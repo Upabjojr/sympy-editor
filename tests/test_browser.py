@@ -645,6 +645,7 @@ def scenario(request, browser, serve_expr, tmp_path):
             page.on("pageerror", lambda e: page.errors.append(str(e)))
             page.goto(path.as_uri())
             page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+            page.wait_for_function("document.querySelector('.se-loading').hidden", timeout=240000)
         pages.append(page)
         return Scenario(page, expr)
 
@@ -978,6 +979,24 @@ def test_function_box_and_paste_button(browser, serve_expr):
     ctx.close()
 
 
+def test_isolate_button_and_shortcut(browser, serve_expr):
+    from sympy import cos
+    t = symbols("theta")
+    srv, doc = serve_expr(x * cos(t) + y)
+    page = _open(browser, srv.url)
+    assert page.locator('.se-toolbar [data-cmd="isolate"]').is_disabled()
+    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "theta"))
+    page.keyboard.press("ArrowUp")                        # cos(theta)
+    _next_state(page, lambda: page.locator('.se-actions [data-cmd="isolate"]').click())
+    assert doc.expr == cos(t)
+    _next_state(page, lambda: page.keyboard.press("Control+z"))
+    assert doc.expr == x * cos(t) + y
+    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "y"))
+    _next_state(page, lambda: page.keyboard.press("Control+Shift+I"))
+    assert doc.expr == y
+    assert page.errors == []
+
+
 def test_plus_term_typed_after_a_product_is_added_not_multiplied(scenario):
     A, B = MatrixSymbol("A", 2, 2), MatrixSymbol("B", 2, 2)
     s = scenario(A * B + 2 * A.T)
@@ -1064,6 +1083,7 @@ def test_pyodide_runtime_is_shared_and_matrix_names_survive(browser, tmp_path):
     page = browser.new_page()
     page.goto(path.as_uri())
     page.wait_for_function("document.querySelectorAll('.se-view .katex').length === 2", timeout=30000)
+    page.wait_for_function("[...document.querySelectorAll('.se-loading')].every(o => o.hidden)", timeout=240000)
     editors = page.locator(".sympy-editor")
     editors.nth(0).locator('[data-path="/1"]').click(force=True)     # B
     page.keyboard.type("A.T")
@@ -1097,7 +1117,7 @@ def test_pyodide_page_preloads_the_runtime(browser, tmp_path):
     assert "Python" in page.locator(".se-loading-text").inner_text()
     page.wait_for_function("window.__sympyEditorPyodide && window.__sympyEditorPyodide.docs === 1", timeout=180000)
     page.wait_for_function("document.querySelector('.se-loading').hidden", timeout=30000)
-    assert page.locator(".se-status").inner_text() == ""      # status cleared once ready, no edit happened
+    assert page.locator(".se-status").inner_text().startswith("Click to select")   # back to the idle hint, no edit happened
     page.locator('[data-path="/0"]').click(force=True)
     page.keyboard.type("z")
     page.keyboard.press("Enter")
@@ -1119,6 +1139,7 @@ def test_pyodide_page_edits_in_browser(browser, tmp_path):
     page = browser.new_page()
     page.goto(path.as_uri())
     page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    page.wait_for_function("document.querySelector('.se-loading').hidden", timeout=240000)   # the overlay blocks input while loading
     _click(page, '/0')          # y
     page.keyboard.type("sin(x)")
     page.keyboard.press("Enter")

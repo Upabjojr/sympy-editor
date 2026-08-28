@@ -362,6 +362,13 @@ class Document:
             return self._commit(replace_range(self.expr, p, children, result))
         return self._commit(replace_at(self.expr, p, result))
 
+    def isolate(self, path: PathLike, children=None) -> Basic:
+        """Make the node at ``path`` (or the range ``children`` of it) the
+        whole expression, dropping everything around it."""
+        p = self._path(path)
+        sub = extract_range(self.expr, p, children) if children is not None else get_at(self.expr, p)
+        return self._commit(sub)
+
     def unwrap(self, path: PathLike, keep: Optional[int] = None) -> Basic:
         """Remove the node at ``path`` but keep one of its arguments in its
         place: ``cos(x)`` becomes ``x``, ``Integral(f, (x, a, b))`` becomes
@@ -635,6 +642,7 @@ class Document:
         ``{"action": "insert", "path": "/", "index": 2, "src": "y", "left": 1}``,
         ``{"action": "extend", "path": "/2/0", "side": "after", "src": "+ 1"}``,
         ``{"action": "unwrap", "path": "/1", "keep": 0}`` (keep an argument, drop the node),
+        ``{"action": "isolate", "path": "/1"}`` (the node becomes the whole expression),
         ``{"action": "call", "path": "/", "func": "diff(x)"}`` (any SymPy function/method),
         ``{"action": "functions"}`` (a snapshot with the list of SymPy function names),
         ``{"action": "retype", "name": "A", "type": "MatrixSymbol", "rows": 2, "cols": 2}``
@@ -664,6 +672,8 @@ class Document:
                             left=message.get("left"), right=message.get("right"), attach=message.get("attach"))
             elif action == "unwrap":
                 self.unwrap(path, message.get("keep"))
+            elif action == "isolate":
+                self.isolate(path, children=children)
             elif action == "call":
                 self.call(path, str(message.get("func", "")), children=children)
             elif action == "functions":

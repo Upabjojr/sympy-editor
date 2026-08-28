@@ -52,6 +52,7 @@ def test_vendored_bundle_is_self_contained(tmp_path):
                        if "127.0.0.1" not in route.request.url else route.continue_())
             page.goto(f"http://127.0.0.1:{srv.server_address[1]}/index.html")
             page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+            page.wait_for_function("document.querySelector('.se-loading').hidden", timeout=240000)
             assert page.evaluate("document.fonts.check('12px KaTeX_Main')")
             page.locator('[data-path="/"]').click(force=True)   # selects the glyph under the centre
             page.keyboard.press("Escape")                        # clear it...

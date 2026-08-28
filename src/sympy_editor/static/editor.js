@@ -228,6 +228,7 @@ var SympyEditor = (function () {
         btn("edit", "Edit", "Edit the selection in place (Enter, double-click, or just start typing)");
         btn("unwrap", "Unwrap", "Remove the selected node but keep its argument: cos(θ) → θ (Backspace)");
         btn("delete", "Delete", "Remove the selection entirely (Del)");
+        btn("isolate", "Isolate", "Keep only the selection: it becomes the whole expression (Ctrl+Shift+I)");
         btn("parent", "↑", "Select the enclosing expression (↑)");
         btn("child", "↓", "Select inside: the sub-expression you came from, or the first one; on an atom, a caret after it (↓)");
         sep();
@@ -304,6 +305,7 @@ var SympyEditor = (function () {
           abtn("edit", "Edit", "Edit in place"),
           abtn("unwrap", "Unwrap", "Remove this node but keep its argument: cos(θ) → θ"),
           abtn("delete", "Delete", "Remove entirely"),
+          abtn("isolate", "Isolate", "Keep only this: it becomes the whole expression"),
           abtn("copy", "Copy", "Copy the SymPy source of the selection (Ctrl+C; Ctrl+X cuts, Ctrl+V pastes)"),
           abtn("paste", "Paste", "Paste the clipboard over the selection (Ctrl+V)")
         ]);
@@ -884,6 +886,8 @@ var SympyEditor = (function () {
         if (!ro) this.send({ action: ev.shiftKey ? "redo" : "undo" });
       } else if (mod && (k === "y" || k === "Y")) {
         if (!ro) this.send({ action: "redo" });
+      } else if (mod && ev.shiftKey && (k === "i" || k === "I")) {
+        this.isolateSelection();
       } else if (ev.shiftKey && (k === "ArrowLeft" || k === "ArrowRight") && !this.caret) {
         this._extendRange(k === "ArrowRight" ? 1 : -1);          // grow / shrink a range
       } else if (k === "Tab" && (this.selected || this.range) && !ro) {
@@ -984,6 +988,13 @@ var SympyEditor = (function () {
       else if (extend) input.setSelectionRange(input.value.length, input.value.length);
     }
 
+    /** The selection (node or range) becomes the whole expression. */
+    isolateSelection() {
+      if (this.opts.readOnly) return;
+      if (this.range) return this.send({ action: "isolate", path: this.range.parent, children: this._rangeIndices() });
+      if (this.selected && this.selected !== "/") return this.send({ action: "isolate", path: this.selected });
+    }
+
     /** Drop the selected node, keeping the argument the user came up from
      *  (↑ from a child) or the natural one. */
     unwrapSelection() {
@@ -1008,6 +1019,7 @@ var SympyEditor = (function () {
                             : cmd === "paste" ? false
                             : cmd === "unwrap" ? !unwrapOk
                             : cmd === "delete" ? !(this.range || (this.selected && this.selected !== "/"))
+                            : cmd === "isolate" ? !(this.range || (this.selected && this.selected !== "/"))
                             : false;
       }
       this.actions.hidden = false;
@@ -1677,6 +1689,7 @@ var SympyEditor = (function () {
           if (this.range) return this.beginRangeEdit();
           return this.beginEdit(this.selected || "/");
         case "unwrap": return this.unwrapSelection();
+        case "isolate": return this.isolateSelection();
         case "delete":
           if (this.range) return this.send({ action: "delete", path: this.range.parent, children: this._rangeIndices() });
           if (this.selected && this.selected !== "/") return this.send({ action: "delete", path: this.selected });
@@ -1771,6 +1784,7 @@ var SympyEditor = (function () {
       set("keyboard", dis);
       set("delete", dis || !(range || (this.selected && this.selected !== "/")));
       set("unwrap", dis || range || !this.selected || !(s.nodes && s.nodes[this.selected] && s.nodes[this.selected].nargs));
+      set("isolate", dis || !(range || (this.selected && this.selected !== "/")));
       set("parent", dis || !(range || (t && t.parent)));
       set("child", dis);
       set("copy", !s.src);

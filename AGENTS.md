@@ -125,6 +125,8 @@ Two conventions between printer, document and front end:
   `Editor._report`: texts mentioning loading/waiting show `.se-loading` (a
   blocking spinner overlay, keys and clicks ignored) until the message
   clears; `mount()` shows it during Pyodide preloading.
+- **Isolate.**  `{"action": "isolate", "path"[, "children"]}` → `Document.isolate`
+  commits the node (or range) as the whole expression; undoable.
 - **Unwrap.**  `{"action": "unwrap", "path", "keep"}` → `Document.unwrap`
   replaces a node by one argument (`keep`, default the first; sums/products
   with several terms require it).  The front end passes the child ↑ came

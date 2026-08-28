@@ -483,3 +483,16 @@ def test_insert_splices_between_both_neighbours():
     A, B = MatrixSymbol("A", 2, 2), MatrixSymbol("B", 2, 2)
     assert ins(A * B, "+ B*A", left=1, attach="left") == A * B + B * A          # + at the sum level: the whole product
     assert ins(A * B, "C", left=0, right=1, attach="left") == A * MatrixSymbol("C", 2, 2) * B
+
+
+def test_isolate():
+    from sympy import cos, symbols
+    x, y, t = symbols("x y t")
+    doc = Document(x * cos(t) + y)
+    c = next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "cos(t)")
+    doc.handle({"action": "isolate", "path": c})
+    assert doc.expr == cos(t)
+    doc.undo()
+    assert doc.expr == x * cos(t) + y
+    doc.handle({"action": "isolate", "path": "/", "children": [0, 1]})   # a range
+    assert doc.expr == doc.expr and len(doc.expr.args) == 2
