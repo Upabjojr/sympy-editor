@@ -317,3 +317,35 @@ def test_insert_terms_factors_and_arguments():
     assert doc.expr == A * C * B                       # order matters for MatMul
     assert "Invalid insertion index" in doc.handle({"action": "insert", "path": "/", "index": 9, "src": "x"})["error"]
     assert doc.handle({"action": "insert", "path": "/0", "index": 0, "src": "x"})["error"]  # a MatrixSymbol is not insertable
+
+
+# -- ranges of adjacent arguments ---------------------------------------------
+
+def test_ranges_replace_delete_apply():
+    from sympy import MatrixSymbol, factor, symbols
+    a, b, c, d = symbols("a b c d")
+    doc = Document(a + b + c + d)
+    args = doc.expr.args                                # canonical order: (a, b, c, d)
+    snap = doc.snapshot()
+    assert snap["nodes"]["/"]["rangeable"] is True and snap["nodes"]["/0"]["rangeable"] is False
+    doc.handle({"action": "replace", "path": "/", "children": [1, 2], "src": "z"})
+    assert doc.expr == a + d + symbols("z")
+    doc.undo()
+    doc.handle({"action": "delete", "path": "/", "children": [0, 3]})
+    assert doc.expr == b + c
+    doc.undo()
+    doc = Document(a * b + a * c + d)
+    i, j = [k for k, arg in enumerate(doc.expr.args) if arg != d]
+    doc.handle({"action": "apply", "path": "/", "children": [i, j], "op": "factor"})
+    assert doc.expr == a * (b + c) + d
+    # a non-commutative product keeps the position of the range
+    A, B, C = (MatrixSymbol(n, 2, 2) for n in "ABC")
+    doc = Document(A * B * C)
+    doc.replace("/", "B.T", children=[0, 1])
+    assert doc.expr == B.T * C
+    doc = Document(A * B * C)
+    doc.apply("/", "transpose", children=[1, 2])
+    assert doc.expr == A * (B * C).T
+    # errors: bad indices, non-rangeable target
+    assert "Invalid argument range" in doc.handle({"action": "delete", "path": "/", "children": [7]})["error"]
+    assert "Invalid argument range" in doc.handle({"action": "delete", "path": "/", "children": []})["error"]

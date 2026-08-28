@@ -74,6 +74,25 @@ Two conventions between printer, document and front end:
   in the context of the node so a new name in a `MatMul` is a matrix).
   Commutative nodes re-order, so the index only matters for `MatMul` and
   function arguments.
+- **Ranges.**  Adjacent arguments of a *rangeable* node (`AssocOp`,
+  `LatticeOp`: Add, Mul, MatAdd, MatMul, And, Or, Max...; snapshot flag
+  `rangeable`) can be selected together: `Editor.range = {parent, anchor,
+  focus}` indexes the parent's display-ordered children (`_displayChildren`).
+  Messages carry `children: [arg indices]` with `replace`/`delete`/`apply`
+  (`printer.extract_range/replace_range/delete_range`); the range's source is
+  built in the front end from the children's sources.  Drags use pointer
+  events (mouse, touch, pen alike); `touch-action: pan-y pinch-zoom` keeps
+  vertical scrolling and pinch-zoom on phones, and `@media (pointer: coarse)`
+  enlarges targets.
+- **Caret vs selection.**  `Editor.selected` and `Editor.caret` are mutually
+  exclusive (`select()` hides the caret, `_showCaret()` clears the
+  selection): keys replace a selection, insert at a caret, and never delete
+  anything while a caret is shown.
+- **LaTeX shortcuts.**  The text field expands complete `\command`s as they
+  are typed (`expandCommands`, tables `GREEK`/`COMMANDS` in editor.js) and
+  converts between the displayed Greek letters and SymPy's names
+  (`toDisplay`/`toSource`: `θ` ↔ `theta`, `λ` ↔ `lamda`, `∞` ↔ `oo`), so
+  what is sent to Python is plain ASCII SymPy syntax.
 - **Declared names.**  `Document.declared` (name -> object) holds names put in
   scope before they occur in the expression: `Document(expr, symbols=[...])`,
   `declare()` / `undeclare()` and the messages of the same names (fields as

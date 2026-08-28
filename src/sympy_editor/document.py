@@ -34,8 +34,12 @@ from .printer import (
     delete_at,
     format_path,
     get_at,
+    delete_range,
+    extract_range,
     insert_at,
     is_insertable,
+    is_rangeable,
+    replace_range,
     parse_path,
     plain_latex,
     replace_at,
@@ -144,7 +148,8 @@ class Document:
     def get(self, path: PathLike) -> Basic:
         return get_at(self.expr, self._path(path))
 
-    def replace(self, path: PathLike, new: Union[Basic, str], reciprocal: bool = False) -> Basic:
+    def replace(self, path: PathLike, new: Union[Basic, str], reciprocal: bool = False,
+                children=None) -> Basic:
         """Replace the node at ``path`` with ``new`` (parsed if a string, in the
         context of the node being replaced: new names in a matrix slot become
         ``MatrixSymbol``s of its shape).
@@ -153,18 +158,30 @@ class Document:
         node at ``path`` is the tree's ``Pow(b, -n)`` shown as ``b**n`` under
         the fraction bar (``snapshot()`` flags such nodes) - so the node
         becomes ``1/new``.
+
+        ``children``: argument indices of the node at ``path`` (an ``Add``,
+        ``Mul``...) - the *range* of arguments they form is replaced by
+        ``new`` instead of the node itself.
         """
         p = self._path(path)
+        context = get_at(self.expr, p)
+        if children is not None:
+            context = extract_range(self.expr, p, children)
         if isinstance(new, str):
-            new_expr = self.parse(new, context=get_at(self.expr, p))
+            new_expr = self.parse(new, context=context)
         else:
             new_expr = sympify(new)
-        if reciprocal:
+        if reciprocal and children is None:
             new_expr = S.One / new_expr
+        if children is not None:
+            return self._commit(replace_range(self.expr, p, children, new_expr))
         return self._commit(replace_at(self.expr, p, new_expr))
 
-    def delete(self, path: PathLike) -> Basic:
-        """Remove the node at ``path`` from its parent's arguments."""
+    def delete(self, path: PathLike, children=None) -> Basic:
+        """Remove the node at ``path`` from its parent's arguments (or, with
+        ``children``, those arguments of the node at ``path``)."""
+        if children is not None:
+            return self._commit(delete_range(self.expr, self._path(path), children))
         return self._commit(delete_at(self.expr, self._path(path)))
 
     def insert(self, path: PathLike, index: int, new: Union[Basic, str]) -> Basic:
@@ -178,8 +195,9 @@ class Document:
         new_expr = self.parse(new, context=parent) if isinstance(new, str) else sympify(new)
         return self._commit(insert_at(self.expr, p, int(index), new_expr))
 
-    def apply(self, path: PathLike, op: Union[str, Callable]) -> Basic:
-        """Apply a registered op (by name) or a callable to the node at ``path``."""
+    def apply(self, path: PathLike, op: Union[str, Callable], children=None) -> Basic:
+        """Apply a registered op (by name) or a callable to the node at ``path``
+        (or, with ``children``, to the range of those arguments of it)."""
         if isinstance(op, str):
             try:
                 func = self.ops[op].func
@@ -188,6 +206,9 @@ class Document:
         else:
             func = op
         p = self._path(path)
+        if children is not None:
+            result = sympify(func(extract_range(self.expr, p, children)))
+            return self._commit(replace_range(self.expr, p, children, result))
         return self._commit(replace_at(self.expr, p, sympify(func(get_at(self.expr, p)))))
 
     def used_symbols(self) -> Dict[str, Any]:
@@ -392,7 +413,8 @@ class Document:
         reciprocal of the tree's node, flagged so that an edit replaces the
         denominator rather than the whole ``Pow``."""
         info: Dict[str, Any] = {"src": str(node), "type": type(node).__name__, "kind": node_kind(node),
-                                "nargs": len(node.args), "insertable": is_insertable(node)}
+                                "nargs": len(node.args), "insertable": is_insertable(node),
+                                "rangeable": is_rangeable(node)}
         try:
             actual = get_at(self.expr, path)
         except (IndexError, AttributeError):
@@ -406,7 +428,9 @@ class Document:
         """Process a front-end message and return a snapshot.
 
         Messages: ``{"action": "replace", "path": "/0", "src": "y**2"}`` (with
-        ``"reciprocal": true`` for a node the snapshot flagged so),
+        ``"reciprocal": true`` for a node the snapshot flagged so; ``replace``,
+        ``delete`` and ``apply`` take ``"children": [i, j]`` to act on the
+        range of those arguments of the node at ``path``),
         ``{"action": "apply", "path": "/", "op": "expand"}``,
         ``{"action": "delete", "path": "/1"}``, ``{"action": "set", "src": ...}``,
         ``{"action": "insert", "path": "/", "index": 2, "src": "y"}``,
@@ -420,8 +444,10 @@ class Document:
         try:
             action = message.get("action")
             path = message.get("path", "/")
+            children = message.get("children")
             if action == "replace":
-                self.replace(path, str(message.get("src", "")), reciprocal=bool(message.get("reciprocal")))
+                self.replace(path, str(message.get("src", "")), reciprocal=bool(message.get("reciprocal")),
+                             children=children)
             elif action == "retype":
                 self.retype(str(message.get("name", "")), str(message.get("type", "")),
                             message.get("rows"), message.get("cols"), message.get("assumptions"))
@@ -435,9 +461,9 @@ class Document:
             elif action == "set":
                 self.replace("/", str(message.get("src", "")))
             elif action == "apply":
-                self.apply(path, str(message.get("op", "")))
+                self.apply(path, str(message.get("op", "")), children=children)
             elif action == "delete":
-                self.delete(path)
+                self.delete(path, children=children)
             elif action == "undo":
                 self.undo()
             elif action == "redo":

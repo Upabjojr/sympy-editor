@@ -57,6 +57,10 @@ __all__ = [
     "delete_at",
     "insert_at",
     "is_insertable",
+    "is_rangeable",
+    "extract_range",
+    "replace_range",
+    "delete_range",
     "rebuild",
 ]
 
@@ -141,6 +145,49 @@ INSERTABLE = (AssocOp, LatticeOp, MatAdd, MatMul, FiniteSet, Union, Intersection
 
 def is_insertable(node: Basic) -> bool:
     return isinstance(node, INSERTABLE)
+
+
+#: Node types in which a *range* of adjacent arguments can be selected and
+#: acted on as a sub-expression (``b + c`` inside ``a + b + c + d``).
+RANGEABLE = (AssocOp, LatticeOp)
+
+
+def is_rangeable(node: Basic) -> bool:
+    return isinstance(node, RANGEABLE)
+
+
+def _range_indices(parent: Basic, indices) -> List[int]:
+    idx = sorted(set(int(i) for i in indices))
+    if not idx or idx[0] < 0 or idx[-1] >= len(parent.args):
+        raise ValueError(f"Invalid argument range {list(indices)} for {parent}")
+    return idx
+
+
+def extract_range(expr: Basic, path: Path, indices) -> Basic:
+    """The sub-expression formed by arguments ``indices`` of the node at
+    ``path`` (``Add(b, c)`` for a range of two terms)."""
+    parent = get_at(expr, path)
+    idx = _range_indices(parent, indices)
+    if len(idx) == 1:
+        return parent.args[idx[0]]
+    return rebuild(parent, [parent.args[i] for i in idx])
+
+
+def replace_range(expr: Basic, path: Path, indices, new: Basic) -> Basic:
+    """``expr`` with arguments ``indices`` of the node at ``path`` replaced by
+    the single argument ``new`` (at the position of the first of them)."""
+    parent = get_at(expr, path)
+    idx = _range_indices(parent, indices)
+    args = [a for i, a in enumerate(parent.args) if i not in idx]
+    args.insert(idx[0], new)
+    return replace_at(expr, path, rebuild(parent, args))
+
+
+def delete_range(expr: Basic, path: Path, indices) -> Basic:
+    """``expr`` without arguments ``indices`` of the node at ``path``."""
+    parent = get_at(expr, path)
+    idx = _range_indices(parent, indices)
+    return replace_at(expr, path, rebuild(parent, [a for i, a in enumerate(parent.args) if i not in idx]))
 
 
 def delete_at(expr: Basic, path: Path) -> Basic:

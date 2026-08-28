@@ -113,8 +113,60 @@ var SympyEditor = (function () {
   /* DOM helper                                                          */
   /* ------------------------------------------------------------------ */
 
-  //: Keys that extend the selection instead of replacing it (see _onKey).
-  var EXTEND_KEYS = ["+", "-", "*", "/", "^", "=", ","];
+  /* ------------------------------------------------------------------ */
+  /* LaTeX shortcuts in the text field                                   */
+  /* ------------------------------------------------------------------ */
+
+  // Greek letters: SymPy name -> character.  The field shows the character
+  // (typing "\theta" turns into it at once) and the source sent back uses
+  // the name, so "θ" is the same symbol as an existing "theta".
+  var GREEK = {
+    alpha: "α", beta: "β", gamma: "γ", delta: "δ", epsilon: "ε", varepsilon: "ε", zeta: "ζ", eta: "η",
+    theta: "θ", vartheta: "ϑ", iota: "ι", kappa: "κ", lamda: "λ", lambda: "λ", mu: "μ", nu: "ν", xi: "ξ",
+    omicron: "ο", pi: "π", rho: "ρ", varrho: "ϱ", sigma: "σ", varsigma: "ς", tau: "τ", upsilon: "υ",
+    phi: "φ", varphi: "ϕ", chi: "χ", psi: "ψ", omega: "ω",
+    Gamma: "Γ", Delta: "Δ", Theta: "Θ", Lamda: "Λ", Lambda: "Λ", Xi: "Ξ", Pi: "Π", Sigma: "Σ",
+    Upsilon: "Υ", Phi: "Φ", Psi: "Ψ", Omega: "Ω", oo: "∞", infty: "∞"
+  };
+  // Other "\command" shortcuts: what they become in the field.
+  var COMMANDS = {
+    cdot: "*", times: "*", le: "<=", leq: "<=", ge: ">=", geq: ">=", ne: "!=", neq: "!=",
+    sqrt: "sqrt", sin: "sin", cos: "cos", tan: "tan", cot: "cot", sec: "sec", csc: "csc",
+    sinh: "sinh", cosh: "cosh", tanh: "tanh", exp: "exp", log: "log", ln: "log", ell: "l"
+  };
+  for (var g in GREEK) if (!(g in COMMANDS)) COMMANDS[g] = GREEK[g];
+  // character -> SymPy name (first name listed wins: λ is "lamda", ∞ is "oo")
+  var GREEK_BACK = {};
+  for (var name in GREEK) if (!(GREEK[name] in GREEK_BACK)) GREEK_BACK[GREEK[name]] = name;
+  var GREEK_NAMES = Object.keys(GREEK).sort(function (a, b) { return b.length - a.length; });
+  var GREEK_NAME_RE = new RegExp("(^|[^A-Za-z0-9_])(" + GREEK_NAMES.join("|") + ")(?![A-Za-z])", "g");
+  var GREEK_CHAR_RE = new RegExp("[" + Object.keys(GREEK_BACK).join("") + "]", "g");
+
+  /** SymPy source -> text shown in the field ("theta" -> "θ"). */
+  function toDisplay(src) {
+    return (src || "").replace(GREEK_NAME_RE, function (m, before, name) { return before + GREEK[name]; });
+  }
+  /** Text of the field -> SymPy source ("θ" -> "theta", "∞" -> "oo"). */
+  function toSource(text) {
+    return (text || "").replace(GREEK_CHAR_RE, function (ch) { return GREEK_BACK[ch]; });
+  }
+  /** Replace complete "\command"s in `text`: those followed by a non-letter,
+   *  or that no longer command starts with.  Returns {text, delta} where
+   *  delta is the change of length before `cursor`. */
+  function expandCommands(text, cursor) {
+    var delta = 0;
+    var out = text.replace(/\\([A-Za-z]+)/g, function (m, name, offset) {
+      var next = text.charAt(offset + m.length);
+      if (!(name in COMMANDS)) return m;
+      var complete = (next !== "" && !/[A-Za-z]/.test(next)) || !Object.keys(COMMANDS).some(function (c) {
+        return c !== name && c.indexOf(name) === 0;
+      });
+      if (!complete) return m;
+      if (offset + m.length <= cursor) delta += COMMANDS[name].length - m.length;
+      return COMMANDS[name];
+    });
+    return { text: out, delta: delta };
+  }
 
   function h(tag, attrs, children) {
     var el = document.createElement(tag);
@@ -172,7 +224,7 @@ var SympyEditor = (function () {
         btn("undo", "↶", "Undo (Ctrl+Z)");
         btn("redo", "↷", "Redo (Ctrl+Shift+Z, Ctrl+Y)");
         sep();
-        btn("edit", "Edit", "Edit the selection in place (Enter, double-click, or just start typing; + - * / ^ extend it)");
+        btn("edit", "Edit", "Edit the selection in place (Enter, double-click, or just start typing)");
         btn("delete", "Delete", "Remove the selection from its parent (Del)");
         btn("parent", "↑", "Select the enclosing expression (↑)");
         sep();
@@ -220,6 +272,12 @@ var SympyEditor = (function () {
       this.caret = null;      // {path, index, a, b, leftEl, rightEl, top, bottom, height}
       this.inserting = null;  // the caret an open field is inserting at
       this._gapCache = null;
+      // Range selection: adjacent arguments of a rangeable node (Add, Mul...),
+      // as indices into that node's display-ordered children (see _setRange).
+      this.range = null;      // {parent, anchor, focus} or null
+      this._editRange = null; // {path, children} while a range is being edited
+      this._drag = null;      // pointer drag in progress: {anchor, moved}
+      this._suppressClick = false;
 
       this.host.appendChild(root);
       this._wire();
@@ -245,6 +303,30 @@ var SympyEditor = (function () {
       this.view.addEventListener("scroll", function () { self._gapCache = null; if (self.caret) self._hideCaret(); });
       this.view.addEventListener("mouseleave", function () { self._setHover(null); });
       this.view.addEventListener("click", function (ev) { self._onClick(ev); });
+      // Dragging (mouse, touch or pen) over the formula selects a range.
+      this.view.addEventListener("pointerdown", function (ev) {
+        if (ev.pointerType === "mouse" && ev.button !== 0) return;
+        var leaf = self._leafAt(ev);
+        self._drag = { anchor: leaf ? leaf.getAttribute("data-path") : null, moved: false };
+      });
+      this.view.addEventListener("pointermove", function (ev) {
+        var d = self._drag;
+        if (!d || !d.anchor) return;
+        if (ev.pointerType === "mouse" && ev.buttons === 0) { self._drag = null; return; }
+        var leaf = self._leafAt(ev);
+        if (!leaf) return;
+        var lp = leaf.getAttribute("data-path");
+        if (!d.moved && lp === d.anchor) return;
+        d.moved = true;
+        self._dragSelect(d.anchor, lp);
+        ev.preventDefault();
+      });
+      var endDrag = function () {
+        if (self._drag && self._drag.moved) self._suppressClick = true;
+        self._drag = null;
+      };
+      this.view.addEventListener("pointerup", endDrag);
+      this.view.addEventListener("pointercancel", function () { self._drag = null; });
       this.view.addEventListener("dblclick", function (ev) { self._onDblClick(ev); });
       this.root.addEventListener("keydown", function (ev) {
         if (self.symbols && self.symbols.contains(ev.target)) return;
@@ -265,8 +347,10 @@ var SympyEditor = (function () {
     /** Apply a snapshot from the backend. */
     async setState(snap) {
       if (!snap) return;
+      var same = snap === this.state;   // re-render of the current state (keeps the range)
       this.state = snap;
       this.tree = buildTree(snap.nodes || {});
+      if (!same) this.range = null;
       if (this.editing !== null || this.inserting) this.cancelEdit(true);
       await this._render();
       if (this.state !== snap) return;  // superseded meanwhile
@@ -326,7 +410,8 @@ var SympyEditor = (function () {
      *  ("matrix", "scalar"...) in a group of their own, after the general ones. */
     _fillOps() {
       if (!this.opsSelect || !this.state) return;
-      var node = this.state.nodes ? this.state.nodes[this.selected || "/"] : null;
+      var target = this.range ? this.range.parent : (this.selected || "/");
+      var node = this.state.nodes ? this.state.nodes[target] : null;
       var kind = node ? node.kind : null;
       var ops = (this.state.ops || []).filter(function (op) {
         return !op.kinds || (kind && op.kinds.indexOf(kind) >= 0);
@@ -483,6 +568,7 @@ var SympyEditor = (function () {
 
     /** Select a path (null to clear). */
     select(path) {
+      this.range = null;
       if (path) this._hideCaret();
       this.selected = (path && (path in this.tree)) ? path : null;
       this._fillOps();
@@ -493,6 +579,15 @@ var SympyEditor = (function () {
     _applySelection() {
       var old = this.view.querySelectorAll(".se-selected");
       for (var i = 0; i < old.length; i++) old[i].classList.remove("se-selected");
+      var rangePaths = this._rangePaths();
+      if (rangePaths.length) {
+        for (var r = 0; r < rangePaths.length; r++) {
+          var rels = this._els(rangePaths[r]);
+          for (var q = 0; q < rels.length; q++) rels[q].classList.add("se-selected");
+        }
+        this._setStatus(this.state.nodes[this.range.parent].type + " range: " + this._rangeSource(rangePaths));
+        return;
+      }
       var node = this.selected && this.state && this.state.nodes ? this.state.nodes[this.selected] : null;
       if (node) {
         var els = this._els(this.selected);
@@ -505,6 +600,7 @@ var SympyEditor = (function () {
     }
 
     _onClick(ev) {
+      if (this._suppressClick) { this._suppressClick = false; return; }   // end of a drag
       if (this.closed || (this.input && ev.target === this.input)) return;
       var leaf = this._leafAt(ev);
       this._gapCache = null;
@@ -557,8 +653,24 @@ var SympyEditor = (function () {
         if (!ro) this.send({ action: ev.shiftKey ? "redo" : "undo" });
       } else if (mod && (k === "y" || k === "Y")) {
         if (!ro) this.send({ action: "redo" });
-      } else if (k === "Tab" && this.selected && !ro) {
+      } else if (ev.shiftKey && (k === "ArrowLeft" || k === "ArrowRight") && !this.caret) {
+        this._extendRange(k === "ArrowRight" ? 1 : -1);          // grow / shrink a range
+      } else if (k === "Tab" && (this.selected || this.range) && !ro) {
         if (!this.caretAtSelection(ev.shiftKey)) handled = false;
+      } else if (this.range && k === "Escape") {
+        this.range = null;
+        this._applySelection();
+        this._updateToolbar();
+      } else if (this.range && k === "Enter") {
+        if (!ro) this.beginRangeEdit();
+      } else if (this.range && (k === "Delete" || k === "Backspace")) {
+        if (!ro) this.send({ action: "delete", path: this.range.parent, children: this._rangeIndices() });
+      } else if (this.range && k === "ArrowUp") {
+        this.select(this.range.parent);
+      } else if (this.range && (k === "ArrowDown" || k === "ArrowLeft" || k === "ArrowRight")) {
+        this.select(this._displayChildren(this.range.parent)[this.range.focus]);   // collapse
+      } else if (this.range && !ro && !mod && !ev.altKey && k.length === 1) {
+        this.beginRangeEdit(k);
       } else if (this.caret && k === "Escape") {
         this._hideCaret();
         this._applySelection();
@@ -589,13 +701,6 @@ var SympyEditor = (function () {
           var i = sib.indexOf(this.selected) + (k === "ArrowLeft" ? -1 : 1);
           if (i >= 0 && i < sib.length) this.select(sib[i]);
         }
-      } else if (!ro && !mod && !ev.altKey && EXTEND_KEYS.indexOf(k) >= 0) {
-        // An operator extends the selection (the whole expression when nothing
-        // is selected): the field opens with its source and the operator, the
-        // caret after them, so new terms and factors can be typed without
-        // retyping what is there.
-        var target = this.selected || "/";
-        this.beginEdit(target, this.state.nodes[target].src + " " + k + " ", true);
       } else if (!ro && !mod && !ev.altKey && k.length === 1 && this.selected) {
         this.beginEdit(this.selected, k);   // start replacing the selection with what is typed
       } else {
@@ -623,7 +728,7 @@ var SympyEditor = (function () {
         class: "se-inline", type: "text", spellcheck: "false", autocomplete: "off",
         "aria-label": "Replacement for " + original + " (SymPy syntax)"
       });
-      input.value = initial !== undefined ? initial : original;
+      input.value = toDisplay(initial !== undefined ? initial : original);
       var stash = document.createDocumentFragment();
       while (host.firstChild) stash.appendChild(host.firstChild);
       host.appendChild(input);
@@ -633,14 +738,7 @@ var SympyEditor = (function () {
       this._editHost = host;
       this._editStash = stash;
       this._editOriginal = original;
-      var fit = function () { input.style.width = Math.max(2, input.value.length + 1) + "ch"; };
-      fit();
-      input.addEventListener("input", fit);
-      input.addEventListener("keydown", function (ev) {
-        ev.stopPropagation();
-        if (ev.key === "Enter") { ev.preventDefault(); self.commitEdit(); }
-        else if (ev.key === "Escape") { ev.preventDefault(); self.cancelEdit(); }
-      });
+      this._wireField(input, 2);
       input.addEventListener("blur", function () {
         if (self.editing === path && self.input === input) self.commitEdit();
       });
@@ -737,6 +835,9 @@ var SympyEditor = (function () {
       this.caretEl.style.top = Math.round(gap.top - vr.top + this.view.scrollTop) + "px";
       this.caretEl.style.height = Math.round(Math.max(12, gap.height)) + "px";
       this.view.appendChild(this.caretEl);
+      // A caret and a selection never coexist: with a caret, keys only insert.
+      this.selected = null;
+      this.range = null;
       var old = this.view.querySelectorAll(".se-selected");
       for (var i = 0; i < old.length; i++) old[i].classList.remove("se-selected");
       var node = this.state.nodes[gap.path];
@@ -764,12 +865,20 @@ var SympyEditor = (function () {
      *  the nearest enclosing node that accepts insertions.  Returns false
      *  when there is none. */
     caretAtSelection(before) {
-      if (!this.selected || !this.state) return false;
-      var child = this.selected;
-      var p = this.tree[child] ? this.tree[child].parent : null;
-      while (p && !(this.state.nodes[p] && this.state.nodes[p].insertable)) {
-        child = p;
-        p = this.tree[p].parent;
+      if (!this.state) return false;
+      var child, p;
+      if (this.range) {
+        var kids = this._displayChildren(this.range.parent);
+        child = kids[before ? Math.min(this.range.anchor, this.range.focus) : Math.max(this.range.anchor, this.range.focus)];
+        p = this.range.parent;
+      } else {
+        if (!this.selected) return false;
+        child = this.selected;
+        p = this.tree[child] ? this.tree[child].parent : null;
+        while (p && !(this.state.nodes[p] && this.state.nodes[p].insertable)) {
+          child = p;
+          p = this.tree[p].parent;
+        }
       }
       if (!p) return false;
       var el = this._els(child)[0];
@@ -781,6 +890,133 @@ var SympyEditor = (function () {
         }
       }
       return false;
+    }
+
+    /* ---- range selection ---- */
+
+    /** The annotated children of `p`, left to right as displayed. */
+    _displayChildren(p) {
+      var self = this;
+      return (this.tree[p] ? this.tree[p].children : [])
+        .map(function (c) { var el = self._els(c)[0]; return { path: c, left: el ? el.getBoundingClientRect().left : 0 }; })
+        .sort(function (a, b) { return a.left - b.left; })
+        .map(function (k) { return k.path; });
+    }
+
+    /** The child of `p` whose subtree contains `path`. */
+    _childOf(p, path) {
+      var kids = this.tree[p] ? this.tree[p].children : [];
+      for (var i = 0; i < kids.length; i++) if (isAncestorOrSelf(kids[i], path)) return kids[i];
+      return null;
+    }
+
+    _rangePaths() {
+      if (!this.range || !this.state) return [];
+      var kids = this._displayChildren(this.range.parent);
+      var lo = Math.min(this.range.anchor, this.range.focus), hi = Math.max(this.range.anchor, this.range.focus);
+      return kids.slice(lo, hi + 1);
+    }
+
+    _rangeIndices() {
+      var self = this, parent = this.range.parent;
+      return this._rangePaths().map(function (c) { return self._argIndex(parent, c); });
+    }
+
+    /** SymPy source of the range, from its arguments' sources. */
+    _rangeSource(paths) {
+      var self = this;
+      var type = this.state.nodes[this.range.parent].type;
+      var sep = /Add$/.test(type) ? " + " : /Mul$/.test(type) ? "*" : type === "And" ? " & " : type === "Or" ? " | " : ", ";
+      return paths.map(function (c) {
+        var src = self.state.nodes[c].src;
+        return sep === "*" && /[+\-]/.test(src.slice(1)) ? "(" + src + ")" : src;
+      }).join(sep);
+    }
+
+    _setRange(parent, anchor, focus) {
+      this._hideCaret();
+      var kids = this._displayChildren(parent);
+      if (anchor === focus) { this.select(kids[anchor]); return; }
+      this.range = { parent: parent, anchor: anchor, focus: focus };
+      this.selected = null;
+      this._fillOps();
+      this._applySelection();
+      this._updateToolbar();
+    }
+
+    /** Shift+arrow: grow the range by one sibling (or shrink it back). */
+    _extendRange(step) {
+      var r = this.range;
+      if (!r) {
+        if (!this.selected) return;
+        var child = this.selected, p = this.tree[child] ? this.tree[child].parent : null;
+        while (p && !(this.state.nodes[p] && this.state.nodes[p].rangeable)) { child = p; p = this.tree[p].parent; }
+        if (!p) return;
+        var i = this._displayChildren(p).indexOf(child);
+        if (i < 0) return;
+        r = { parent: p, anchor: i, focus: i };
+      }
+      var n = this._displayChildren(r.parent).length;
+      this._setRange(r.parent, r.anchor, Math.max(0, Math.min(n - 1, r.focus + step)));
+    }
+
+    /** Drag from glyph `a` to glyph `b`: the range of siblings between them
+     *  in their nearest common rangeable ancestor (or that ancestor itself). */
+    _dragSelect(a, b) {
+      if (isAncestorOrSelf(a, b)) { this.select(a); return; }
+      var p = this.tree[a] ? this.tree[a].parent : null;
+      while (p) {
+        if (isAncestorOrSelf(p, b) && this.state.nodes[p]) {
+          var ca = this._childOf(p, a), cb = this._childOf(p, b);
+          if (ca === cb) { this.select(ca); return; }
+          if (this.state.nodes[p].rangeable) {
+            var kids = this._displayChildren(p);
+            this._setRange(p, kids.indexOf(ca), kids.indexOf(cb));
+          } else {
+            this.select(p);
+          }
+          return;
+        }
+        p = this.tree[p].parent;
+      }
+    }
+
+    /** Edit the range in place: one field replaces its arguments. */
+    beginRangeEdit(initial) {
+      var paths = this._rangePaths();
+      if (!paths.length || this.opts.readOnly || this.closed || this.busy) return;
+      if (this.editing !== null || this.inserting) this.cancelEdit(true);
+      var self = this;
+      var parent = this.range.parent;
+      var original = this._rangeSource(paths);
+      var first = this._els(paths[0])[0], last = this._els(paths[paths.length - 1])[0];
+      if (!first || !last) return;
+      var children = this._rangeIndices();
+      if (first !== last) {   // drop the rendering after the first argument up to the last
+        var r = document.createRange();
+        r.setStartAfter(first);
+        r.setEndAfter(last);
+        r.deleteContents();
+      }
+      var input = h("input", { class: "se-inline", type: "text", spellcheck: "false", autocomplete: "off",
+        "aria-label": "Replacement for " + original + " (SymPy syntax)" });
+      input.value = toDisplay(initial !== undefined ? initial : original);
+      while (first.firstChild) first.removeChild(first.firstChild);
+      first.appendChild(input);
+      first.classList.add("se-editing");
+      this.editing = parent;
+      this._editRange = { path: parent, children: children };
+      this._editOriginal = original;
+      this.input = input;
+      this._editHost = null;
+      this._editStash = null;
+      this._wireField(input, 2);
+      input.addEventListener("blur", function () {
+        if (self._editRange && self.input === input) self.commitEdit();
+      });
+      this._setStatus("Editing " + this.state.nodes[parent].type + " range – Enter to apply, Esc to cancel");
+      input.focus();
+      if (initial === undefined) input.select();
     }
 
     /** Open a field at the caret; Enter inserts what is typed. */
@@ -803,14 +1039,7 @@ var SympyEditor = (function () {
       this._editHost = null;
       this._editStash = null;
       this._editOriginal = null;
-      var fit = function () { input.style.width = Math.max(5, input.value.length + 1) + "ch"; };
-      fit();
-      input.addEventListener("input", fit);
-      input.addEventListener("keydown", function (ev) {
-        ev.stopPropagation();
-        if (ev.key === "Enter") { ev.preventDefault(); self.commitEdit(); }
-        else if (ev.key === "Escape") { ev.preventDefault(); self.cancelEdit(); }
-      });
+      this._wireField(input, 5);
       input.addEventListener("blur", function () {
         if (self.inserting === gap && self.input === input) self.commitEdit();
       });
@@ -818,10 +1047,32 @@ var SympyEditor = (function () {
       input.focus();
     }
 
+    /** Sizing, Enter/Escape and live "\\command" expansion for a field. */
+    _wireField(input, minWidth) {
+      var self = this;
+      var fit = function () { input.style.width = Math.max(minWidth, input.value.length + 1) + "ch"; };
+      fit();
+      input.addEventListener("input", function () {
+        var cursor = input.selectionStart;
+        var r = expandCommands(input.value, cursor);
+        if (r.text !== input.value) {
+          input.value = r.text;
+          input.setSelectionRange(cursor + r.delta, cursor + r.delta);
+        }
+        fit();
+      });
+      input.addEventListener("keydown", function (ev) {
+        ev.stopPropagation();
+        if (ev.key === "Enter") { ev.preventDefault(); self.commitEdit(); }
+        else if (ev.key === "Escape") { ev.preventDefault(); self.cancelEdit(); }
+      });
+    }
+
     _endEdit() {
       var host = this._editHost, input = this.input, stash = this._editStash;
       this.editing = null;
       this.inserting = null;
+      this._editRange = null;
       this.input = null;
       this._editHost = null;
       this._editStash = null;
@@ -836,13 +1087,18 @@ var SympyEditor = (function () {
 
     commitEdit() {
       if (this.editing === null && !this.inserting) return;
-      var inserting = this.inserting;
+      var inserting = this.inserting, editRange = this._editRange;
       var path = this.editing;
-      var src = this.input.value.trim();
+      var src = toSource(this.input.value).trim();
       var original = this._editOriginal;
       this._endEdit();
       this._applySelection();
       this.view.focus({ preventScroll: true });
+      if (editRange) {
+        if (!src || src === original) { this.setState(this.state); return; }   // restore the rendering
+        this.send({ action: "replace", path: editRange.path, children: editRange.children, src: src });
+        return;
+      }
       if (inserting) {
         if (src) this.send({ action: "insert", path: inserting.path, index: inserting.index, src: src });
         return;
@@ -856,7 +1112,9 @@ var SympyEditor = (function () {
 
     cancelEdit(silent) {
       if (this.editing === null && !this.inserting) return;
+      var editRange = this._editRange;
       this._endEdit();
+      if (editRange) { this.setState(this.state); return; }   // re-render what the field replaced
       this._applySelection();
       if (!silent) this.view.focus({ preventScroll: true });
     }
@@ -867,18 +1125,25 @@ var SympyEditor = (function () {
       switch (cmd) {
         case "undo": return this.send({ action: "undo" });
         case "redo": return this.send({ action: "redo" });
-        case "edit": return this.caret ? this.beginInsert("") : this.beginEdit(this.selected || "/");
+        case "edit":
+          if (this.caret) return this.beginInsert("");
+          if (this.range) return this.beginRangeEdit();
+          return this.beginEdit(this.selected || "/");
         case "delete":
+          if (this.range) return this.send({ action: "delete", path: this.range.parent, children: this._rangeIndices() });
           if (this.selected && this.selected !== "/") return this.send({ action: "delete", path: this.selected });
           return;
         case "parent": {
+          if (this.range) { this.select(this.range.parent); return; }
           var t = this.selected ? this.tree[this.selected] : null;
           if (t && t.parent) this.select(t.parent);
           return;
         }
         case "apply":
           if (this.opsSelect && this.opsSelect.value) {
-            return this.send({ action: "apply", path: this.selected || "/", op: this.opsSelect.value });
+            var msg = { action: "apply", path: this.range ? this.range.parent : (this.selected || "/"), op: this.opsSelect.value };
+            if (this.range) msg.children = this._rangeIndices();
+            return this.send(msg);
           }
           return;
         case "copy": return this.copySource();
@@ -950,11 +1215,12 @@ var SympyEditor = (function () {
       var dis = this.busy || this.closed || !this.state;
       var set = function (name, disabled) { if (b[name]) b[name].disabled = !!disabled; };
       var t = this.selected ? this.tree[this.selected] : null;
+      var range = !!this.range;
       set("undo", dis || !s.can_undo);
       set("redo", dis || !s.can_redo);
       set("edit", dis);
-      set("delete", dis || !this.selected || this.selected === "/");
-      set("parent", dis || !(t && t.parent));
+      set("delete", dis || !(range || (this.selected && this.selected !== "/")));
+      set("parent", dis || !(range || (t && t.parent)));
       set("apply", dis || !(this.opsSelect && this.opsSelect.value));
       set("copy", !s.src);
       set("finish", dis);
@@ -1071,6 +1337,9 @@ var SympyEditor = (function () {
     backends: backends,
     mount: mount,
     loadKatex: loadKatex,
+    toDisplay: toDisplay,
+    toSource: toSource,
+    expandCommands: expandCommands,
     buildTree: buildTree,
     parentPath: parentPath,
     DEFAULTS: DEFAULTS

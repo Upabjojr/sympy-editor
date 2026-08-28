@@ -17,7 +17,7 @@ import pytest
 import re
 import time
 
-from sympy import Array, Matrix, MatrixSymbol, Symbol, sin, symbols
+from sympy import Array, Matrix, MatrixSymbol, Symbol, pi, sin, symbols
 
 from sympy_editor import Document, to_html
 from sympy_editor.html import default_urls
@@ -336,6 +336,179 @@ def test_symbols_panel_declare_and_assumptions(browser, serve_expr):
     row = page.locator(".se-sym").filter(has=page.locator("code", has_text=re.compile(r"^q$")))
     _next_state(page, lambda: row.locator("button", has_text="Remove").click())
     assert "q" not in doc.declared
+    assert page.errors == []
+
+
+def test_caret_and_selection_are_exclusive(browser, serve_expr):
+    srv, doc = serve_expr(x + y)
+    page = _open(browser, srv.url)
+    _click(page, "/0")                                 # select x
+    page.keyboard.press("Tab")                         # caret after x: the selection is gone
+    assert page.locator(".se-caret").count() == 1
+    assert page.locator(".se-selected").count() == 0
+    assert page.locator('[data-cmd="delete"]').is_disabled()
+    page.keyboard.press("Delete")                      # nothing to delete with a caret
+    page.keyboard.press("Backspace")
+    page.wait_for_timeout(300)
+    assert doc.expr == x + y
+    assert page.locator(".se-caret").count() == 1
+    page.keyboard.type("2")                            # keys at a caret insert
+    page.keyboard.press("Enter")
+    page.wait_for_function("document.querySelector('.se-source').textContent === 'x + y + 2'")
+    assert doc.expr == x + y + 2
+    gx, gy = _gap_between(page, "/1", "/2")
+    _click(page, "/1")                                 # select x
+    page.mouse.click(gx, gy)                           # clicking a gap replaces the selection by a caret
+    assert page.locator(".se-selected").count() == 0 and page.locator(".se-caret").count() == 1
+    _click(page, "/1")                                 # selecting removes the caret
+    assert page.locator(".se-caret").count() == 0 and page.locator(".se-selected").count() == 1
+    page.keyboard.type("+")                            # any printable key replaces the selection
+    assert page.locator(".se-inline").input_value() == "+"
+    page.keyboard.press("Escape")
+    assert doc.expr == x + y + 2
+    assert page.errors == []
+
+
+def test_latex_shortcuts_in_the_field(browser, serve_expr):
+    theta, lam = symbols("theta lamda")
+    srv, doc = serve_expr(theta + 1)
+    page = _open(browser, srv.url)
+    path = next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "theta")
+    _click(page, path)
+    page.keyboard.press("Enter")                       # the field shows the Greek letter
+    assert page.locator(".se-inline").input_value() == "θ"
+    page.keyboard.press("Control+a")
+    page.keyboard.type("\\theta")                      # expands as soon as the command is complete
+    assert page.locator(".se-inline").input_value() == "θ"
+    page.keyboard.type("**2 + \\lambda*\\pi + \\sin(\\alpha)")
+    assert page.locator(".se-inline").input_value() == "θ**2 + λ*π + sin(α)"
+    page.keyboard.press("Enter")
+    page.wait_for_function("document.querySelector('.se-source').textContent.includes('sin(alpha)')")
+    assert doc.expr == theta**2 + lam * pi + sin(symbols("alpha")) + 1
+    assert theta in doc.expr.free_symbols               # the same symbol as before, not a new "θ"
+    # a command that is a prefix of another waits for the next character
+    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "1"))
+    page.keyboard.type("\\in")
+    assert page.locator(".se-inline").input_value() == "\\in"
+    page.keyboard.type("fty")
+    assert page.locator(".se-inline").input_value() == "∞"
+    page.keyboard.press("Escape")
+    assert page.errors == []
+
+
+def _display_children(page, parent):
+    """Annotated children of `parent`, left to right as displayed."""
+    return page.evaluate(
+        """p => { const els = [...document.querySelectorAll('.se-view [data-path]')];
+                 const kids = els.filter(e => { const q = e.getAttribute('data-path'); if (q === p || !(p === '/' ? q.startsWith('/') : q.startsWith(p + '/'))) return false;
+                   const anc = e.parentElement.closest('[data-path]'); return anc && anc.getAttribute('data-path') === p; });
+                 return kids.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left).map(e => e.getAttribute('data-path')); }""", parent)
+
+
+def _center(page, path):
+    return page.evaluate("p => { const b = document.querySelector(`[data-path=\"${p}\"]`).getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; }", path)
+
+
+def test_shift_arrows_select_ranges(browser, serve_expr):
+    a, b, c, d = symbols("a b c d")
+    srv, doc = serve_expr(a + b + c + d)
+    page = _open(browser, srv.url)
+    kids = _display_children(page, "/")
+    assert len(kids) == 4
+    _click(page, kids[1])                              # b
+    page.keyboard.press("Shift+ArrowRight")
+    assert page.locator(".se-selected").count() == 2
+    assert page.locator(".se-status").inner_text() == "Add range: b + c"
+    page.keyboard.press("Shift+ArrowRight")
+    assert page.locator(".se-selected").count() == 3
+    page.keyboard.press("Shift+ArrowLeft")             # shrink back
+    assert page.locator(".se-selected").count() == 2
+    assert page.locator('[data-cmd="delete"]').is_enabled()
+    page.locator(".se-ops").select_option("negate")    # an op acts on the range only
+    _next_state(page, lambda: page.locator('[data-cmd="apply"]').click())
+    assert doc.expr == a - b - c + d
+    assert page.locator(".se-selected").count() == 0   # a new state drops the range
+    kids = _display_children(page, "/")
+    _click(page, kids[0])                              # a
+    page.keyboard.press("Shift+ArrowRight")            # a and -b
+    page.keyboard.type("q")                            # typing replaces the whole range
+    assert page.locator(".se-inline").input_value() == "q"
+    page.keyboard.press("Enter")
+    page.wait_for_function("document.querySelector('.se-source').textContent.includes('q')")
+    assert doc.expr == -c + d + symbols("q")
+    kids = _display_children(page, "/")
+    _click(page, kids[0])
+    page.keyboard.press("Shift+ArrowRight")
+    page.keyboard.press("Escape")                      # Escape clears the range
+    assert page.locator(".se-selected").count() == 0
+    _click(page, kids[0])
+    page.keyboard.press("Shift+ArrowRight")
+    page.keyboard.press("Enter")                       # Enter edits the range, prefilled with its source
+    assert "+" in page.locator(".se-inline").input_value()
+    page.keyboard.press("Escape")                      # cancel restores the rendering
+    page.wait_for_function("document.querySelectorAll('.se-view [data-path]').length > 1")
+    assert page.locator(".se-inline").count() == 0
+    _click(page, kids[0])
+    page.keyboard.press("Shift+ArrowRight")
+    _next_state(page, lambda: page.keyboard.press("Delete"))
+    assert len(doc.expr.args) == 1 or doc.expr.is_Symbol or doc.expr.is_Mul
+    assert page.errors == []
+
+
+def test_range_in_nested_product_and_arrow_down_reduces(browser, serve_expr):
+    a, b, c = symbols("a b c")
+    srv, doc = serve_expr(a * b * c + 1)              # Add(1, Mul(a, b, c))
+    page = _open(browser, srv.url)
+    mul = next(k for k, v in doc.snapshot()["nodes"].items() if v["type"] == "Mul")
+    kids = _display_children(page, mul)
+    _click(page, kids[0])
+    page.keyboard.press("Shift+ArrowRight")
+    assert page.locator(".se-status").inner_text() == "Mul range: a*b"
+    page.keyboard.press("ArrowUp")                     # the range's parent
+    assert page.locator(".se-status").inner_text() == "Mul: a*b*c"
+    page.keyboard.press("ArrowDown")                   # reduce to the first child
+    assert page.locator(".se-status").inner_text() == "Symbol: a"
+    page.keyboard.press("Shift+ArrowRight")
+    page.keyboard.press("ArrowRight")                  # collapse the range onto its focus end
+    assert page.locator(".se-status").inner_text() == "Symbol: b"
+    assert page.errors == []
+
+
+def test_mouse_drag_selects_a_range(browser, serve_expr):
+    a, b, c, d = symbols("a b c d")
+    srv, doc = serve_expr(a + b + c + d)
+    page = _open(browser, srv.url)
+    kids = _display_children(page, "/")
+    x0, y0 = _center(page, kids[0])
+    x2, y2 = _center(page, kids[2])
+    page.mouse.move(x0, y0)
+    page.mouse.down()
+    page.mouse.move(x2, y2, steps=6)
+    page.mouse.up()
+    assert page.locator(".se-selected").count() == 3
+    assert page.locator(".se-status").inner_text() == "Add range: a + b + c"
+    page.mouse.move(x2, y2)                            # the click ending the drag does not clear it
+    assert page.locator(".se-selected").count() == 3
+    _click(page, kids[3])                              # a plain click selects again
+    assert page.locator(".se-status").inner_text() == "Symbol: d"
+    assert page.errors == []
+
+
+def test_touch_drag_selects_a_range(browser, serve_expr):
+    a, b, c = symbols("a b c")
+    srv, doc = serve_expr(a + b + c)
+    page = _open(browser, srv.url)
+    kids = _display_children(page, "/")
+    page.evaluate(
+        """([p0, p1]) => {
+            const at = p => { const b = document.querySelector(`[data-path="${p}"]`).getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; };
+            const fire = (type, p) => { const [x, y] = at(p); const el = document.elementFromPoint(x, y);
+              el.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, pointerType: 'touch', pointerId: 7, isPrimary: true, buttons: 1 })); };
+            fire('pointerdown', p0); fire('pointermove', p1); fire('pointerup', p1);
+        }""", [kids[0], kids[1]])
+    assert page.locator(".se-selected").count() == 2
+    assert page.locator(".se-status").inner_text() == "Add range: a + b"
+    assert page.evaluate("getComputedStyle(document.querySelector('.se-view')).touchAction").startswith("pan-y")
     assert page.errors == []
 
 

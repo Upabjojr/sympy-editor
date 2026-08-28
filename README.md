@@ -58,9 +58,11 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | --- | --- | --- |
 | Select sub-expression | click | ↓ (enter children), ←/→ (siblings) |
 | Select enclosing expression | click again on the same spot, or **↑** | ↑ |
+| Reduce to the first sub-expression | | ↓ |
+| Select a range of adjacent terms / factors | drag across them (mouse, touch or pen) | Shift+→ / Shift+← grow and shrink the range; ←/→/↓ collapse it, ↑ selects the whole sum/product |
 | Replace selection by typing | | just start typing (SymPy syntax) |
 | Insert a term / factor / argument | click **between** two terms (or on the operator): a caret appears; type the new term, Enter | Tab / Shift+Tab put the caret after / before the selection; ←/→ move it; Enter opens an empty field; Esc removes it |
-| Extend the selection (insert after it) | | `+` `-` `*` `/` `^` `=` `,` — the field opens as `selection +` with the caret at the end; with nothing selected the whole expression is extended |
+| LaTeX shortcuts in the field | | `\theta` becomes `θ` as you type (Greek letters, `\infty`, `\sin`, `\cdot`, `\le`...); Greek letters are SymPy's names (`θ` is `theta`, `λ` is `lamda`, `∞` is `oo`) |
 | Edit selection's existing text | double-click / **Edit** | Enter |
 | Apply / cancel an edit | click elsewhere applies | Enter / Esc |
 | Remove selection from its parent | **Delete** | Del |
@@ -69,6 +71,14 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 
 Editing happens *inside* the formula: the selected node is swapped for a small
 text field at its position, and the formula re-renders when you press Enter.
+A selection and an insertion caret never coexist: with a selection, typing
+replaces it; with a caret, typing only inserts.  A range (`b + c` inside `a + b + c + d`) is
+edited, deleted and transformed like a single node: typing replaces it, Del
+removes its terms, *Apply* transforms just those terms.
+
+On phones and tablets: tap to select, drag to select a range, use the toolbar
+(*Edit*, *Delete*, *Apply*) instead of keys; the field opens the on-screen
+keyboard.  Vertical swipes and pinches still scroll and zoom the page.
 Transformations act on the selected sub-expression only (on the whole formula
 when nothing is selected).
 
