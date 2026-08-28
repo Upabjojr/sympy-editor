@@ -65,6 +65,21 @@ Two conventions between printer, document and front end:
   and the front end sends that flag back with a `replace`, which then stores
   `1/new` at the path.  Deleting or applying an op to the node acts on the real
   `Pow`.
+- **Insertion caret.**  `snapshot()` marks nodes whose argument list can
+  grow (`insertable`, with `nargs`: Add, Mul, MatMul, function calls, sets...).
+  The front end computes the gaps between the rendered arguments of such
+  nodes (`Editor._gapsOf`); a click in a gap (or on the operator glyph there,
+  which belongs to no argument) shows a caret, and typing sends
+  `{"action": "insert", "path", "index", "src"}` (`Document.insert`, parsed
+  in the context of the node so a new name in a `MatMul` is a matrix).
+  Commutative nodes re-order, so the index only matters for `MatMul` and
+  function arguments.
+- **Declared names.**  `Document.declared` (name -> object) holds names put in
+  scope before they occur in the expression: `Document(expr, symbols=[...])`,
+  `declare()` / `undeclare()` and the messages of the same names (fields as
+  `retype`, plus `assumptions`).  `namespace()` = names in the expression
+  (they win) + declared; `symbol_info()` reports `used`.  Pyodide pages carry
+  them as `srepr` strings in `config.document.symbols`.
 - **Retyping symbols.**  `{"action": "retype", "name", "type", "rows",
   "cols"}` swaps every occurrence of a name (`xreplace`) for a `Symbol`, a
   `MatrixSymbol` or its `as_explicit()` matrix; since `xreplace` skips the

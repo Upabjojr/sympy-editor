@@ -214,6 +214,12 @@ var SympyEditor = (function () {
       root.appendChild(this.error);
 
       this.input = null;  // the in-place <input> while editing
+      // Insertion caret: a point between two arguments of an insertable node
+      // (see _gapsOf); typing there inserts a new argument.
+      this.caretEl = h("span", { class: "se-caret", "aria-hidden": "true" });
+      this.caret = null;      // {path, index, a, b, leftEl, rightEl, top, bottom, height}
+      this.inserting = null;  // the caret an open field is inserting at
+      this._gapCache = null;
 
       this.host.appendChild(root);
       this._wire();
@@ -230,7 +236,13 @@ var SympyEditor = (function () {
           if (cmd !== "edit") self.view.focus({ preventScroll: true });
         }
       });
-      this.view.addEventListener("mousemove", function (ev) { self._setHover(self._leafAt(ev)); });
+      this.view.addEventListener("mousemove", function (ev) {
+        var leaf = self._leafAt(ev);
+        var gap = self.opts.readOnly ? null : self._gapAt(ev.clientX, ev.clientY, leaf);
+        self._setHover(gap ? null : leaf);
+        self.view.classList.toggle("se-gap", !!gap);
+      });
+      this.view.addEventListener("scroll", function () { self._gapCache = null; if (self.caret) self._hideCaret(); });
       this.view.addEventListener("mouseleave", function () { self._setHover(null); });
       this.view.addEventListener("click", function (ev) { self._onClick(ev); });
       this.view.addEventListener("dblclick", function (ev) { self._onDblClick(ev); });
@@ -255,7 +267,7 @@ var SympyEditor = (function () {
       if (!snap) return;
       this.state = snap;
       this.tree = buildTree(snap.nodes || {});
-      if (this.editing !== null) this.cancelEdit(true);
+      if (this.editing !== null || this.inserting) this.cancelEdit(true);
       await this._render();
       if (this.state !== snap) return;  // superseded meanwhile
       var sel = this.selected;
@@ -263,6 +275,7 @@ var SympyEditor = (function () {
       this.selected = sel;
       this._fillOps();
       this._fillSymbols();
+      this.root.setAttribute("data-seq", String(snap.seq || 0));   // lets tests wait for a re-render
       this._applySelection();
       this._showError(snap.error);
       if (snap.closed) {
@@ -304,6 +317,8 @@ var SympyEditor = (function () {
         }
       }
       this.source.textContent = this.state.src || "";
+      this._gapCache = null;
+      this.caret = null;   // the rendering replaced the caret element too
     }
 
     /** The dropdown offers the ops that apply to the selection (the whole
@@ -339,67 +354,96 @@ var SympyEditor = (function () {
       if (current && ops.some(function (op) { return op.name === current; })) this.opsSelect.value = current;
     }
 
-    /** One row per name in the expression: its type, and controls to make it
-     *  a Symbol, a MatrixSymbol (rows x cols) or an explicit Matrix. */
+    /** The symbols panel: one row per name (used in the expression or merely
+     *  declared) with controls to change what it stands for, and a last row
+     *  to declare a new name - with its type, shape or assumptions - before
+     *  typing it. */
     _fillSymbols() {
-      if (!this.symbols) return;
+      if (!this.symbols || !this.state) return;
       var syms = this.state.symbols || [];
       var key = JSON.stringify(syms);
       if (key === this._symbolsKey) return;
       this._symbolsKey = key;
       this.symbolsBody.textContent = "";
-      this.symbols.hidden = !syms.length;
+      this.symbols.hidden = false;
       var self = this;
-      syms.forEach(function (sym) {
-        var row = h("div", { class: "se-sym" }, [h("code", {}, [sym.name])]);
-        var kinds = ["Symbol", "MatrixSymbol", "Matrix"];
-        if (kinds.indexOf(sym.type) < 0) {
-          var note = sym.type + (sym.type === "IndexedBase" ? " (indexed)" : "");
-          row.appendChild(h("span", { class: "se-sym-note" }, [note]));
-          self.symbolsBody.appendChild(row);
-          return;
-        }
-        var select = h("select", { title: "What " + sym.name + " stands for" });
-        kinds.forEach(function (k) {
-          var label = k === "Matrix" ? "Matrix (explicit)" : k;
-          select.appendChild(h("option", { value: k }, [label]));
-        });
-        select.value = sym.type;
-        var shape = sym.shape || ["2", "2"];
-        var rows = h("input", { type: "text", value: shape[0], title: "Rows", "aria-label": "Rows" });
-        var cols = h("input", { type: "text", value: shape[1], title: "Columns", "aria-label": "Columns" });
-        var times = h("span", {}, ["\u00d7"]);
-        var button = h("button", { type: "button", title: "Change " + sym.name + " throughout the expression" }, ["Set"]);
-        var shapeVisible = function () {
-          var show = select.value !== "Symbol";
-          rows.hidden = cols.hidden = times.hidden = !show;
-        };
-        select.addEventListener("change", shapeVisible);
-        var apply = function () {
-          if (self.busy || self.closed) return;
-          var msg = { action: "retype", name: sym.name, type: select.value };
-          if (select.value !== "Symbol") { msg.rows = rows.value.trim(); msg.cols = cols.value.trim(); }
-          self.send(msg);
-        };
-        button.addEventListener("click", apply);
-        [rows, cols].forEach(function (inp) {
-          inp.addEventListener("keydown", function (ev) {
-            ev.stopPropagation();
-            if (ev.key === "Enter") { ev.preventDefault(); apply(); }
-          });
-        });
-        select.addEventListener("keydown", function (ev) { ev.stopPropagation(); });
-        row.appendChild(select);
-        row.appendChild(rows);
-        row.appendChild(times);
-        row.appendChild(cols);
-        row.appendChild(button);
-        if (sym.assumptions && sym.assumptions.length) {
-          row.appendChild(h("span", { class: "se-sym-note" }, [sym.assumptions.join(", ")]));
-        }
-        shapeVisible();
-        self.symbolsBody.appendChild(row);
+      syms.forEach(function (sym) { self.symbolsBody.appendChild(self._symbolRow(sym)); });
+      this.symbolsBody.appendChild(this._symbolRow(null));
+    }
+
+    /** A row of the symbols panel; `sym` null gives the "declare a new name" row. */
+    _symbolRow(sym) {
+      var self = this;
+      var isNew = !sym;
+      var row = h("div", { class: "se-sym" + (isNew ? " se-sym-new" : "") });
+      var nameInput = null;
+      if (isNew) {
+        nameInput = h("input", { type: "text", class: "se-sym-name", placeholder: "name",
+          "aria-label": "Name of the new symbol", title: "Declare a name (and what it is) before typing it" });
+        row.appendChild(nameInput);
+      } else {
+        row.appendChild(h("code", {}, [sym.name]));
+      }
+      var types = ["Symbol", "MatrixSymbol", "Matrix", "Function"];
+      if (!isNew && types.indexOf(sym.type) < 0) {
+        row.appendChild(h("span", { class: "se-sym-note" }, [sym.type + (sym.type === "IndexedBase" ? " (indexed)" : "")]));
+        return row;
+      }
+      var select = h("select", { title: isNew ? "Type of the new symbol" : "What " + sym.name + " stands for" });
+      types.forEach(function (k) {
+        select.appendChild(h("option", { value: k }, [k === "Matrix" ? "Matrix (explicit)" : k]));
       });
+      select.value = isNew ? "Symbol" : sym.type;
+      var shape = (sym && sym.shape) || ["2", "2"];
+      var rows = h("input", { type: "text", value: shape[0], title: "Rows", "aria-label": "Rows" });
+      var cols = h("input", { type: "text", value: shape[1], title: "Columns", "aria-label": "Columns" });
+      var times = h("span", {}, ["\u00d7"]);
+      var assume = h("input", { type: "text", class: "se-sym-assume", placeholder: "assumptions",
+        title: "Comma-separated SymPy assumptions: positive, real, integer, nonzero...",
+        "aria-label": "Assumptions", value: (sym && sym.assumptions) ? sym.assumptions.join(", ") : "" });
+      var button = h("button", { type: "button",
+        title: isNew ? "Declare the symbol" : "Change " + sym.name + " throughout the expression" }, [isNew ? "Add" : "Set"]);
+      var refresh = function () {
+        var matrix = select.value === "MatrixSymbol" || select.value === "Matrix";
+        rows.hidden = cols.hidden = times.hidden = !matrix;
+        assume.hidden = select.value !== "Symbol";
+      };
+      select.addEventListener("change", refresh);
+      var apply = function () {
+        if (self.busy || self.closed) return;
+        var name = isNew ? nameInput.value.trim() : sym.name;
+        if (!name) { nameInput.focus(); return; }
+        var msg = { action: isNew ? "declare" : "retype", name: name, type: select.value };
+        if (select.value === "MatrixSymbol" || select.value === "Matrix") {
+          msg.rows = rows.value.trim();
+          msg.cols = cols.value.trim();
+        }
+        if (select.value === "Symbol") {
+          msg.assumptions = assume.value.split(",").map(function (a) { return a.trim(); }).filter(Boolean);
+        }
+        self.send(msg);
+      };
+      button.addEventListener("click", apply);
+      var inputs = [rows, cols, assume];
+      if (nameInput) inputs.push(nameInput);
+      inputs.forEach(function (inp) {
+        inp.addEventListener("keydown", function (ev) {
+          ev.stopPropagation();
+          if (ev.key === "Enter") { ev.preventDefault(); apply(); }
+        });
+      });
+      select.addEventListener("keydown", function (ev) { ev.stopPropagation(); });
+      [select, rows, times, cols, assume, button].forEach(function (el) { row.appendChild(el); });
+      if (!isNew && sym.used === false) {
+        row.appendChild(h("span", { class: "se-sym-note" }, ["declared, not used"]));
+        var remove = h("button", { type: "button", title: "Forget this declaration" }, ["Remove"]);
+        remove.addEventListener("click", function () {
+          if (!self.busy && !self.closed) self.send({ action: "undeclare", name: sym.name });
+        });
+        row.appendChild(remove);
+      }
+      refresh();
+      return row;
     }
 
     /* ---- selection ---- */
@@ -439,6 +483,7 @@ var SympyEditor = (function () {
 
     /** Select a path (null to clear). */
     select(path) {
+      if (path) this._hideCaret();
       this.selected = (path && (path in this.tree)) ? path : null;
       this._fillOps();
       this._applySelection();
@@ -454,7 +499,7 @@ var SympyEditor = (function () {
         for (var j = 0; j < els.length; j++) els[j].classList.add("se-selected");
         this._setStatus(node.type + ": " + node.src + (node.reciprocal ? "  (denominator: the node is 1 over this)" : ""));
       } else if (!this.closed) {
-        this._setStatus(this.annotated ? (this.opts.readOnly ? "" : "Click a sub-expression to select it; type + - * / to extend the whole expression")
+        this._setStatus(this.annotated ? (this.opts.readOnly ? "" : "Click a sub-expression to select it, or click between terms to insert one")
                                        : "Structure unavailable (plain rendering)");
       }
     }
@@ -462,8 +507,19 @@ var SympyEditor = (function () {
     _onClick(ev) {
       if (this.closed || (this.input && ev.target === this.input)) return;
       var leaf = this._leafAt(ev);
+      this._gapCache = null;
+      var gap = this.opts.readOnly ? null : this._gapAt(ev.clientX, ev.clientY, leaf);
+      if (gap) {
+        this.select(null);
+        this.lastLeaf = null;
+        this._showCaret(gap, ev.clientX);
+        this.view.focus({ preventScroll: true });
+        return;
+      }
       if (!leaf) {
         this.select(null);
+        this._hideCaret();
+        this._applySelection();
         this.lastLeaf = null;
         this.view.focus({ preventScroll: true });
         return;
@@ -501,6 +557,21 @@ var SympyEditor = (function () {
         if (!ro) this.send({ action: ev.shiftKey ? "redo" : "undo" });
       } else if (mod && (k === "y" || k === "Y")) {
         if (!ro) this.send({ action: "redo" });
+      } else if (k === "Tab" && this.selected && !ro) {
+        if (!this.caretAtSelection(ev.shiftKey)) handled = false;
+      } else if (this.caret && k === "Escape") {
+        this._hideCaret();
+        this._applySelection();
+      } else if (this.caret && k === "Enter") {
+        if (!ro) this.beginInsert("");
+      } else if (this.caret && (k === "ArrowLeft" || k === "ArrowRight")) {
+        this._moveCaret(k === "ArrowLeft" ? -1 : 1);
+      } else if (this.caret && k === "ArrowUp") {
+        var container = this.caret.path;
+        this._hideCaret();
+        this.select(container);
+      } else if (this.caret && !ro && !mod && !ev.altKey && k.length === 1) {
+        this.beginInsert(k);
       } else if (k === "Enter") {
         if (!ro) this.beginEdit(this.selected || "/");
       } else if (k === "Escape") {
@@ -544,7 +615,7 @@ var SympyEditor = (function () {
       if (this.opts.readOnly || this.closed || !this.state || this.busy) return;
       if (!path || !(path in this.state.nodes)) path = "/";
       if (!(path in this.state.nodes)) return;
-      if (this.editing !== null) this.cancelEdit(true);
+      if (this.editing !== null || this.inserting) this.cancelEdit(true);
       var self = this;
       var original = this.state.nodes[path].src;
       var host = this._els(path)[0] || this.view;
@@ -580,9 +651,177 @@ var SympyEditor = (function () {
       else if (extend) input.setSelectionRange(input.value.length, input.value.length);
     }
 
+    /* ---- insertion caret ---- */
+
+    _argIndex(parent, child) {
+      var rest = parent === "/" ? child.slice(1) : child.slice(parent.length + 1);
+      return parseInt(rest.split("/")[0], 10);
+    }
+
+    /** The insertion points of an insertable node, in display order: before
+     *  its first argument, between arguments, after the last.  `index` is
+     *  the argument position sent to the backend. */
+    _gapsOf(p) {
+      var node = this.state && this.state.nodes ? this.state.nodes[p] : null;
+      if (!node || !node.insertable || !this.tree[p]) return [];
+      var host = this._els(p)[0];
+      if (!host) return [];
+      var hr = host.getBoundingClientRect();
+      var self = this;
+      var kids = this.tree[p].children
+        .map(function (c) { return { path: c, el: self._els(c)[0] }; })
+        .filter(function (k) { return k.el; })
+        .map(function (k) { k.rect = k.el.getBoundingClientRect(); return k; })
+        .sort(function (a, b) { return a.rect.left - b.rect.left; });
+      // Room before the first and after the last argument: generous around
+      // the whole expression, a few pixels inside a nested node so that its
+      // own operator glyphs (the sign of "- sin(x)") still select the node.
+      var pad = p === "/" ? 16 : 4;
+      var gaps = [];
+      var push = function (index, a, b, leftEl, rightEl, top, bottom) {
+        if (a > b) { a = b = (a + b) / 2; }
+        gaps.push({ path: p, index: index, a: a, b: b, leftEl: leftEl, rightEl: rightEl,
+          top: top, bottom: bottom, height: bottom - top });
+      };
+      if (!kids.length) {
+        push(node.nargs, hr.left, hr.right, null, null, hr.top, hr.bottom);
+        return gaps;
+      }
+      var first = kids[0], last = kids[kids.length - 1];
+      push(this._argIndex(p, first.path), (p === "/" ? Math.min(hr.left, first.rect.left) : first.rect.left) - pad,
+        first.rect.left, null, first.el, first.rect.top, first.rect.bottom);
+      for (var i = 0; i + 1 < kids.length; i++) {
+        var l = kids[i], r = kids[i + 1];
+        // Only arguments on the same line have a gap between them: the
+        // numerator and denominator of a fraction are stacked, not adjacent.
+        var overlap = Math.min(l.rect.bottom, r.rect.bottom) - Math.max(l.rect.top, r.rect.top);
+        if (overlap < 0.5 * Math.min(l.rect.height, r.rect.height)) continue;
+        push(this._argIndex(p, r.path), l.rect.right, r.rect.left, l.el, r.el,
+          Math.min(l.rect.top, r.rect.top), Math.max(l.rect.bottom, r.rect.bottom));
+      }
+      push(node.nargs, last.rect.right, (p === "/" ? Math.max(hr.right, last.rect.right) : last.rect.right) + pad,
+        last.el, null, last.rect.top, last.rect.bottom);
+      return gaps;
+    }
+
+    _allGaps() {
+      if (!this._gapCache) {
+        var gaps = [];
+        for (var p in this.tree) gaps = gaps.concat(this._gapsOf(p));
+        this._gapCache = gaps;
+      }
+      return this._gapCache;
+    }
+
+    /** The insertion point at a viewport position, or null.  The innermost
+     *  node wins; a glyph (`leaf`) wins over the gaps of its ancestors. */
+    _gapAt(x, y, leaf) {
+      var leafLen = leaf ? leaf.getAttribute("data-path").length : 0;
+      var best = null;
+      var gaps = this._allGaps();
+      for (var i = 0; i < gaps.length; i++) {
+        var g = gaps[i];
+        if (x < g.a - 3 || x > g.b + 3 || y < g.top - 6 || y > g.bottom + 6) continue;
+        if (g.path.length < leafLen) continue;
+        if (!best || g.path.length > best.path.length) best = g;
+      }
+      return best;
+    }
+
+    _showCaret(gap, x) {
+      this._hideCaret();
+      this.caret = gap;
+      var vr = this.view.getBoundingClientRect();
+      var cx = Math.max(gap.a, Math.min(x === undefined ? gap.b : x, gap.b));
+      this.caretEl.style.left = Math.round(cx - vr.left + this.view.scrollLeft - 1) + "px";
+      this.caretEl.style.top = Math.round(gap.top - vr.top + this.view.scrollTop) + "px";
+      this.caretEl.style.height = Math.round(Math.max(12, gap.height)) + "px";
+      this.view.appendChild(this.caretEl);
+      var old = this.view.querySelectorAll(".se-selected");
+      for (var i = 0; i < old.length; i++) old[i].classList.remove("se-selected");
+      var node = this.state.nodes[gap.path];
+      this._setStatus("Insert into " + node.type + " " + node.src + " – type a term (Enter to apply, Esc to cancel)");
+      this._updateToolbar();
+    }
+
+    _hideCaret() {
+      this.caret = null;
+      if (this.caretEl.parentNode) this.caretEl.parentNode.removeChild(this.caretEl);
+    }
+
+    _moveCaret(step) {
+      var cur = this.caret;
+      var gaps = this._gapsOf(cur.path);
+      var idx = -1;
+      for (var i = 0; i < gaps.length; i++) {
+        if (gaps[i].index === cur.index && gaps[i].leftEl === cur.leftEl) idx = i;
+      }
+      var j = idx + step;
+      if (j >= 0 && j < gaps.length) this._showCaret(gaps[j], step < 0 ? gaps[j].b : gaps[j].a);
+    }
+
+    /** Put the caret right after (before, with `before`) the selection, in
+     *  the nearest enclosing node that accepts insertions.  Returns false
+     *  when there is none. */
+    caretAtSelection(before) {
+      if (!this.selected || !this.state) return false;
+      var child = this.selected;
+      var p = this.tree[child] ? this.tree[child].parent : null;
+      while (p && !(this.state.nodes[p] && this.state.nodes[p].insertable)) {
+        child = p;
+        p = this.tree[p].parent;
+      }
+      if (!p) return false;
+      var el = this._els(child)[0];
+      var gaps = this._gapsOf(p);
+      for (var i = 0; i < gaps.length; i++) {
+        if (before ? gaps[i].rightEl === el : gaps[i].leftEl === el) {
+          this._showCaret(gaps[i], before ? gaps[i].b : gaps[i].a);
+          return true;
+        }
+      }
+      return false;
+    }
+
+    /** Open a field at the caret; Enter inserts what is typed. */
+    beginInsert(initial) {
+      var gap = this.caret;
+      if (!gap || this.opts.readOnly || this.closed || !this.state || this.busy) return;
+      if (this.editing !== null || this.inserting) this.cancelEdit(true);
+      var self = this;
+      var input = h("input", { class: "se-inline", type: "text", spellcheck: "false", autocomplete: "off",
+        placeholder: "term", "aria-label": "New term (SymPy syntax)" });
+      input.value = initial || "";
+      var host = this._els(gap.path)[0];
+      if (gap.rightEl && gap.rightEl.parentNode) gap.rightEl.parentNode.insertBefore(input, gap.rightEl);
+      else if (gap.leftEl && gap.leftEl.parentNode) gap.leftEl.parentNode.insertBefore(input, gap.leftEl.nextSibling);
+      else if (host) host.appendChild(input);
+      else return;
+      this._hideCaret();
+      this.inserting = gap;
+      this.input = input;
+      this._editHost = null;
+      this._editStash = null;
+      this._editOriginal = null;
+      var fit = function () { input.style.width = Math.max(5, input.value.length + 1) + "ch"; };
+      fit();
+      input.addEventListener("input", fit);
+      input.addEventListener("keydown", function (ev) {
+        ev.stopPropagation();
+        if (ev.key === "Enter") { ev.preventDefault(); self.commitEdit(); }
+        else if (ev.key === "Escape") { ev.preventDefault(); self.cancelEdit(); }
+      });
+      input.addEventListener("blur", function () {
+        if (self.inserting === gap && self.input === input) self.commitEdit();
+      });
+      this._setStatus("Inserting into " + this.state.nodes[gap.path].type + " – Enter to apply, Esc to cancel");
+      input.focus();
+    }
+
     _endEdit() {
       var host = this._editHost, input = this.input, stash = this._editStash;
       this.editing = null;
+      this.inserting = null;
       this.input = null;
       this._editHost = null;
       this._editStash = null;
@@ -590,17 +829,24 @@ var SympyEditor = (function () {
         host.classList.remove("se-editing");
         if (input && input.parentNode === host) host.removeChild(input);
         if (stash) host.appendChild(stash);
+      } else if (input && input.parentNode) {
+        input.parentNode.removeChild(input);
       }
     }
 
     commitEdit() {
-      if (this.editing === null) return;
+      if (this.editing === null && !this.inserting) return;
+      var inserting = this.inserting;
       var path = this.editing;
       var src = this.input.value.trim();
       var original = this._editOriginal;
       this._endEdit();
       this._applySelection();
       this.view.focus({ preventScroll: true });
+      if (inserting) {
+        if (src) this.send({ action: "insert", path: inserting.path, index: inserting.index, src: src });
+        return;
+      }
       if (!src || src === original) return;
       var msg = { action: path === "/" ? "set" : "replace", path: path, src: src };
       var node = this.state && this.state.nodes ? this.state.nodes[path] : null;
@@ -609,7 +855,7 @@ var SympyEditor = (function () {
     }
 
     cancelEdit(silent) {
-      if (this.editing === null) return;
+      if (this.editing === null && !this.inserting) return;
       this._endEdit();
       this._applySelection();
       if (!silent) this.view.focus({ preventScroll: true });
@@ -621,7 +867,7 @@ var SympyEditor = (function () {
       switch (cmd) {
         case "undo": return this.send({ action: "undo" });
         case "redo": return this.send({ action: "redo" });
-        case "edit": return this.beginEdit(this.selected || "/");
+        case "edit": return this.caret ? this.beginInsert("") : this.beginEdit(this.selected || "/");
         case "delete":
           if (this.selected && this.selected !== "/") return this.send({ action: "delete", path: this.selected });
           return;

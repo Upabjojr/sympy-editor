@@ -59,6 +59,7 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | Select sub-expression | click | ↓ (enter children), ←/→ (siblings) |
 | Select enclosing expression | click again on the same spot, or **↑** | ↑ |
 | Replace selection by typing | | just start typing (SymPy syntax) |
+| Insert a term / factor / argument | click **between** two terms (or on the operator): a caret appears; type the new term, Enter | Tab / Shift+Tab put the caret after / before the selection; ←/→ move it; Enter opens an empty field; Esc removes it |
 | Extend the selection (insert after it) | | `+` `-` `*` `/` `^` `=` `,` — the field opens as `selection +` with the caret at the end; with nothing selected the whole expression is extended |
 | Edit selection's existing text | double-click / **Edit** | Enter |
 | Apply / cancel an edit | click elsewhere applies | Enter / Esc |
@@ -85,12 +86,17 @@ a whole even though the tree holds `Pow(x + 1, -2)`: editing it replaces the
 denominator (typing `y**3` gives `x/y**3`).
 
 The **Symbols** panel under the formula lists every name with what it stands
-for (`Symbol` with its assumptions, `MatrixSymbol` with its shape, ...) and
-lets you change it throughout the expression: make `y` a 2×2 `MatrixSymbol`,
-or an explicit `Matrix` of `y[i, j]` entries (symbolic dimensions such as `n`
-are fine for a `MatrixSymbol`).  Products and powers are rebuilt as
+for (`Symbol` with its assumptions, `MatrixSymbol` with its shape, `Function`,
+...) and lets you change it throughout the expression: make `y` a 2×2
+`MatrixSymbol`, an explicit `Matrix` of `y[i, j]` entries (symbolic dimensions
+such as `n` are fine for a `MatrixSymbol`), or a positive real `Symbol`
+(assumptions are a comma-separated list).  Products and powers are rebuilt as
 `MatMul`/`MatPow`; a change SymPy cannot represent (a matrix under a
-transpose back to a scalar) is refused with its error.
+transpose back to a scalar) is refused with its error.  The last row of the
+panel **declares a new name before you type it** — so `C` typed into a
+scalar context can still be a 3×3 matrix symbol — and from Python the same is
+`edit(expr, symbols=[MatrixSymbol("C", 3, 3)])` or
+`w.document.declare("C", "MatrixSymbol", 3, 3)`.
 
 The transformation dropdown offers what applies to the selection: the general
 ops always, and the ops registered for the selection's *kind* - for a matrix

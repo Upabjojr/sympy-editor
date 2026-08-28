@@ -15,8 +15,8 @@ import keyword
 import tokenize
 
 import sympy
-from sympy import Basic, Dummy, IndexedBase, MatrixSymbol, Pow, S, Symbol, sympify, srepr
-from sympy.core.function import AppliedUndef
+from sympy import Basic, Dummy, Function, IndexedBase, MatrixSymbol, Pow, S, Symbol, sympify, srepr
+from sympy.core.function import AppliedUndef, UndefinedFunction
 from sympy.core.symbol import Str
 from sympy.matrices.expressions import MatrixExpr
 from sympy.matrices.matrixbase import MatrixBase
@@ -34,12 +34,17 @@ from .printer import (
     delete_at,
     format_path,
     get_at,
+    insert_at,
+    is_insertable,
     parse_path,
     plain_latex,
     replace_at,
 )
 
-__all__ = ["Document"]
+__all__ = ["Document", "SYMBOL_TYPES"]
+
+#: Types a name can be declared as (see :meth:`Document.declare`).
+SYMBOL_TYPES = ("Symbol", "MatrixSymbol", "Matrix", "Function")
 
 PathLike = Union[str, Path]
 
@@ -60,6 +65,10 @@ class Document:
         global registry.
     max_history
         Maximum number of undo steps kept.
+    symbols
+        Symbol-like objects (``Symbol``, ``MatrixSymbol``, undefined
+        ``Function``; ``srepr`` strings are accepted too) put in scope for
+        typed input before they occur in the expression; see :meth:`declare`.
     """
 
     def __init__(
@@ -70,6 +79,7 @@ class Document:
         parser: str = "strict",
         ops: Optional[Dict[str, Op]] = None,
         max_history: int = 200,
+        symbols=(),
     ):
         if parser not in ("strict", "implicit"):
             raise ValueError("parser must be 'strict' or 'implicit'")
@@ -81,6 +91,12 @@ class Document:
         self._index = -1
         self._seq = 0
         self._listeners: List[Callable[[Basic], None]] = []
+        #: Declared names (see :meth:`declare`): name -> object.
+        self.declared: Dict[str, Any] = {}
+        for obj in symbols:
+            if isinstance(obj, str):  # srepr text; Str is not exported by SymPy < 1.14
+                obj = sympify(obj, locals={"Str": Str})
+            self.declared[self._symbol_name(obj)] = obj
         self._commit(self._coerce(expr))
 
     # -- state --------------------------------------------------------------
@@ -151,6 +167,17 @@ class Document:
         """Remove the node at ``path`` from its parent's arguments."""
         return self._commit(delete_at(self.expr, self._path(path)))
 
+    def insert(self, path: PathLike, index: int, new: Union[Basic, str]) -> Basic:
+        """Insert ``new`` (parsed if a string, in the context of the node at
+        ``path``) as argument number ``index`` of that node - a term of an
+        ``Add``, a factor of a ``Mul``/``MatMul``, an argument of a function
+        call... (``snapshot()`` flags such nodes ``insertable``).  Commutative
+        nodes re-order their arguments."""
+        p = self._path(path)
+        parent = get_at(self.expr, p)
+        new_expr = self.parse(new, context=parent) if isinstance(new, str) else sympify(new)
+        return self._commit(insert_at(self.expr, p, int(index), new_expr))
+
     def apply(self, path: PathLike, op: Union[str, Callable]) -> Basic:
         """Apply a registered op (by name) or a callable to the node at ``path``."""
         if isinstance(op, str):
@@ -163,19 +190,32 @@ class Document:
         p = self._path(path)
         return self._commit(replace_at(self.expr, p, sympify(func(get_at(self.expr, p)))))
 
-    def namespace(self) -> Dict[str, Any]:
-        """Symbols, matrix symbols, indexed bases and undefined functions of
-        the current expression, by name, so that typed input reuses them
-        (assumptions included)."""
+    def used_symbols(self) -> Dict[str, Any]:
+        """Symbols, matrix symbols, indexed bases and undefined functions
+        occurring in the current expression, by name."""
         ns: Dict[str, Any] = {}
         for s in self.expr.atoms(Symbol, MatrixSymbol, IndexedBase):
-            if isinstance(s, Dummy):
-                continue
-            name = s.label if isinstance(s, IndexedBase) else s.name
-            ns.setdefault(str(name), s)
+            if not isinstance(s, Dummy):
+                ns.setdefault(self._symbol_name(s), s)
         for f in self.expr.atoms(AppliedUndef):
             ns.setdefault(f.func.__name__, f.func)
         return ns
+
+    def namespace(self) -> Dict[str, Any]:
+        """Names available to typed input: everything occurring in the
+        expression (assumptions included) plus the declared names."""
+        ns = self.used_symbols()
+        for name, obj in self.declared.items():
+            ns.setdefault(name, obj)
+        return ns
+
+    @staticmethod
+    def _symbol_name(obj) -> str:
+        if isinstance(obj, IndexedBase):
+            return str(obj.label)
+        if isinstance(obj, type):  # undefined function class
+            return obj.__name__
+        return str(obj.name)
 
     def parse(self, src: str, context: Optional[Basic] = None) -> Basic:
         """Parse user input in the context of the current expression.
@@ -230,8 +270,9 @@ class Document:
         "shape": ["2", "2"]}, {"name": "x", "type": "Symbol",
         "assumptions": ["positive"]}, ...]``."""
         out: List[Dict[str, Any]] = []
+        used = self.used_symbols()
         for name, obj in sorted(self.namespace().items()):
-            info: Dict[str, Any] = {"name": name}
+            info: Dict[str, Any] = {"name": name, "used": name in used}
             if isinstance(obj, MatrixSymbol):
                 info.update(type="MatrixSymbol", shape=[str(obj.rows), str(obj.cols)])
             elif isinstance(obj, IndexedBase):
@@ -241,12 +282,60 @@ class Document:
                     k for k, v in obj.assumptions0.items() if v and k != "commutative"))
             elif isinstance(obj, type):
                 info["type"] = "Function"
+            elif isinstance(obj, MatrixBase):
+                info.update(type="Matrix", shape=[str(d) for d in obj.shape])
             else:
                 info["type"] = type(obj).__name__
             out.append(info)
         return out
 
-    def retype(self, name: str, kind: str, rows: Any = None, cols: Any = None) -> Basic:
+    def _make(self, name: str, kind: str, rows: Any, cols: Any, assumptions: Any, old: Any = None) -> Any:
+        """The object a name is (re)declared as."""
+        if isinstance(assumptions, str):
+            assumptions = [a.strip() for a in assumptions.split(",")]
+        if isinstance(assumptions, dict):
+            flags = {str(k): bool(v) for k, v in assumptions.items() if v is not None}
+        else:
+            flags = {str(a): True for a in (assumptions or []) if str(a).strip()}
+        if kind == "Symbol":
+            return Symbol(name, **flags)
+        if kind == "Function":
+            return Function(name)
+        if kind in ("MatrixSymbol", "Matrix"):
+            old_shape = getattr(old, "shape", (2, 2))
+            ns = self.namespace()
+            r = sympify(rows, locals=ns) if rows not in (None, "") else old_shape[0]
+            c = sympify(cols, locals=ns) if cols not in (None, "") else old_shape[1]
+            new = MatrixSymbol(name, r, c)
+            return new.as_explicit() if kind == "Matrix" else new
+        raise ValueError(f"Unknown symbol type {kind!r}; use one of {', '.join(SYMBOL_TYPES)}")
+
+    def declare(self, name: str, kind: str = "Symbol", rows: Any = None, cols: Any = None,
+                assumptions: Any = None) -> Any:
+        """Put ``name`` in scope for typed input as a ``Symbol`` (with
+        ``assumptions``, e.g. ``["positive"]``), a ``MatrixSymbol`` /
+        explicit ``Matrix`` of ``rows`` x ``cols`` or an undefined
+        ``Function``.  A name already in the expression is changed
+        everywhere (see :meth:`retype`)."""
+        name = (name or "").strip()
+        if not name.isidentifier():
+            raise ValueError(f"Invalid symbol name: {name!r}")
+        if name in self.namespace():
+            return self.retype(name, kind, rows, cols, assumptions)
+        new = self._make(name, kind, rows, cols, assumptions)
+        self.declared[name] = new
+        return new
+
+    def undeclare(self, name: str) -> None:
+        """Forget a declared name (it must not occur in the expression)."""
+        if name in self.used_symbols():
+            raise ValueError(f"{name} occurs in the expression; remove it there first")
+        if name not in self.declared:
+            raise ValueError(f"No declared symbol named {name!r}")
+        del self.declared[name]
+
+    def retype(self, name: str, kind: str, rows: Any = None, cols: Any = None,
+               assumptions: Any = None) -> Basic:
         """Change what ``name`` stands for, everywhere in the expression:
         ``"Symbol"``, ``"MatrixSymbol"`` (``rows`` x ``cols``, symbolic
         dimensions allowed) or ``"Matrix"`` (an explicit ``rows`` x ``cols``
@@ -258,19 +347,13 @@ class Document:
         if name not in ns:
             raise ValueError(f"No symbol named {name!r} in the expression")
         old = ns[name]
-        if kind == "Symbol":
-            new: Basic = Symbol(name)
-        elif kind in ("MatrixSymbol", "Matrix"):
-            old_shape = getattr(old, "shape", (2, 2))
-            r = sympify(rows) if rows not in (None, "") else old_shape[0]
-            c = sympify(cols) if cols not in (None, "") else old_shape[1]
-            new = MatrixSymbol(name, r, c)
-            if kind == "Matrix":
-                new = new.as_explicit()
-        else:
-            raise ValueError(f"Unknown symbol type {kind!r}; use Symbol, MatrixSymbol or Matrix")
-        if new == old:
+        new = self._make(name, kind, rows, cols, assumptions, old)
+        self.declared[name] = new
+        if new == old or name not in self.used_symbols():
             return self.expr
+        if isinstance(old, type) or isinstance(new, type):
+            raise ValueError(f"{name} is used as a {'function' if isinstance(old, type) else 'symbol'}; "
+                             "remove those uses before changing it")
         new_expr = self._coerce(self.expr.xreplace({old: new}))
         # xreplace rebuilds without the constructors' checks, so a matrix
         # turned back into a scalar can leave a Transpose(Symbol) behind - a
@@ -308,7 +391,8 @@ class Document:
         printed at ``path``; for a denominator raised to a power that is the
         reciprocal of the tree's node, flagged so that an edit replaces the
         denominator rather than the whole ``Pow``."""
-        info: Dict[str, Any] = {"src": str(node), "type": type(node).__name__, "kind": node_kind(node)}
+        info: Dict[str, Any] = {"src": str(node), "type": type(node).__name__, "kind": node_kind(node),
+                                "nargs": len(node.args), "insertable": is_insertable(node)}
         try:
             actual = get_at(self.expr, path)
         except (IndexError, AttributeError):
@@ -325,7 +409,11 @@ class Document:
         ``"reciprocal": true`` for a node the snapshot flagged so),
         ``{"action": "apply", "path": "/", "op": "expand"}``,
         ``{"action": "delete", "path": "/1"}``, ``{"action": "set", "src": ...}``,
-        ``{"action": "retype", "name": "A", "type": "MatrixSymbol", "rows": 2, "cols": 2}``,
+        ``{"action": "insert", "path": "/", "index": 2, "src": "y"}``,
+        ``{"action": "retype", "name": "A", "type": "MatrixSymbol", "rows": 2, "cols": 2}``
+        (``"assumptions": ["positive"]`` for a Symbol), ``{"action": "declare", ...}``
+        with the same fields for a name not yet in the expression,
+        ``{"action": "undeclare", "name": "A"}``,
         ``{"action": "undo"}``, ``{"action": "redo"}``, ``{"action": "snapshot"}``.
         Errors are reported in the snapshot's ``"error"`` field.
         """
@@ -336,7 +424,14 @@ class Document:
                 self.replace(path, str(message.get("src", "")), reciprocal=bool(message.get("reciprocal")))
             elif action == "retype":
                 self.retype(str(message.get("name", "")), str(message.get("type", "")),
-                            message.get("rows"), message.get("cols"))
+                            message.get("rows"), message.get("cols"), message.get("assumptions"))
+            elif action == "declare":
+                self.declare(str(message.get("name", "")), str(message.get("type", "Symbol")),
+                             message.get("rows"), message.get("cols"), message.get("assumptions"))
+            elif action == "undeclare":
+                self.undeclare(str(message.get("name", "")))
+            elif action == "insert":
+                self.insert(path, int(message.get("index", 0)), str(message.get("src", "")))
             elif action == "set":
                 self.replace("/", str(message.get("src", "")))
             elif action == "apply":

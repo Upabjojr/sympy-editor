@@ -104,7 +104,11 @@ def build_config(
             pyodideIndex=all_urls["pyodideIndex"],
             sources=python_sources(),
             srepr=srepr(doc.expr),
-            document={"printer_settings": doc.printer_settings, "parser": doc.parser},
+            document={
+                "printer_settings": doc.printer_settings,
+                "parser": doc.parser,
+                "symbols": [srepr(obj) for obj in doc.declared.values()],
+            },
         )
     elif backend == "http":
         cfg.update(apiUrl=api_url, token=token or "")

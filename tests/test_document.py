@@ -135,7 +135,8 @@ def test_denominator_power_is_selectable_and_edits_as_denominator():
     x, y = symbols("x y")
     doc = Document(x / (x + 1) ** 2)
     nodes = doc.snapshot()["nodes"]
-    assert nodes["/1"] == {"src": "(x + 1)**2", "type": "Pow", "kind": "scalar", "reciprocal": True}
+    assert {k: nodes["/1"][k] for k in ("src", "type", "kind", "reciprocal")} == {
+        "src": "(x + 1)**2", "type": "Pow", "kind": "scalar", "reciprocal": True}
     assert "reciprocal" not in nodes["/1/0"]              # the base is a real node
     doc.handle({"action": "replace", "path": "/1", "src": "y**3", "reciprocal": True})
     assert doc.expr == x / y ** 3
@@ -170,13 +171,13 @@ def test_symbols_panel_info_and_retype():
     doc = Document(x * y + y ** 2 + p)
     symbols_info = doc.snapshot()["symbols"]
     assert [s["name"] for s in symbols_info] == ["p", "x", "y"]
-    assert symbols_info[1] == {"name": "x", "type": "Symbol", "assumptions": []}
+    assert symbols_info[1] == {"name": "x", "used": True, "type": "Symbol", "assumptions": []}
     assert "positive" in symbols_info[0]["assumptions"] and "commutative" not in symbols_info[0]["assumptions"]
     doc.handle({"action": "retype", "name": "y", "type": "MatrixSymbol", "rows": "2", "cols": "n"})
     Y = MatrixSymbol("y", 2, symbols("n"))
     assert doc.namespace()["y"] == Y
     assert [s for s in doc.symbol_info() if s["name"] == "y"] == [
-        {"name": "y", "type": "MatrixSymbol", "shape": ["2", "n"]}]
+        {"name": "y", "used": True, "type": "MatrixSymbol", "shape": ["2", "n"]}]
     doc.undo()
     doc.retype("y", "Matrix", 2, 2)
     assert isinstance(doc.expr.args[0], Matrix) or doc.expr.has(Matrix) or "y[0, 0]" in str(doc.expr)
@@ -226,3 +227,93 @@ def test_srepr_strings_keep_matrix_symbol_names():
     assert doc.namespace()["A"] == A
     assert doc.snapshot()["src"] == "A*A.T"
     assert Document("MatrixSymbol(Str('B'), Integer(2), Integer(3))").expr == MatrixSymbol("B", 2, 3)
+
+
+# -- declared symbols and insertion ------------------------------------------
+
+def test_declare_before_use_and_undeclare():
+    from sympy import Function, MatrixSymbol, Symbol, symbols
+    x = symbols("x")
+    doc = Document(x + 1)
+    assert [s["name"] for s in doc.symbol_info()] == ["x"]
+    doc.handle({"action": "declare", "name": "M", "type": "MatrixSymbol", "rows": "2", "cols": "n"})
+    M = MatrixSymbol("M", 2, symbols("n"))
+    assert doc.namespace()["M"] == M and doc.declared["M"] == M
+    info = {s["name"]: s for s in doc.symbol_info()}
+    assert info["M"] == {"name": "M", "used": False, "type": "MatrixSymbol", "shape": ["2", "n"]}
+    assert info["x"]["used"] is True
+    doc.replace("/", "M*x + M.T")                       # the declared name resolves
+    assert doc.expr == M * x + M.T
+    assert "occurs" in doc.handle({"action": "undeclare", "name": "M"})["error"]
+    doc.undo()
+    doc.handle({"action": "undeclare", "name": "M"})
+    assert "M" not in doc.namespace()
+    assert "No declared" in doc.handle({"action": "undeclare", "name": "M"})["error"]
+    # assumptions and functions
+    doc.declare("p", "Symbol", assumptions="positive, integer")
+    assert doc.declared["p"] == Symbol("p", positive=True, integer=True)
+    doc.declare("g", "Function")
+    assert doc.declared["g"] == Function("g")
+    doc.replace("/", "g(p) + x")
+    assert doc.expr.atoms(Symbol) == {Symbol("p", positive=True, integer=True), x}
+    assert "Invalid symbol name" in doc.handle({"action": "declare", "name": "2bad"})["error"]
+    assert "Unknown symbol type" in doc.handle({"action": "declare", "name": "q", "type": "Tensor"})["error"]
+
+
+def test_declare_existing_name_retypes_and_assumptions_propagate():
+    from sympy import MatrixSymbol, Symbol, symbols
+    x, y = symbols("x y")
+    doc = Document(x * y + y)
+    doc.declare("y", "Symbol", assumptions=["positive"])
+    yp = Symbol("y", positive=True)
+    assert doc.expr == x * yp + yp
+    assert doc.namespace()["y"] is not None and doc.namespace()["y"].is_positive
+    doc.handle({"action": "retype", "name": "x", "type": "Symbol", "assumptions": ["real"]})
+    assert all(s.is_real for s in doc.expr.atoms(Symbol) if s.name == "x")
+    # a declared-but-unused name can be retyped freely, even to a Function
+    doc.declare("h", "Symbol")
+    doc.retype("h", "Function")
+    assert doc.declared["h"].__name__ == "h"
+    # but a used symbol cannot become a function
+    assert "remove those uses" in doc.handle({"action": "retype", "name": "x", "type": "Function"})["error"]
+
+
+def test_document_symbols_kwarg_and_srepr_strings():
+    from sympy import MatrixSymbol, srepr, symbols
+    x = symbols("x")
+    A = MatrixSymbol("A", 3, 3)
+    doc = Document(x, symbols=[A, srepr(MatrixSymbol("B", 3, 3)), "Function('f')"])
+    assert doc.namespace()["A"] == A and doc.namespace()["B"] == MatrixSymbol("B", 3, 3)
+    assert doc.namespace()["f"].__name__ == "f"
+    doc.replace("/", "A*B + f(x)*A")
+    assert doc.expr.shape == (3, 3)
+    from sympy_editor.html import build_config
+    cfg = build_config(doc, backend="pyodide")
+    assert len(cfg["document"]["symbols"]) == 3
+    doc2 = Document(cfg["srepr"], symbols=cfg["document"]["symbols"])
+    assert doc2.expr == doc.expr and set(doc2.declared) == {"A", "B", "f"}
+
+
+def test_insert_terms_factors_and_arguments():
+    from sympy import Function, MatrixSymbol, symbols
+    x, y, z = symbols("x y z")
+    f = Function("f")
+    doc = Document(x + y)
+    nodes = doc.snapshot()["nodes"]
+    assert nodes["/"]["insertable"] is True and nodes["/"]["nargs"] == 2
+    assert nodes["/0"]["insertable"] is False
+    doc.handle({"action": "insert", "path": "/", "index": 2, "src": "z**2"})
+    assert doc.expr == x + y + z**2
+    doc = Document(x * f(y))
+    path = next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "f(y)")
+    doc.insert(path, 1, "z")                           # f(y) -> f(y, z)
+    assert doc.expr == x * f(y, z)
+    doc.insert("/", 0, "2")
+    assert doc.expr == 2 * x * f(y, z)
+    A, B = MatrixSymbol("A", 2, 2), MatrixSymbol("B", 2, 2)
+    doc = Document(A * B)
+    doc.insert("/", 1, "C")                            # new name in a matrix product is a matrix
+    C = MatrixSymbol("C", 2, 2)
+    assert doc.expr == A * C * B                       # order matters for MatMul
+    assert "Invalid insertion index" in doc.handle({"action": "insert", "path": "/", "index": 9, "src": "x"})["error"]
+    assert doc.handle({"action": "insert", "path": "/0", "index": 0, "src": "x"})["error"]  # a MatrixSymbol is not insertable

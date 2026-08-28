@@ -43,7 +43,7 @@ class SympyEditorWidget(anywidget.AnyWidget):
         urls: Optional[Dict[str, str]] = None,
         **kwargs,
     ):
-        document_kwargs = {k: kwargs.pop(k) for k in ("printer_settings", "parser", "ops", "max_history") if k in kwargs}
+        document_kwargs = {k: kwargs.pop(k) for k in ("printer_settings", "parser", "ops", "max_history", "symbols") if k in kwargs}
         if isinstance(expr, Document):
             self.document = expr
         else:
