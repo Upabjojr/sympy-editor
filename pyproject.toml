@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sympy-editor"
+version = "0.1.0"
+description = "Click-to-edit WYSIWYG editor for SymPy expressions: Jupyter widget and standalone HTML"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "BSD-3-Clause" }
+authors = [{ name = "Francesco Bonazzi" }]
+keywords = ["sympy", "latex", "editor", "jupyter", "widget", "katex"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: Jupyter",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
+dependencies = ["sympy>=1.9"]
+
+[project.optional-dependencies]
+jupyter = ["anywidget>=0.9"]
+test = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+sympy_editor = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,140 @@
+/* sympy-editor styles.  Everything is scoped under .sympy-editor.
+ * Colours follow JupyterLab's theme variables when present and fall back to
+ * light/dark defaults driven by prefers-color-scheme. */
+
+.sympy-editor {
+  --se-accent: 59, 130, 246;
+  --se-bg: var(--jp-layout-color1, #ffffff);
+  --se-fg: var(--jp-ui-font-color1, #1f2328);
+  --se-border: var(--jp-border-color2, #d0d7de);
+  --se-muted: var(--jp-ui-font-color2, #656d76);
+  --se-error: #b42318;
+  --se-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  position: relative;
+  display: inline-block;
+  box-sizing: border-box;
+  min-width: 20rem;
+  max-width: 100%;
+  padding: 0.4rem 0.6rem 0.5rem;
+  border: 1px solid var(--se-border);
+  border-radius: 0.5rem;
+  background: var(--se-bg);
+  color: var(--se-fg);
+  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  text-align: left;
+}
+@media (prefers-color-scheme: dark) {
+  .sympy-editor {
+    --se-bg: var(--jp-layout-color1, #1e1e1e);
+    --se-fg: var(--jp-ui-font-color1, #e6e6e6);
+    --se-border: var(--jp-border-color2, #444444);
+    --se-muted: var(--jp-ui-font-color2, #a0a0a0);
+    --se-error: #ff8a80;
+  }
+}
+.sympy-editor * { box-sizing: border-box; }
+
+.se-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  margin-bottom: 0.3rem;
+}
+.se-toolbar button, .se-ops {
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--se-border);
+  border-radius: 0.3rem;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.se-ops { max-width: 12rem; }
+.se-toolbar button:hover:not(:disabled) {
+  background: rgba(var(--se-accent), 0.12);
+}
+.se-toolbar button:disabled, .se-ops:disabled { opacity: 0.4; cursor: default; }
+.se-sep { width: 1px; height: 1.1rem; background: var(--se-border); margin: 0 0.2rem; }
+.se-status {
+  margin-left: auto;
+  padding-left: 0.5rem;
+  color: var(--se-muted);
+  font-family: var(--se-mono);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 50%;
+}
+
+.se-view {
+  padding: 0.6rem 0.4rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  outline: none;
+  border-radius: 0.3rem;
+  font-size: 1.3em;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.se-view:focus-visible { box-shadow: 0 0 0 2px rgba(var(--se-accent), 0.5); }
+.se-view .katex-display { margin: 0.2em 0; }
+.se-view [data-path] { border-radius: 0.15em; transition: background-color 0.08s; }
+.se-view .se-hover { background: rgba(var(--se-accent), 0.14); }
+.se-view .se-selected {
+  background: rgba(var(--se-accent), 0.22);
+  box-shadow: 0 0 0 1.5px rgba(var(--se-accent), 0.9);
+}
+
+.se-source {
+  display: block;
+  margin-top: 0.3rem;
+  padding: 0.2rem 0.4rem;
+  font-family: var(--se-mono);
+  font-size: 12px;
+  color: var(--se-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: text;
+  border-radius: 0.3rem;
+}
+.se-source:hover { background: rgba(var(--se-accent), 0.08); }
+
+.se-error {
+  margin-top: 0.3rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 0.3rem;
+  color: var(--se-error);
+  background: rgba(180, 35, 24, 0.08);
+  font-family: var(--se-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+.se-error[hidden] { display: none; }
+
+/* in-place editing: the node's rendering is swapped for this field */
+.se-view .se-selected.se-editing { background: none; box-shadow: none; }
+.se-inline {
+  font: 0.8em/1.3 var(--se-mono);
+  display: inline-block;
+  vertical-align: baseline;
+  box-sizing: content-box;
+  min-width: 2ch;
+  padding: 0 0.15em;
+  margin: 0 0.05em;
+  border: none;
+  border-bottom: 2px solid rgba(var(--se-accent), 0.9);
+  border-radius: 0.15em 0.15em 0 0;
+  background: rgba(var(--se-accent), 0.12);
+  color: inherit;
+  outline: none;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.se-busy .se-view { opacity: 0.6; }
+.se-closed .se-view { opacity: 0.7; }
