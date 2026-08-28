@@ -30,9 +30,12 @@ src/sympy_editor/
                 of the expression, JSON `snapshot()` and message `handle()`.
                 Single source of truth for all front ends.
   ops.py        Registry of transformations (simplify, expand, ...); register_op.
-                KINDS maps a selection's kind ("matrix", "array", "scalar") to
-                SymPy types; an op registered with kinds= is offered only on
-                selections of those kinds (the matrix ops: transpose, trace...).
+                KINDS maps kinds (integral, sum, derivative, limit, relational,
+                matrix, array, scalar) to SymPy types; node_kinds() lists all
+                kinds of a node, most specific first.  An op registered with
+                kinds= appears in the front end's *type menu* (labelled with
+                the most specific kind) for selections of those kinds; ops
+                without kinds are in the general dropdown.
   html.py       Standalone HTML (full page or fragment) with the `pyodide`,
                 `http` or `readonly` backend; embeds the core modules for Pyodide.
   server.py     Stdlib http.server backend: serve(expr) -> edited expr.
@@ -74,6 +77,9 @@ Two conventions between printer, document and front end:
   in the context of the node so a new name in a `MatMul` is a matrix).
   Commutative nodes re-order, so the index only matters for `MatMul` and
   function arguments.
+  Clicking within the edge zone (≤ 5 px, 15 % of the width) of an object
+  gives a caret before/after it in the nearest insertable ancestor whose
+  argument shares that edge (`_edgeCaretAt`); the middle selects.
 - **Ranges.**  Adjacent arguments of a *rangeable* node (`AssocOp`,
   `LatticeOp`: Add, Mul, MatAdd, MatMul, And, Or, Max...; snapshot flag
   `rangeable`) can be selected together: `Editor.range = {parent, anchor,

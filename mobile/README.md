@@ -76,8 +76,9 @@ as artifacts; with the secrets `ANDROID_KEYSTORE_BASE64` + passwords and
 
 ## Notes
 
-- First edit on a phone takes a few seconds: Pyodide (Python in
-  WebAssembly) starts then; the page renders instantly.
+- The page renders instantly and starts Pyodide (Python in WebAssembly) in
+  the background; the status line says "Loading Python runtime" for a few
+  seconds after launch, then edits are immediate.
 - Licences of the vendored parts are listed in `www/vendor/NOTICE.txt`
   (KaTeX MIT, Pyodide MPL-2.0, CPython PSF, SymPy/mpmath BSD).  Ship that file
   with the app (it is inside the bundle already).

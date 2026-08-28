@@ -40,9 +40,10 @@ from sympy_editor import save_html
 save_html(expr, "expr.html")   # open in any browser
 ```
 
-The file is self-contained: it renders immediately and, on the first edit,
-loads [Pyodide](https://pyodide.org) + SymPy from a CDN to run the editing
-logic inside the browser.  Use `editable=False` for a view-only page (still
+The file is self-contained: it renders immediately and loads
+[Pyodide](https://pyodide.org) + SymPy from a CDN in the background to run
+the editing logic inside the browser (`options={"preload": False}` defers
+that to the first edit).  Use `editable=False` for a view-only page (still
 selectable).
 
 ### Local server (scripts, plain Python sessions)
@@ -56,7 +57,7 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 
 | Action | Mouse | Keyboard |
 | --- | --- | --- |
-| Select sub-expression | click | ↓ (enter children), ←/→ (siblings) |
+| Select sub-expression | click its middle (its left/right edge places a caret before/after it instead) | ↓ (enter children), ←/→ (siblings) |
 | Select enclosing expression | click again on the same spot, or **↑** | ↑ |
 | Reduce to the first sub-expression | | ↓ |
 | Select a range of adjacent terms / factors | drag across them (mouse, touch or pen) | Shift+→ / Shift+← grow and shrink the range; ←/→/↓ collapse it, ↑ selects the whole sum/product |
@@ -109,10 +110,14 @@ scalar context can still be a 3×3 matrix symbol — and from Python the same is
 `edit(expr, symbols=[MatrixSymbol("C", 3, 3)])` or
 `w.document.declare("C", "MatrixSymbol", 3, 3)`.
 
-The transformation dropdown offers what applies to the selection: the general
-ops always, and the ops registered for the selection's *kind* - for a matrix
-(`MatrixSymbol` algebra or an explicit matrix): transpose, adjoint, inverse,
-trace, determinant, `as_explicit`, conjugate - in a group of their own.
+The transformation dropdown holds the general ops (simplify, expand,
+factor, ...).  Operations specific to the selection's *type* appear in a
+separate highlighted **type menu** next to it, labelled with the type
+("Matrix ▾", "Integral ▾", "Equation ▾"...), and apply as soon as you pick
+one: transpose / inverse / trace / determinant / `as_explicit` for matrices,
+evaluate / numeric value / expand or simplify the function inside for
+integrals, sums, derivatives and limits, swap sides / move everything to the
+left / simplify or expand both sides for equations, `tomatrix` for arrays.
 
 Matrices (dense and sparse), `MatrixSymbol` expressions, block matrices,
 determinants/traces and N-dimensional `Array`s are supported: every entry is

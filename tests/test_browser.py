@@ -684,6 +684,69 @@ def test_arrow_navigation_remembers_and_crosses_levels(scenario):
     assert s2.status == "Pow: x**2"
 
 
+def test_type_menu_shows_the_selection_type_operations(browser, serve_expr):
+    from sympy import Integral, Matrix
+    srv, doc = serve_expr(Matrix([[x, y], [z, 1]]))
+    page = _open(browser, srv.url)
+    menu = page.locator(".se-typemenu")
+    assert menu.is_visible()                              # nothing selected: the whole (matrix) expression is the target
+    page.locator(".se-view").focus()
+    page.keyboard.press("ArrowDown")                      # select it explicitly
+    assert menu.is_visible() and menu.locator("option").first.inner_text().startswith("Matrix")
+    labels = menu.locator("option").all_inner_texts()
+    assert "Transpose" in labels and "Determinant" in labels
+    assert "Transpose" not in page.locator(".se-ops option").all_inner_texts()   # not in the general dropdown
+    _click(page, "/2/0")                                  # the x entry: a plain scalar, no type menu
+    assert page.locator(".se-status").inner_text() == "Symbol: x"
+    assert not menu.is_visible()
+    page.keyboard.press("ArrowUp")                        # the matrix itself
+    assert page.locator(".se-status").inner_text().startswith("ImmutableDenseMatrix")
+    _next_state(page, lambda: menu.select_option("determinant"))   # picking applies at once
+    assert doc.expr == x - y * z
+    assert not menu.is_visible()                          # the result is a scalar: no type menu
+    srv2, doc2 = serve_expr(Integral(x**2, (x, 0, 1)) + y)
+    page = _open(browser, srv2.url)
+    _click(page, next(k for k, v in doc2.snapshot()["nodes"].items() if v["type"] == "Integral"))
+    menu = page.locator(".se-typemenu")
+    assert menu.locator("option").first.inner_text().startswith("Integral")
+    _next_state(page, lambda: menu.select_option("evaluate"))
+    assert doc2.expr == y + symbols("x") ** 0 / 3 or str(doc2.expr) == "y + 1/3"
+    assert page.errors == []
+
+
+def _rect(page, path):
+    return page.evaluate("p => { const b = document.querySelector(`[data-path=\"${p}\"]`).getBoundingClientRect(); return {l: b.left, r: b.right, y: b.top + b.height / 2}; }", path)
+
+
+def test_edges_give_a_caret_and_the_middle_selects(browser, serve_expr):
+    srv, doc = serve_expr(x**2 + y)                      # Add(y, x**2) displayed x² + y
+    page = _open(browser, srv.url)
+    px = next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "x**2")
+    ry = _rect(page, "/0")                                # y
+    page.mouse.click((ry["l"] + ry["r"]) / 2, ry["y"])    # middle: select
+    assert page.locator(".se-status").inner_text() == "Symbol: y"
+    page.mouse.click(ry["l"] + 1, ry["y"])                # left edge: caret before y, nothing selected
+    assert page.locator(".se-caret").count() == 1 and page.locator(".se-selected").count() == 0
+    assert page.locator(".se-status").inner_text().startswith("Insert into Add")
+    page.keyboard.type("3")
+    page.keyboard.press("Enter")
+    page.wait_for_function("document.querySelector('.se-source').textContent === 'x**2 + y + 3'")
+    px = next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "x**2")   # paths changed with the sum
+    rx = _rect(page, px + "/0")                            # the x of x²: its left edge is the term's edge
+    page.mouse.click(rx["l"] + 1, rx["y"])
+    assert page.locator(".se-caret").count() == 1 and page.locator(".se-status").inner_text().startswith("Insert into Add")
+    page.mouse.click((rx["l"] + rx["r"]) / 2, rx["y"])    # its middle selects x itself
+    assert page.locator(".se-status").inner_text() == "Symbol: x"
+    r2 = _rect(page, px + "/1")                            # the exponent: right edge = end of the term
+    page.mouse.click(r2["r"] - 1, r2["y"])
+    assert page.locator(".se-status").inner_text().startswith("Insert into Add")
+    page.keyboard.type("+ w")                              # a leading + means a term wherever the caret is
+    page.keyboard.press("Enter")
+    page.wait_for_function("document.querySelector('.se-source').textContent.includes('w')")
+    assert doc.expr == x**2 + y + 3 + symbols("w")
+    assert page.errors == []
+
+
 def test_plus_term_typed_after_a_product_is_added_not_multiplied(scenario):
     A, B = MatrixSymbol("A", 2, 2), MatrixSymbol("B", 2, 2)
     s = scenario(A * B + 2 * A.T)
@@ -787,6 +850,30 @@ def test_pyodide_runtime_is_shared_and_matrix_names_survive(browser, tmp_path):
     assert page.evaluate("window.__sympyEditorPyodide.docs") == 2
     assert page.evaluate("performance.getEntriesByType('resource').filter(e => e.name.endsWith('pyodide.asm.js')).length") == 1
     assert page.evaluate("document.querySelectorAll('.se-error:not([hidden])').length") == 0
+
+
+@pytest.mark.skipif(not os.environ.get("SYMPY_EDITOR_SLOW_TESTS"), reason="set SYMPY_EDITOR_SLOW_TESTS=1")
+def test_pyodide_page_preloads_the_runtime(browser, tmp_path):
+    path = tmp_path / "pre.html"
+    path.write_text(to_html(x + y), encoding="utf-8")
+    page = browser.new_page()
+    page.goto(path.as_uri())
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    page.wait_for_function("document.querySelector('.se-status').textContent.includes('Python')", timeout=30000)
+    page.wait_for_function("window.__sympyEditorPyodide && window.__sympyEditorPyodide.docs === 1", timeout=180000)
+    assert page.locator(".se-status").inner_text() == ""      # status cleared once ready, no edit happened
+    page.locator('[data-path="/0"]').click(force=True)
+    page.keyboard.type("z")
+    page.keyboard.press("Enter")
+    page.wait_for_function("document.querySelector('.se-source').textContent.includes('z')", timeout=10000)   # fast: already loaded
+    # preload can be turned off
+    path2 = tmp_path / "lazy.html"
+    path2.write_text(to_html(x + y, options={"preload": False}), encoding="utf-8")
+    page2 = browser.new_page()
+    page2.goto(path2.as_uri())
+    page2.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    page2.wait_for_timeout(1500)
+    assert page2.evaluate("!window.__sympyEditorPyodide")
 
 
 @pytest.mark.skipif(not os.environ.get("SYMPY_EDITOR_SLOW_TESTS"), reason="set SYMPY_EDITOR_SLOW_TESTS=1")

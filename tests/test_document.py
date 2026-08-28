@@ -375,3 +375,30 @@ def test_insert_honours_a_leading_operator():
     doc = Document(x + y)
     doc.insert("/", 2, "- z")                         # in a sum, a signed term is just a term
     assert doc.expr == x + y - z
+
+
+def test_kinds_and_type_specific_ops():
+    from sympy import Eq, Integral, Matrix, MatrixSymbol, Sum, Array, oo, symbols
+    x, n = symbols("x n")
+    doc = Document(Integral(x**2, (x, 0, 1)))
+    snap = doc.snapshot()
+    assert snap["nodes"]["/"]["kinds"] == ["integral", "scalar"] and snap["nodes"]["/"]["kind"] == "integral"
+    assert snap["kind_labels"]["integral"] == "Integral" and snap["kind_labels"]["relational"] == "Equation"
+    by_name = {op["name"]: op for op in snap["ops"]}
+    assert "integral" in by_name["evaluate"]["kinds"] and by_name["transpose"]["kinds"] == ["matrix"]
+    doc.apply("/", "evaluate")
+    assert doc.expr == symbols("x").integrate((x, 0, 1)) if False else str(doc.expr) == "1/3"
+    doc = Document(Sum((x + 1)**2, (x, 0, n)))
+    doc.apply("/", "expand_inside")
+    assert doc.expr == Sum(x**2 + 2 * x + 1, (x, 0, n))
+    doc = Document(Eq(x + 1, 2 * x))
+    assert doc.snapshot()["nodes"]["/"]["kinds"] == ["relational"]
+    doc.apply("/", "swap_sides")
+    assert doc.expr == Eq(2 * x, x + 1)
+    doc.apply("/", "to_left")
+    assert doc.expr == Eq(x - 1, 0)
+    doc = Document(Array([[x, 1], [2, 3]]))
+    doc.apply("/", "tomatrix")
+    assert doc.expr == Matrix([[x, 1], [2, 3]])
+    assert Document(x).snapshot()["nodes"]["/"]["kinds"] == ["scalar"]
+    assert Document(MatrixSymbol("A", 2, 2)).snapshot()["nodes"]["/"]["kinds"] == ["matrix", "scalar"]

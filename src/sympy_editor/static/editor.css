@@ -53,6 +53,22 @@
   cursor: pointer;
 }
 .se-ops { max-width: 12rem; }
+/* the type menu: operations of the selection's type, made hard to miss */
+.se-typemenu {
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 0.2rem 0.5rem;
+  max-width: 14rem;
+  border: 1px solid rgba(var(--se-accent), 0.9);
+  border-radius: 0.3rem;
+  background: rgba(var(--se-accent), 0.12);
+  color: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.se-typemenu[hidden] { display: none; }
+.se-typemenu:disabled { opacity: 0.4; cursor: default; }
 .se-toolbar button:hover:not(:disabled) {
   background: rgba(var(--se-accent), 0.12);
 }

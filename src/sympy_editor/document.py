@@ -27,7 +27,7 @@ from sympy.parsing.sympy_parser import (
     standard_transformations,
 )
 
-from .ops import Op, get_ops, node_kind
+from .ops import KIND_LABELS, Op, get_ops, node_kind, node_kinds
 from .printer import (
     Path,
     annotate,
@@ -422,6 +422,7 @@ class Document:
             "can_redo": self.can_redo,
             "ops": [{"name": op.name, "label": op.label, "kinds": list(op.kinds) if op.kinds else None}
                     for op in self.ops.values()],
+            "kind_labels": dict(KIND_LABELS),
             "error": error,
         }
 
@@ -431,6 +432,7 @@ class Document:
         reciprocal of the tree's node, flagged so that an edit replaces the
         denominator rather than the whole ``Pow``."""
         info: Dict[str, Any] = {"src": str(node), "type": type(node).__name__, "kind": node_kind(node),
+                                "kinds": node_kinds(node),
                                 "nargs": len(node.args), "insertable": is_insertable(node),
                                 "rangeable": is_rangeable(node)}
         try:

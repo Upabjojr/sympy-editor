@@ -27,7 +27,8 @@ var SympyEditor = (function () {
     toolbar: true,       // show the button bar
     showSource: true,    // show str(expr) under the rendering
     readOnly: false,     // selection only, no editing
-    finishButton: false  // "Done" button (used by the HTTP server backend)
+    finishButton: false, // "Done" button (used by the HTTP server backend)
+    preload: true        // Pyodide pages: start loading Python at page load, not at the first edit
   };
 
   /* ------------------------------------------------------------------ */
@@ -228,9 +229,13 @@ var SympyEditor = (function () {
         btn("delete", "Delete", "Remove the selection from its parent (Del)");
         btn("parent", "↑", "Select the enclosing expression (↑)");
         sep();
-        this.opsSelect = h("select", { class: "se-ops", title: "Operation to apply to the selection" });
+        this.opsSelect = h("select", { class: "se-ops", title: "General operation to apply to the selection" });
         this.toolbar.appendChild(this.opsSelect);
         btn("apply", "Apply", "Apply the chosen operation to the selection (or the whole expression)");
+        // Type menu: the operations specific to the selection's type (Matrix,
+        // Integral, Equation...); picking one applies it at once.
+        this.typeMenu = h("select", { class: "se-typemenu", hidden: "", title: "Operations specific to the selected type" });
+        this.toolbar.appendChild(this.typeMenu);
         sep();
       }
       if (!o.readOnly) btn("keyboard", "⌨", "Open the keyboard: edit the selection, insert at the caret, or edit the whole expression");
@@ -302,7 +307,8 @@ var SympyEditor = (function () {
       });
       this.view.addEventListener("mousemove", function (ev) {
         var leaf = self._leafAt(ev);
-        var gap = self.opts.readOnly ? null : self._gapAt(ev.clientX, ev.clientY, leaf);
+        var edge = leaf && !self.opts.readOnly ? self._edgeCaretAt(leaf, ev.clientX) : null;
+        var gap = edge ? edge.gap : (self.opts.readOnly ? null : self._gapAt(ev.clientX, ev.clientY, leaf));
         self._setHover(gap ? null : leaf);
         self.view.classList.toggle("se-gap", !!gap);
       });
@@ -346,6 +352,18 @@ var SympyEditor = (function () {
       });
       if (this.opsSelect) {
         this.opsSelect.addEventListener("change", function () { self._updateToolbar(); });
+      }
+      if (this.typeMenu) {
+        this.typeMenu.addEventListener("change", function () {
+          var op = self.typeMenu.value;
+          self.typeMenu.selectedIndex = 0;
+          if (!op) return;
+          var msg = { action: "apply", path: self.range ? self.range.parent : (self.selected || "/"), op: op };
+          if (self.range) msg.children = self._rangeIndices();
+          self.send(msg);
+          self.view.focus({ preventScroll: true });
+        });
+        this.typeMenu.addEventListener("keydown", function (ev) { ev.stopPropagation(); });
       }
     }
 
@@ -414,38 +432,37 @@ var SympyEditor = (function () {
       this._hoverEl = null;
     }
 
-    /** The dropdown offers the ops that apply to the selection (the whole
-     *  expression when nothing is selected): those registered for its kind
-     *  ("matrix", "scalar"...) in a group of their own, after the general ones. */
+    /** The general dropdown lists the ops that apply everywhere; the type
+     *  menu lists those registered for the selection's kinds ("matrix",
+     *  "integral"...), labelled with the most specific kind, and is hidden
+     *  when there are none. */
     _fillOps() {
       if (!this.opsSelect || !this.state) return;
       var target = this.range ? this.range.parent : (this.selected || "/");
       var node = this.state.nodes ? this.state.nodes[target] : null;
-      var kind = node ? node.kind : null;
-      var ops = (this.state.ops || []).filter(function (op) {
-        return !op.kinds || (kind && op.kinds.indexOf(kind) >= 0);
+      var kinds = node ? (node.kinds || [node.kind]) : [];
+      var ops = this.state.ops || [];
+      var general = ops.filter(function (op) { return !op.kinds; });
+      var specific = ops.filter(function (op) {
+        return op.kinds && op.kinds.some(function (k) { return kinds.indexOf(k) >= 0; });
       });
-      var key = kind + "|" + JSON.stringify(ops.map(function (op) { return op.name; }));
+      var key = kinds.join(",") + "|" + JSON.stringify(ops.map(function (op) { return op.name; }));
       if (key === this._opsKey) return;
       this._opsKey = key;
       var current = this.opsSelect.value;
       this.opsSelect.textContent = "";
-      var general = ops.filter(function (op) { return !op.kinds; });
-      var specific = ops.filter(function (op) { return op.kinds; });
       var self = this;
-      var add = function (parent, op) { parent.appendChild(h("option", { value: op.name }, [op.label || op.name])); };
-      if (specific.length) {
-        var kindLabel = kind ? kind.charAt(0).toUpperCase() + kind.slice(1) : "Selection";
-        var group = h("optgroup", { label: kindLabel });
-        specific.forEach(function (op) { add(group, op); });
-        this.opsSelect.appendChild(group);
-        var rest = h("optgroup", { label: "General" });
-        general.forEach(function (op) { add(rest, op); });
-        this.opsSelect.appendChild(rest);
-      } else {
-        general.forEach(function (op) { add(self.opsSelect, op); });
-      }
-      if (current && ops.some(function (op) { return op.name === current; })) this.opsSelect.value = current;
+      general.forEach(function (op) { self.opsSelect.appendChild(h("option", { value: op.name }, [op.label || op.name])); });
+      if (current && general.some(function (op) { return op.name === current; })) this.opsSelect.value = current;
+      if (!this.typeMenu) return;
+      this.typeMenu.textContent = "";
+      if (!specific.length) { this.typeMenu.hidden = true; return; }
+      var labels = this.state.kind_labels || {};
+      var label = labels[kinds[0]] || (node && node.type) || "Type";
+      this.typeMenu.appendChild(h("option", { value: "", disabled: "", selected: "" }, [label + " \u25BE"]));
+      specific.forEach(function (op) { self.typeMenu.appendChild(h("option", { value: op.name }, [op.label || op.name])); });
+      this.typeMenu.selectedIndex = 0;
+      this.typeMenu.hidden = false;
     }
 
     /** The symbols panel: one row per name (used in the expression or merely
@@ -682,12 +699,14 @@ var SympyEditor = (function () {
       if (this.closed || (this.input && ev.target === this.input)) return;
       var leaf = this._leafAt(ev);
       this._gapCache = null;
-      var gap = this.opts.readOnly ? null : this._gapAt(ev.clientX, ev.clientY, leaf);
+      // The edges of an object give a caret before/after it; its middle selects it.
+      var edge = leaf && !this.opts.readOnly ? this._edgeCaretAt(leaf, ev.clientX) : null;
+      var gap = edge ? edge.gap : (this.opts.readOnly ? null : this._gapAt(ev.clientX, ev.clientY, leaf));
       if (gap) {
         var same = this.caret && this.caret.path === gap.path && this.caret.index === gap.index;
         this.select(null);
         this.lastLeaf = null;
-        this._showCaret(gap, ev.clientX);
+        this._showCaret(gap, edge ? edge.x : ev.clientX);
         if (same) { this.beginInsert(""); return; }   // clicking the caret again opens the field (no keyboard needed)
         this.view.focus({ preventScroll: true });
         return;
@@ -890,6 +909,40 @@ var SympyEditor = (function () {
       push(node.nargs, last.rect.right, (p === "/" ? Math.max(hr.right, last.rect.right) : last.rect.right) + pad,
         last.el, null, last.rect.top, last.rect.bottom);
       return gaps;
+    }
+
+    /** A caret before/after the object whose left/right edge zone contains
+     *  `x`: `leaf`, or an ancestor sharing that edge, that is an argument of
+     *  an insertable node.  Null when `x` is in the middle of the glyphs
+     *  (a click there selects). */
+    _edgeCaretAt(leaf, x) {
+      if (!leaf || !this.state) return null;
+      var path = leaf.getAttribute("data-path");
+      var side = null;
+      while (path) {
+        var parent = this.tree[path] ? this.tree[path].parent : null;
+        if (!parent) return null;
+        var el = this._els(path)[0];
+        if (!el) return null;
+        var r = this._visualRect(el);
+        // A thin strip on the clicked object (its middle is for selecting);
+        // going up, the edge only has to be near (scripts add trailing space).
+        var zone = side ? 10 : Math.max(3, Math.min(5, r.width * 0.15));
+        var here = x <= r.left + zone ? "before" : (x >= r.right - zone ? "after" : null);
+        if (!here || (side && here !== side)) return null;
+        side = here;
+        if (this.state.nodes[parent] && this.state.nodes[parent].insertable) {
+          var gaps = this._allGaps();
+          for (var i = 0; i < gaps.length; i++) {
+            var g = gaps[i];
+            if (g.path !== parent) continue;
+            if (side === "before" ? g.rightEl === el : g.leftEl === el) return { gap: g, x: side === "before" ? g.b : g.a };
+          }
+          return null;
+        }
+        path = parent;   // this edge is also the enclosing node's edge: try one level up
+      }
+      return null;
     }
 
     _allGaps() {
@@ -1337,6 +1390,7 @@ var SympyEditor = (function () {
       set("copy", !s.src);
       set("finish", dis);
       if (this.opsSelect) this.opsSelect.disabled = dis;
+      if (this.typeMenu) this.typeMenu.disabled = dis;
     }
 
     /** Remove the editor from the page. */
@@ -1415,15 +1469,17 @@ var SympyEditor = (function () {
       report("");
       return function (msg) { return runtime.handle(id, msg); };
     }
+    function start(report) {
+      if (!ready) ready = init(report).catch(function (e) { ready = null; throw e; });
+      return ready;
+    }
     return {
       send: async function (msg, report) {
-        report = report || function () {};
-        if (!ready) {
-          ready = init(report).catch(function (e) { ready = null; throw e; });
-        }
-        var handle = await ready;
+        var handle = await start(report || function () {});
         return JSON.parse(handle(JSON.stringify(msg)));
-      }
+      },
+      /** Load the runtime now (page load) instead of at the first edit. */
+      warmup: function (report) { return start(report).then(function () { report(""); }, function (e) { report("Python failed to load: " + e.message); }); }
     };
   }
 
@@ -1440,8 +1496,13 @@ var SympyEditor = (function () {
     var make = backends[cfg.backend] || readonlyBackend;
     var options = Object.assign({}, cfg.options || {});
     if (cfg.backend === "readonly") options.readOnly = true;
-    var editor = new Editor(host, make(cfg), options);
-    editor.setState(cfg.snapshot);
+    var backend = make(cfg);
+    var editor = new Editor(host, backend, options);
+    editor.setState(cfg.snapshot).then(function () {
+      if (backend.warmup && editor.opts.preload !== false) {
+        backend.warmup(function (text) { if (!editor.input && !editor.busy) editor._setStatus(text); });
+      }
+    });
     return editor;
   }
 
