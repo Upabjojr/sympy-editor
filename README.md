@@ -148,10 +148,22 @@ and iOS (SwiftUI `WKWebView`) app: `python mobile/build_www.py` produces the
 shared, offline-capable bundle, and each platform folder is a few files that
 just display it.  See `mobile/README.md`.
 
+### The source line
+
+The SymPy source under the formula is linked to the rendering: select a
+piece of it and the corresponding sub-expression is selected in the formula;
+select in the formula and the matching source text is highlighted.  The line
+is editable — Enter applies it as the whole expression, Esc reverts — and
+that is where whole-expression edits happen: the rendered formula itself is
+never replaced by code.
+
 ## How it works
 
 `sympy_editor.AnnotatedLatexPrinter` extends SymPy's `LatexPrinter` so that
-every printed sub-expression is wrapped in KaTeX's `\htmlData{path=/1/0}{...}`.
+every printed sub-expression is wrapped in KaTeX's `\htmlData{path=/1/0}{...}`
+(`AnnotatedStrPrinter` does the same for `str()`, and `latex_spans(expr)` /
+`annotate_str(expr)` give the character spans of every node in both strings,
+keyed by the same paths).
 KaTeX turns that into `<span data-path="/1/0">`, so the DOM knows which node
 of the expression tree each glyph belongs to.  Editing operations
 (`Document.replace/delete/apply/undo/redo`) rebuild the tree and re-render.

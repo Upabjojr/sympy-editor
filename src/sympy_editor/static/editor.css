@@ -129,7 +129,11 @@
   cursor: text;
   border-radius: 0.3rem;
 }
-.se-source:hover { background: rgba(var(--se-accent), 0.08); }
+.se-source[contenteditable] { user-select: text; -webkit-user-select: text; outline: none; }
+.se-source[contenteditable]:hover { background: rgba(var(--se-accent), 0.06); }
+.se-source[contenteditable]:focus { background: rgba(var(--se-accent), 0.08); box-shadow: 0 0 0 2px rgba(var(--se-accent), 0.5); color: var(--se-fg); }
+.se-source.se-dirty { border-left: 3px solid rgba(var(--se-accent), 0.9); padding-left: 0.3rem; }
+.se-source mark { background: rgba(var(--se-accent), 0.25); color: inherit; border-radius: 2px; }
 
 .se-error {
   margin-top: 0.3rem;

@@ -31,6 +31,7 @@ from .ops import KIND_LABELS, Op, get_ops, node_kind, node_kinds
 from .printer import (
     Path,
     annotate,
+    annotate_str,
     delete_at,
     format_path,
     get_at,
@@ -469,6 +470,7 @@ class Document:
             "latex": tex,
             "latex_plain": plain_latex(expr, **self.printer_settings),
             "src": str(expr),
+            "spans": {path: list(span) for path, span in annotate_str(expr)[1].items()},
             "srepr": srepr(expr),
             "nodes": {format_path(path): self._node_info(path, node) for path, node in nodes.items()},
             "symbols": self.symbol_info(),

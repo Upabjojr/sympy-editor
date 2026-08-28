@@ -102,6 +102,16 @@ Two conventions between printer, document and front end:
   events (mouse, touch, pen alike); `touch-action: pan-y pinch-zoom` keeps
   vertical scrolling and pinch-zoom on phones, and `@media (pointer: coarse)`
   enlarges targets.
+- **Source line.**  `AnnotatedStrPrinter` (same mixin as the LaTeX printer,
+  markers instead of `\htmlData`) gives `snapshot["spans"]`: the character
+  span of every node in `str(expr)` (empty if the marked output would not
+  match `str(expr)` - explicit matrices are re-aligned on plain widths).  The
+  front end's source line is `contenteditable`: a selection in it selects
+  the innermost node whose span contains it (only while the line has
+  focus); a selection in the rendering wraps its span in a `<mark>` (never
+  the document selection, which would move focus into the editable line);
+  Enter sends `set`, Esc reverts.  `beginEdit("/")`
+  edits there - the rendering is never swapped for a text field.
 - **Caret vs selection.**  `Editor.selected` and `Editor.caret` are mutually
   exclusive (`select()` hides the caret, `_showCaret()` clears the
   selection): keys replace a selection, insert at a caret, and never delete

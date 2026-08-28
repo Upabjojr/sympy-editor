@@ -798,6 +798,45 @@ def test_caret_aligns_with_the_previous_character(browser, serve_expr):
     assert page.errors == []
 
 
+def test_source_line_is_linked_to_the_rendering(browser, serve_expr):
+    srv, doc = serve_expr(x**2 + sin(y) / 3)
+    page = _open(browser, srv.url)
+    src = page.locator(".se-source")
+    assert src.get_attribute("contenteditable") in ("plaintext-only", "true")
+    text = src.inner_text()
+    # selecting "sin(y)" in the source selects that node in the rendering
+    start = text.index("sin(y)")
+    src.focus()                                               # a user selection: the line has focus
+    page.evaluate("""([s, e]) => { const t = document.querySelector('.se-source').firstChild; window.getSelection().setBaseAndExtent(t, s, t, e); }""", [start, start + 6])
+    page.wait_for_function("document.querySelector('.se-status').textContent === 'sin: sin(y)'")
+    assert page.locator(".se-selected").count() == 1
+    # selecting in the rendering highlights the source text
+    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "x**2") + "/0")   # the x of x**2
+    assert src.locator("mark").inner_text() == "x"
+    page.keyboard.press("ArrowUp")                            # the whole power
+    assert src.locator("mark").inner_text() == "x**2"
+    assert page.evaluate("document.activeElement.className") == "se-view"   # focus stays in the formula
+    # editing the source: Enter applies, Esc reverts; the rendering is never replaced by code
+    page.keyboard.press("Escape")
+    assert page.locator(".se-selected").count() == 0 and src.locator("mark").count() == 0
+    page.keyboard.press("Enter")                              # nothing selected: edit the whole expression...
+    assert page.evaluate("document.activeElement.className").startswith("se-source")   # ...in the source line
+    assert page.locator(".se-inline").count() == 0
+    page.keyboard.press("Control+a")
+    page.keyboard.type("x*y + 1")
+    assert src.evaluate("e => e.classList.contains('se-dirty')")
+    page.keyboard.press("Escape")                             # revert
+    assert src.inner_text() == text and not src.evaluate("e => e.classList.contains('se-dirty')")
+    src.click()
+    page.keyboard.press("Control+a")
+    page.keyboard.type("x*y + 1")
+    page.keyboard.press("Enter")
+    page.wait_for_function("document.querySelector('.se-source').textContent === 'x*y + 1'")
+    assert doc.expr == x * y + 1
+    assert page.locator(".se-view .katex").count() == 1       # still rendered
+    assert page.errors == []
+
+
 def test_plus_term_typed_after_a_product_is_added_not_multiplied(scenario):
     A, B = MatrixSymbol("A", 2, 2), MatrixSymbol("B", 2, 2)
     s = scenario(A * B + 2 * A.T)
@@ -853,8 +892,10 @@ def test_touch_tap_again_edits_and_caret_tap_inserts(browser, serve_expr):
     assert page.locator(".se-inline").count() == 1 and page.evaluate("document.activeElement.className") == "se-inline"
     page.keyboard.press("Escape")                       # cancel the field...
     page.keyboard.press("Escape")                       # ...and clear the selection
-    kb.tap()                                             # nothing selected: the whole expression
-    assert page.locator(".se-inline").input_value() == "y + z + 2"
+    kb.tap()                                             # nothing selected: the whole expression, in the source line
+    assert page.locator(".se-inline").count() == 0
+    assert page.evaluate("document.activeElement.className").startswith("se-source")
+    assert page.evaluate("window.getSelection().toString()") == "y + z + 2"
     page.keyboard.press("Escape")
     assert errors == []
     ctx.close()

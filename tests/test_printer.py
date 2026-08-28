@@ -123,3 +123,36 @@ def test_strip_annotations_handles_nesting_and_escapes():
     tex = r"\htmlData{path=/}{\left\{\htmlData{path=/0}{x}\right\}}"
     assert strip_annotations(tex) == r"\left\{x\right\}"
     assert strip_annotations("plain") == "plain"
+
+
+
+@pytest.mark.parametrize("expr", EXPRS + [Matrix([[1, 2], [-33, 4]]), Matrix([[x, 1 / y], [2, -z]]), Matrix([[x, y, z]]), Matrix([x, y])], ids=str)
+def test_str_spans_match_str(expr):
+    from sympy_editor.printer import annotate_str
+    expr = sympify(expr)
+    text, spans = annotate_str(expr)
+    assert text == str(expr)
+    assert spans and "/" in spans and spans["/"] == (0, len(text))
+    for path, (start, end) in spans.items():
+        node = get_at(expr, parse_path(path))
+        piece = text[start:end]
+        # a negated term is printed without its sign; a denominator as its reciprocal
+        forms = {str(node)}
+        for make in (lambda n: -n, lambda n: 1 / n):
+            try:
+                forms.add(str(make(node)))
+            except Exception:
+                pass
+        assert piece in forms, (path, piece, str(node))
+
+
+def test_latex_and_source_spans_share_keys():
+    from sympy_editor import annotate_str, latex_spans
+    e = x**2 + sin(x) / 3
+    tex, tspans = latex_spans(e)
+    src, sspans = annotate_str(e)
+    assert tex == latex(e) and src == str(e)
+    assert set(tspans) == set(sspans)                   # same node paths on both sides
+    p = next(k for k, (a, b) in sspans.items() if src[a:b] == "sin(x)")
+    a, b = tspans[p]
+    assert tex[a:b] == r"\sin{\left(x \right)}"

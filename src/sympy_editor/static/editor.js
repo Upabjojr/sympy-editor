@@ -254,7 +254,16 @@ var SympyEditor = (function () {
       });
       root.appendChild(this.view);
 
-      this.source = h("code", { class: "se-source", title: "SymPy source (click to edit the whole expression)" });
+      // The SymPy source line: editable text (Enter applies, Esc reverts) whose
+      // selection is linked to the rendering both ways.  The rendering itself is
+      // never replaced by code: whole-expression edits happen here.
+      this.source = h("code", { class: "se-source", spellcheck: "false",
+        title: o.readOnly ? "SymPy source" : "SymPy source: select to select in the formula; edit, then Enter to apply (Esc reverts)" });
+      if (!o.readOnly) {
+        this.source.setAttribute("contenteditable", "plaintext-only");
+        if (!this.source.isContentEditable) this.source.setAttribute("contenteditable", "true");
+      }
+      this.sourceDirty = false;
       if (o.showSource) root.appendChild(this.source);
 
       // Symbols panel: what each name stands for (Symbol, MatrixSymbol with
@@ -344,13 +353,31 @@ var SympyEditor = (function () {
       this.view.addEventListener("dblclick", function (ev) { self._onDblClick(ev); });
       this.root.addEventListener("keydown", function (ev) {
         if (self.symbols && self.symbols.contains(ev.target)) return;
+        if (ev.target === self.source) return;
         var t = ev.target;
         if (t === self.input || (t && t.tagName === "SELECT")) return;
         self._onKey(ev);
       });
-      this.source.addEventListener("click", function () {
-        if (!self.opts.readOnly) self.beginEdit("/");
+      this.source.addEventListener("focus", function () {
+        if (self.source.querySelector("mark")) self.source.textContent = self.source.textContent;   // plain text to edit
       });
+      this.source.addEventListener("input", function () {
+        self.sourceDirty = true;
+        self.source.classList.add("se-dirty");
+        self._setStatus("Enter applies the edited source, Esc reverts it");
+      });
+      this.source.addEventListener("keydown", function (ev) {
+        ev.stopPropagation();
+        if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); self.commitSource(); }
+        else if (ev.key === "Escape") { ev.preventDefault(); self.revertSource(); self.view.focus({ preventScroll: true }); }
+      });
+      this.source.addEventListener("paste", function (ev) {   // plain text only
+        if (!ev.clipboardData) return;
+        ev.preventDefault();
+        document.execCommand("insertText", false, ev.clipboardData.getData("text/plain"));
+      });
+      this.source.addEventListener("blur", function () { if (self.sourceDirty) self.commitSource(); });
+      document.addEventListener("selectionchange", function () { self._onSourceSelection(); });
       var applyFromMenu = function (menu) {
         var op = menu.value;
         menu.selectedIndex = 0;
@@ -426,6 +453,8 @@ var SympyEditor = (function () {
         }
       }
       this.source.textContent = this.state.src || "";
+      this.sourceDirty = false;
+      this.source.classList.remove("se-dirty");
       this._gapCache = null;
       this.caret = null;   // the rendering replaced the caret element and the boxes too
       this._boxes = { hover: [], select: [] };
@@ -676,6 +705,7 @@ var SympyEditor = (function () {
         var u = this._unionRect(rects);
         this._drawBoxes("select", u ? [u] : []);
         this._setStatus(this.state.nodes[this.range.parent].type + " range: " + this._rangeSource(rangePaths));
+        this._markSource(rangePaths);
         return;
       }
       var node = this.selected && this.state && this.state.nodes ? this.state.nodes[this.selected] : null;
@@ -685,8 +715,10 @@ var SympyEditor = (function () {
         for (var j = 0; j < els.length; j++) { els[j].classList.add("se-selected"); srects.push(this._visualRect(els[j])); }
         this._drawBoxes("select", els.length && !els[0].classList.contains("se-editing") ? srects : []);
         this._setStatus(node.type + ": " + node.src + (node.reciprocal ? "  (denominator: the node is 1 over this)" : ""));
+        this._markSource([this.selected]);
       } else {
         this._drawBoxes("select", []);
+        this._markSource([]);
       }
       if (!node && !this.closed) {
         this._setStatus(this.annotated ? (this.opts.readOnly ? "" : "Click to select; click between terms to insert")
@@ -846,6 +878,9 @@ var SympyEditor = (function () {
       if (this.opts.readOnly || this.closed || !this.state || this.busy) return;
       if (!path || !(path in this.state.nodes)) path = "/";
       if (!(path in this.state.nodes)) return;
+      // The rendering is never replaced by code: the whole expression is
+      // edited in the source line.
+      if (path === "/" && initial === undefined && this.editSource()) return;
       if (this.editing !== null || this.inserting) this.cancelEdit(true);
       var self = this;
       var original = this.state.nodes[path].src;
@@ -874,6 +909,89 @@ var SympyEditor = (function () {
       input.focus();
       if (initial === undefined) input.select();
       else if (extend) input.setSelectionRange(input.value.length, input.value.length);
+    }
+
+    /* ---- the source line ---- */
+
+    /** Highlight the source text of `paths` with a <mark> (not the document
+     *  selection, which would move the focus into the editable line). */
+    _markSource(paths) {
+      if (this.sourceDirty || document.activeElement === this.source || !this.state) return;
+      var text = this.state.src || "";
+      var spans = this.state.spans || {};
+      var lo = Infinity, hi = -Infinity;
+      for (var i = 0; i < paths.length; i++) {
+        var sp = spans[paths[i]];
+        if (!sp) { lo = Infinity; break; }
+        lo = Math.min(lo, sp[0]); hi = Math.max(hi, sp[1]);
+      }
+      this.source.textContent = "";
+      if (!paths.length || lo === Infinity || hi > text.length) { this.source.textContent = text; return; }
+      this.source.appendChild(document.createTextNode(text.slice(0, lo)));
+      this.source.appendChild(h("mark", {}, [text.slice(lo, hi)]));
+      this.source.appendChild(document.createTextNode(text.slice(hi)));
+    }
+
+    /** A selection made in the source line selects the innermost node whose
+     *  span contains it. */
+    _onSourceSelection() {
+      // Only selections the user makes in the source line (it has focus then);
+      // the highlight set from the rendering also fires selectionchange.
+      if (this.sourceDirty || !this.state || !this.state.spans) return;
+      if (document.activeElement !== this.source) return;
+      var sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0 || !this.source.contains(sel.anchorNode) || !this.source.contains(sel.focusNode)) return;
+      var range = sel.getRangeAt(0);
+      var pre = document.createRange();
+      pre.selectNodeContents(this.source);
+      pre.setEnd(range.startContainer, range.startOffset);
+      var start = pre.toString().length, end = start + range.toString().length;
+      var best = null, bestLen = Infinity;
+      for (var path in this.state.spans) {
+        var sp = this.state.spans[path];
+        var inside = end > start ? (sp[0] <= start && end <= sp[1]) : (sp[0] <= start && start <= sp[1]);
+        if (inside && sp[1] - sp[0] < bestLen) { best = path; bestLen = sp[1] - sp[0]; }
+      }
+      if (end > start) {
+        if (best && best !== this.selected) {
+          this._hideCaret();
+          this.range = null;
+          this.selected = best;
+          this._fillOps();
+          this._applySelection();
+          this._updateToolbar();
+        }
+      } else if (best) {
+        var el = this._els(best)[0];
+        this._drawBoxes("hover", el ? [this._visualRect(el)] : []);   // a caret in the source: a hover hint
+      }
+    }
+
+    /** Apply the edited source line as the whole expression. */
+    commitSource() {
+      var src = toSource(this.source.textContent).trim();
+      var same = src === (this.state ? this.state.src : "");
+      this.sourceDirty = false;
+      this.source.classList.remove("se-dirty");
+      if (!src || same) { this.revertSource(); return; }
+      this.send({ action: "set", src: src });
+    }
+
+    revertSource() {
+      this.source.textContent = this.state ? this.state.src : "";
+      this.sourceDirty = false;
+      this.source.classList.remove("se-dirty");
+      this._applySelection();
+    }
+
+    /** Put the keyboard in the source line with everything selected. */
+    editSource() {
+      if (this.opts.readOnly || !this.opts.showSource) return false;
+      this.source.focus();
+      var sel = window.getSelection();
+      if (sel && this.source.firstChild) sel.selectAllChildren(this.source);
+      this._setStatus("Editing the whole expression as SymPy source – Enter applies, Esc reverts");
+      return true;
     }
 
     /* ---- insertion caret ---- */

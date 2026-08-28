@@ -43,12 +43,17 @@ from sympy.core.function import AppliedUndef
 from sympy.core.operations import AssocOp, LatticeOp
 from sympy.sets.sets import FiniteSet, Intersection, Union
 from sympy.printing.latex import LatexPrinter, latex
+from sympy.printing.str import StrPrinter
 
 Path = Tuple[int, ...]
 
 __all__ = [
     "AnnotatedLatexPrinter",
+    "AnnotatedStrPrinter",
     "annotate",
+    "annotate_str",
+    "latex_spans",
+    "spans_from_marked",
     "strip_annotations",
     "format_path",
     "parse_path",
@@ -253,12 +258,12 @@ class _Frame:
         return self._index.get(expr, [])
 
 
-class AnnotatedLatexPrinter(LatexPrinter):
-    """LaTeX printer that annotates every printed sub-expression with its path.
+class _AnnotatingMixin:
+    """Shared by the annotated LaTeX and str printers: locating the tree node
+    being printed and wrapping its output (``wrap``).
 
-    Use :meth:`annotate` (or the module-level :func:`annotate`) rather than
-    :meth:`doprint`; without a prior call to ``annotate`` the printer behaves
-    exactly like :class:`~sympy.printing.latex.LatexPrinter`.
+    Use :meth:`annotate` rather than ``doprint``; without a prior call to
+    ``annotate`` the printer behaves exactly like its SymPy base class.
     """
 
     #: How deep below the innermost real frame to look for the printed object.
@@ -338,6 +343,10 @@ class AnnotatedLatexPrinter(LatexPrinter):
             self._stack.pop()
         return self._annotated(expr, path, tex)
 
+class AnnotatedLatexPrinter(_AnnotatingMixin, LatexPrinter):
+    """LaTeX printer that annotates every printed sub-expression with its
+    path (KaTeX ``\\htmlData``)."""
+
     def _print_Add(self, expr, order=None):
         # Same as LatexPrinter._print_Add, except that a term printed as
         # ``- (negated term)`` is annotated with the path of the original
@@ -368,6 +377,129 @@ class AnnotatedLatexPrinter(LatexPrinter):
         if self._needs_add_brackets(term):
             term_tex = r"\left(%s\right)" % term_tex
         return term_tex
+
+
+MARK_START, MARK_SEP, MARK_END = "\x01", "\x02", "\x03"
+
+
+class AnnotatedStrPrinter(_AnnotatingMixin, StrPrinter):
+    """``str()`` printer whose output carries markers around every printed
+    sub-expression, from which :func:`spans_from_marked` computes character
+    spans (used to link the source line to the rendering)."""
+
+    wrap = staticmethod(lambda path, text: MARK_START + path + MARK_SEP + text + MARK_END)
+
+    @staticmethod
+    def _unwrap(text: str):
+        """``(path, inner)`` when ``text`` is exactly one marker pair, else None."""
+        if not (text.startswith(MARK_START) and text.endswith(MARK_END)):
+            return None
+        sep = text.find(MARK_SEP)
+        if sep < 0:
+            return None
+        inner = text[sep + 1:-1]
+        depth = 0
+        for ch in inner:            # the closing marker must be the outer one
+            if ch == MARK_START:
+                depth += 1
+            elif ch == MARK_END:
+                depth -= 1
+                if depth < 0:
+                    return None
+        return text[1:sep], inner
+
+    def _print_Add(self, expr, order=None):
+        # StrPrinter._print_Add, with the sign taken from inside the wrapper.
+        from sympy.core.expr import UnevaluatedExpr
+        from sympy.printing.precedence import precedence
+        terms = self._as_ordered_terms(expr, order=order)
+        is_add = lambda e: e.is_Add or (isinstance(e, UnevaluatedExpr) and e.args[0].is_Add)
+        prec = precedence(expr)
+        parts = []
+        for term in terms:
+            t = self._print(term)
+            sign = "+"
+            if not is_add(term):
+                unwrapped = self._unwrap(t)
+                inner = unwrapped[1] if unwrapped else t
+                if inner.startswith("-"):
+                    sign = "-"
+                    inner = inner[1:]
+                    t = self.wrap(unwrapped[0], inner) if unwrapped else inner
+            if precedence(term) < prec or is_add(term):
+                parts.extend([sign, "(%s)" % t])
+            else:
+                parts.extend([sign, t])
+        sign = parts.pop(0)
+        if sign == "+":
+            sign = ""
+        return sign + " ".join(parts)
+
+
+def _annotated_matrix_str(printer, expr) -> str:
+    """``str()`` of a matrix is ``DenseMatrix.__str__``: ``Matrix(<list of
+    rows>)`` on one line (not the printer's aligned table), reproduced here
+    with annotated elements."""
+    from sympy import S
+    if S.Zero in expr.shape:
+        return "Matrix(%s, %s, [])" % (expr.rows, expr.cols)
+    rows = ["[" + ", ".join(printer._print(expr[i, j]) for j in range(expr.cols)) + "]" for i in range(expr.rows)]
+    return "Matrix([%s])" % ", ".join(rows)
+
+
+AnnotatedStrPrinter._print_MatrixBase = lambda self, expr: _annotated_matrix_str(self, expr)
+
+
+def spans_from_marked(marked: str) -> Tuple[str, Dict[str, Tuple[int, int]]]:
+    """Strip the markers of :class:`AnnotatedStrPrinter` output; return the
+    plain text and ``{path string: (start, end)}`` character spans."""
+    out: List[str] = []
+    length = 0
+    stack: List[Tuple[str, int]] = []
+    spans: Dict[str, Tuple[int, int]] = {}
+    i, n = 0, len(marked)
+    while i < n:
+        ch = marked[i]
+        if ch == MARK_START:
+            j = marked.index(MARK_SEP, i)
+            stack.append((marked[i + 1:j], length))
+            i = j + 1
+            continue
+        if ch == MARK_END:
+            path, start = stack.pop()
+            spans.setdefault(path, (start, length))
+            i += 1
+            continue
+        out.append(ch)
+        length += 1
+        i += 1
+    return "".join(out), spans
+
+
+def latex_spans(expr: Basic, **settings) -> Tuple[str, Dict[str, Tuple[int, int]]]:
+    """``(latex(expr), spans)``: the character span of every sub-expression in
+    the LaTeX string, keyed by path string - the same keys as
+    :func:`annotate_str`, so LaTeX and Python source correspond node by node."""
+    if not isinstance(expr, Basic):
+        expr = sympify(expr)
+    printer = AnnotatedLatexPrinter(dict(settings, mode="plain"))
+    printer.wrap = AnnotatedStrPrinter.wrap
+    marked, _nodes = printer.annotate(expr)
+    text, spans = spans_from_marked(marked)
+    plain = latex(expr, **dict(settings, mode="plain"))
+    return plain, (spans if text == plain else {})
+
+
+def annotate_str(expr: Basic) -> Tuple[str, Dict[str, Tuple[int, int]]]:
+    """``(str(expr), spans)``: the character span of every sub-expression in
+    ``str(expr)``.  Spans are empty when the annotated output would not
+    match ``str(expr)`` exactly (never seen, but the guarantee is checked)."""
+    if not isinstance(expr, Basic):
+        expr = sympify(expr)
+    marked, _nodes = AnnotatedStrPrinter().annotate(expr)
+    text, spans = spans_from_marked(marked)
+    plain = str(expr)
+    return plain, (spans if text == plain else {})
 
 
 def annotate(expr: Basic, **settings) -> Tuple[str, Dict[Path, Basic]]:

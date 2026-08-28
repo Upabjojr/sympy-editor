@@ -24,7 +24,10 @@ from .html import display_html, save_html, to_html
 from .ops import get_ops, register_op
 from .printer import (
     AnnotatedLatexPrinter,
+    AnnotatedStrPrinter,
     annotate,
+    annotate_str,
+    latex_spans,
     delete_at,
     format_path,
     get_at,
@@ -38,6 +41,9 @@ __version__ = "0.1.0"
 
 __all__ = [
     "AnnotatedLatexPrinter",
+    "AnnotatedStrPrinter",
+    "annotate_str",
+    "latex_spans",
     "Document",
     "EditorServer",
     "annotate",
