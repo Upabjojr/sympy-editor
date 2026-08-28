@@ -74,12 +74,12 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | LaTeX shortcuts in the field | | `\theta` becomes `θ` as you type (Greek letters, `\infty`, `\sin`, `\cdot`, `\le`...); Greek letters are SymPy's names (`θ` is `theta`, `λ` is `lamda`, `∞` is `oo`) |
 | Edit selection's existing text | double-click / **Edit** | Enter |
 | Apply / cancel an edit | click elsewhere applies | Enter / Esc |
-| Remove the selection entirely | **Delete** | Del |
+| Remove the selection entirely (on the whole expression: start over in the source line) | **Delete** | Del |
 | Remove the node but keep its argument (`cos(θ)` → `θ`, `√x` → `x`, `∫f dx` → `f`) | **Unwrap** | Backspace — after ↑ from a term, that term is the one kept |
 | Keep only the selection (it becomes the whole expression) | **Isolate** | Ctrl+Shift+I |
 | Transform the selection | pick an operation in the **Transform ▾** menu (general) or the type menu ("Matrix ▾"...): it applies at once | |
 | Copy / cut / paste a part | **Copy** / **Paste** (toolbar or action bar) | Ctrl+C / Ctrl+X copy the selection's SymPy source; Ctrl+V pastes over a selection or at a caret |
-| Apply any SymPy function | the **function box** in the toolbar (autocompletes SymPy's names): `diff(x)`, `series(x, 0, 5)`, `subs(x, 1)`, `.T`, `det()` — Enter applies it to the selection | |
+| Apply any SymPy function | the **function box** in the toolbar: type to search SymPy's functions, pick one; a function that needs parameters asks for them (symbol parameters offer the selection's free symbols — `solve` on `sin(x)cos(y)` asks x or y); `diff(x)`, `.T`, `det()` typed in full apply as written | |
 | Undo / redo | ↶ / ↷ | Ctrl+Z / Ctrl+Shift+Z |
 
 A small action bar appears under whatever is selected — ↑ parent, ↓ inside,

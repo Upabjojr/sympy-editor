@@ -247,13 +247,17 @@ var SympyEditor = (function () {
       if (!o.readOnly) {
         btn("paste", "Paste", "Paste the clipboard over the selection, or at the caret (Ctrl+V)");
         sep();
-        // Function box: any SymPy function or method applied to the selection.
-        this.fnList = h("datalist", { id: "se-fn-" + Math.random().toString(36).slice(2, 8) });
-        this.fnInput = h("input", { class: "se-fn", type: "text", list: this.fnList.id, placeholder: "SymPy function… e.g. diff(x)",
-          title: "Apply any SymPy function or method to the selection (or the whole expression): diff(x), series(x, 0, 5), subs(x, 1), .T — Enter applies",
+        // Function box: search SymPy's functions; a picked function that needs
+        // parameters asks for them (see _showFnForm).
+        this.fnInput = h("input", { class: "se-fn", type: "text", placeholder: "SymPy function… (search)",
+          title: "Apply any SymPy function or method to the selection (or the whole expression): type to search, Enter to pick; functions with parameters ask for them",
           spellcheck: "false", autocomplete: "off" });
         this.toolbar.appendChild(this.fnInput);
-        this.toolbar.appendChild(this.fnList);
+        this.fnMenu = h("div", { class: "se-fn-menu", hidden: "", role: "listbox" });
+        this.fnForm = h("div", { class: "se-fn-form", hidden: "" });
+        this._fnNames = [];
+        this._fnSigs = {};
+        this._fnActive = -1;
       }
       if (o.finishButton && !o.readOnly) {
         btn("finish", "Done", "Finish editing and hand the expression back to Python");
@@ -335,6 +339,7 @@ var SympyEditor = (function () {
       this.overlay = h("div", { class: "se-loading", hidden: "", role: "status", "aria-live": "polite" }, [
         h("div", { class: "se-spinner" }), h("div", { class: "se-loading-text" }, ["Loading…"])
       ]);
+      if (this.fnMenu) { root.appendChild(this.fnMenu); root.appendChild(this.fnForm); }
       root.appendChild(this.overlay);
       this.host.appendChild(root);
       root.__sympyEditor = this;   // handy for debugging and tests
@@ -390,7 +395,7 @@ var SympyEditor = (function () {
       this.view.addEventListener("dblclick", function (ev) { self._onDblClick(ev); });
       this.root.addEventListener("keydown", function (ev) {
         if (self.symbols && self.symbols.contains(ev.target)) return;
-        if (ev.target === self.source || ev.target === self.fnInput) return;
+        if (ev.target === self.source || ev.target === self.fnInput || (self.fnForm && self.fnForm.contains(ev.target))) return;
         if (self.loading) { ev.preventDefault(); return; }
         var t = ev.target;
         if (t === self.input || (t && t.tagName === "SELECT")) return;
@@ -430,11 +435,35 @@ var SympyEditor = (function () {
         self.view.focus({ preventScroll: true });
       };
       if (this.fnInput) {
-        this.fnInput.addEventListener("focus", function () { self._loadFunctions(); });
+        this.fnInput.addEventListener("focus", function () { self._loadFunctions(); self._filterFn(); });
+        this.fnInput.addEventListener("input", function () { self._filterFn(); });
+        this.fnInput.addEventListener("blur", function () { setTimeout(function () { if (document.activeElement !== self.fnInput) self._hideFnMenu(); }, 150); });
         this.fnInput.addEventListener("keydown", function (ev) {
           ev.stopPropagation();
-          if (ev.key === "Enter") { ev.preventDefault(); self.callFunction(self.fnInput.value); }
-          else if (ev.key === "Escape") { ev.preventDefault(); self.fnInput.value = ""; self.view.focus({ preventScroll: true }); }
+          var items = self.fnMenu.querySelectorAll(".se-fn-item");
+          if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+            ev.preventDefault();
+            if (!items.length) return;
+            self._fnActive = (self._fnActive + (ev.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+            self._highlightFn();
+          } else if (ev.key === "Enter") {
+            ev.preventDefault();
+            var text = self.fnInput.value.trim();
+            if (/\(/.test(text)) { self._hideFnMenu(); self.callFunction(text); return; }   // typed with arguments: as is
+            var pick = self._fnActive >= 0 && items[self._fnActive] ? items[self._fnActive].getAttribute("data-name") : text;
+            if (pick) self._pickFn(pick);
+          } else if (ev.key === "Escape") {
+            ev.preventDefault();
+            self._hideFnMenu();
+            self._hideFnForm();
+            self.fnInput.value = "";
+            self.view.focus({ preventScroll: true });
+          }
+        });
+        this.fnMenu.addEventListener("mousedown", function (ev) { ev.preventDefault(); });   // keep the focus in the box
+        this.fnMenu.addEventListener("click", function (ev) {
+          var item = ev.target.closest(".se-fn-item");
+          if (item) self._pickFn(item.getAttribute("data-name"));
         });
       }
       [this.opsSelect, this.typeMenu].forEach(function (menu) {
@@ -461,10 +490,15 @@ var SympyEditor = (function () {
       this.selected = sel;
       this._fillOps();
       this._fillSymbols();
-      if (snap.functions && this.fnList && !this._functionsLoaded) {
+      if (snap.functions && this.fnInput && !this._functionsLoaded) {
         this._functionsLoaded = true;
-        var self2 = this;
-        snap.functions.forEach(function (name) { self2.fnList.appendChild(h("option", { value: name })); });
+        this._fnNames = snap.functions;
+        this._fnSigs = snap.signatures || {};
+        if (document.activeElement === this.fnInput) this._filterFn();
+      }
+      if (snap.signature && this.fnInput) {
+        this._fnSigs[snap.signature.name] = snap.signature;
+        this._showFnForm(snap.signature);
       }
       this.root.setAttribute("data-seq", String(++this._stateCount));   // lets tests wait for a re-render
       this._applySelection();
@@ -925,6 +959,8 @@ var SympyEditor = (function () {
         if (!ro) this.beginEdit(this.selected || "/");
       } else if (k === "Escape") {
         this.select(null);
+      } else if ((k === "Backspace" || k === "Delete") && this.selected === "/" && !ro) {
+        this.editSource("");                     // the whole expression: start over in the source line
       } else if (k === "Backspace") {
         if (!ro && this.selected) this.unwrapSelection();
       } else if (k === "Delete") {
@@ -955,8 +991,8 @@ var SympyEditor = (function () {
       if (!path || !(path in this.state.nodes)) path = "/";
       if (!(path in this.state.nodes)) return;
       // The rendering is never replaced by code: the whole expression is
-      // edited in the source line.
-      if (path === "/" && initial === undefined && this.editSource()) return;
+      // edited in the source line (started over with what was typed).
+      if (path === "/" && this.editSource(initial)) return;
       if (this.editing !== null || this.inserting) this.cancelEdit(true);
       var self = this;
       var original = this.state.nodes[path].src;
@@ -1018,7 +1054,7 @@ var SympyEditor = (function () {
                             : cmd === "child" ? false
                             : cmd === "paste" ? false
                             : cmd === "unwrap" ? !unwrapOk
-                            : cmd === "delete" ? !(this.range || (this.selected && this.selected !== "/"))
+                            : cmd === "delete" ? !(this.range || this.selected)
                             : cmd === "isolate" ? !(this.range || (this.selected && this.selected !== "/"))
                             : false;
       }
@@ -1069,7 +1105,7 @@ var SympyEditor = (function () {
       if (kind === "cut" && !this.opts.readOnly) {
         if (this.range) this.send({ action: "delete", path: this.range.parent, children: this._rangeIndices() });
         else if (this.selected !== "/") this.send({ action: "delete", path: this.selected });
-        else this._setStatus("Copied: " + src + " (the whole expression cannot be cut)");
+        else this.editSource("");                // cutting everything: start over in the source line
       } else {
         this._setStatus("Copied: " + src);
       }
@@ -1126,13 +1162,136 @@ var SympyEditor = (function () {
       }, function () { self._hideLoading(); self._functionsRequested = false; });
     }
 
+    /** The node the function box acts on: the range's parent, the selection or the root. */
+    _fnTarget() {
+      return this.range ? this.range.parent : (this.selected || "/");
+    }
+
+    _filterFn() {
+      if (!this.fnInput || !this._functionsLoaded) return;
+      var q = this.fnInput.value.trim().replace(/\(.*$/, "").toLowerCase();
+      var names = this._fnNames;
+      var starts = [], contains = [];
+      for (var i = 0; i < names.length; i++) {
+        var n = names[i], l = n.toLowerCase();
+        if (!q) { if (starts.length < 12) starts.push(n); continue; }
+        if (l.indexOf(q) === 0) starts.push(n);
+        else if (l.indexOf(q) >= 0) contains.push(n);
+      }
+      var list = starts.concat(contains).slice(0, 12);
+      this.fnMenu.textContent = "";
+      var self = this;
+      list.forEach(function (name) {
+        var sig = self._fnSigs[name];
+        var item = h("div", { class: "se-fn-item", role: "option", "data-name": name }, [
+          h("span", { class: "se-fn-name" }, [name]),
+          h("span", { class: "se-fn-doc" }, [sig && sig.doc ? sig.doc : ""])
+        ]);
+        self.fnMenu.appendChild(item);
+      });
+      this._fnActive = list.length ? 0 : -1;
+      this._highlightFn();
+      this.fnMenu.hidden = !list.length;
+      this._placeUnder(this.fnMenu, this.fnInput);
+    }
+
+    _highlightFn() {
+      var items = this.fnMenu.querySelectorAll(".se-fn-item");
+      for (var i = 0; i < items.length; i++) items[i].classList.toggle("se-active", i === this._fnActive);
+    }
+
+    _hideFnMenu() { if (this.fnMenu) this.fnMenu.hidden = true; }
+    _hideFnForm() { if (this.fnForm) { this.fnForm.hidden = true; this.fnForm.textContent = ""; } }
+
+    _placeUnder(panel, anchor) {
+      var rr = this.root.getBoundingClientRect(), ar = anchor.getBoundingClientRect();
+      panel.style.top = Math.round(ar.bottom - rr.top + 4) + "px";
+      panel.style.left = Math.round(Math.max(0, Math.min(ar.left - rr.left, this.root.clientWidth - panel.offsetWidth - 4))) + "px";
+    }
+
+    /** A function was chosen: apply it, or ask for its parameters first. */
+    _pickFn(name) {
+      this._hideFnMenu();
+      this.fnInput.value = name;
+      var sig = this._fnSigs[name];
+      if (sig) { this._showFnForm(sig); return; }
+      var msg = { action: "signature", name: name, path: this._fnTarget() };
+      if (this.range) msg.children = this._rangeIndices();
+      this.send(msg);   // the answer (snapshot.signature) opens the form
+    }
+
+    /** Ask for the parameters of `sig` (or apply at once when none is required). */
+    _showFnForm(sig) {
+      var needs = sig.callable && sig.params.some(function (p) { return !p.optional; });
+      if (!needs) { this._hideFnForm(); this.callFunction(sig.name); return; }
+      var self = this;
+      var node = this.state.nodes[this._fnTarget()] || {};
+      var free = node.free || [];
+      this.fnForm.textContent = "";
+      this.fnForm.appendChild(h("div", { class: "se-fn-title" }, [sig.name + "(" + (node.src ? node.src.slice(0, 30) + (node.src.length > 30 ? "…" : "") : "…") + ", …)"]));
+      if (sig.doc) this.fnForm.appendChild(h("div", { class: "se-fn-docline" }, [sig.doc]));
+      var controls = [];
+      sig.params.forEach(function (prm, i) {
+        var ctrl;
+        if (prm.kind === "symbol" && free.length) {
+          ctrl = h("select", {});
+          if (prm.optional) ctrl.appendChild(h("option", { value: "" }, ["(default)"]));
+          free.forEach(function (name) { ctrl.appendChild(h("option", { value: name }, [name])); });
+        } else {
+          ctrl = h("input", { type: "text", spellcheck: "false", placeholder: prm.default !== null && prm.default !== undefined ? String(prm.default) : (prm.optional ? "(optional)" : "") });
+        }
+        ctrl.addEventListener("keydown", function (ev) {
+          ev.stopPropagation();
+          if (ev.key === "Enter") { ev.preventDefault(); apply(); }
+          else if (ev.key === "Escape") { ev.preventDefault(); self._hideFnForm(); self.view.focus({ preventScroll: true }); }
+        });
+        controls.push({ prm: prm, ctrl: ctrl });
+        self.fnForm.appendChild(h("label", { class: "se-fn-field" }, [h("span", {}, [prm.name + (prm.optional ? "" : " *")]), ctrl]));
+      });
+      var apply = function () {
+        var values = controls.map(function (c) { return (c.ctrl.value || "").trim(); });
+        var parts = [], gap = false;
+        for (var i = 0; i < controls.length; i++) {
+          var prm = controls[i].prm, v = values[i];
+          if (!v) {
+            var later = values.slice(i + 1).some(function (x) { return x; });
+            if (later && prm.default !== null && prm.default !== undefined && sig.hinted) { parts.push(String(prm.default)); continue; }
+            gap = true;
+            continue;
+          }
+          if (gap && !sig.hinted && !prm.varargs) parts.push(prm.name + "=" + v);
+          else parts.push(v);
+        }
+        var base = sig.name.replace(/^\./, "");
+        var call;
+        if ((base === "integrate" || base === "summation") && values[0] && values[1] && values[2]) {
+          call = sig.name + "((" + values[0] + ", " + values[1] + ", " + values[2] + "))";
+        } else {
+          call = sig.name + "(" + parts.join(", ") + ")";
+        }
+        self._hideFnForm();
+        self.callFunction(call);
+      };
+      var buttons = h("div", { class: "se-fn-buttons" }, [
+        h("button", { type: "button", class: "se-fn-apply" }, ["Apply"]),
+        h("button", { type: "button", class: "se-fn-cancel" }, ["Cancel"])
+      ]);
+      buttons.querySelector(".se-fn-apply").addEventListener("click", apply);
+      buttons.querySelector(".se-fn-cancel").addEventListener("click", function () { self._hideFnForm(); self.view.focus({ preventScroll: true }); });
+      this.fnForm.appendChild(buttons);
+      this.fnForm.hidden = false;
+      this._placeUnder(this.fnForm, this.fnInput);
+      if (controls.length) controls[0].ctrl.focus();
+    }
+
     /** Apply "name(args)" / ".method(args)" from the function box to the selection. */
     callFunction(text) {
       text = (text || "").trim();
       if (!text || this.opts.readOnly || this.closed) return;
-      var msg = { action: "call", path: this.range ? this.range.parent : (this.selected || "/"), func: text };
+      var msg = { action: "call", path: this._fnTarget(), func: text };
       if (this.range) msg.children = this._rangeIndices();
       this.fnInput.value = "";
+      this._hideFnMenu();
       this.send(msg);
       this.view.focus({ preventScroll: true });
     }
@@ -1199,7 +1358,11 @@ var SympyEditor = (function () {
       var same = src === (this.state ? this.state.src : "");
       this.sourceDirty = false;
       this.source.classList.remove("se-dirty");
-      if (!src || same) { this.revertSource(); return; }
+      if (!src || same) {
+        this.revertSource();
+        if (!src) this._setStatus("Empty: the previous expression is back (an expression cannot be empty)");
+        return;
+      }
       this.send({ action: "set", src: src });
     }
 
@@ -1211,12 +1374,22 @@ var SympyEditor = (function () {
     }
 
     /** Put the keyboard in the source line with everything selected. */
-    editSource() {
+    editSource(text) {
       if (this.opts.readOnly || !this.opts.showSource) return false;
       this.source.focus();
       var sel = window.getSelection();
-      if (sel && this.source.firstChild) sel.selectAllChildren(this.source);
-      this._setStatus("Editing the whole expression as SymPy source – Enter applies, Esc reverts");
+      if (text !== undefined) {
+        // Start over: the line holds only `text` (possibly nothing) until Enter applies it.
+        this.source.textContent = text;
+        this.sourceDirty = true;
+        this.source.classList.add("se-dirty");
+        if (sel && this.source.firstChild) sel.collapse(this.source.firstChild, this.source.firstChild.length);
+        this._setStatus(text ? "Editing the whole expression – Enter applies, Esc restores the previous one"
+                             : "Everything removed: type the new expression – Enter applies, Esc restores the previous one");
+      } else {
+        if (sel && this.source.firstChild) sel.selectAllChildren(this.source);
+        this._setStatus("Editing the whole expression as SymPy source – Enter applies, Esc reverts");
+      }
       return true;
     }
 
@@ -1692,7 +1865,8 @@ var SympyEditor = (function () {
         case "isolate": return this.isolateSelection();
         case "delete":
           if (this.range) return this.send({ action: "delete", path: this.range.parent, children: this._rangeIndices() });
-          if (this.selected && this.selected !== "/") return this.send({ action: "delete", path: this.selected });
+          if (this.selected === "/") return this.editSource("");
+          if (this.selected) return this.send({ action: "delete", path: this.selected });
           return;
         case "child": return this._selectChild();
         case "parent": {
@@ -1782,7 +1956,7 @@ var SympyEditor = (function () {
       set("redo", dis || !s.can_redo);
       set("edit", dis);
       set("keyboard", dis);
-      set("delete", dis || !(range || (this.selected && this.selected !== "/")));
+      set("delete", dis || !(range || this.selected));
       set("unwrap", dis || range || !this.selected || !(s.nodes && s.nodes[this.selected] && s.nodes[this.selected].nargs));
       set("isolate", dis || !(range || (this.selected && this.selected !== "/")));
       set("parent", dis || !(range || (t && t.parent)));

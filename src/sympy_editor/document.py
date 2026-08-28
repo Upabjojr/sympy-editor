@@ -86,6 +86,74 @@ COMMON_FUNCTIONS = (
 )
 
 
+#: Parameter prompts for functions whose Python signature does not say enough
+#: (``*args``): name -> list of (label, kind) with kind "symbol" or "text".
+PARAM_HINTS: Dict[str, List] = {
+    # name -> [(label, kind, optional, gap-fill default)]
+    "subs": [("old", "text", False, None), ("new", "text", False, None)],
+    "diff": [("variable", "symbol", False, None), ("n (times)", "text", True, None)],
+    "integrate": [("variable", "symbol", False, None), ("lower limit", "text", True, None), ("upper limit", "text", True, None)],
+    "series": [("variable", "symbol", False, None), ("x0", "text", True, "0"), ("n (order)", "text", True, None)],
+    "limit": [("variable", "symbol", False, None), ("x0", "text", False, None), ("dir", "text", True, None)],
+    "solve": [("symbol", "symbol", False, None)],
+    "solveset": [("symbol", "symbol", False, None), ("domain", "text", True, None)],
+    "roots": [("symbol", "symbol", False, None)],
+    "collect": [("symbol", "symbol", False, None)],
+    "apart": [("symbol", "symbol", False, None)],
+    "rewrite": [("function", "text", False, None)],
+    "summation": [("variable", "symbol", False, None), ("lower", "text", False, None), ("upper", "text", False, None)],
+    "evalf": [("n (digits)", "text", True, None)],
+    "N": [("n (digits)", "text", True, None)],
+    "Poly": [("generator", "symbol", False, None)],
+    "degree": [("generator", "symbol", False, None)],
+    "LC": [("generator", "symbol", False, None)],
+}
+SYMBOL_PARAM_NAMES = {"symbol", "symbols", "x", "var", "variable", "variables", "gen", "gens", "sym", "syms", "s", "dep", "wrt"}
+
+
+def function_signature(name: str, target: Optional[Basic] = None) -> Dict[str, Any]:
+    """Parameter prompts for ``name`` (a sympy callable, or a method/attribute
+    of ``target`` when ``name`` starts with ``.``): ``{"name", "params":
+    [{"name", "kind": "symbol"|"text", "default"}], "doc", "callable"}``."""
+    import inspect
+    dotted = name.startswith(".")
+    bare = name.lstrip(".")
+    if not dotted and callable(getattr(sympy, bare, None)):
+        fn = getattr(sympy, bare)
+        skip = 1
+    elif target is not None and not bare.startswith("_") and hasattr(target, bare):
+        fn = getattr(target, bare)
+        skip = 0
+        if not callable(fn):
+            return {"name": name, "params": [], "doc": f"attribute of {type(target).__name__}", "callable": False}
+    else:
+        raise ValueError(f"Unknown SymPy function or method: {bare!r}")
+    doc = (inspect.getdoc(fn) or "").strip().split("\n", 1)[0][:160]
+    if bare in PARAM_HINTS:
+        params = [{"name": label, "kind": kind, "default": fill, "optional": optional}
+                  for label, kind, optional, fill in PARAM_HINTS[bare]]
+        return {"name": name, "params": params, "doc": doc, "callable": True, "hinted": True}
+    params = []
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return {"name": name, "params": [{"name": "arguments", "kind": "text", "default": None, "optional": True}],
+                "doc": doc, "callable": True, "hinted": False}
+    for i, prm in enumerate(sig.parameters.values()):
+        if i < skip or prm.name in ("self", "cls"):
+            continue
+        if prm.kind == prm.VAR_KEYWORD:
+            continue
+        if prm.kind == prm.VAR_POSITIONAL:
+            params.append({"name": prm.name, "kind": "symbol" if prm.name in SYMBOL_PARAM_NAMES else "text",
+                           "default": None, "optional": True, "varargs": True})
+            continue
+        default = None if prm.default is inspect.Parameter.empty else repr(prm.default)
+        kind = "symbol" if prm.name in SYMBOL_PARAM_NAMES else "text"
+        params.append({"name": prm.name, "kind": kind, "default": default, "optional": default is not None})
+    return {"name": name, "params": params[:6], "doc": doc, "callable": True, "hinted": False}
+
+
 def sympy_functions() -> List[str]:
     """Names of SymPy's public callables, the common ones first."""
     names = [n for n in dir(sympy) if not n.startswith("_") and callable(getattr(sympy, n, None))]
@@ -620,7 +688,8 @@ class Document:
         info: Dict[str, Any] = {"src": str(node), "type": type(node).__name__, "kind": node_kind(node),
                                 "kinds": node_kinds(node),
                                 "nargs": len(node.args), "insertable": is_insertable(node),
-                                "rangeable": is_rangeable(node)}
+                                "rangeable": is_rangeable(node),
+                                "free": sorted(str(s) for s in getattr(node, "free_symbols", ()))[:12]}
         try:
             actual = get_at(self.expr, path)
         except (IndexError, AttributeError):
@@ -679,6 +748,17 @@ class Document:
             elif action == "functions":
                 snap = self.snapshot()
                 snap["functions"] = sympy_functions()
+                snap["signatures"] = {}
+                for name in COMMON_FUNCTIONS:
+                    try:
+                        snap["signatures"][name] = function_signature(name)
+                    except ValueError:
+                        pass
+                return snap
+            elif action == "signature":
+                target = extract_range(self.expr, self._path(path), children) if children is not None else get_at(self.expr, self._path(path))
+                snap = self.snapshot()
+                snap["signature"] = function_signature(str(message.get("name", "")), target)
                 return snap
             elif action == "extend":
                 self.extend(path, str(message.get("side", "after")), str(message.get("src", "")))

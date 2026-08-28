@@ -496,3 +496,21 @@ def test_isolate():
     assert doc.expr == x * cos(t) + y
     doc.handle({"action": "isolate", "path": "/", "children": [0, 1]})   # a range
     assert doc.expr == doc.expr and len(doc.expr.args) == 2
+
+
+def test_function_signatures_for_prompts():
+    from sympy import Matrix, symbols, sin, cos
+    from sympy_editor.document import function_signature
+    x, y = symbols("x y")
+    solve = function_signature("solve")
+    assert solve["params"][0]["kind"] == "symbol" and solve["params"][0]["optional"] is False
+    assert all(p["optional"] for p in function_signature("factor")["params"])          # applies without a prompt
+    series = function_signature("series")
+    assert [p["name"] for p in series["params"]][:2] == ["variable", "x0"] and series["params"][1]["default"] == "0"
+    assert function_signature(".T", Matrix([[x]]))["callable"] is False
+    doc = Document(sin(x) * cos(y))
+    snap = doc.handle({"action": "signature", "path": "/", "name": "solve"})
+    assert snap["signature"]["name"] == "solve" and snap["nodes"]["/"]["free"] == ["x", "y"]
+    assert "Unknown" in doc.handle({"action": "signature", "path": "/", "name": "nope"})["error"]
+    doc.call("/", "solve(y)")
+    assert all(not e.has(y) for e in doc.expr)                                            # solved for y

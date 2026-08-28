@@ -120,7 +120,13 @@ Two conventions between printer, document and front end:
   a `.name`/attribute of the node otherwise; extra args are parsed in the
   document's namespace; lists become `FiniteSet`s.  `{"action":
   "functions"}` returns a snapshot with `functions` (common names first) for
-  the box's `<datalist>`, requested once on focus.
+  the box's dropdown (`_filterFn`), requested once on focus, with
+  `signatures` for the common names; `{"action": "signature", "name"}`
+  gives `function_signature()` for others (params with kind symbol/text,
+  optional, defaults; `PARAM_HINTS` overrides for `*args` functions).  A
+  picked function with a required parameter opens the form (`_showFnForm`:
+  symbol params are a select over the node's `free` symbols), otherwise it
+  is applied at once.
 - **Loading overlay.**  Backend progress messages go through
   `Editor._report`: texts mentioning loading/waiting show `.se-loading` (a
   blocking spinner overlay, keys and clicks ignored) until the message

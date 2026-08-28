@@ -948,8 +948,9 @@ def test_copy_cut_paste_of_a_selection(browser, serve_expr):
     assert page.errors == []
 
 
-def test_function_box_and_paste_button(browser, serve_expr):
-    srv, doc = serve_expr(x**3 + y)
+def test_function_box_search_prompt_and_paste_button(browser, serve_expr):
+    from sympy import FiniteSet, cos
+    srv, doc = serve_expr(sin(x) * cos(y))
     ctx = browser.new_context(permissions=["clipboard-read", "clipboard-write"])
     page = ctx.new_page()
     page.errors = []
@@ -957,43 +958,80 @@ def test_function_box_and_paste_button(browser, serve_expr):
     page.goto(srv.url)
     page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
     assert not page.locator(".se-loading").is_visible()     # no overlay on the HTTP backend
-    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "x**3") + "/0")   # the x glyph...
-    page.keyboard.press("ArrowUp")                                                                      # ...then the power
-    assert page.locator(".se-status").inner_text() == "Pow: x**3"
     fn = page.locator(".se-fn")
     fn.click()
-    page.wait_for_function("document.querySelector('datalist option[value=\"diff\"]') !== null")   # names loaded on focus
-    fn.fill("diff(x)")
+    page.wait_for_function("document.querySelectorAll('.se-fn-item').length > 0")   # the list appears on focus
+    fn.fill("sol")
+    menu = page.locator(".se-fn-menu")
+    assert menu.is_visible() and menu.locator(".se-fn-item").first.get_attribute("data-name") == "solve"
+    page.keyboard.press("Enter")                              # pick solve: it needs a symbol -> a prompt
+    form = page.locator(".se-fn-form")
+    assert form.is_visible() and "solve(" in form.locator(".se-fn-title").inner_text()
+    sel = form.locator("select")
+    assert sel.locator("option").all_inner_texts() == ["x", "y"]   # the free symbols of the selection
+    sel.select_option("y")
+    _next_state(page, lambda: form.locator(".se-fn-apply").click())
+    assert isinstance(doc.expr, FiniteSet) and all(not e.has(y) for e in doc.expr)
+    assert not form.is_visible() and fn.input_value() == ""
+    # a function without required parameters applies at once
+    srv2, doc2 = serve_expr(x**2 - 1)
+    page.goto(srv2.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    fn = page.locator(".se-fn")
+    fn.click()
+    fn.fill("factor")
     _next_state(page, lambda: page.keyboard.press("Enter"))
-    assert doc.expr == 3 * x**2 + y and fn.input_value() == ""
+    assert doc2.expr == (x - 1) * (x + 1) and not page.locator(".se-fn-form").is_visible()
+    # a prompt applied with the default choice (Enter in the form)
+    fn.click()
+    fn.fill("diff")
+    page.keyboard.press("Enter")
+    assert page.locator(".se-fn-form").is_visible()
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    assert doc2.expr == 2 * x
+    # typed with arguments: applied as written; errors are reported
     fn.click()
     fn.fill("bogus(")
     page.keyboard.press("Enter")
     page.wait_for_selector(".se-error:not([hidden])")
     # Paste button over a selection
     page.evaluate("navigator.clipboard.writeText('z + 1')")
-    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "y"))
+    _click(page, next(k for k, v in doc2.snapshot()["nodes"].items() if v["src"] == "2"))
     _next_state(page, lambda: page.locator('.se-toolbar [data-cmd="paste"]').click())
-    assert doc.expr == 3 * x**2 + z + 1
+    assert doc2.expr == (z + 1) * x
     assert page.errors == []
     ctx.close()
 
 
-def test_isolate_button_and_shortcut(browser, serve_expr):
-    from sympy import cos
-    t = symbols("theta")
-    srv, doc = serve_expr(x * cos(t) + y)
+def test_replacing_the_whole_expression(browser, serve_expr):
+    srv, doc = serve_expr(x**2 + sin(y))
     page = _open(browser, srv.url)
-    assert page.locator('.se-toolbar [data-cmd="isolate"]').is_disabled()
-    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "theta"))
-    page.keyboard.press("ArrowUp")                        # cos(theta)
-    _next_state(page, lambda: page.locator('.se-actions [data-cmd="isolate"]').click())
-    assert doc.expr == cos(t)
-    _next_state(page, lambda: page.keyboard.press("Control+z"))
-    assert doc.expr == x * cos(t) + y
-    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "y"))
-    _next_state(page, lambda: page.keyboard.press("Control+Shift+I"))
-    assert doc.expr == y
+    page.locator(".se-view").focus()
+    page.keyboard.press("ArrowDown")                          # the whole expression
+    page.keyboard.type("z")                                   # typing: starts over in the source line, never a field over the formula
+    assert page.locator(".se-inline").count() == 0
+    assert page.evaluate("document.activeElement.className").startswith("se-source")
+    assert page.locator(".se-source").inner_text() == "z"
+    page.keyboard.type("+1")
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    assert doc.expr == z + 1
+    # Delete with everything selected: the source line is emptied, new text replaces the expression
+    page.locator(".se-view").focus()
+    page.keyboard.press("Escape")
+    page.keyboard.press("ArrowDown")
+    assert page.locator('.se-toolbar [data-cmd="delete"]').is_enabled()
+    page.keyboard.press("Delete")
+    assert page.locator(".se-source").inner_text() == "" and "removed" in page.locator(".se-status").inner_text()
+    page.keyboard.type("q**2")
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    assert doc.expr == symbols("q") ** 2
+    # an empty line left behind restores the expression, and says so
+    page.locator(".se-source").click()
+    page.keyboard.press("Control+a")
+    page.keyboard.press("Backspace")
+    page.evaluate("document.querySelector('.se-source').blur()")   # leave the line empty
+    assert page.locator(".se-source").inner_text() == "q**2" and "Empty" in page.locator(".se-status").inner_text()
+    assert doc.expr == symbols("q") ** 2
     assert page.errors == []
 
 
