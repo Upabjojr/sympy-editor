@@ -30,6 +30,9 @@ src/sympy_editor/
                 of the expression, JSON `snapshot()` and message `handle()`.
                 Single source of truth for all front ends.
   ops.py        Registry of transformations (simplify, expand, ...); register_op.
+                KINDS maps a selection's kind ("matrix", "array", "scalar") to
+                SymPy types; an op registered with kinds= is offered only on
+                selections of those kinds (the matrix ops: transpose, trace...).
   html.py       Standalone HTML (full page or fragment) with the `pyodide`,
                 `http` or `readonly` backend; embeds the core modules for Pyodide.
   server.py     Stdlib http.server backend: serve(expr) -> edited expr.
@@ -43,12 +46,31 @@ examples/       demo.py generates demo.html / runs the server.
 ```
 
 Data flow: Python `Document.snapshot()` → JSON (`latex`, `latex_plain`,
-`nodes` {path → {src, type}}, `ops`, `can_undo`...) → `editor.js` renders
+`nodes` {path → {src, type, kind[, reciprocal]}}, `symbols`, `ops`,
+`can_undo`...) → `editor.js` renders
 `latex` with KaTeX (`trust` enabled for `\htmlData` only) → user acts →
 message `{action, path, src|op}` → `Document.handle()` → new snapshot.
 The three backends only differ in how the message reaches Python:
 anywidget `model.send` + `snapshot` trait, `fetch` POST to `/api`, or a
-direct call into Pyodide.
+direct call into Pyodide.  A page with several Pyodide editors loads one
+interpreter (cached on `window.__sympyEditorPyodide`, keyed by the Pyodide
+index URL) and keeps one `Document` per editor in it; `html.py` also skips
+re-running `editor.js` when `window.SympyEditor` already exists.
+
+Two conventions between printer, document and front end:
+
+- **Reciprocal nodes.**  SymPy prints `x/(x+1)**2` by synthesising
+  `Pow(x+1, 2)` for the denominator; the printer annotates it with the path of
+  the tree's `Pow(x+1, -2)`, `snapshot()` flags the node `reciprocal: true`,
+  and the front end sends that flag back with a `replace`, which then stores
+  `1/new` at the path.  Deleting or applying an op to the node acts on the real
+  `Pow`.
+- **Retyping symbols.**  `{"action": "retype", "name", "type", "rows",
+  "cols"}` swaps every occurrence of a name (`xreplace`) for a `Symbol`, a
+  `MatrixSymbol` or its `as_explicit()` matrix; since `xreplace` skips the
+  constructors' checks, the result is test-printed before it is committed.
+  `Document.parse(src, context=node)` reads new names as `MatrixSymbol`s of
+  the context's shape when the context is a matrix.
 
 ## Key design decisions
 

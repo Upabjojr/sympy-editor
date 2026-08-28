@@ -10,8 +10,16 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Union
 
-from sympy import Basic, Dummy, IndexedBase, MatrixSymbol, Symbol, sympify, srepr
+import io
+import keyword
+import tokenize
+
+import sympy
+from sympy import Basic, Dummy, IndexedBase, MatrixSymbol, Pow, S, Symbol, sympify, srepr
 from sympy.core.function import AppliedUndef
+from sympy.core.symbol import Str
+from sympy.matrices.expressions import MatrixExpr
+from sympy.matrices.matrixbase import MatrixBase
 from sympy.parsing.sympy_parser import (
     convert_xor,
     implicit_multiplication_application,
@@ -19,7 +27,7 @@ from sympy.parsing.sympy_parser import (
     standard_transformations,
 )
 
-from .ops import Op, get_ops
+from .ops import Op, get_ops, node_kind
 from .printer import (
     Path,
     annotate,
@@ -120,10 +128,24 @@ class Document:
     def get(self, path: PathLike) -> Basic:
         return get_at(self.expr, self._path(path))
 
-    def replace(self, path: PathLike, new: Union[Basic, str]) -> Basic:
-        """Replace the node at ``path`` with ``new`` (parsed if a string)."""
-        new_expr = self.parse(new) if isinstance(new, str) else sympify(new)
-        return self._commit(replace_at(self.expr, self._path(path), new_expr))
+    def replace(self, path: PathLike, new: Union[Basic, str], reciprocal: bool = False) -> Basic:
+        """Replace the node at ``path`` with ``new`` (parsed if a string, in the
+        context of the node being replaced: new names in a matrix slot become
+        ``MatrixSymbol``s of its shape).
+
+        ``reciprocal``: ``new`` is the printed form of a denominator - the
+        node at ``path`` is the tree's ``Pow(b, -n)`` shown as ``b**n`` under
+        the fraction bar (``snapshot()`` flags such nodes) - so the node
+        becomes ``1/new``.
+        """
+        p = self._path(path)
+        if isinstance(new, str):
+            new_expr = self.parse(new, context=get_at(self.expr, p))
+        else:
+            new_expr = sympify(new)
+        if reciprocal:
+            new_expr = S.One / new_expr
+        return self._commit(replace_at(self.expr, p, new_expr))
 
     def delete(self, path: PathLike) -> Basic:
         """Remove the node at ``path`` from its parent's arguments."""
@@ -155,18 +177,109 @@ class Document:
             ns.setdefault(f.func.__name__, f.func)
         return ns
 
-    def parse(self, src: str) -> Basic:
-        """Parse user input in the context of the current expression."""
+    def parse(self, src: str, context: Optional[Basic] = None) -> Basic:
+        """Parse user input in the context of the current expression.
+
+        ``context`` is the node the input replaces, if any.  When it is a
+        matrix (a ``MatrixExpr`` or an explicit matrix), names that do not
+        occur in the expression are read as ``MatrixSymbol``s of its shape
+        rather than as plain symbols - so typing ``C.T`` over ``B`` in
+        ``A*B`` works, and ``C`` in a matrix product is a matrix.
+        """
         src = (src or "").strip()
         if not src:
             raise ValueError("Empty input")
         transformations = standard_transformations + (convert_xor,)
         if self.parser == "implicit":
             transformations = transformations + (implicit_multiplication_application,)
+        local = self.namespace()
+        shape = getattr(context, "shape", None) if isinstance(context, (MatrixExpr, MatrixBase)) else None
+        if shape is not None and len(shape) == 2:
+            for name in self._new_names(src, local):
+                local[name] = MatrixSymbol(name, *shape)
         try:
-            return sympify(parse_expr(src, local_dict=self.namespace(), transformations=transformations))
+            return sympify(parse_expr(src, local_dict=local, transformations=transformations))
         except Exception as exc:  # SyntaxError, TokenError, TypeError, ...
             raise ValueError(f"Could not parse {src!r}: {exc}") from None
+
+    @staticmethod
+    def _new_names(src: str, local: Dict[str, Any]) -> List[str]:
+        """The identifiers in ``src`` that ``parse_expr`` would turn into new
+        symbols: not in ``local``, not SymPy names (``sin``, ``pi``, ``I``...),
+        not attribute names (``.T``) and not called (``f(x)``)."""
+        try:
+            tokens = list(tokenize.generate_tokens(io.StringIO(src).readline))
+        except (tokenize.TokenError, SyntaxError):
+            return []
+        names: List[str] = []
+        prev = ""
+        for i, tok in enumerate(tokens):
+            nxt = tokens[i + 1].string if i + 1 < len(tokens) else ""
+            if (tok.type == tokenize.NAME and not keyword.iskeyword(tok.string)
+                    and prev != "." and nxt != "(" and tok.string not in local
+                    and not hasattr(sympy, tok.string) and tok.string not in names):
+                names.append(tok.string)
+            prev = tok.string
+        return names
+
+    # -- symbols ------------------------------------------------------------
+
+    def symbol_info(self) -> List[Dict[str, Any]]:
+        """The names in the expression with what they stand for, for the
+        front end's symbols panel: ``[{"name": "A", "type": "MatrixSymbol",
+        "shape": ["2", "2"]}, {"name": "x", "type": "Symbol",
+        "assumptions": ["positive"]}, ...]``."""
+        out: List[Dict[str, Any]] = []
+        for name, obj in sorted(self.namespace().items()):
+            info: Dict[str, Any] = {"name": name}
+            if isinstance(obj, MatrixSymbol):
+                info.update(type="MatrixSymbol", shape=[str(obj.rows), str(obj.cols)])
+            elif isinstance(obj, IndexedBase):
+                info["type"] = "IndexedBase"
+            elif isinstance(obj, Symbol):
+                info.update(type="Symbol", assumptions=sorted(
+                    k for k, v in obj.assumptions0.items() if v and k != "commutative"))
+            elif isinstance(obj, type):
+                info["type"] = "Function"
+            else:
+                info["type"] = type(obj).__name__
+            out.append(info)
+        return out
+
+    def retype(self, name: str, kind: str, rows: Any = None, cols: Any = None) -> Basic:
+        """Change what ``name`` stands for, everywhere in the expression:
+        ``"Symbol"``, ``"MatrixSymbol"`` (``rows`` x ``cols``, symbolic
+        dimensions allowed) or ``"Matrix"`` (an explicit ``rows`` x ``cols``
+        matrix of ``name[i, j]`` elements).  Ancestors are rebuilt, so a
+        product of two names becomes a ``MatMul`` when both become matrices;
+        the reverse (a matrix back to a scalar under a transpose, say) fails
+        with SymPy's error, which ``handle`` reports."""
+        ns = self.namespace()
+        if name not in ns:
+            raise ValueError(f"No symbol named {name!r} in the expression")
+        old = ns[name]
+        if kind == "Symbol":
+            new: Basic = Symbol(name)
+        elif kind in ("MatrixSymbol", "Matrix"):
+            old_shape = getattr(old, "shape", (2, 2))
+            r = sympify(rows) if rows not in (None, "") else old_shape[0]
+            c = sympify(cols) if cols not in (None, "") else old_shape[1]
+            new = MatrixSymbol(name, r, c)
+            if kind == "Matrix":
+                new = new.as_explicit()
+        else:
+            raise ValueError(f"Unknown symbol type {kind!r}; use Symbol, MatrixSymbol or Matrix")
+        if new == old:
+            return self.expr
+        new_expr = self._coerce(self.expr.xreplace({old: new}))
+        # xreplace rebuilds without the constructors' checks, so a matrix
+        # turned back into a scalar can leave a Transpose(Symbol) behind - a
+        # tree nothing can print.  Refuse it rather than commit it.
+        try:
+            plain_latex(new_expr, **self.printer_settings)
+        except Exception as exc:
+            raise ValueError(f"{name} cannot become a {kind} where it is used: {exc}") from None
+        return self._commit(new_expr)
 
     # -- serialisation ------------------------------------------------------
 
@@ -181,22 +294,38 @@ class Document:
             "latex_plain": plain_latex(expr, **self.printer_settings),
             "src": str(expr),
             "srepr": srepr(expr),
-            "nodes": {
-                format_path(path): {"src": str(node), "type": type(node).__name__}
-                for path, node in nodes.items()
-            },
+            "nodes": {format_path(path): self._node_info(path, node) for path, node in nodes.items()},
+            "symbols": self.symbol_info(),
             "can_undo": self.can_undo,
             "can_redo": self.can_redo,
-            "ops": [{"name": op.name, "label": op.label} for op in self.ops.values()],
+            "ops": [{"name": op.name, "label": op.label, "kinds": list(op.kinds) if op.kinds else None}
+                    for op in self.ops.values()],
             "error": error,
         }
+
+    def _node_info(self, path: Path, node: Basic) -> Dict[str, Any]:
+        """A node's entry in the snapshot.  ``node`` is what the printer
+        printed at ``path``; for a denominator raised to a power that is the
+        reciprocal of the tree's node, flagged so that an edit replaces the
+        denominator rather than the whole ``Pow``."""
+        info: Dict[str, Any] = {"src": str(node), "type": type(node).__name__, "kind": node_kind(node)}
+        try:
+            actual = get_at(self.expr, path)
+        except (IndexError, AttributeError):
+            return info
+        if actual is not node and isinstance(actual, Pow) and isinstance(node, Pow) \
+                and actual.base == node.base and actual.exp == -node.exp:
+            info["reciprocal"] = True
+        return info
 
     def handle(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """Process a front-end message and return a snapshot.
 
-        Messages: ``{"action": "replace", "path": "/0", "src": "y**2"}``,
+        Messages: ``{"action": "replace", "path": "/0", "src": "y**2"}`` (with
+        ``"reciprocal": true`` for a node the snapshot flagged so),
         ``{"action": "apply", "path": "/", "op": "expand"}``,
         ``{"action": "delete", "path": "/1"}``, ``{"action": "set", "src": ...}``,
+        ``{"action": "retype", "name": "A", "type": "MatrixSymbol", "rows": 2, "cols": 2}``,
         ``{"action": "undo"}``, ``{"action": "redo"}``, ``{"action": "snapshot"}``.
         Errors are reported in the snapshot's ``"error"`` field.
         """
@@ -204,7 +333,10 @@ class Document:
             action = message.get("action")
             path = message.get("path", "/")
             if action == "replace":
-                self.replace(path, str(message.get("src", "")))
+                self.replace(path, str(message.get("src", "")), reciprocal=bool(message.get("reciprocal")))
+            elif action == "retype":
+                self.retype(str(message.get("name", "")), str(message.get("type", "")),
+                            message.get("rows"), message.get("cols"))
             elif action == "set":
                 self.replace("/", str(message.get("src", "")))
             elif action == "apply":
@@ -231,7 +363,10 @@ class Document:
 
     @staticmethod
     def _coerce(expr) -> Basic:
-        result = sympify(expr)
+        # srepr output names Str (a MatrixSymbol's name) which SymPy < 1.14
+        # does not export: without it in scope, sympify reads Str('A') as an
+        # undefined function of A, and the matrix symbol's name becomes "Str".
+        result = sympify(expr, locals={"Str": Str}) if isinstance(expr, str) else sympify(expr)
         if not isinstance(result, Basic):
             raise TypeError(f"Cannot edit {type(expr).__name__} objects")
         return result

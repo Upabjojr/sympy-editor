@@ -20,7 +20,11 @@ nodes currently being printed) and, each time ``_print`` is called, searches
 the sub-tree of the innermost frame (breadth-first, up to ``max_depth``) for an
 unclaimed node structurally equal to the object being printed.  Synthesised
 objects that are not found are printed unannotated, but their children are
-still located relative to the enclosing real frame.
+still located relative to the enclosing real frame - with one exception: a
+denominator ``Pow(b, n)`` synthesised from the tree's ``Pow(b, -n)`` is
+annotated with the path of that real node, so a denominator raised to a power
+can be selected and edited as a whole (the document treats such a node as the
+reciprocal of what is printed; see ``Document.snapshot``).
 """
 
 from __future__ import annotations
@@ -30,10 +34,14 @@ from typing import Callable, Dict, List, Optional, Tuple
 from sympy import sympify
 from sympy.core.basic import Basic
 from sympy.core.containers import Tuple as SymTuple
+from sympy.core.power import Pow
 from sympy.functions.elementary.piecewise import ExprCondPair
 from sympy.matrices.expressions.blockmatrix import BlockMatrix
 from sympy.matrices.expressions.matadd import MatAdd
 from sympy.matrices.expressions.matmul import MatMul
+from sympy.core.function import AppliedUndef
+from sympy.core.operations import AssocOp, LatticeOp
+from sympy.sets.sets import FiniteSet, Intersection, Union
 from sympy.printing.latex import LatexPrinter, latex
 
 Path = Tuple[int, ...]
@@ -47,6 +55,8 @@ __all__ = [
     "get_at",
     "replace_at",
     "delete_at",
+    "insert_at",
+    "is_insertable",
     "rebuild",
 ]
 
@@ -111,6 +121,26 @@ def replace_at(expr: Basic, path: Path, new: Basic) -> Basic:
         raise ValueError(f"Invalid path {format_path(path)} for {expr}")
     args[i] = replace_at(args[i], path[1:], new)
     return rebuild(expr, args)
+
+
+def insert_at(expr: Basic, path: Path, index: int, new: Basic) -> Basic:
+    """Return ``expr`` with ``new`` inserted at position ``index`` of the
+    arguments of the node at ``path``."""
+    parent = get_at(expr, path)
+    args = list(parent.args)
+    if not 0 <= index <= len(args):
+        raise ValueError(f"Invalid insertion index {index} for {parent}")
+    args.insert(index, new)
+    return replace_at(expr, path, rebuild(parent, args))
+
+
+#: Node types whose argument list can be extended by the editor ("insert a
+#: term here").  Commutative ones (Add, Mul, ...) re-order their arguments.
+INSERTABLE = (AssocOp, LatticeOp, MatAdd, MatMul, FiniteSet, Union, Intersection, AppliedUndef)
+
+
+def is_insertable(node: Basic) -> bool:
+    return isinstance(node, INSERTABLE)
 
 
 def delete_at(expr: Basic, path: Path) -> Basic:
@@ -217,7 +247,13 @@ class AnnotatedLatexPrinter(LatexPrinter):
 
     # -- internals ----------------------------------------------------------
 
-    def _locate(self, expr: Basic) -> Optional[Path]:
+    def _locate(self, expr: Basic) -> Optional[Tuple[Path, Basic]]:
+        """The ``(path, node)`` of the unclaimed tree node that ``expr`` prints,
+        or None.  ``node`` is ``expr`` itself except for a denominator, where
+        the printer builds ``Pow(b, n)`` to print the tree's ``Pow(b, -n)``
+        under the fraction bar: that real node is claimed for it, and it is
+        the real node whose children are then searched, so the printed
+        exponent ``n`` is not mistaken for the tree's ``-n``."""
         if not self._stack:
             return None
         frame = self._stack[-1]
@@ -226,7 +262,15 @@ class AnnotatedLatexPrinter(LatexPrinter):
                 continue
             if node is expr or (type(node) is type(expr) and node == expr):
                 self._claimed.add(path)
-                return path
+                return path, node
+        if isinstance(expr, Pow):
+            inverse = Pow(expr.base, -expr.exp, evaluate=False)
+            for path, node in frame.candidates(inverse, self.max_depth):
+                if path in self._claimed:
+                    continue
+                if isinstance(node, Pow) and node.base == expr.base and node.exp == -expr.exp:
+                    self._claimed.add(path)
+                    return path, node
         return None
 
     def _annotated(self, expr: Basic, path: Path, tex: str) -> str:
@@ -236,10 +280,11 @@ class AnnotatedLatexPrinter(LatexPrinter):
     def _print(self, expr, **kwargs):
         if self._stack is None or not isinstance(expr, Basic):
             return super()._print(expr, **kwargs)
-        path = self._locate(expr)
-        if path is None:
+        found = self._locate(expr)
+        if found is None:
             return super()._print(expr, **kwargs)
-        self._stack.append(_Frame(expr, path))
+        path, node = found
+        self._stack.append(_Frame(node, path))
         try:
             tex = super()._print(expr, **kwargs)
         finally:
@@ -256,11 +301,12 @@ class AnnotatedLatexPrinter(LatexPrinter):
             if i == 0:
                 tex += self._print_add_term(term)
             elif term.could_extract_minus_sign():
-                path = self._locate(term) if self._stack is not None else None
-                if path is None:
+                found = self._locate(term) if self._stack is not None else None
+                if found is None:
                     tex += " - " + self._print_add_term(-term)
                 else:
-                    self._stack.append(_Frame(term, path))
+                    path, node = found
+                    self._stack.append(_Frame(node, path))
                     try:
                         inner = self._print_add_term(-term)
                     finally:

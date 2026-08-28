@@ -59,6 +59,7 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | Select sub-expression | click | ↓ (enter children), ←/→ (siblings) |
 | Select enclosing expression | click again on the same spot, or **↑** | ↑ |
 | Replace selection by typing | | just start typing (SymPy syntax) |
+| Extend the selection (insert after it) | | `+` `-` `*` `/` `^` `=` `,` — the field opens as `selection +` with the caret at the end; with nothing selected the whole expression is extended |
 | Edit selection's existing text | double-click / **Edit** | Enter |
 | Apply / cancel an edit | click elsewhere applies | Enter / Esc |
 | Remove selection from its parent | **Delete** | Del |
@@ -72,16 +73,38 @@ when nothing is selected).
 
 Typed input is parsed with `sympy.parsing.sympy_parser.parse_expr` in the
 context of the expression, so existing symbols keep their assumptions and
-undefined functions (and `MatrixSymbol`s / `IndexedBase`s) are reused; names
-that do not occur in the current expression become plain symbols.  Ancestors are rebuilt with SymPy's normal
-automatic evaluation (replacing `y` by `-x` in `x + y` gives `0`).
+undefined functions (and `MatrixSymbol`s / `IndexedBase`s) are reused.  Names
+that do not occur in the current expression become plain symbols - unless the
+node being replaced is a matrix, in which case they become `MatrixSymbol`s of
+its shape (so `C.T` typed over `B` in `A*B` works).  Ancestors are rebuilt
+with SymPy's normal automatic evaluation (replacing `y` by `-x` in `x + y`
+gives `0`).
+
+A denominator raised to a power (`(x+1)**2` in `x/(x+1)**2`) is selectable as
+a whole even though the tree holds `Pow(x + 1, -2)`: editing it replaces the
+denominator (typing `y**3` gives `x/y**3`).
+
+The **Symbols** panel under the formula lists every name with what it stands
+for (`Symbol` with its assumptions, `MatrixSymbol` with its shape, ...) and
+lets you change it throughout the expression: make `y` a 2×2 `MatrixSymbol`,
+or an explicit `Matrix` of `y[i, j]` entries (symbolic dimensions such as `n`
+are fine for a `MatrixSymbol`).  Products and powers are rebuilt as
+`MatMul`/`MatPow`; a change SymPy cannot represent (a matrix under a
+transpose back to a scalar) is refused with its error.
+
+The transformation dropdown offers what applies to the selection: the general
+ops always, and the ops registered for the selection's *kind* - for a matrix
+(`MatrixSymbol` algebra or an explicit matrix): transpose, adjoint, inverse,
+trace, determinant, `as_explicit`, conjugate - in a group of their own.
 
 Matrices (dense and sparse), `MatrixSymbol` expressions, block matrices,
 determinants/traces and N-dimensional `Array`s are supported: every entry is
 selectable and editable, and the container is rebuilt around the edit (see
 `examples/demo_matrices.py` and `examples/demo_matrices.ipynb`).
 
-Register your own transformations:
+Register your own transformations, for every selection or only for some
+kinds (`"matrix"`, `"array"`, `"scalar"`; the mapping from kinds to SymPy
+types is `sympy_editor.ops.KINDS`):
 
 ```python
 from sympy_editor import register_op
@@ -89,6 +112,10 @@ from sympy_editor import register_op
 @register_op("my_op", label="My op")
 def my_op(expr):
     return ...
+
+@register_op("gram", label="Gram matrix", kinds=("matrix",))
+def gram(m):
+    return m.T * m
 ```
 
 ## How it works

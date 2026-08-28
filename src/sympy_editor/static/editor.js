@@ -113,6 +113,9 @@ var SympyEditor = (function () {
   /* DOM helper                                                          */
   /* ------------------------------------------------------------------ */
 
+  //: Keys that extend the selection instead of replacing it (see _onKey).
+  var EXTEND_KEYS = ["+", "-", "*", "/", "^", "=", ","];
+
   function h(tag, attrs, children) {
     var el = document.createElement(tag);
     if (attrs) {
@@ -169,7 +172,7 @@ var SympyEditor = (function () {
         btn("undo", "↶", "Undo (Ctrl+Z)");
         btn("redo", "↷", "Redo (Ctrl+Shift+Z, Ctrl+Y)");
         sep();
-        btn("edit", "Edit", "Edit the selection in place (Enter, double-click, or just start typing)");
+        btn("edit", "Edit", "Edit the selection in place (Enter, double-click, or just start typing; + - * / ^ extend it)");
         btn("delete", "Delete", "Remove the selection from its parent (Del)");
         btn("parent", "↑", "Select the enclosing expression (↑)");
         sep();
@@ -194,6 +197,18 @@ var SympyEditor = (function () {
 
       this.source = h("code", { class: "se-source", title: "SymPy source (click to edit the whole expression)" });
       if (o.showSource) root.appendChild(this.source);
+
+      // Symbols panel: what each name stands for (Symbol, MatrixSymbol with
+      // its shape, explicit Matrix...) with controls to change it.
+      this.symbols = null;
+      if (!o.readOnly && o.symbolsPanel !== false) {
+        this.symbolsBody = h("div", { class: "se-symbols-body" });
+        this.symbols = h("details", { class: "se-symbols", hidden: "" }, [
+          h("summary", { title: "The names in the expression and their types; change a name into a matrix symbol or an explicit matrix" }, ["Symbols"]),
+          this.symbolsBody
+        ]);
+        root.appendChild(this.symbols);
+      }
 
       this.error = h("div", { class: "se-error", role: "alert", hidden: "" });
       root.appendChild(this.error);
@@ -220,6 +235,7 @@ var SympyEditor = (function () {
       this.view.addEventListener("click", function (ev) { self._onClick(ev); });
       this.view.addEventListener("dblclick", function (ev) { self._onDblClick(ev); });
       this.root.addEventListener("keydown", function (ev) {
+        if (self.symbols && self.symbols.contains(ev.target)) return;
         var t = ev.target;
         if (t === self.input || (t && t.tagName === "SELECT")) return;
         self._onKey(ev);
@@ -246,6 +262,7 @@ var SympyEditor = (function () {
       while (sel && !(sel in this.tree)) sel = parentPath(sel);
       this.selected = sel;
       this._fillOps();
+      this._fillSymbols();
       this._applySelection();
       this._showError(snap.error);
       if (snap.closed) {
@@ -289,19 +306,100 @@ var SympyEditor = (function () {
       this.source.textContent = this.state.src || "";
     }
 
+    /** The dropdown offers the ops that apply to the selection (the whole
+     *  expression when nothing is selected): those registered for its kind
+     *  ("matrix", "scalar"...) in a group of their own, after the general ones. */
     _fillOps() {
-      if (!this.opsSelect) return;
-      var ops = this.state.ops || [];
-      var key = JSON.stringify(ops.map(function (op) { return op.name; }));
+      if (!this.opsSelect || !this.state) return;
+      var node = this.state.nodes ? this.state.nodes[this.selected || "/"] : null;
+      var kind = node ? node.kind : null;
+      var ops = (this.state.ops || []).filter(function (op) {
+        return !op.kinds || (kind && op.kinds.indexOf(kind) >= 0);
+      });
+      var key = kind + "|" + JSON.stringify(ops.map(function (op) { return op.name; }));
       if (key === this._opsKey) return;
       this._opsKey = key;
       var current = this.opsSelect.value;
       this.opsSelect.textContent = "";
+      var general = ops.filter(function (op) { return !op.kinds; });
+      var specific = ops.filter(function (op) { return op.kinds; });
       var self = this;
-      ops.forEach(function (op) {
-        self.opsSelect.appendChild(h("option", { value: op.name }, [op.label || op.name]));
+      var add = function (parent, op) { parent.appendChild(h("option", { value: op.name }, [op.label || op.name])); };
+      if (specific.length) {
+        var kindLabel = kind ? kind.charAt(0).toUpperCase() + kind.slice(1) : "Selection";
+        var group = h("optgroup", { label: kindLabel });
+        specific.forEach(function (op) { add(group, op); });
+        this.opsSelect.appendChild(group);
+        var rest = h("optgroup", { label: "General" });
+        general.forEach(function (op) { add(rest, op); });
+        this.opsSelect.appendChild(rest);
+      } else {
+        general.forEach(function (op) { add(self.opsSelect, op); });
+      }
+      if (current && ops.some(function (op) { return op.name === current; })) this.opsSelect.value = current;
+    }
+
+    /** One row per name in the expression: its type, and controls to make it
+     *  a Symbol, a MatrixSymbol (rows x cols) or an explicit Matrix. */
+    _fillSymbols() {
+      if (!this.symbols) return;
+      var syms = this.state.symbols || [];
+      var key = JSON.stringify(syms);
+      if (key === this._symbolsKey) return;
+      this._symbolsKey = key;
+      this.symbolsBody.textContent = "";
+      this.symbols.hidden = !syms.length;
+      var self = this;
+      syms.forEach(function (sym) {
+        var row = h("div", { class: "se-sym" }, [h("code", {}, [sym.name])]);
+        var kinds = ["Symbol", "MatrixSymbol", "Matrix"];
+        if (kinds.indexOf(sym.type) < 0) {
+          var note = sym.type + (sym.type === "IndexedBase" ? " (indexed)" : "");
+          row.appendChild(h("span", { class: "se-sym-note" }, [note]));
+          self.symbolsBody.appendChild(row);
+          return;
+        }
+        var select = h("select", { title: "What " + sym.name + " stands for" });
+        kinds.forEach(function (k) {
+          var label = k === "Matrix" ? "Matrix (explicit)" : k;
+          select.appendChild(h("option", { value: k }, [label]));
+        });
+        select.value = sym.type;
+        var shape = sym.shape || ["2", "2"];
+        var rows = h("input", { type: "text", value: shape[0], title: "Rows", "aria-label": "Rows" });
+        var cols = h("input", { type: "text", value: shape[1], title: "Columns", "aria-label": "Columns" });
+        var times = h("span", {}, ["\u00d7"]);
+        var button = h("button", { type: "button", title: "Change " + sym.name + " throughout the expression" }, ["Set"]);
+        var shapeVisible = function () {
+          var show = select.value !== "Symbol";
+          rows.hidden = cols.hidden = times.hidden = !show;
+        };
+        select.addEventListener("change", shapeVisible);
+        var apply = function () {
+          if (self.busy || self.closed) return;
+          var msg = { action: "retype", name: sym.name, type: select.value };
+          if (select.value !== "Symbol") { msg.rows = rows.value.trim(); msg.cols = cols.value.trim(); }
+          self.send(msg);
+        };
+        button.addEventListener("click", apply);
+        [rows, cols].forEach(function (inp) {
+          inp.addEventListener("keydown", function (ev) {
+            ev.stopPropagation();
+            if (ev.key === "Enter") { ev.preventDefault(); apply(); }
+          });
+        });
+        select.addEventListener("keydown", function (ev) { ev.stopPropagation(); });
+        row.appendChild(select);
+        row.appendChild(rows);
+        row.appendChild(times);
+        row.appendChild(cols);
+        row.appendChild(button);
+        if (sym.assumptions && sym.assumptions.length) {
+          row.appendChild(h("span", { class: "se-sym-note" }, [sym.assumptions.join(", ")]));
+        }
+        shapeVisible();
+        self.symbolsBody.appendChild(row);
       });
-      if (current) this.opsSelect.value = current;
     }
 
     /* ---- selection ---- */
@@ -342,6 +440,7 @@ var SympyEditor = (function () {
     /** Select a path (null to clear). */
     select(path) {
       this.selected = (path && (path in this.tree)) ? path : null;
+      this._fillOps();
       this._applySelection();
       this._updateToolbar();
     }
@@ -353,9 +452,9 @@ var SympyEditor = (function () {
       if (node) {
         var els = this._els(this.selected);
         for (var j = 0; j < els.length; j++) els[j].classList.add("se-selected");
-        this._setStatus(node.type + ": " + node.src);
+        this._setStatus(node.type + ": " + node.src + (node.reciprocal ? "  (denominator: the node is 1 over this)" : ""));
       } else if (!this.closed) {
-        this._setStatus(this.annotated ? (this.opts.readOnly ? "" : "Click a sub-expression to select it")
+        this._setStatus(this.annotated ? (this.opts.readOnly ? "" : "Click a sub-expression to select it; type + - * / to extend the whole expression")
                                        : "Structure unavailable (plain rendering)");
       }
     }
@@ -419,6 +518,13 @@ var SympyEditor = (function () {
           var i = sib.indexOf(this.selected) + (k === "ArrowLeft" ? -1 : 1);
           if (i >= 0 && i < sib.length) this.select(sib[i]);
         }
+      } else if (!ro && !mod && !ev.altKey && EXTEND_KEYS.indexOf(k) >= 0) {
+        // An operator extends the selection (the whole expression when nothing
+        // is selected): the field opens with its source and the operator, the
+        // caret after them, so new terms and factors can be typed without
+        // retyping what is there.
+        var target = this.selected || "/";
+        this.beginEdit(target, this.state.nodes[target].src + " " + k + " ", true);
       } else if (!ro && !mod && !ev.altKey && k.length === 1 && this.selected) {
         this.beginEdit(this.selected, k);   // start replacing the selection with what is typed
       } else {
@@ -430,8 +536,11 @@ var SympyEditor = (function () {
     /* ---- in-place editing ---- */
 
     /** Replace the rendering of `path` with a text field inside the formula.
-     *  `initial` (optional) pre-fills the field instead of the node's source. */
-    beginEdit(path, initial) {
+     *  `initial` (optional) pre-fills the field instead of the node's source;
+     *  with `extend` the field keeps the whole text and puts the caret at its
+     *  end (an insertion), otherwise the node's source is selected for
+     *  replacement. */
+    beginEdit(path, initial, extend) {
       if (this.opts.readOnly || this.closed || !this.state || this.busy) return;
       if (!path || !(path in this.state.nodes)) path = "/";
       if (!(path in this.state.nodes)) return;
@@ -468,6 +577,7 @@ var SympyEditor = (function () {
       this._setStatus("Editing " + this.state.nodes[path].type + " – Enter to apply, Esc to cancel");
       input.focus();
       if (initial === undefined) input.select();
+      else if (extend) input.setSelectionRange(input.value.length, input.value.length);
     }
 
     _endEdit() {
@@ -492,7 +602,10 @@ var SympyEditor = (function () {
       this._applySelection();
       this.view.focus({ preventScroll: true });
       if (!src || src === original) return;
-      this.send({ action: path === "/" ? "set" : "replace", path: path, src: src });
+      var msg = { action: path === "/" ? "set" : "replace", path: path, src: src };
+      var node = this.state && this.state.nodes ? this.state.nodes[path] : null;
+      if (node && node.reciprocal) msg.reciprocal = true;
+      this.send(msg);
     }
 
     cancelEdit(silent) {
@@ -632,32 +745,50 @@ var SympyEditor = (function () {
     "import json, sys",
     "if '/sympy_editor_pkg' not in sys.path:",
     "    sys.path.insert(0, '/sympy_editor_pkg')",
-    "from sympy import sympify",
     "from sympy_editor.document import Document",
-    "__sympy_editor_doc = Document(sympify(__sympy_editor_srepr), **json.loads(__sympy_editor_settings))",
-    "def __sympy_editor_handle(msg):",
-    "    return json.dumps(__sympy_editor_doc.handle(json.loads(msg)))",
+    "__sympy_editor_docs = {}",
+    "def __sympy_editor_new(doc_id, srepr, settings):",
+    "    __sympy_editor_docs[doc_id] = Document(srepr, **json.loads(settings))",
+    "def __sympy_editor_handle(doc_id, msg):",
+    "    return json.dumps(__sympy_editor_docs[doc_id].handle(json.loads(msg)))",
     ""
   ].join("\n");
 
+  /** The one Pyodide interpreter of the page, with SymPy and the editor's
+   *  modules loaded: every editor on the page keeps its Document in it.  The
+   *  cache lives on window, since each embedded fragment may carry its own
+   *  copy of this script. */
+  function pyodideRuntime(cfg, report) {
+    var shared = window.__sympyEditorPyodide || (window.__sympyEditorPyodide = { runtimes: {}, docs: 0 });
+    var key = cfg.pyodideIndex || cfg.pyodideJs || "default";
+    if (!shared.runtimes[key]) {
+      shared.runtimes[key] = (async function () {
+        report("Loading Python runtime (Pyodide)…");
+        if (typeof window.loadPyodide !== "function") await loadScript(cfg.pyodideJs);
+        var py = await window.loadPyodide({ indexURL: cfg.pyodideIndex });
+        report("Loading SymPy…");
+        await py.loadPackage("sympy");
+        var dir = "/sympy_editor_pkg/sympy_editor";
+        py.FS.mkdirTree(dir);
+        for (var name in cfg.sources) py.FS.writeFile(dir + "/" + name, cfg.sources[name]);
+        py.runPython(PYODIDE_BOOT);
+        return { py: py, newDoc: py.globals.get("__sympy_editor_new"), handle: py.globals.get("__sympy_editor_handle") };
+      })().catch(function (e) { delete shared.runtimes[key]; throw e; });
+    }
+    return shared.runtimes[key];
+  }
+
   /** Run the Python Document inside the browser with Pyodide (loaded lazily
-   *  on the first edit).  cfg: {pyodideJs, pyodideIndex, sources, srepr, document}. */
+   *  on the first edit, once per page).  cfg: {pyodideJs, pyodideIndex, sources, srepr, document}. */
   function pyodideBackend(cfg) {
     var ready = null;
     async function init(report) {
-      report("Loading Python runtime (Pyodide)…");
-      if (typeof window.loadPyodide !== "function") await loadScript(cfg.pyodideJs);
-      var py = await window.loadPyodide({ indexURL: cfg.pyodideIndex });
-      report("Loading SymPy…");
-      await py.loadPackage("sympy");
-      var dir = "/sympy_editor_pkg/sympy_editor";
-      py.FS.mkdirTree(dir);
-      for (var name in cfg.sources) py.FS.writeFile(dir + "/" + name, cfg.sources[name]);
-      py.globals.set("__sympy_editor_srepr", cfg.srepr);
-      py.globals.set("__sympy_editor_settings", JSON.stringify(cfg.document || {}));
-      py.runPython(PYODIDE_BOOT);
+      var runtime = await pyodideRuntime(cfg, report);
+      var shared = window.__sympyEditorPyodide;
+      var id = "doc" + (++shared.docs);
+      runtime.newDoc(id, cfg.srepr, JSON.stringify(cfg.document || {}));
       report("");
-      return py.globals.get("__sympy_editor_handle");
+      return function (msg) { return runtime.handle(id, msg); };
     }
     return {
       send: async function (msg, report) {

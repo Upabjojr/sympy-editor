@@ -120,7 +120,9 @@ def render_fragment(config: Dict[str, Any], element_id: Optional[str] = None) ->
         f'<link rel="stylesheet" href="{katex_css}">\n'
         f"<style>\n{read_static('editor.css')}\n</style>\n"
         f'<div id="{element_id}" class="sympy-editor-host"></div>\n'
-        f"<script>\n{read_static('editor.js')}\n</script>\n"
+        # Several fragments on one page share one SympyEditor (and, through
+        # it, one Pyodide runtime); the script is skipped once it is defined.
+        f'<script>\nif (!window.SympyEditor) {{\n{read_static("editor.js")}\n}}\n</script>\n'
         "<script>\n"
         f'SympyEditor.mount(document.getElementById("{element_id}"), {_script_json(config)});\n'
         "</script>\n"

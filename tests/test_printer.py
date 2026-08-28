@@ -1,5 +1,6 @@
 import pytest
 from sympy import (
+    Pow,
     Abs, Derivative, Eq, Function, ImmutableMatrix, Integral, Lambda, Limit, Matrix,
     Piecewise, Rational, Subs, Sum, cos, exp, latex, log, oo, pi, sin, sqrt, symbols, sympify,
 )
@@ -56,7 +57,12 @@ def test_paths_point_to_the_printed_nodes(expr):
     tex, nodes = annotate(expr)
     assert () in nodes and nodes[()] == expr
     for path, node in nodes.items():
-        assert get_at(expr, path) == node
+        actual = get_at(expr, path)
+        # A denominator raised to a power is printed as the reciprocal of the
+        # tree's node (Pow(b, -n) shown as b**n under the fraction bar).
+        reciprocal = (isinstance(actual, Pow) and isinstance(node, Pow)
+                      and actual.base == node.base and actual.exp == -node.exp)
+        assert actual == node or reciprocal
         assert r"\htmlData{path=%s}{" % format_path(path) in tex
 
 

@@ -126,3 +126,103 @@ def test_listeners_and_custom_ops():
 def test_rejects_non_sympy():
     with pytest.raises(TypeError):
         Document([1, 2])
+
+
+# -- denominators, matrix context, symbol types, op kinds ---------------------
+
+def test_denominator_power_is_selectable_and_edits_as_denominator():
+    from sympy import symbols
+    x, y = symbols("x y")
+    doc = Document(x / (x + 1) ** 2)
+    nodes = doc.snapshot()["nodes"]
+    assert nodes["/1"] == {"src": "(x + 1)**2", "type": "Pow", "kind": "scalar", "reciprocal": True}
+    assert "reciprocal" not in nodes["/1/0"]              # the base is a real node
+    doc.handle({"action": "replace", "path": "/1", "src": "y**3", "reciprocal": True})
+    assert doc.expr == x / y ** 3
+    doc.undo()
+    doc.replace("/1/0", "y")                              # editing the base still works
+    assert doc.expr == x / y ** 2
+
+
+def test_new_names_in_a_matrix_slot_are_matrix_symbols():
+    from sympy import MatrixSymbol, Symbol, Transpose, symbols
+    A, B = MatrixSymbol("A", 2, 2), MatrixSymbol("B", 2, 2)
+    x, y = symbols("x y")
+    doc = Document(A * B + 2 * A.T)
+    doc.replace("/1/1", "C.T")
+    C = MatrixSymbol("C", 2, 2)
+    assert doc.expr == A * C.T + 2 * A.T
+    assert doc.namespace()["C"] == C
+    # the whole expression, set from a string, keeps the matrix context
+    doc.handle({"action": "set", "src": "D*A + C.I"})
+    assert doc.namespace()["D"] == MatrixSymbol("D", 2, 2)
+    # a scalar slot still gets scalars; sin() and pi are not turned into matrices
+    doc2 = Document(x + y)
+    doc2.replace("/0", "z*sin(w) + pi")
+    assert doc2.namespace()["z"] == Symbol("z")
+    assert doc._new_names("C.T*sin(x) + D_1 + pi", {"x": x}) == ["C", "D_1"]
+
+
+def test_symbols_panel_info_and_retype():
+    from sympy import MatAdd, MatrixSymbol, Matrix, symbols
+    x, y = symbols("x y")
+    p = symbols("p", positive=True)
+    doc = Document(x * y + y ** 2 + p)
+    symbols_info = doc.snapshot()["symbols"]
+    assert [s["name"] for s in symbols_info] == ["p", "x", "y"]
+    assert symbols_info[1] == {"name": "x", "type": "Symbol", "assumptions": []}
+    assert "positive" in symbols_info[0]["assumptions"] and "commutative" not in symbols_info[0]["assumptions"]
+    doc.handle({"action": "retype", "name": "y", "type": "MatrixSymbol", "rows": "2", "cols": "n"})
+    Y = MatrixSymbol("y", 2, symbols("n"))
+    assert doc.namespace()["y"] == Y
+    assert [s for s in doc.symbol_info() if s["name"] == "y"] == [
+        {"name": "y", "type": "MatrixSymbol", "shape": ["2", "n"]}]
+    doc.undo()
+    doc.retype("y", "Matrix", 2, 2)
+    assert isinstance(doc.expr.args[0], Matrix) or doc.expr.has(Matrix) or "y[0, 0]" in str(doc.expr)
+    # a matrix under a transpose cannot become a scalar: refused, state unchanged
+    doc3 = Document(MatrixSymbol("A", 2, 2).T)
+    snap = doc3.handle({"action": "retype", "name": "A", "type": "Symbol"})
+    assert snap["error"] and "cannot become" in snap["error"]
+    assert doc3.expr == MatrixSymbol("A", 2, 2).T
+    assert "No symbol" in doc3.handle({"action": "retype", "name": "Q", "type": "Symbol"})["error"]
+
+
+def test_ops_have_kinds_and_matrix_ops_apply_to_matrices():
+    from sympy import Determinant, MatrixSymbol, Matrix, Trace, symbols
+    x, y = symbols("x y")
+    A, B = MatrixSymbol("A", 2, 2), MatrixSymbol("B", 2, 2)
+    doc = Document(A * B + x * A)
+    snap = doc.snapshot()
+    kinds = {n["src"]: n["kind"] for n in snap["nodes"].values()}
+    assert snap["nodes"]["/"]["kind"] == "matrix" and kinds["A*B"] == "matrix" and kinds["x"] == "scalar"
+    by_name = {op["name"]: op for op in snap["ops"]}
+    assert by_name["simplify"]["kinds"] is None
+    assert by_name["transpose"]["kinds"] == ["matrix"]
+    doc = Document(A * B)
+    doc.apply("/", "transpose")
+    assert doc.expr == (A * B).T
+    doc.apply("/", "trace")
+    assert doc.expr == Trace((A * B).T)
+    doc = Document(Matrix([[x, 1], [2, y]]))
+    doc.apply("/", "determinant")
+    assert doc.expr == x * y - 2
+    doc = Document(A)
+    doc.apply("/", "as_explicit")
+    assert doc.snapshot()["nodes"]["/"]["kind"] == "matrix" and doc.expr.shape == (2, 2)
+    import pytest
+    from sympy_editor.ops import register_op
+    with pytest.raises(ValueError):
+        register_op("bad", lambda e: e, kinds=("nonsense",))
+
+
+def test_srepr_strings_keep_matrix_symbol_names():
+    # SymPy < 1.14 does not export Str; a Document built from srepr text (the
+    # Pyodide front end does that) must still get MatrixSymbol("A"), not an
+    # undefined function Str(A) whose name prints as "Str".
+    from sympy import MatrixSymbol, srepr
+    A = MatrixSymbol("A", 2, 2)
+    doc = Document(srepr(A * A.T))
+    assert doc.namespace()["A"] == A
+    assert doc.snapshot()["src"] == "A*A.T"
+    assert Document("MatrixSymbol(Str('B'), Integer(2), Integer(3))").expr == MatrixSymbol("B", 2, 3)
