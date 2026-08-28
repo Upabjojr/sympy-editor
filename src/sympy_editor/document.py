@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Union
 
-from sympy import Basic, Dummy, Symbol, sympify, srepr
+from sympy import Basic, Dummy, IndexedBase, MatrixSymbol, Symbol, sympify, srepr
 from sympy.core.function import AppliedUndef
 from sympy.parsing.sympy_parser import (
     convert_xor,
@@ -142,12 +142,15 @@ class Document:
         return self._commit(replace_at(self.expr, p, sympify(func(get_at(self.expr, p)))))
 
     def namespace(self) -> Dict[str, Any]:
-        """Symbols and undefined functions of the current expression, by name,
-        so that typed input reuses them (assumptions included)."""
+        """Symbols, matrix symbols, indexed bases and undefined functions of
+        the current expression, by name, so that typed input reuses them
+        (assumptions included)."""
         ns: Dict[str, Any] = {}
-        for s in self.expr.atoms(Symbol):
-            if not isinstance(s, Dummy):
-                ns.setdefault(s.name, s)
+        for s in self.expr.atoms(Symbol, MatrixSymbol, IndexedBase):
+            if isinstance(s, Dummy):
+                continue
+            name = s.label if isinstance(s, IndexedBase) else s.name
+            ns.setdefault(str(name), s)
         for f in self.expr.atoms(AppliedUndef):
             ns.setdefault(f.func.__name__, f.func)
         return ns

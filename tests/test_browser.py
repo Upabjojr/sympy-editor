@@ -14,7 +14,7 @@ import urllib.request
 from contextlib import closing
 
 import pytest
-from sympy import sin, symbols
+from sympy import Array, Matrix, sin, symbols
 
 from sympy_editor import Document, to_html
 from sympy_editor.html import default_urls
@@ -48,6 +48,24 @@ def browser():
             b.close()
     except Exception as exc:
         pytest.skip(f"playwright unavailable: {exc}")
+
+
+@pytest.fixture
+def serve_expr():
+    """Factory: serve_expr(expr) -> (server, document); servers stop at teardown."""
+    servers = []
+
+    def _serve(expr):
+        doc = Document(expr)
+        srv = EditorServer(doc, port=0)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        servers.append(srv)
+        return srv, doc
+
+    yield _serve
+    for srv in servers:
+        srv.shutdown()
+        srv.server_close()
 
 
 @pytest.fixture
@@ -168,6 +186,33 @@ def test_readonly_page(browser, tmp_path):
     assert page.locator('[data-cmd="edit"]').count() == 0
     _click(page, '/0')
     assert page.locator(".se-selected").count() == 1
+
+
+def test_matrix_element_edit(browser, serve_expr):
+    srv, doc = serve_expr(Matrix([[x, y], [z, 1]]))
+    page = _open(browser, srv.url)
+    assert page.locator(".se-view .katex [data-path]").count() == 5   # root + 4 elements
+    _click(page, "/2/1")                                              # y
+    assert page.locator(".se-status").inner_text() == "Symbol: y"
+    page.keyboard.type("y**2")
+    page.keyboard.press("Enter")
+    page.wait_for_function("document.querySelector('.se-source').textContent.includes('y**2')")
+    assert doc.expr == Matrix([[x, y**2], [z, 1]])
+    assert page.errors == []
+
+
+def test_ndim_array_element_edit(browser, serve_expr):
+    arr = Array([[[x, 1], [y, 2]], [[z, 3], [1, 4]]])
+    srv, doc = serve_expr(arr)
+    page = _open(browser, srv.url)
+    path = next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "3")
+    _click(page, path)
+    assert page.locator(".se-status").inner_text() == "Integer: 3"
+    page.keyboard.type("w")
+    page.keyboard.press("Enter")
+    page.wait_for_function("document.querySelector('.se-source').textContent.includes('w')")
+    assert doc.expr[1, 0, 1] == symbols("w") and doc.expr.shape == (2, 2, 2)
+    assert page.errors == []
 
 
 @pytest.mark.skipif(not os.environ.get("SYMPY_EDITOR_SLOW_TESTS"), reason="set SYMPY_EDITOR_SLOW_TESTS=1")

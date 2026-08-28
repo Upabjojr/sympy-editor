@@ -66,6 +66,12 @@ direct call into Pyodide.
   with the exponent).  Synthesised objects print unannotated, but their
   children still get located.  `_print_Add` is overridden so a negated term
   is annotated with the original term's path, sign included.
+- **Containers and rebuild rules** live in `printer.rebuild`: `func(*args)`
+  by default; `BlockMatrix` is rebuilt from rows; `MatMul`/`MatAdd` get
+  `doit(deep=False)` so `A*A` becomes `A**2` like operator syntax would.
+  Matrices/N-dim arrays work because their entries sit in a transparent
+  `Tuple` arg.  `Document.namespace()` puts `Symbol`, `MatrixSymbol`,
+  `IndexedBase` and undefined functions in scope for typed input.
 - **Annotation must be transparent:** `strip_annotations(annotated) ==
   sympy.latex(expr)` is enforced by tests for every expression in the suite.
   Keep it that way when touching the printer.

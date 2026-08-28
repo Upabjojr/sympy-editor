@@ -75,6 +75,11 @@ context of the expression, so existing symbols keep their assumptions and
 undefined functions are reused.  Ancestors are rebuilt with SymPy's normal
 automatic evaluation (replacing `y` by `-x` in `x + y` gives `0`).
 
+Matrices (dense and sparse), `MatrixSymbol` expressions, block matrices,
+determinants/traces and N-dimensional `Array`s are supported: every entry is
+selectable and editable, and the container is rebuilt around the edit (see
+`examples/demo_matrices.py` and `examples/demo_matrices.ipynb`).
+
 Register your own transformations:
 
 ```python

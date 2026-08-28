@@ -31,6 +31,9 @@ from sympy import sympify
 from sympy.core.basic import Basic
 from sympy.core.containers import Tuple as SymTuple
 from sympy.functions.elementary.piecewise import ExprCondPair
+from sympy.matrices.expressions.blockmatrix import BlockMatrix
+from sympy.matrices.expressions.matadd import MatAdd
+from sympy.matrices.expressions.matmul import MatMul
 from sympy.printing.latex import LatexPrinter, latex
 
 Path = Tuple[int, ...]
@@ -44,6 +47,7 @@ __all__ = [
     "get_at",
     "replace_at",
     "delete_at",
+    "rebuild",
 ]
 
 
@@ -78,11 +82,26 @@ def get_at(expr: Basic, path: Path) -> Basic:
     return node
 
 
+def rebuild(expr: Basic, args) -> Basic:
+    """``expr`` reconstructed with new ``args`` (``expr.func(*args)``, with
+    special cases for classes whose constructor does not accept their own
+    ``args``)."""
+    args = list(args)
+    if isinstance(expr, BlockMatrix):
+        # BlockMatrix stores a matrix of blocks but is constructed from rows.
+        return BlockMatrix(args[0].tolist())
+    if isinstance(expr, (MatMul, MatAdd)):
+        # Matrix arithmetic is canonicalised by the operators (A*A -> A**2),
+        # not by the constructors; doit(deep=False) does the same at this level.
+        return expr.func(*args).doit(deep=False)
+    return expr.func(*args)
+
+
 def replace_at(expr: Basic, path: Path, new: Basic) -> Basic:
     """Return ``expr`` with the node at ``path`` replaced by ``new``.
 
-    Ancestors are rebuilt with ``node.func(*args)``, so SymPy's automatic
-    evaluation applies (``x + (-x)`` becomes ``0``, etc.).
+    Ancestors are rebuilt with :func:`rebuild` (normally ``node.func(*args)``),
+    so SymPy's automatic evaluation applies (``x + (-x)`` becomes ``0``, etc.).
     """
     if not path:
         return new
@@ -91,7 +110,7 @@ def replace_at(expr: Basic, path: Path, new: Basic) -> Basic:
     if not 0 <= i < len(args):
         raise ValueError(f"Invalid path {format_path(path)} for {expr}")
     args[i] = replace_at(args[i], path[1:], new)
-    return expr.func(*args)
+    return rebuild(expr, args)
 
 
 def delete_at(expr: Basic, path: Path) -> Basic:
@@ -101,7 +120,7 @@ def delete_at(expr: Basic, path: Path) -> Basic:
     parent = get_at(expr, path[:-1])
     args = list(parent.args)
     del args[path[-1]]
-    return replace_at(expr, path[:-1], parent.func(*args))
+    return replace_at(expr, path[:-1], rebuild(parent, args))
 
 
 # --------------------------------------------------------------------------
