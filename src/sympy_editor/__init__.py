@@ -63,12 +63,34 @@ __all__ = [
 ]
 
 
-def edit(expr, **kwargs):
-    """Return a Jupyter widget editing ``expr`` (see :class:`~sympy_editor.widget.SympyEditorWidget`)."""
+def edit(expr, backend="auto", **kwargs):
+    """Edit ``expr`` in Jupyter.
+
+    ``backend``:
+
+    ``"kernel"``
+        An `anywidget <https://anywidget.dev>`_ widget: every edit runs in
+        **this** kernel's SymPy, ``w.expr`` is live (needs
+        ``pip install "sympy-editor[jupyter]"``).
+    ``"pyodide"``
+        Plain HTML output that runs its own SymPy in the browser (Pyodide);
+        it survives ``nbconvert`` / static viewers, but edits do not reach
+        the kernel.  The same page as :func:`to_html`.
+    ``"auto"`` (default)
+        ``"kernel"`` when anywidget is installed, ``"pyodide"`` otherwise.
+    """
+    if backend not in ("auto", "kernel", "pyodide"):
+        raise ValueError("backend must be 'auto', 'kernel' or 'pyodide'")
+    if backend == "pyodide":
+        return display_html(expr, **kwargs)
     try:
         from .widget import SympyEditorWidget
     except ImportError as exc:  # anywidget missing
-        raise ImportError(
-            "Jupyter integration needs anywidget: pip install 'sympy-editor[jupyter]'"
-        ) from exc
+        if backend == "kernel":
+            raise ImportError("backend='kernel' needs anywidget: pip install 'sympy-editor[jupyter]'") from exc
+        import warnings
+
+        warnings.warn("anywidget is not installed: using the Pyodide (in-browser) editor; edits will not reach the kernel. "
+                      "pip install 'sympy-editor[jupyter]' for the kernel-backed widget.", stacklevel=2)
+        return display_html(expr, **kwargs)
     return SympyEditorWidget(expr, **kwargs)

@@ -33,6 +33,13 @@ w.expr       # the current, edited expression (live)
 w.on_change(lambda e: print("now:", e))
 ```
 
+The widget runs every edit in **the kernel's SymPy** (no Pyodide involved).
+`edit(expr, backend="pyodide")` gives instead the self-contained HTML page
+that runs its own SymPy in the browser — useful for notebooks exported with
+`nbconvert`, but its edits do not reach the kernel; the default `"auto"`
+picks the kernel widget when anywidget is installed and falls back to Pyodide
+with a warning otherwise.
+
 ### Standalone HTML file
 
 ```python

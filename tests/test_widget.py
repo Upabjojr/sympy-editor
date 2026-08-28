@@ -53,3 +53,13 @@ def test_widget_expr_setter_and_document_input():
 
 def test_edit_helper_returns_widget():
     assert isinstance(edit(x), SympyEditorWidget)
+
+
+def test_edit_backend_switch():
+    from IPython.display import HTML
+    assert isinstance(edit(x), SympyEditorWidget)                    # auto: the kernel widget
+    assert isinstance(edit(x, backend="kernel"), SympyEditorWidget)
+    html = edit(x, backend="pyodide")                                # explicit Pyodide page
+    assert isinstance(html, HTML) and "pyodide" in html.data and "SympyEditor.mount" in html.data
+    with pytest.raises(ValueError):
+        edit(x, backend="server")

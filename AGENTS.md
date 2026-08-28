@@ -157,6 +157,15 @@ Two conventions between printer, document and front end:
   `Document.parse(src, context=node)` reads new names as `MatrixSymbol`s of
   the context's shape when the context is a matrix.
 
+## Backends at a glance
+
+- Jupyter widget (`edit()`, `SympyEditorWidget`): the kernel's SymPy through
+  anywidget messages - never Pyodide.
+- Standalone HTML (`to_html`, `save_html`, `display_html`,
+  `edit(backend="pyodide")`): Pyodide in the browser, preloaded behind an
+  overlay.
+- `serve()`: the stdlib HTTP server backed by the running Python.
+
 ## Key design decisions
 
 - **Tree paths, not LaTeX positions.**  Paths are `args` indices
