@@ -229,9 +229,10 @@ var SympyEditor = (function () {
         btn("delete", "Delete", "Remove the selection from its parent (Del)");
         btn("parent", "↑", "Select the enclosing expression (↑)");
         sep();
-        this.opsSelect = h("select", { class: "se-ops", title: "General operation to apply to the selection" });
+        // General menu: picking an operation applies it to the selection (or
+        // the whole expression) at once.
+        this.opsSelect = h("select", { class: "se-ops", title: "Transform the selection (or the whole expression)" });
         this.toolbar.appendChild(this.opsSelect);
-        btn("apply", "Apply", "Apply the chosen operation to the selection (or the whole expression)");
         // Type menu: the operations specific to the selection's type (Matrix,
         // Integral, Equation...); picking one applies it at once.
         this.typeMenu = h("select", { class: "se-typemenu", hidden: "", title: "Operations specific to the selected type" });
@@ -350,21 +351,20 @@ var SympyEditor = (function () {
       this.source.addEventListener("click", function () {
         if (!self.opts.readOnly) self.beginEdit("/");
       });
-      if (this.opsSelect) {
-        this.opsSelect.addEventListener("change", function () { self._updateToolbar(); });
-      }
-      if (this.typeMenu) {
-        this.typeMenu.addEventListener("change", function () {
-          var op = self.typeMenu.value;
-          self.typeMenu.selectedIndex = 0;
-          if (!op) return;
-          var msg = { action: "apply", path: self.range ? self.range.parent : (self.selected || "/"), op: op };
-          if (self.range) msg.children = self._rangeIndices();
-          self.send(msg);
-          self.view.focus({ preventScroll: true });
-        });
-        this.typeMenu.addEventListener("keydown", function (ev) { ev.stopPropagation(); });
-      }
+      var applyFromMenu = function (menu) {
+        var op = menu.value;
+        menu.selectedIndex = 0;
+        if (!op) return;
+        var msg = { action: "apply", path: self.range ? self.range.parent : (self.selected || "/"), op: op };
+        if (self.range) msg.children = self._rangeIndices();
+        self.send(msg);
+        self.view.focus({ preventScroll: true });
+      };
+      [this.opsSelect, this.typeMenu].forEach(function (menu) {
+        if (!menu) return;
+        menu.addEventListener("change", function () { applyFromMenu(menu); });
+        menu.addEventListener("keydown", function (ev) { ev.stopPropagation(); });
+      });
     }
 
     /* ---- state ---- */
@@ -449,11 +449,11 @@ var SympyEditor = (function () {
       var key = kinds.join(",") + "|" + JSON.stringify(ops.map(function (op) { return op.name; }));
       if (key === this._opsKey) return;
       this._opsKey = key;
-      var current = this.opsSelect.value;
       this.opsSelect.textContent = "";
       var self = this;
+      this.opsSelect.appendChild(h("option", { value: "", disabled: "", selected: "" }, ["Transform \u25BE"]));
       general.forEach(function (op) { self.opsSelect.appendChild(h("option", { value: op.name }, [op.label || op.name])); });
-      if (current && general.some(function (op) { return op.name === current; })) this.opsSelect.value = current;
+      this.opsSelect.selectedIndex = 0;
       if (!this.typeMenu) return;
       this.typeMenu.textContent = "";
       if (!specific.length) { this.typeMenu.hidden = true; return; }
@@ -1298,13 +1298,6 @@ var SympyEditor = (function () {
           if (t && t.parent) this.select(t.parent);
           return;
         }
-        case "apply":
-          if (this.opsSelect && this.opsSelect.value) {
-            var msg = { action: "apply", path: this.range ? this.range.parent : (this.selected || "/"), op: this.opsSelect.value };
-            if (this.range) msg.children = this._rangeIndices();
-            return this.send(msg);
-          }
-          return;
         case "keyboard":
           if (this.input) { this.input.focus(); return; }   // bring the keyboard back for the open field
           if (this.caret) return this.beginInsert("");
@@ -1386,7 +1379,6 @@ var SympyEditor = (function () {
       set("keyboard", dis);
       set("delete", dis || !(range || (this.selected && this.selected !== "/")));
       set("parent", dis || !(range || (t && t.parent)));
-      set("apply", dis || !(this.opsSelect && this.opsSelect.value));
       set("copy", !s.src);
       set("finish", dis);
       if (this.opsSelect) this.opsSelect.disabled = dis;

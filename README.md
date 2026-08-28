@@ -67,7 +67,7 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | Edit selection's existing text | double-click / **Edit** | Enter |
 | Apply / cancel an edit | click elsewhere applies | Enter / Esc |
 | Remove selection from its parent | **Delete** | Del |
-| Apply a transformation to the selection | choose in the dropdown, **Apply** | |
+| Transform the selection | pick an operation in the **Transform ▾** menu (general) or the type menu ("Matrix ▾"...): it applies at once | |
 | Undo / redo | ↶ / ↷ | Ctrl+Z / Ctrl+Shift+Z |
 
 Editing happens *inside* the formula: the selected node is swapped for a small
@@ -75,12 +75,13 @@ text field at its position, and the formula re-renders when you press Enter.
 A selection and an insertion caret never coexist: with a selection, typing
 replaces it; with a caret, typing only inserts.  A range (`b + c` inside `a + b + c + d`) is
 edited, deleted and transformed like a single node: typing replaces it, Del
-removes its terms, *Apply* transforms just those terms.
+removes its terms, an operation picked in a menu transforms just those terms.
 
 On phones and tablets: tap to select, **tap the selected node again to edit
 it**, tap a gap for a caret and tap it again to insert, drag to select a
 range; the toolbar's ↑ selects the parent and its ⌨ button opens the
-keyboard for the selection, the caret or the whole expression.  Vertical swipes and pinches still scroll and zoom the page.
+keyboard for the selection, the caret or the whole expression; the menus
+apply an operation as soon as it is picked.  Vertical swipes and pinches still scroll and zoom the page.
 Transformations act on the selected sub-expression only (on the whole formula
 when nothing is selected).
 
@@ -110,8 +111,8 @@ scalar context can still be a 3×3 matrix symbol — and from Python the same is
 `edit(expr, symbols=[MatrixSymbol("C", 3, 3)])` or
 `w.document.declare("C", "MatrixSymbol", 3, 3)`.
 
-The transformation dropdown holds the general ops (simplify, expand,
-factor, ...).  Operations specific to the selection's *type* appear in a
+The **Transform ▾** menu holds the general ops (simplify, expand, factor,
+...) and applies one as soon as it is picked.  Operations specific to the selection's *type* appear in a
 separate highlighted **type menu** next to it, labelled with the type
 ("Matrix ▾", "Integral ▾", "Equation ▾"...), and apply as soon as you pick
 one: transpose / inverse / trace / determinant / `as_explicit` for matrices,

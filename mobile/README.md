@@ -84,5 +84,5 @@ as artifacts; with the secrets `ANDROID_KEYSTORE_BASE64` + passwords and
   with the app (it is inside the bundle already).
 - Interaction on touch screens: tap to select, tap the selected node again
   to edit it (tap a gap for a caret, again to insert), drag to select a
-  range, ↑ / *Delete* / *Apply* in the toolbar; ⌨ opens the on-screen
+  range, ↑ / *Delete* / the menus in the toolbar; ⌨ opens the on-screen
   keyboard for the selection, the caret or the whole expression.

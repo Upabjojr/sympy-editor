@@ -148,8 +148,7 @@ def test_ops_undo_redo_delete_and_errors(browser, served):
     srv, doc = served
     page = _open(browser, srv.url)
     _click(page, '/1')          # the fraction
-    page.locator(".se-ops").select_option("negate")
-    page.locator('[data-cmd="apply"]').click()
+    page.locator(".se-ops").select_option("negate")  # picking applies at once
     page.wait_for_function("document.querySelector('.se-source').textContent.startsWith('-x**2')")
     assert doc.expr == -(x**2) / y - sin(x)
     page.keyboard.press("Control+z")
@@ -424,8 +423,7 @@ def test_shift_arrows_select_ranges(browser, serve_expr):
     page.keyboard.press("Shift+ArrowLeft")             # shrink back
     assert page.locator(".se-selected").count() == 2
     assert page.locator('[data-cmd="delete"]').is_enabled()
-    page.locator(".se-ops").select_option("negate")    # an op acts on the range only
-    _next_state(page, lambda: page.locator('[data-cmd="apply"]').click())
+    _next_state(page, lambda: page.locator(".se-ops").select_option("negate"))   # an op acts on the range only
     assert doc.expr == a - b - c + d
     assert page.locator(".se-selected").count() == 0   # a new state drops the range
     kids = _display_children(page, "/")

@@ -19,15 +19,15 @@ A, B = MatrixSymbol("A", 2, 2), MatrixSymbol("B", 2, 2)
 R = Matrix([[cos(theta), -sin(theta)], [sin(theta), cos(theta)]])
 
 EXAMPLES = [
-    ("Dense matrix", "Click any entry and type to replace it; select an entry and Apply an op.",
+    ("Dense matrix", "Click any entry and type to replace it; select an entry and pick an operation in a menu.",
      Matrix([[x, y], [z, t]])),
-    ("Rotation matrix times a vector", "Select the whole product (click, then ↑ until the root) and Apply 'Evaluate (doit)'.",
+    ("Rotation matrix times a vector", "Select the whole product (click, then ↑ until the root) and pick 'Evaluate (doit)' in the Transform menu.",
      R * Matrix([x, y])),
     ("Matrix expressions (MatrixSymbol algebra)", "A and B are 2x2 MatrixSymbols; editing rebuilds the MatAdd/MatMul tree.",
      A * B + 2 * A.T - A.I),
     ("Block matrix", "Blocks are editable; the BlockMatrix is rebuilt from its rows.",
      BlockMatrix([[A, B], [B, A]])),
-    ("Determinant and trace", "Select the determinant and Apply 'Evaluate (doit)' to compute it.",
+    ("Determinant and trace", "Select the determinant and pick 'Evaluate' in its Integral/Matrix-style type menu to compute it.",
      Determinant(Matrix([[x, y], [z, t]])) + Trace(A) + x * Determinant(eye(2))),
     ("2-D array (ImmutableDenseNDimArray)", "Arrays behave like matrices for editing.",
      Array([[x, y], [z, t]])),
