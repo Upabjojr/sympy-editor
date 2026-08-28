@@ -316,8 +316,7 @@ def test_symbols_panel_declare_and_assumptions(browser, serve_expr):
     page.keyboard.press("Enter")
     page.keyboard.press("Control+a")
     page.keyboard.type("M*x + M.T")
-    page.keyboard.press("Enter")
-    page.wait_for_function("document.querySelector('.se-source').textContent.includes('M.T')")
+    _next_state(page, lambda: page.keyboard.press("Enter"))   # the source line applies on Enter
     M = MatrixSymbol("M", 3, 3)
     assert doc.expr == M * x + M.T
     assert "declared, not used" not in page.locator(".se-symbols").inner_text()
@@ -874,6 +873,13 @@ def test_floating_action_bar_click_and_tap(browser, serve_expr):
     box = page.locator(".se-box-select").bounding_box()
     bb = bar.bounding_box()
     assert bb["y"] >= box["y"] + box["height"]                # right under the selection
+    bar.locator('[data-cmd="child"]').click()                 # ↓ button: back into theta
+    assert page.locator(".se-status").inner_text() == "Symbol: theta"
+    bar.locator('[data-cmd="child"]').click()                 # ↓ on an atom: a caret after it, bar gone
+    assert page.locator(".se-caret").count() == 1 and not bar.is_visible()
+    page.keyboard.press("ArrowUp")                            # back on theta
+    page.locator('.se-toolbar [data-cmd="parent"]').click()   # toolbar ↑ to cos(theta)
+    assert page.locator(".se-status").inner_text() == "cos: cos(theta)"
     _next_state(page, lambda: bar.locator('[data-cmd="unwrap"]').click())
     assert doc.expr == x * t + y
     assert bar.is_visible()                                   # the selection survives on the changed node

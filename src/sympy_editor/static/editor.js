@@ -229,6 +229,7 @@ var SympyEditor = (function () {
         btn("unwrap", "Unwrap", "Remove the selected node but keep its argument: cos(θ) → θ (Backspace)");
         btn("delete", "Delete", "Remove the selection entirely (Del)");
         btn("parent", "↑", "Select the enclosing expression (↑)");
+        btn("child", "↓", "Select inside: the sub-expression you came from, or the first one; on an atom, a caret after it (↓)");
         sep();
         // General menu: picking an operation applies it to the selection (or
         // the whole expression) at once.
@@ -288,6 +289,7 @@ var SympyEditor = (function () {
         var abtn = function (cmd, label, title) { return h("button", { type: "button", "data-cmd": cmd, title: title }, [label]); };
         this.actions = h("div", { class: "se-actions", hidden: "", role: "toolbar" }, [
           abtn("parent", "↑", "Select the enclosing expression"),
+          abtn("child", "↓", "Select inside (the sub-expression you came from, or the first one)"),
           abtn("edit", "Edit", "Edit in place"),
           abtn("unwrap", "Unwrap", "Remove this node but keep its argument: cos(θ) → θ"),
           abtn("delete", "Delete", "Remove entirely"),
@@ -700,6 +702,32 @@ var SympyEditor = (function () {
       return this.view.querySelectorAll('[data-path="' + esc + '"]');
     }
 
+    /** ↓: into the selection - the sub-expression ↑ came from, or the first
+     *  one; on an atom, a caret right after it (between the arguments of its
+     *  parent, or extending the atom). */
+    _selectChild() {
+      if (this.range) { this.select(this._displayChildren(this.range.parent)[this.range.focus]); return; }
+      if (!this.selected) { this.select("/"); return; }
+      var t = this.tree[this.selected];
+      if (t && t.children.length) {
+        var back = this._cameFrom[this.selected];
+        this.select(back && this.tree[back] && isAncestorOrSelf(this.selected, back) ? back
+                    : this._displayChildren(this.selected)[0]);
+        return;
+      }
+      if (this.opts.readOnly) return;
+      var atom = this.selected, ael = this._els(atom)[0];
+      var ap = t ? t.parent : null;
+      if (ap && this.state.nodes[ap] && this.state.nodes[ap].insertable) {
+        var ags = this._gapsOf(ap);
+        for (var gi = 0; gi < ags.length; gi++) {
+          if (ags[gi].leftEl === ael) { this._showCaret(Object.assign({}, ags[gi], { attach: "left" }), ags[gi].a); return; }
+        }
+      }
+      var eg = this._extendGap(atom, "after");
+      if (eg) this._showCaret(eg.gap, eg.x);
+    }
+
     /** Select the parent of `path`, remembering where we came from (for ↓ and Unwrap). */
     _selectParent(path) {
       var parent = this.tree[path] ? this.tree[path].parent : null;
@@ -867,28 +895,7 @@ var SympyEditor = (function () {
       } else if (k === "ArrowUp") {
         if (this.selected) this._selectParent(this.selected);
       } else if (k === "ArrowDown") {
-        if (!this.selected) this.select("/");
-        else if (t && t.children.length) {
-          var back = this._cameFrom[this.selected];      // return to where ↑ came from
-          this.select(back && this.tree[back] && isAncestorOrSelf(this.selected, back) ? back
-                      : this._displayChildren(this.selected)[0]);
-        } else if (!ro) {
-          // ↓ on an atom: down to the "text level", a caret right after it
-          // (between the arguments of its parent, or extending the atom).
-          var atom = this.selected, ael = this._els(atom)[0];
-          var ap = this.tree[atom] ? this.tree[atom].parent : null;
-          var placed = false;
-          if (ap && this.state.nodes[ap] && this.state.nodes[ap].insertable) {
-            var ags = this._gapsOf(ap);
-            for (var gi = 0; gi < ags.length; gi++) {
-              if (ags[gi].leftEl === ael) { this._showCaret(Object.assign({}, ags[gi], { attach: "left" }), ags[gi].a); placed = true; break; }
-            }
-          }
-          if (!placed) {
-            var eg = this._extendGap(atom, "after");
-            if (eg) this._showCaret(eg.gap, eg.x);
-          }
-        }
+        this._selectChild();
       } else if (k === "ArrowLeft" || k === "ArrowRight") {
         this._moveSideways(k === "ArrowLeft" ? -1 : 1);
       } else if (!ro && !mod && !ev.altKey && k.length === 1 && this.selected) {
@@ -964,6 +971,7 @@ var SympyEditor = (function () {
       for (var i = 0; i < buttons.length; i++) {
         var cmd = buttons[i].getAttribute("data-cmd");
         buttons[i].disabled = cmd === "parent" ? !(this.range || (t && t.parent))
+                            : cmd === "child" ? false
                             : cmd === "unwrap" ? !unwrapOk
                             : cmd === "delete" ? !(this.range || (this.selected && this.selected !== "/"))
                             : false;
@@ -1577,6 +1585,7 @@ var SympyEditor = (function () {
           if (this.range) return this.send({ action: "delete", path: this.range.parent, children: this._rangeIndices() });
           if (this.selected && this.selected !== "/") return this.send({ action: "delete", path: this.selected });
           return;
+        case "child": return this._selectChild();
         case "parent": {
           if (this.range) { this.select(this.range.parent); return; }
           if (this.selected) this._selectParent(this.selected);
@@ -1665,6 +1674,7 @@ var SympyEditor = (function () {
       set("delete", dis || !(range || (this.selected && this.selected !== "/")));
       set("unwrap", dis || range || !this.selected || !(s.nodes && s.nodes[this.selected] && s.nodes[this.selected].nargs));
       set("parent", dis || !(range || (t && t.parent)));
+      set("child", dis);
       set("copy", !s.src);
       set("finish", dis);
       if (this.opsSelect) this.opsSelect.disabled = dis;

@@ -59,7 +59,7 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | --- | --- | --- |
 | Select sub-expression | click its middle (its left/right edge places a caret before/after it instead; next to a matrix entry or a power's base the caret *extends* it: `+ 1` adds, `y` multiplies) | ↓ (enter children), ←/→ (siblings) |
 | Select enclosing expression | click again on the same spot, or **↑** | ↑ |
-| Reduce to the first sub-expression (on an atom: a caret after it) | | ↓ |
+| Go inside: the sub-expression you came up from, or the first one (on an atom: a caret after it) | **↓** (toolbar or action bar) | ↓ |
 | Select a range of adjacent terms / factors | drag across them (mouse, touch or pen) | Shift+→ / Shift+← grow and shrink the range; ←/→/↓ collapse it, ↑ selects the whole sum/product |
 | Replace selection by typing | | just start typing (SymPy syntax) |
 | Type at a caret | click **between** two terms (or on the operator), or at the edge of an object: a caret appears; what you type is spliced between its neighbours like in a text editor: operators you type are used as written, a missing one means juxtaposition (`cos(t)` after `x` gives `x cos(t)`), `+`/`-` bind at the sum level (`x z` with `+y+` typed between gives `x + y + z`), `, …` adds a function argument | Tab / Shift+Tab put the caret after / before the selection; ←/→ move it; ↑ selects the object next to it; Enter opens an empty field; Esc removes it |
@@ -72,9 +72,9 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | Copy / cut / paste a part | **Copy** (toolbar or action bar) | Ctrl+C / Ctrl+X copy the selection's SymPy source; Ctrl+V pastes over a selection or at a caret |
 | Undo / redo | ↶ / ↷ | Ctrl+Z / Ctrl+Shift+Z |
 
-A small action bar appears under whatever is selected — ↑ parent, Edit,
-Unwrap, Delete — so these actions are one click or one tap away from the
-object; the same commands sit in the toolbar and on the keys.
+A small action bar appears under whatever is selected — ↑ parent, ↓ inside,
+Edit, Unwrap, Delete, Copy — so these actions are one click or one tap away
+from the object; the same commands sit in the toolbar and on the keys.
 
 Editing happens *inside* the formula: the selected node is swapped for a small
 text field at its position, and the formula re-renders when you press Enter.
