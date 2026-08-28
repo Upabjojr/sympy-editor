@@ -27,6 +27,11 @@ class MainActivity : AppCompatActivity() {
         web.settings.javaScriptEnabled = true
         web.settings.domStorageEnabled = true
         web.settings.allowFileAccess = false
+        // Without focus on the WebView itself, input.focus() from the page
+        // does not bring up the soft keyboard.
+        web.isFocusable = true
+        web.isFocusableInTouchMode = true
+        web.requestFocus(android.view.View.FOCUS_DOWN)
 
         val assets = WebViewAssetLoader.AssetsPathHandler(this)
         val loader = WebViewAssetLoader.Builder()

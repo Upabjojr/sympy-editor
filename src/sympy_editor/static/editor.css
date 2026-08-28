@@ -198,6 +198,10 @@
 .se-sym input.se-sym-name { width: 4.5rem; font-family: var(--se-mono); }
 .se-sym input.se-sym-assume { width: 9rem; }
 
+/* the keyboard button only matters where there is no physical keyboard */
+.se-toolbar button[data-cmd="keyboard"] { display: none; }
+@media (any-pointer: coarse) { .se-toolbar button[data-cmd="keyboard"] { display: inline-block; font-size: 1.1em; } }
+
 /* touch screens: bigger targets, larger formula */
 @media (pointer: coarse) {
   .se-toolbar button, .se-ops, .se-sym select, .se-sym input, .se-sym button {

@@ -233,6 +233,7 @@ var SympyEditor = (function () {
         btn("apply", "Apply", "Apply the chosen operation to the selection (or the whole expression)");
         sep();
       }
+      if (!o.readOnly) btn("keyboard", "⌨", "Open the keyboard: edit the selection, insert at the caret, or edit the whole expression");
       btn("copy", "Copy", "Copy the SymPy source to the clipboard");
       if (o.finishButton && !o.readOnly) {
         btn("finish", "Done", "Finish editing and hand the expression back to Python");
@@ -278,6 +279,7 @@ var SympyEditor = (function () {
       this._editRange = null; // {path, children} while a range is being edited
       this._drag = null;      // pointer drag in progress: {anchor, moved}
       this._suppressClick = false;
+      this._pointerType = "mouse";   // of the last pointerdown: touch gets tap-to-edit
       this._boxes = { hover: [], select: [] };   // highlight overlays (see _visualRect)
       this._cameFrom = {};    // ancestor path -> the descendant ↑ was pressed on (for ↓)
       this._stateCount = 0;   // states applied so far (data-seq on the root)
@@ -295,7 +297,7 @@ var SympyEditor = (function () {
           ev.preventDefault();
           var cmd = b.getAttribute("data-cmd");
           self.command(cmd);
-          if (cmd !== "edit") self.view.focus({ preventScroll: true });
+          if (cmd !== "edit" && cmd !== "keyboard") self.view.focus({ preventScroll: true });
         }
       });
       this.view.addEventListener("mousemove", function (ev) {
@@ -309,6 +311,7 @@ var SympyEditor = (function () {
       this.view.addEventListener("click", function (ev) { self._onClick(ev); });
       // Dragging (mouse, touch or pen) over the formula selects a range.
       this.view.addEventListener("pointerdown", function (ev) {
+        self._pointerType = ev.pointerType || "mouse";
         if (ev.pointerType === "mouse" && ev.button !== 0) return;
         var leaf = self._leafAt(ev);
         self._drag = { anchor: leaf ? leaf.getAttribute("data-path") : null, moved: false };
@@ -681,9 +684,11 @@ var SympyEditor = (function () {
       this._gapCache = null;
       var gap = this.opts.readOnly ? null : this._gapAt(ev.clientX, ev.clientY, leaf);
       if (gap) {
+        var same = this.caret && this.caret.path === gap.path && this.caret.index === gap.index;
         this.select(null);
         this.lastLeaf = null;
         this._showCaret(gap, ev.clientX);
+        if (same) { this.beginInsert(""); return; }   // clicking the caret again opens the field (no keyboard needed)
         this.view.focus({ preventScroll: true });
         return;
       }
@@ -696,6 +701,12 @@ var SympyEditor = (function () {
         return;
       }
       var lp = leaf.getAttribute("data-path");
+      // On a touch screen there are no keys: tapping the selected node again
+      // opens the field (the toolbar's ↑ selects the parent instead).
+      if (this._pointerType === "touch" && !this.opts.readOnly && this.selected === lp && !this.range) {
+        this.beginEdit(lp);
+        return;
+      }
       // Clicking repeatedly on the same spot walks up the ancestors.
       if (this.selected && this.lastLeaf === lp && isAncestorOrSelf(this.selected, lp)) {
         var up = this.tree[this.selected] ? this.tree[this.selected].parent : null;
@@ -709,6 +720,9 @@ var SympyEditor = (function () {
 
     _onDblClick(ev) {
       if (this.opts.readOnly || this.closed || (this.input && ev.target === this.input)) return;
+      // A field opened by the second click (caret, touch tap) must not be replaced;
+      // touch screens use tap-again instead of double-tap.
+      if (this.input || this._pointerType === "touch") return;
       var leaf = this._leafAt(ev);
       if (!leaf) return;
       ev.preventDefault();
@@ -1238,6 +1252,11 @@ var SympyEditor = (function () {
             return this.send(msg);
           }
           return;
+        case "keyboard":
+          if (this.input) { this.input.focus(); return; }   // bring the keyboard back for the open field
+          if (this.caret) return this.beginInsert("");
+          if (this.range) return this.beginRangeEdit();
+          return this.beginEdit(this.selected || "/");
         case "copy": return this.copySource();
         case "finish": return this.send({ action: "close" });
       }
@@ -1311,6 +1330,7 @@ var SympyEditor = (function () {
       set("undo", dis || !s.can_undo);
       set("redo", dis || !s.can_redo);
       set("edit", dis);
+      set("keyboard", dis);
       set("delete", dis || !(range || (this.selected && this.selected !== "/")));
       set("parent", dis || !(range || (t && t.parent)));
       set("apply", dis || !(this.opsSelect && this.opsSelect.value));

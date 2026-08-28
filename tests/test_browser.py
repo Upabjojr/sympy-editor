@@ -705,6 +705,60 @@ def test_scenario_helper_covers_the_other_gestures(scenario):
     assert s.source == "c + q - 1"
 
 
+def test_touch_tap_again_edits_and_caret_tap_inserts(browser, serve_expr):
+    srv, doc = serve_expr(x + y)
+    ctx = browser.new_context(has_touch=True, is_mobile=True, viewport={"width": 420, "height": 800})
+    page = ctx.new_page()
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(srv.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    x0, y0 = _center(page, "/0")
+    page.touchscreen.tap(x0, y0)                        # tap: select
+    assert page.locator(".se-status").inner_text() == "Symbol: x"
+    page.touchscreen.tap(x0, y0)                        # tap again: edit, no keyboard needed
+    assert page.locator(".se-inline").count() == 1
+    assert page.evaluate("document.activeElement.className") == "se-inline"
+    page.keyboard.type("z")
+    page.keyboard.press("Enter")
+    page.wait_for_function("document.querySelector('.se-source').textContent === 'y + z'")
+    gx, gy = _gap_between(page, "/0", "/1")
+    page.touchscreen.tap(gx, gy)                        # tap a gap: caret
+    assert page.locator(".se-caret").count() == 1
+    page.touchscreen.tap(gx, gy)                        # tap it again: insertion field
+    assert page.locator(".se-inline").count() == 1
+    page.keyboard.type("2")
+    page.keyboard.press("Enter")
+    page.wait_for_function("document.querySelector('.se-source').textContent === 'y + z + 2'")
+    # the keyboard button: visible on touch devices, opens a field for the selection
+    kb = page.locator('[data-cmd="keyboard"]')
+    assert kb.is_visible()
+    x0, y0 = _center(page, "/0")
+    page.touchscreen.tap(x0, y0)
+    kb.tap()
+    assert page.locator(".se-inline").count() == 1 and page.evaluate("document.activeElement.className") == "se-inline"
+    page.keyboard.press("Escape")                       # cancel the field...
+    page.keyboard.press("Escape")                       # ...and clear the selection
+    kb.tap()                                             # nothing selected: the whole expression
+    assert page.locator(".se-inline").input_value() == "y + z + 2"
+    page.keyboard.press("Escape")
+    assert errors == []
+    ctx.close()
+
+
+def test_keyboard_button_hidden_with_a_mouse(browser, serve_expr):
+    srv, doc = serve_expr(x + y)
+    page = _open(browser, srv.url)
+    assert page.locator('[data-cmd="keyboard"]').count() == 1
+    assert not page.locator('[data-cmd="keyboard"]').is_visible()
+    # double-clicking a gap opens the insertion field, not an edit of the whole expression
+    gx, gy = _gap_between(page, "/0", "/1")
+    page.mouse.dblclick(gx, gy)
+    assert page.locator(".se-status").inner_text().startswith("Inserting into Add")
+    page.keyboard.press("Escape")
+    assert page.errors == []
+
+
 @pytest.mark.skipif(not os.environ.get("SYMPY_EDITOR_SLOW_TESTS"), reason="set SYMPY_EDITOR_SLOW_TESTS=1")
 def test_pyodide_runtime_is_shared_and_matrix_names_survive(browser, tmp_path):
     A, B = MatrixSymbol("A", 2, 2), MatrixSymbol("B", 2, 2)

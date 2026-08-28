@@ -76,9 +76,10 @@ replaces it; with a caret, typing only inserts.  A range (`b + c` inside `a + b 
 edited, deleted and transformed like a single node: typing replaces it, Del
 removes its terms, *Apply* transforms just those terms.
 
-On phones and tablets: tap to select, drag to select a range, use the toolbar
-(*Edit*, *Delete*, *Apply*) instead of keys; the field opens the on-screen
-keyboard.  Vertical swipes and pinches still scroll and zoom the page.
+On phones and tablets: tap to select, **tap the selected node again to edit
+it**, tap a gap for a caret and tap it again to insert, drag to select a
+range; the toolbar's ↑ selects the parent and its ⌨ button opens the
+keyboard for the selection, the caret or the whole expression.  Vertical swipes and pinches still scroll and zoom the page.
 Transformations act on the selected sub-expression only (on the whole formula
 when nothing is selected).
 
