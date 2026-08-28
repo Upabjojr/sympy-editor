@@ -1260,10 +1260,10 @@ var SympyEditor = (function () {
       this.caretEl.style.height = Math.round(Math.max(12, gap.height)) + "px";
       this.view.appendChild(this.caretEl);
       // A caret and a selection never coexist: with a caret, keys only insert.
+      // Lift the selection completely: classes, highlight box, source mark, action bar.
       this.selected = null;
       this.range = null;
-      var old = this.view.querySelectorAll(".se-selected");
-      for (var i = 0; i < old.length; i++) old[i].classList.remove("se-selected");
+      this._applySelection();
       var node = this.state.nodes[gap.path];
       this._setStatus(gap.extend
         ? "Type " + (gap.extend === "before" ? "before " : "after ") + node.type + " " + node.src + " (\"+ 1\" adds, \"y\" multiplies; Enter to apply)"

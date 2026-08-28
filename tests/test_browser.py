@@ -773,9 +773,11 @@ def test_edge_of_a_matrix_entry_extends_it(browser, serve_expr):
     r = _rect(page, zpath)
     page.mouse.click((r["l"] + r["r"]) / 2, r["y"])       # the middle of a glyph still selects it
     assert page.locator(".se-status").inner_text() == "Symbol: z" and page.locator(".se-caret").count() == 0
-    # ↓ on an atom gives a caret after it; ↑ from a caret selects that atom first
+    # ↓ on an atom gives a caret after it and lifts the selection entirely; ↑ from a caret selects that atom first
     page.keyboard.press("ArrowDown")
     assert page.locator(".se-caret").count() == 1 and page.locator(".se-selected").count() == 0
+    assert page.locator(".se-box-select").count() == 0 and page.locator(".se-source mark").count() == 0
+    assert not page.locator(".se-actions").is_visible()
     page.keyboard.press("ArrowUp")
     assert page.locator(".se-status").inner_text() == "Symbol: z"
     assert page.errors == []
