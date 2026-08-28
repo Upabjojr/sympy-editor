@@ -6,3 +6,13 @@ dist/
 .pytest_cache/
 .ipynb_checkpoints/
 examples/*.html
+
+# mobile packaging: generated bundle and native build products
+mobile/www/
+mobile/android/app/src/main/assets/
+mobile/android/.gradle/
+mobile/android/**/build/
+mobile/android/local.properties
+mobile/android/.idea/
+mobile/ios/*.xcodeproj/
+mobile/ios/SymPyEditor/Info.plist

@@ -134,6 +134,13 @@ def gram(m):
     return m.T * m
 ```
 
+### Mobile apps
+
+`mobile/` packages the same editor page as a minimal Android (Kotlin WebView)
+and iOS (SwiftUI `WKWebView`) app: `python mobile/build_www.py` produces the
+shared, offline-capable bundle, and each platform folder is a few files that
+just display it.  See `mobile/README.md`.
+
 ## How it works
 
 `sympy_editor.AnnotatedLatexPrinter` extends SymPy's `LatexPrinter` so that

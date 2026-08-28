@@ -153,6 +153,30 @@ Two conventions between printer, document and front end:
   `document.py`; those three modules must import nothing but SymPy, the
   standard library and each other.
 
+## Mobile apps (`mobile/`)
+
+Everything about phone packaging lives in `mobile/` and is *not* part of the
+pip package.  The rule is minimal wrapping and maximal sharing:
+
+- `mobile/build_www.py` builds `mobile/www/`: the very same page
+  `sympy_editor.to_html()` produces for the desktop, with KaTeX and the part of
+  Pyodide SymPy needs vendored under `www/vendor/` (about 30 MB) so the app
+  works offline.  Test it in a desktop browser with
+  `python -m http.server -d mobile/www` (it must be served, not opened as a
+  file: WebAssembly and fetch need an origin).
+- `mobile/android/`: a Gradle/Kotlin project whose only activity is a WebView
+  serving the bundle through `WebViewAssetLoader` (an https origin, with MIME
+  types fixed for .wasm/.whl).  No node toolchain; Android Studio (or a local
+  Gradle) builds it.
+- `mobile/ios/`: a SwiftUI app with a `WKWebView` and a `WKURLSchemeHandler`
+  that serves the bundle from the app bundle (`app://www/...`); the Xcode
+  project is generated from `project.yml` with XcodeGen (or created by hand,
+  see `mobile/README.md`).
+- Keep platform code to loading the bundle; every feature belongs in
+  `editor.js`/Python so that desktop, Android and iOS stay identical.
+  `tests/test_mobile.py` builds the bundle and, with
+  `SYMPY_EDITOR_SLOW_TESTS=1`, edits in it with all external requests blocked.
+
 ## Conventions
 
 - Python ≥ 3.9, no type-checking tooling enforced; keep type hints and

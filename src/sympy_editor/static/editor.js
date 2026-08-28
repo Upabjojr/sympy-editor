@@ -1369,7 +1369,8 @@ var SympyEditor = (function () {
       shared.runtimes[key] = (async function () {
         report("Loading Python runtime (Pyodide)…");
         if (typeof window.loadPyodide !== "function") await loadScript(cfg.pyodideJs);
-        var py = await window.loadPyodide({ indexURL: cfg.pyodideIndex });
+        // Pyodide wants an absolute index URL; relative ones (vendored bundles) are resolved against the page.
+        var py = await window.loadPyodide({ indexURL: new URL(cfg.pyodideIndex, document.baseURI).href });
         report("Loading SymPy…");
         await py.loadPackage("sympy");
         var dir = "/sympy_editor_pkg/sympy_editor";

@@ -1,0 +1,59 @@
+name: Mobile apps
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+      - uses: android-actions/setup-android@v3
+      - run: pip install -e .
+      - name: Build debug APK and release APK/AAB
+        env:
+          ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_PATH }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            export ANDROID_KEYSTORE="$RUNNER_TEMP/release.keystore"
+          fi
+          python mobile/build.py android
+          python mobile/build.py android --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: |
+            mobile/android/app/build/outputs/apk/**/*.apk
+            mobile/android/app/build/outputs/bundle/**/*.aab
+
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -e .
+      - run: brew install xcodegen
+      - name: Build simulator .app (no signing) and, with IOS_TEAM_ID, a signed .ipa
+        env:
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+          IOS_EXPORT_METHOD: ${{ vars.IOS_EXPORT_METHOD || 'development' }}
+        run: |
+          python mobile/build.py ios --simulator
+          if [ -n "$IOS_TEAM_ID" ]; then python mobile/build.py ios; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios
+          path: |
+            mobile/ios/build/ipa/*.ipa
+            mobile/ios/build/derived/Build/Products/*/SymPyEditor.app
