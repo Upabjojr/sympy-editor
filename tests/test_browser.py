@@ -782,6 +782,22 @@ def test_edge_of_a_matrix_entry_extends_it(browser, serve_expr):
     assert page.errors == []
 
 
+def test_caret_aligns_with_the_previous_character(browser, serve_expr):
+    from sympy import Integral
+    srv, doc = serve_expr(y + Integral(x, x) + z**2)   # a short symbol next to a tall integral and a superscript
+    page = _open(browser, srv.url)
+    kids = _display_children(page, "/")
+    for left, right in zip(kids, kids[1:]):
+        gx, gy = _gap_between(page, left, right)
+        page.mouse.click(gx, gy)
+        assert page.locator(".se-caret").count() == 1
+        caret = page.locator(".se-caret").bounding_box()
+        prev = page.evaluate("p => { const ed = document.querySelector('.sympy-editor').__sympyEditor; const r = ed._visualRect(document.querySelector('[data-path=\"' + p + '\"]')); return [r.top, r.bottom]; }", left)
+        assert abs(caret["y"] - prev[0]) <= 1.5, (left, caret, prev)
+        assert abs(caret["y"] + caret["height"] - prev[1]) <= 1.5, (left, caret, prev)
+    assert page.errors == []
+
+
 def test_plus_term_typed_after_a_product_is_added_not_multiplied(scenario):
     A, B = MatrixSymbol("A", 2, 2), MatrixSymbol("B", 2, 2)
     s = scenario(A * B + 2 * A.T)

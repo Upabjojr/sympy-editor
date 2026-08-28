@@ -921,8 +921,9 @@ var SympyEditor = (function () {
         // numerator and denominator of a fraction are stacked, not adjacent.
         var overlap = Math.min(l.rect.bottom, r.rect.bottom) - Math.max(l.rect.top, r.rect.top);
         if (overlap < 0.5 * Math.min(l.rect.height, r.rect.height)) continue;
-        push(this._argIndex(p, r.path), l.rect.right, r.rect.left, l.el, r.el,
-          Math.min(l.rect.top, r.rect.top), Math.max(l.rect.bottom, r.rect.bottom));
+        // The caret takes the height of the argument it follows, like a text
+        // cursor after a character - not the union with a taller neighbour.
+        push(this._argIndex(p, r.path), l.rect.right, r.rect.left, l.el, r.el, l.rect.top, l.rect.bottom);
       }
       push(node.nargs, last.rect.right, (p === "/" ? Math.max(hr.right, last.rect.right) : last.rect.right) + pad,
         last.el, null, last.rect.top, last.rect.bottom);
@@ -1005,6 +1006,13 @@ var SympyEditor = (function () {
     _showCaret(gap, x) {
       this._hideCaret();
       this.caret = gap;
+      // Vertical extent: the object the caret sits next to (measured now,
+      // since the gap may have been computed before a scroll).
+      var beside = gap.leftEl || gap.rightEl;
+      if (beside) {
+        var br = this._visualRect(beside);
+        gap.top = br.top; gap.bottom = br.bottom; gap.height = br.height;
+      }
       var vr = this.view.getBoundingClientRect();
       var cx = Math.max(gap.a, Math.min(x === undefined ? gap.b : x, gap.b));
       this.caretEl.style.left = Math.round(cx - vr.left + this.view.scrollLeft - 1) + "px";
