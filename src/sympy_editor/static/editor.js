@@ -279,8 +279,11 @@ var SympyEditor = (function () {
       this._drag = null;      // pointer drag in progress: {anchor, moved}
       this._suppressClick = false;
       this._boxes = { hover: [], select: [] };   // highlight overlays (see _visualRect)
+      this._cameFrom = {};    // ancestor path -> the descendant ↑ was pressed on (for ↓)
+      this._stateCount = 0;   // states applied so far (data-seq on the root)
 
       this.host.appendChild(root);
+      root.__sympyEditor = this;   // handy for debugging and tests
       this._wire();
     }
 
@@ -351,7 +354,7 @@ var SympyEditor = (function () {
       var same = snap === this.state;   // re-render of the current state (keeps the range)
       this.state = snap;
       this.tree = buildTree(snap.nodes || {});
-      if (!same) this.range = null;
+      if (!same) { this.range = null; this._cameFrom = {}; }
       if (this.editing !== null || this.inserting) this.cancelEdit(true);
       await this._render();
       if (this.state !== snap) return;  // superseded meanwhile
@@ -360,7 +363,7 @@ var SympyEditor = (function () {
       this.selected = sel;
       this._fillOps();
       this._fillSymbols();
-      this.root.setAttribute("data-seq", String(snap.seq || 0));   // lets tests wait for a re-render
+      this.root.setAttribute("data-seq", String(++this._stateCount));   // lets tests wait for a re-render
       this._applySelection();
       this._showError(snap.error);
       if (snap.closed) {
@@ -763,16 +766,16 @@ var SympyEditor = (function () {
       } else if (k === "Delete" || k === "Backspace") {
         if (!ro && this.selected && this.selected !== "/") this.send({ action: "delete", path: this.selected });
       } else if (k === "ArrowUp") {
-        if (t && t.parent) this.select(t.parent);
+        if (t && t.parent) { this._cameFrom[t.parent] = this.selected; this.select(t.parent); }
       } else if (k === "ArrowDown") {
         if (!this.selected) this.select("/");
-        else if (t && t.children.length) this.select(t.children[0]);
-      } else if (k === "ArrowLeft" || k === "ArrowRight") {
-        if (t && t.parent) {
-          var sib = this.tree[t.parent].children;
-          var i = sib.indexOf(this.selected) + (k === "ArrowLeft" ? -1 : 1);
-          if (i >= 0 && i < sib.length) this.select(sib[i]);
+        else if (t && t.children.length) {
+          var back = this._cameFrom[this.selected];      // return to where ↑ came from
+          this.select(back && this.tree[back] && isAncestorOrSelf(this.selected, back) ? back
+                      : this._displayChildren(this.selected)[0]);
         }
+      } else if (k === "ArrowLeft" || k === "ArrowRight") {
+        this._moveSideways(k === "ArrowLeft" ? -1 : 1);
       } else if (!ro && !mod && !ev.altKey && k.length === 1 && this.selected) {
         this.beginEdit(this.selected, k);   // start replacing the selection with what is typed
       } else {
@@ -963,6 +966,20 @@ var SympyEditor = (function () {
         }
       }
       return false;
+    }
+
+    /** ←/→: the neighbouring sub-expression as displayed; at the end of a
+     *  group, continue with the neighbour of the enclosing group. */
+    _moveSideways(step) {
+      var cur = this.selected;
+      while (cur) {
+        var parent = this.tree[cur] ? this.tree[cur].parent : null;
+        if (!parent) return;
+        var sib = this._displayChildren(parent);
+        var i = sib.indexOf(cur) + step;
+        if (i >= 0 && i < sib.length) { this.select(sib[i]); return; }
+        cur = parent;
+      }
     }
 
     /* ---- range selection ---- */

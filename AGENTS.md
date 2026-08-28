@@ -170,6 +170,12 @@ Two conventions between printer, document and front end:
     Playwright is a dev-only tool, not a project dependency.  Use
     `_click(page, path)` (force click) for glyphs: KaTeX struts intercept
     Playwright's actionability check.
+  - `tests/test_examples.py` fails when a generated `examples/*.html` embeds
+    outdated JS/Python: regenerate the pages after code changes.
+  - Graphical edits: use the `Scenario` helper in `tests/test_browser.py`
+    (click/select/caret_after/caret_between/drag/type/enter, then `.source`);
+    the `scenario` fixture runs each such test on the HTTP backend and, with
+    `SYMPY_EDITOR_SLOW_TESTS=1`, on a Pyodide page.
   - Any change to editor.js should come with a browser test; there is no
     JavaScript unit-test runner by design (no node.js toolchain).
 - Front-end options live in `DEFAULTS` in editor.js and are passed through

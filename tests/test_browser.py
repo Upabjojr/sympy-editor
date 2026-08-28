@@ -539,6 +539,172 @@ def test_selection_box_covers_tall_content(browser, serve_expr):
     assert page.errors == []
 
 
+# ---------------------------------------------------------------------------
+# Scenario helper: write graphical-edit tests as a sequence of user actions
+# and read the resulting expression back, on either backend.
+# ---------------------------------------------------------------------------
+
+class Scenario:
+    """Drive one editor like a user.  `source` waits for the editor to
+    apply the next state and returns the SymPy source it shows, so the
+    same scenario runs against the HTTP backend and the Pyodide page."""
+
+    def __init__(self, page, expr, timeout=180000):
+        self.page = page
+        self.expr = expr
+        self.timeout = timeout
+
+    # -- selection --
+    def click(self, path):
+        _click(self.page, path)
+        return self
+
+    def select(self, path):
+        """Select a node by path, walking up from a glyph if needed."""
+        _click(self.page, path)
+        for _ in range(20):
+            if self.page.locator(".se-selected").first.get_attribute("data-path") == path:
+                return self
+            self.page.keyboard.press("ArrowUp")
+        raise AssertionError(f"could not select {path}")
+
+    def caret_after(self, path):
+        """A caret right after the rendering of `path` (a mouse click there)."""
+        r = self.page.locator(f'[data-path="{path}"]').bounding_box()
+        self.page.mouse.click(r["x"] + r["width"] + 2, r["y"] + r["height"] / 2)
+        assert self.page.locator(".se-caret").count() == 1, "no caret appeared"
+        return self
+
+    def caret_between(self, left, right):
+        gx, gy = _gap_between(self.page, left, right)
+        self.page.mouse.click(gx, gy)
+        assert self.page.locator(".se-caret").count() == 1, "no caret appeared"
+        return self
+
+    def drag(self, a, b):
+        x0, y0 = _center(self.page, a)
+        x1, y1 = _center(self.page, b)
+        self.page.mouse.move(x0, y0)
+        self.page.mouse.down()
+        self.page.mouse.move(x1, y1, steps=6)
+        self.page.mouse.up()
+        return self
+
+    # -- keys --
+    def type(self, text):
+        self.page.keyboard.type(text)
+        return self
+
+    def key(self, *keys):
+        for k in keys:
+            self.page.keyboard.press(k)
+        return self
+
+    def enter(self):
+        seq = int(self.page.locator(".sympy-editor").first.get_attribute("data-seq") or 0)
+        self.page.keyboard.press("Enter")
+        self.page.wait_for_function("s => +document.querySelector('.sympy-editor').getAttribute('data-seq') > s",
+                                    arg=seq, timeout=self.timeout)
+        return self
+
+    # -- results --
+    @property
+    def source(self):
+        return self.page.locator(".se-source").inner_text()
+
+    @property
+    def status(self):
+        return self.page.locator(".se-status").inner_text()
+
+    @property
+    def error(self):
+        return self.page.locator(".se-error").inner_text()
+
+    def path_of(self, src):
+        """Path of the first rendered node whose source is `src` (from the
+        editor's current state)."""
+        nodes = self.page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.nodes")
+        for path in sorted(nodes, key=len):
+            if nodes[path]["src"] == src:
+                return path
+        raise AssertionError(f"no node {src!r}; have {sorted(v['src'] for v in nodes.values())}")
+
+
+@pytest.fixture(params=["http", pytest.param("pyodide", marks=pytest.mark.skipif(
+    not os.environ.get("SYMPY_EDITOR_SLOW_TESTS"), reason="set SYMPY_EDITOR_SLOW_TESTS=1"))])
+def scenario(request, browser, serve_expr, tmp_path):
+    """scenario(expr) -> Scenario on the HTTP backend or on a Pyodide page."""
+    pages = []
+
+    def make(expr):
+        if request.param == "http":
+            srv, doc = serve_expr(expr)
+            page = _open(browser, srv.url)
+        else:
+            path = tmp_path / "scenario.html"
+            path.write_text(to_html(expr), encoding="utf-8")
+            page = browser.new_page()
+            page.errors = []
+            page.on("pageerror", lambda e: page.errors.append(str(e)))
+            page.goto(path.as_uri())
+            page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+        pages.append(page)
+        return Scenario(page, expr)
+
+    yield make
+    for page in pages:
+        assert page.errors == []
+        page.close()
+
+
+def test_arrow_navigation_remembers_and_crosses_levels(scenario):
+    A, B = MatrixSymbol("A", 2, 2), MatrixSymbol("B", 2, 2)
+    s = scenario(A**2 * B)                              # MatMul(MatPow(A, 2), B), displayed A²B
+    s.click(s.path_of("2"))
+    assert s.status == "Integer: 2"
+    s.key("ArrowRight")                                 # leaves the power and reaches B
+    assert s.status == "MatrixSymbol: B"
+    s.key("ArrowLeft")                                  # back to the power as a whole
+    assert s.status == "MatPow: A**2"
+    s.key("ArrowDown")                                  # into it: first child
+    assert s.status == "MatrixSymbol: A"
+    s.key("ArrowRight")
+    assert s.status == "Integer: 2"
+    s.key("ArrowUp", "ArrowUp")                         # up to the product...
+    assert s.status.startswith("MatMul")
+    s.key("ArrowDown", "ArrowDown")                     # ...and ↓ returns where ↑ came from, twice
+    assert s.status == "Integer: 2"
+    x, y = symbols("x y")
+    s2 = scenario(x**2 + x + 1)                         # args (1, x, x**2) but displayed x² + x + 1
+    s2.click(s2.path_of("1")).key("ArrowLeft")
+    assert s2.status == "Symbol: x"
+    s2.key("ArrowLeft")
+    assert s2.status == "Pow: x**2"
+    s2.key("ArrowLeft")                                 # nothing further left: stays
+    assert s2.status == "Pow: x**2"
+
+
+def test_plus_term_typed_after_a_product_is_added_not_multiplied(scenario):
+    A, B = MatrixSymbol("A", 2, 2), MatrixSymbol("B", 2, 2)
+    s = scenario(A * B + 2 * A.T)
+    ab = s.path_of("A*B")
+    s.caret_after(ab).type("+ B * A").enter()          # the caret sits in the product's trailing gap
+    assert s.source == "A*B + B*A + 2*A.T"
+    assert s.error == ""
+    s2 = scenario(A * B + 2 * A.T)
+    s2.select(s2.path_of("A*B")).key("Enter", "End").type(" + B*A").enter()   # editing the block itself
+    assert s2.source == "A*B + B*A + 2*A.T"
+
+
+def test_scenario_helper_covers_the_other_gestures(scenario):
+    a, b, c = symbols("a b c")
+    s = scenario(a * b + c)
+    s.caret_between(s.path_of("a*b"), s.path_of("c")).type("- 1").enter()
+    assert s.source == "a*b + c - 1"
+    s.drag(s.path_of("a"), s.path_of("b")).type("q").enter()
+    assert s.source == "c + q - 1"
+
+
 @pytest.mark.skipif(not os.environ.get("SYMPY_EDITOR_SLOW_TESTS"), reason="set SYMPY_EDITOR_SLOW_TESTS=1")
 def test_pyodide_runtime_is_shared_and_matrix_names_survive(browser, tmp_path):
     A, B = MatrixSymbol("A", 2, 2), MatrixSymbol("B", 2, 2)

@@ -159,7 +159,8 @@ sympy-editor itself is BSD-3-Clause.
 ```bash
 pip install -e ".[jupyter,test]"
 pytest                           # Python tests (printer, document, HTML, server, widget)
-python examples/demo.py          # writes examples/demo.html
+python examples/demo.py          # writes examples/demo.html (regenerate after code changes:
+python examples/demo_matrices.py #  the pages embed the package; tests/test_examples.py checks they are current)
 python examples/demo.py --serve  # local-server mode
 jupyter lab examples/demo.ipynb  # notebook demo
 ```
@@ -175,4 +176,7 @@ SYMPY_EDITOR_SLOW_TESTS=1 pytest tests/test_browser.py   # also the Pyodide page
 ```
 
 They are skipped automatically when Playwright, the browser or the network
-are unavailable.  `.github/workflows/ci.yml` runs everything on push.
+are unavailable.  Graphical edits are tested as user scenarios with the
+`Scenario` helper in `tests/test_browser.py` (`scenario(expr).caret_after(path)
+.type("+ B*A").enter()` then `.source`), run on both the HTTP backend and a
+Pyodide page.  `.github/workflows/ci.yml` runs everything on push.
