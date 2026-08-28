@@ -6,4 +6,4 @@ if [ ! -f "$JAR" ]; then
   echo "Downloading gradle-wrapper.jar..." >&2
   curl -fsSL -o "$JAR" https://raw.githubusercontent.com/gradle/gradle/v8.9.0/gradle/wrapper/gradle-wrapper.jar || exit 1
 fi
-exec java -jar "$JAR" "$@"
+exec java -classpath "$JAR" org.gradle.wrapper.GradleWrapperMain "$@"
