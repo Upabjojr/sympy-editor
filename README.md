@@ -110,6 +110,15 @@ its shape (so `C.T` typed over `B` in `A*B` works).  Ancestors are rebuilt
 with SymPy's normal automatic evaluation (replacing `y` by `-x` in `x + y`
 gives `0`).
 
+**Names vs. SymPy functions.**  A typed name is resolved in this order: a
+symbol declared in the Symbols panel (or passed as `symbols=`), a name already
+in the expression, then SymPy's own names (`sin`, `pi`, `E`, `I`, `gamma`,
+...), and finally a new plain symbol.  So a variable called `sin` is declared
+once in the panel and wins from then on; for a one-off, write it in backticks
+(`` `sin`*x ``); `\sin` is always the function.  When a name you typed was
+taken as SymPy's function or constant, the status line says so and points at
+these two options.
+
 A denominator raised to a power (`(x+1)**2` in `x/(x+1)**2`) is selectable as
 a whole even though the tree holds `Pow(x + 1, -2)`: editing it replaces the
 denominator (typing `y**3` gives `x/y**3`).

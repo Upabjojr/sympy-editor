@@ -503,6 +503,7 @@ var SympyEditor = (function () {
       this.root.setAttribute("data-seq", String(++this._stateCount));   // lets tests wait for a re-render
       this._applySelection();
       this._showError(snap.error);
+      if (snap.note && !snap.error) this._setStatus(snap.note);   // e.g. a name read as SymPy's function
       if (snap.closed) {
         this.closed = true;
         this.root.classList.add("se-closed");

@@ -150,6 +150,11 @@ Two conventions between printer, document and front end:
   converts between the displayed Greek letters and SymPy's names
   (`toDisplay`/`toSource`: `θ` ↔ `theta`, `λ` ↔ `lamda`, `∞` ↔ `oo`), so
   what is sent to Python is plain ASCII SymPy syntax.
+- **Name resolution.**  `Document.parse` uses `parse_expr(local_dict=namespace())`:
+  declared/used names win, then SymPy's globals, then new symbols.
+  `` `name` `` (backticks) forces a Symbol for that parse; `_collision_note`
+  reports names that were taken as SymPy globals (`snapshot["note"]`, shown
+  in the status line).
 - **Declared names.**  `Document.declared` (name -> object) holds names put in
   scope before they occur in the expression: `Document(expr, symbols=[...])`,
   `declare()` / `undeclare()` and the messages of the same names (fields as

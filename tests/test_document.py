@@ -514,3 +514,25 @@ def test_function_signatures_for_prompts():
     assert "Unknown" in doc.handle({"action": "signature", "path": "/", "name": "nope"})["error"]
     doc.call("/", "solve(y)")
     assert all(not e.has(y) for e in doc.expr)                                            # solved for y
+
+
+def test_names_versus_sympy_functions():
+    from sympy import E, Symbol, gamma, sin, symbols
+    x = symbols("x")
+    doc = Document(x + 1)
+    # an undeclared name that SymPy knows is SymPy's, with a hint
+    from sympy import I
+    snap = doc.handle({"action": "set", "src": "sin(x) + E + I"})
+    assert doc.expr == sin(x) + E + I
+    assert "E, I" in snap["note"] and "backticks" in snap["note"]
+    # backticks make a variable of it, once
+    snap = doc.handle({"action": "set", "src": "`sin` * x + `E`"})
+    assert doc.expr == Symbol("sin") * x + Symbol("E") and "note" not in snap
+    # a declared symbol wins over SymPy's name from then on
+    doc.declare("gamma", "Symbol", assumptions=["positive"])
+    snap = doc.handle({"action": "set", "src": "gamma * x"})
+    assert doc.expr == Symbol("gamma", positive=True) * x and "note" not in snap
+    # a name in the expression wins too, and calls are always functions
+    snap = doc.handle({"action": "set", "src": "sin(gamma)"})
+    assert doc.expr == sin(Symbol("gamma", positive=True)) and "note" not in snap
+    assert "not" not in (doc.handle({"action": "set", "src": "x + 2"}).get("note") or "")

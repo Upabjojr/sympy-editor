@@ -205,6 +205,7 @@ class Document:
         self._listeners: List[Callable[[Basic], None]] = []
         #: Declared names (see :meth:`declare`): name -> object.
         self.declared: Dict[str, Any] = {}
+        self.last_note: Optional[str] = None
         for obj in symbols:
             if isinstance(obj, str):  # srepr text; Str is not exported by SymPy < 1.14
                 obj = sympify(obj, locals={"Str": Str})
@@ -525,14 +526,45 @@ class Document:
         if self.parser == "implicit":
             transformations = transformations + (implicit_multiplication_application,)
         local = self.namespace()
+        # `name` in backticks is a variable even if SymPy has a function or a
+        # constant of that name (`sin`, `E`, `gamma`...); the backticks go.
+        for name in set(re.findall(r"`([A-Za-z_][A-Za-z_0-9]*)`", src)):
+            local.setdefault(name, Symbol(name))
+        src = re.sub(r"`([A-Za-z_][A-Za-z_0-9]*)`", r"\1", src)
         shape = getattr(context, "shape", None) if isinstance(context, (MatrixExpr, MatrixBase)) else None
         if shape is not None and len(shape) == 2:
             for name in self._new_names(src, local):
                 local[name] = MatrixSymbol(name, *shape)
+        self.last_note = self._collision_note(src, local)
         try:
             return sympify(parse_expr(src, local_dict=local, transformations=transformations))
         except Exception as exc:  # SyntaxError, TokenError, TypeError, ...
             raise ValueError(f"Could not parse {src!r}: {exc}") from None
+
+    @staticmethod
+    def _collision_note(src: str, local: Dict[str, Any]) -> Optional[str]:
+        """A hint when a typed name that is not a known symbol was read as one
+        of SymPy's functions or constants (``E``, ``I``, ``gamma``...)."""
+        try:
+            tokens = list(tokenize.generate_tokens(io.StringIO(src).readline))
+        except (tokenize.TokenError, SyntaxError):
+            return None
+        taken = []
+        for i, tok in enumerate(tokens):
+            if tok.type != tokenize.NAME or keyword.iskeyword(tok.string) or tok.string in local:
+                continue
+            prev = tokens[i - 1].string if i else ""
+            nxt = tokens[i + 1].string if i + 1 < len(tokens) else ""
+            if prev == "." or nxt == "(":          # attributes and calls are meant as functions
+                continue
+            obj = getattr(sympy, tok.string, None)
+            if obj is not None and tok.string not in taken:
+                taken.append(tok.string)
+        if not taken:
+            return None
+        names = ", ".join(taken)
+        return (f"{names}: read as SymPy's {'constant/function' if len(taken) == 1 else 'constants/functions'}; "
+                f"for a variable write `{taken[0]}` in backticks or declare it in Symbols")
 
     @staticmethod
     def _new_names(src: str, local: Dict[str, Any]) -> List[str]:
@@ -721,6 +753,7 @@ class Document:
         ``{"action": "undo"}``, ``{"action": "redo"}``, ``{"action": "snapshot"}``.
         Errors are reported in the snapshot's ``"error"`` field.
         """
+        self.last_note = None
         try:
             action = message.get("action")
             path = message.get("path", "/")
@@ -776,7 +809,10 @@ class Document:
                 pass
             else:
                 raise ValueError(f"Unknown action: {action!r}")
-            return self.snapshot()
+            snap = self.snapshot()
+            if self.last_note:
+                snap["note"] = self.last_note
+            return snap
         except Exception as exc:
             return self.snapshot(error=f"{type(exc).__name__}: {exc}")
 
