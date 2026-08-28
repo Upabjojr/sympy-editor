@@ -53,8 +53,10 @@ def test_vendored_bundle_is_self_contained(tmp_path):
             page.goto(f"http://127.0.0.1:{srv.server_address[1]}/index.html")
             page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
             assert page.evaluate("document.fonts.check('12px KaTeX_Main')")
-            page.locator('[data-path="/"]').click(force=True)
-            page.keyboard.press("ArrowDown")
+            page.locator('[data-path="/"]').click(force=True)   # selects the glyph under the centre
+            page.keyboard.press("Escape")                        # clear it...
+            page.keyboard.press("ArrowDown")                     # ...and select the whole expression
+            assert page.locator(".se-status").inner_text().startswith("Add:")
             page.keyboard.press("Enter")
             page.keyboard.press("Control+a")
             page.keyboard.type("x**2 + 1")
