@@ -499,7 +499,7 @@ var SympyEditor = (function () {
         for (var j = 0; j < els.length; j++) els[j].classList.add("se-selected");
         this._setStatus(node.type + ": " + node.src + (node.reciprocal ? "  (denominator: the node is 1 over this)" : ""));
       } else if (!this.closed) {
-        this._setStatus(this.annotated ? (this.opts.readOnly ? "" : "Click a sub-expression to select it, or click between terms to insert one")
+        this._setStatus(this.annotated ? (this.opts.readOnly ? "" : "Click to select; click between terms to insert")
                                        : "Structure unavailable (plain rendering)");
       }
     }
