@@ -251,9 +251,9 @@ def test_click_between_terms_inserts(browser, serve_expr):
     gx, gy = _gap_between(page, "/0", "/1")            # on the "+"
     page.mouse.click(gx, gy)
     assert page.locator(".se-caret").count() == 1
-    assert page.locator(".se-status").inner_text().startswith("Insert into Add")
+    assert page.locator(".se-status").inner_text().startswith("Type into Add")
     assert page.locator(".se-selected").count() == 0
-    page.keyboard.type("z**2")                         # typing at the caret opens the field there
+    page.keyboard.type("+ z**2")                       # typing at the caret opens the field there; "+" adds a term
     assert page.locator(".se-inline").count() == 1
     assert page.locator(".se-inline").get_attribute("placeholder") == "term"
     page.keyboard.press("Enter")
@@ -273,12 +273,12 @@ def test_click_between_terms_inserts(browser, serve_expr):
     page.keyboard.press("ArrowRight")                  # move to the next gap
     assert page.locator(".se-caret").count() == 1
     page.keyboard.press("Enter")                       # open an empty field
-    page.keyboard.type("3*w")
+    page.keyboard.type("3*w")                          # no operator at the junction: juxtaposed with the neighbour
     page.keyboard.press("Enter")
-    page.wait_for_function("document.querySelector('.se-source').textContent.includes('3*w')")
-    assert doc.expr == x + y + z**2 + 3 * symbols("w")
+    page.wait_for_function("document.querySelector('.se-source').textContent.includes('w')")
+    assert doc.expr.has(symbols("w")) and doc.expr != x + y + z**2 + 3 * symbols("w")
     # clicking a glyph still selects it (no caret)
-    _click(page, "/1")
+    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "y"))
     assert page.locator(".se-status").inner_text() == "Symbol: y"
     assert page.locator(".se-caret").count() == 0
     assert page.errors == []
@@ -289,7 +289,7 @@ def test_insert_factor_in_nested_product(browser, serve_expr):
     page = _open(browser, srv.url)
     _click(page, "/1/0")                               # x
     page.keyboard.press("Tab")                         # caret after x inside the Mul
-    assert page.locator(".se-status").inner_text().startswith("Insert into Mul")
+    assert page.locator(".se-status").inner_text().startswith("Type into Mul")
     page.keyboard.type("2")
     page.keyboard.press("Enter")
     page.wait_for_function("document.querySelector('.se-source').textContent.startsWith('2*x*y')")
@@ -351,12 +351,12 @@ def test_caret_and_selection_are_exclusive(browser, serve_expr):
     page.wait_for_timeout(300)
     assert doc.expr == x + y
     assert page.locator(".se-caret").count() == 1
-    page.keyboard.type("2")                            # keys at a caret insert
+    page.keyboard.type("2")                            # keys at a caret insert: juxtaposed with x
     page.keyboard.press("Enter")
-    page.wait_for_function("document.querySelector('.se-source').textContent === 'x + y + 2'")
-    assert doc.expr == x + y + 2
-    gx, gy = _gap_between(page, "/1", "/2")
-    _click(page, "/1")                                 # select x
+    page.wait_for_function("document.querySelector('.se-source').textContent === '2*x + y'")
+    assert doc.expr == 2 * x + y
+    gx, gy = _gap_between(page, "/0", "/1")
+    _click(page, "/1")                                 # select y
     page.mouse.click(gx, gy)                           # clicking a gap replaces the selection by a caret
     assert page.locator(".se-selected").count() == 0 and page.locator(".se-caret").count() == 1
     _click(page, "/1")                                 # selecting removes the caret
@@ -364,7 +364,7 @@ def test_caret_and_selection_are_exclusive(browser, serve_expr):
     page.keyboard.type("+")                            # any printable key replaces the selection
     assert page.locator(".se-inline").input_value() == "+"
     page.keyboard.press("Escape")
-    assert doc.expr == x + y + 2
+    assert doc.expr == 2 * x + y
     assert page.errors == []
 
 
@@ -729,23 +729,23 @@ def test_edges_give_a_caret_and_the_middle_selects(browser, serve_expr):
     assert page.locator(".se-status").inner_text() == "Symbol: y"
     page.mouse.click(ry["l"] + 1, ry["y"])                # left edge: caret before y, nothing selected
     assert page.locator(".se-caret").count() == 1 and page.locator(".se-selected").count() == 0
-    assert page.locator(".se-status").inner_text().startswith("Insert into Add")
-    page.keyboard.type("3")
+    assert page.locator(".se-status").inner_text().startswith("Type into Add")
+    page.keyboard.type("3")                                # juxtaposed: 3*y
     page.keyboard.press("Enter")
-    page.wait_for_function("document.querySelector('.se-source').textContent === 'x**2 + y + 3'")
+    page.wait_for_function("document.querySelector('.se-source').textContent === 'x**2 + 3*y'")
     px = next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "x**2")   # paths changed with the sum
     rx = _rect(page, px + "/0")                            # the x of x²: its left edge is the term's edge
     page.mouse.click(rx["l"] + 1, rx["y"])
-    assert page.locator(".se-caret").count() == 1 and page.locator(".se-status").inner_text().startswith("Insert into Add")
+    assert page.locator(".se-caret").count() == 1 and page.locator(".se-status").inner_text().startswith("Type into Add")
     page.mouse.click((rx["l"] + rx["r"]) / 2, rx["y"])    # its middle selects x itself
     assert page.locator(".se-status").inner_text() == "Symbol: x"
     r2 = _rect(page, px + "/1")                            # the exponent: right edge = end of the term
     page.mouse.click(r2["r"] - 1, r2["y"])
-    assert page.locator(".se-status").inner_text().startswith("Insert into Add")
+    assert page.locator(".se-status").inner_text().startswith("Type into Add")
     page.keyboard.type("+ w")                              # a leading + means a term wherever the caret is
     page.keyboard.press("Enter")
     page.wait_for_function("document.querySelector('.se-source').textContent.includes('w')")
-    assert doc.expr == x**2 + y + 3 + symbols("w")
+    assert doc.expr == x**2 + 3 * y + symbols("w")
     assert page.errors == []
 
 
@@ -841,7 +841,7 @@ def test_touch_tap_again_edits_and_caret_tap_inserts(browser, serve_expr):
     assert page.locator(".se-caret").count() == 1
     page.touchscreen.tap(gx, gy)                        # tap it again: insertion field
     assert page.locator(".se-inline").count() == 1
-    page.keyboard.type("2")
+    page.keyboard.type("+ 2")
     page.keyboard.press("Enter")
     page.wait_for_function("document.querySelector('.se-source').textContent === 'y + z + 2'")
     # the keyboard button: visible on touch devices, opens a field for the selection

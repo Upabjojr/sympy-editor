@@ -703,7 +703,7 @@ var SympyEditor = (function () {
       var edge = leaf && !this.opts.readOnly ? this._edgeCaretAt(leaf, ev.clientX) : null;
       var gap = edge ? edge.gap : (this.opts.readOnly ? null : this._gapAt(ev.clientX, ev.clientY, leaf));
       if (gap) {
-        var same = this.caret && this.caret.path === gap.path && this.caret.index === gap.index && this.caret.extend === gap.extend;
+        var same = this.caret && this.caret.path === gap.path && this.caret.index === gap.index && this.caret.extend === gap.extend && this.caret.attach === gap.attach;
         this.select(null);
         this.lastLeaf = null;
         this._showCaret(gap, edge ? edge.x : ev.clientX);
@@ -817,7 +817,7 @@ var SympyEditor = (function () {
           if (ap && this.state.nodes[ap] && this.state.nodes[ap].insertable) {
             var ags = this._gapsOf(ap);
             for (var gi = 0; gi < ags.length; gi++) {
-              if (ags[gi].leftEl === ael) { this._showCaret(ags[gi], ags[gi].a); placed = true; break; }
+              if (ags[gi].leftEl === ael) { this._showCaret(Object.assign({}, ags[gi], { attach: "left" }), ags[gi].a); placed = true; break; }
             }
           }
           if (!placed) {
@@ -945,7 +945,7 @@ var SympyEditor = (function () {
         var r = this._visualRect(el);
         // A thin strip on the clicked object (its middle is for selecting);
         // going up, the edge only has to be near (scripts add trailing space).
-        var zone = side ? 10 : Math.min(5, Math.max(1.5, r.width * 0.2));
+        var zone = side ? 10 : Math.min(5, Math.max(2, r.width * 0.2));
         var here = x <= r.left + zone ? "before" : (x >= r.right - zone ? "after" : null);
         if (!here || (side && here !== side)) break;
         side = here;
@@ -956,7 +956,10 @@ var SympyEditor = (function () {
           for (var i = 0; i < gaps.length; i++) {
             var g = gaps[i];
             if (g.path !== parent) continue;
-            if (side === "before" ? g.rightEl === el : g.leftEl === el) return { gap: g, x: side === "before" ? g.b : g.a };
+            // Remember which neighbour the caret belongs to: typing attaches to it.
+            if (side === "before" ? g.rightEl === el : g.leftEl === el) {
+              return { gap: Object.assign({}, g, { attach: side === "before" ? "right" : "left" }), x: side === "before" ? g.b : g.a };
+            }
           }
           break;
         }
@@ -1027,7 +1030,7 @@ var SympyEditor = (function () {
       var node = this.state.nodes[gap.path];
       this._setStatus(gap.extend
         ? "Type " + (gap.extend === "before" ? "before " : "after ") + node.type + " " + node.src + " (\"+ 1\" adds, \"y\" multiplies; Enter to apply)"
-        : "Insert into " + node.type + " " + node.src + " – type a term (Enter to apply, Esc to cancel)");
+        : "Type into " + node.type + " " + node.src + " (\"y\" multiplies the neighbour, \"+ y\" adds a term; Enter to apply)");
       this._updateToolbar();
     }
 
@@ -1071,7 +1074,7 @@ var SympyEditor = (function () {
       var gaps = this._gapsOf(p);
       for (var i = 0; i < gaps.length; i++) {
         if (before ? gaps[i].rightEl === el : gaps[i].leftEl === el) {
-          this._showCaret(gaps[i], before ? gaps[i].b : gaps[i].a);
+          this._showCaret(Object.assign({}, gaps[i], { attach: before ? "right" : "left" }), before ? gaps[i].b : gaps[i].a);
           return true;
         }
       }
@@ -1303,7 +1306,13 @@ var SympyEditor = (function () {
       }
       if (inserting) {
         if (src && inserting.extend) this.send({ action: "extend", path: inserting.path, side: inserting.extend, src: src });
-        else if (src) this.send({ action: "insert", path: inserting.path, index: inserting.index, src: src });
+        else if (src) {
+          var parent = inserting.path;
+          var msg = { action: "insert", path: parent, index: inserting.index, src: src };
+          if (inserting.leftEl && inserting.attach !== "right") msg.left = this._argIndex(parent, inserting.leftEl.getAttribute("data-path"));
+          if (inserting.rightEl && inserting.attach !== "left") msg.right = this._argIndex(parent, inserting.rightEl.getAttribute("data-path"));
+          this.send(msg);
+        }
         return;
       }
       if (!src || src === original) return;

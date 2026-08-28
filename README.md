@@ -62,7 +62,7 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | Reduce to the first sub-expression (on an atom: a caret after it) | | ↓ |
 | Select a range of adjacent terms / factors | drag across them (mouse, touch or pen) | Shift+→ / Shift+← grow and shrink the range; ←/→/↓ collapse it, ↑ selects the whole sum/product |
 | Replace selection by typing | | just start typing (SymPy syntax) |
-| Insert a term / factor / argument | click **between** two terms (or on the operator): a caret appears; type the new term, Enter. A leading `+`/`-` always adds a *term* (even with the caret inside a product), a leading `*` a *factor* | Tab / Shift+Tab put the caret after / before the selection; ←/→ move it; ↑ selects the object next to it; Enter opens an empty field; Esc removes it |
+| Type at a caret | click **between** two terms (or on the operator), or at the edge of an object: a caret appears; what you type is juxtaposed with the neighbour like on paper (`cos(t)` after `x` gives `x cos(t)`); `+ …`/`- …` add a term, `* …` multiplies, `/…` and `^…` act on the neighbour, `, …` adds a function argument | Tab / Shift+Tab put the caret after / before the selection; ←/→ move it; ↑ selects the object next to it; Enter opens an empty field; Esc removes it |
 | LaTeX shortcuts in the field | | `\theta` becomes `θ` as you type (Greek letters, `\infty`, `\sin`, `\cdot`, `\le`...); Greek letters are SymPy's names (`θ` is `theta`, `λ` is `lamda`, `∞` is `oo`) |
 | Edit selection's existing text | double-click / **Edit** | Enter |
 | Apply / cancel an edit | click elsewhere applies | Enter / Esc |

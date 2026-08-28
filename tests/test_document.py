@@ -424,3 +424,22 @@ def test_extend_types_next_to_a_node():
     doc.extend("/0", "after", "B")                                               # a new name in a matrix slot is a matrix
     assert doc.expr.doit() == (A * MatrixSymbol("B", 2, 2)).T
     assert "Empty" in doc.handle({"action": "extend", "path": "/0", "side": "after", "src": " "})["error"]
+
+
+def test_insert_juxtaposition_and_junction_operators():
+    from sympy import Function, cos, symbols
+    x, y, t = symbols("x y t")
+    f = Function("f")
+    def ins(expr, src, **kw):
+        d = Document(expr); d.handle(dict({"action": "insert", "path": "/", "index": 1, "src": src}, **kw)); return d.expr
+    assert ins(x + y, "cos(t)", left=0, right=1) == x * cos(t) + y          # x cos(t): juxtaposition multiplies
+    assert ins(x + y, "+ cos(t)", left=0, right=1) == x + y + cos(t)         # "+": a term
+    assert ins(x + y, "^2", left=0) == x**2 + y
+    assert ins(x + y, "/2", left=0) == x / 2 + y
+    assert ins(x + y, "* 3", left=0) == 3 * x + y
+    assert ins(x + y, "2", right=1) == x + 2 * y                              # before y
+    assert ins(x + y, "t -", right=1) == x + t - y                            # "t -" before y
+    assert ins(f(x), ", y", left=0) == f(x, y)                                # ",": a new argument
+    assert ins(f(x), "y", left=0) == f(x * y)
+    d = Document(x + y); d.insert("/", 2, "t")                                # no neighbours given: plain insertion
+    assert d.expr == x + y + t

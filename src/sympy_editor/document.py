@@ -184,34 +184,68 @@ class Document:
             return self._commit(delete_range(self.expr, self._path(path), children))
         return self._commit(delete_at(self.expr, self._path(path)))
 
-    def insert(self, path: PathLike, index: int, new: Union[Basic, str]) -> Basic:
-        """Insert ``new`` (parsed if a string, in the context of the node at
-        ``path``) as argument number ``index`` of that node - a term of an
-        ``Add``, a factor of a ``Mul``/``MatMul``, an argument of a function
-        call... (``snapshot()`` flags such nodes ``insertable``).  Commutative
-        nodes re-order their arguments."""
+    def insert(self, path: PathLike, index: int, new: Union[Basic, str],
+               left: Optional[int] = None, right: Optional[int] = None) -> Basic:
+        """Type at a caret between the arguments of the node at ``path`` (an
+        Add, Mul, function call...).  ``left``/``right`` are the argument
+        indices next to the caret (``index`` is where a new argument would go).
+
+        The text behaves like typing next to a character: without an
+        operator it is *juxtaposed* with the neighbour, which multiplies
+        (``cos(t)`` after ``x`` gives ``x*cos(t)``); ``+``/``-`` at the junction
+        add a term (to the enclosing sum), ``*`` multiplies, ``/`` and ``^``
+        act on the left neighbour, ``,`` makes a new argument.  A SymPy
+        object is inserted as an argument as is.
+        """
         p = self._path(path)
         parent = get_at(self.expr, p)
-        if isinstance(new, str):
-            src = new.strip()
-            lead = src[:1] if src[:1] in "+-*" else ""
-            # A leading operator states the intent regardless of where the
-            # caret landed: "+ B*A" typed inside the product A*B adds a term
-            # to the surrounding sum (A*B + B*A), "* c" typed in a sum
-            # multiplies it, and "* c" in a product is the factor c.
-            if lead in ("+", "-") and not parent.is_Add:
-                term = self.parse(src, context=parent)
-                return self._commit(replace_at(self.expr, p, parent + term))
-            if lead == "*":
-                factor = self.parse(src[1:], context=parent)
-                if not parent.is_Mul:
-                    return self._commit(replace_at(self.expr, p, parent * factor))
-                new_expr = factor
+        args = parent.args
+        if not isinstance(new, str):
+            return self._commit(insert_at(self.expr, p, int(index), sympify(new)))
+        text = new.strip()
+        if not text:
+            raise ValueError("Empty input")
+        lead = text[0] if text[0] in "+-*/^," else ""
+        trail = text[-1] if text[-1] in "+-*," else ""
+        left_arg = args[left] if left is not None and 0 <= left < len(args) else None
+        right_arg = args[right] if right is not None and 0 <= right < len(args) else None
+
+        def parse(src, context=None):
+            return self.parse(src, context=context if context is not None else parent)
+
+        if lead in ("+", "-") or trail in ("+", "-"):
+            # a term: of this sum, or of the sum this node becomes
+            if trail and not lead:
+                term = parse(text[:-1])
+                if trail == "-" and right_arg is not None:      # "y -" before x: y - x
+                    return self._commit(replace_range(self.expr, p, [right], -right_arg) if False else
+                                        insert_at(replace_at(self.expr, p + (right,), -right_arg), p, int(index), term))
             else:
-                new_expr = self.parse(src, context=parent)
-        else:
-            new_expr = sympify(new)
-        return self._commit(insert_at(self.expr, p, int(index), new_expr))
+                term = parse(text)
+            if parent.is_Add:
+                return self._commit(insert_at(self.expr, p, int(index), term))
+            return self._commit(replace_at(self.expr, p, parent + term))
+        if lead == "," or trail == ",":
+            return self._commit(insert_at(self.expr, p, int(index), parse(text.strip(",").strip())))
+        if lead == "*" or trail == "*":
+            factor = parse(text.strip("*").strip())
+            if parent.is_Mul:
+                return self._commit(insert_at(self.expr, p, int(index), factor))
+            if left_arg is not None:
+                return self._commit(replace_at(self.expr, p + (left,), left_arg * factor))
+            if right_arg is not None:
+                return self._commit(replace_at(self.expr, p + (right,), factor * right_arg))
+            return self._commit(replace_at(self.expr, p, parent * factor))
+        if lead in ("/", "^"):
+            if left_arg is None:
+                raise ValueError(f"Nothing to the left of the caret to apply {lead!r} to")
+            return self._commit(replace_at(self.expr, p + (left,), parse(f"({left_arg}){text}", left_arg)))
+        # juxtaposition: multiply the neighbour (the left one when there are two)
+        if left_arg is not None:
+            return self._commit(replace_at(self.expr, p + (left,), parse(f"({left_arg})*({text})", left_arg)))
+        if right_arg is not None:
+            return self._commit(replace_at(self.expr, p + (right,), parse(f"({text})*({right_arg})", right_arg)))
+        return self._commit(insert_at(self.expr, p, int(index), parse(text)))
 
     def apply(self, path: PathLike, op: Union[str, Callable], children=None) -> Basic:
         """Apply a registered op (by name) or a callable to the node at ``path``
@@ -473,7 +507,7 @@ class Document:
         range of those arguments of the node at ``path``),
         ``{"action": "apply", "path": "/", "op": "expand"}``,
         ``{"action": "delete", "path": "/1"}``, ``{"action": "set", "src": ...}``,
-        ``{"action": "insert", "path": "/", "index": 2, "src": "y"}``,
+        ``{"action": "insert", "path": "/", "index": 2, "src": "y", "left": 1}``,
         ``{"action": "extend", "path": "/2/0", "side": "after", "src": "+ 1"}``,
         ``{"action": "retype", "name": "A", "type": "MatrixSymbol", "rows": 2, "cols": 2}``
         (``"assumptions": ["positive"]`` for a Symbol), ``{"action": "declare", ...}``
@@ -498,7 +532,8 @@ class Document:
             elif action == "undeclare":
                 self.undeclare(str(message.get("name", "")))
             elif action == "insert":
-                self.insert(path, int(message.get("index", 0)), str(message.get("src", "")))
+                self.insert(path, int(message.get("index", 0)), str(message.get("src", "")),
+                            left=message.get("left"), right=message.get("right"))
             elif action == "extend":
                 self.extend(path, str(message.get("side", "after")), str(message.get("src", "")))
             elif action == "set":

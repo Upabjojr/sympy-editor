@@ -77,7 +77,14 @@ Two conventions between printer, document and front end:
   in the context of the node so a new name in a `MatMul` is a matrix).
   Commutative nodes re-order, so the index only matters for `MatMul` and
   function arguments.
-  Clicking within the edge zone (≤ 5 px, 15 % of the width) of an object
+  Messages carry `left`/`right` (argument indices next to the caret):
+  without an operator at the junction the text is juxtaposed with the
+  neighbour (multiplied); `+`/`-` add a term, `*` a factor, `/` `^` act on
+  the left neighbour, `,` inserts an argument (`Document.insert`).
+  An edge-click caret remembers its side (`gap.attach`), so the left edge
+  of `y` attaches typed text to `y`, the right edge of `x` to `x`; a caret
+  on the operator attaches to the left neighbour.
+  Clicking within the edge zone (2-5 px, 20 % of the width) of an object
   gives a caret before/after it in the nearest insertable ancestor whose
   argument shares that edge (`_edgeCaretAt`); the middle selects.
   When there is no such ancestor (matrix/array entries, a power's base, a
