@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- method is replaced by mobile/build.py (--method development|ad-hoc|app-store-connect) -->
+    <!-- "method" is replaced by mobile/build.py (option method: development, ad-hoc, app-store-connect) -->
     <key>method</key>
     <string>development</string>
     <key>signingStyle</key>

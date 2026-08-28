@@ -69,3 +69,11 @@ def test_vendored_bundle_is_self_contained(tmp_path):
         srv.shutdown()
         srv.server_close()
     assert external == [], f"the bundle reached out to {external}"
+
+
+def test_native_project_files_are_well_formed():
+    import xml.dom.minidom
+    xml.dom.minidom.parse(str(ROOT / "mobile" / "android" / "app" / "src" / "main" / "AndroidManifest.xml"))
+    xml.dom.minidom.parse(str(ROOT / "mobile" / "ios" / "ExportOptions.plist"))
+    import yaml  # PyYAML ships with Jupyter; skip quietly without it
+    yaml.safe_load((ROOT / "mobile" / "ios" / "project.yml").read_text(encoding="utf-8"))
