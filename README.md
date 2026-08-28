@@ -62,14 +62,19 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | Reduce to the first sub-expression (on an atom: a caret after it) | | ↓ |
 | Select a range of adjacent terms / factors | drag across them (mouse, touch or pen) | Shift+→ / Shift+← grow and shrink the range; ←/→/↓ collapse it, ↑ selects the whole sum/product |
 | Replace selection by typing | | just start typing (SymPy syntax) |
-| Type at a caret | click **between** two terms (or on the operator), or at the edge of an object: a caret appears; what you type is juxtaposed with the neighbour like on paper (`cos(t)` after `x` gives `x cos(t)`); `+ …`/`- …` add a term, `* …` multiplies, `/…` and `^…` act on the neighbour, `, …` adds a function argument | Tab / Shift+Tab put the caret after / before the selection; ←/→ move it; ↑ selects the object next to it; Enter opens an empty field; Esc removes it |
+| Type at a caret | click **between** two terms (or on the operator), or at the edge of an object: a caret appears; what you type is spliced between its neighbours like in a text editor: operators you type are used as written, a missing one means juxtaposition (`cos(t)` after `x` gives `x cos(t)`), `+`/`-` bind at the sum level (`x z` with `+y+` typed between gives `x + y + z`), `, …` adds a function argument | Tab / Shift+Tab put the caret after / before the selection; ←/→ move it; ↑ selects the object next to it; Enter opens an empty field; Esc removes it |
 | LaTeX shortcuts in the field | | `\theta` becomes `θ` as you type (Greek letters, `\infty`, `\sin`, `\cdot`, `\le`...); Greek letters are SymPy's names (`θ` is `theta`, `λ` is `lamda`, `∞` is `oo`) |
 | Edit selection's existing text | double-click / **Edit** | Enter |
 | Apply / cancel an edit | click elsewhere applies | Enter / Esc |
 | Remove the selection entirely | **Delete** | Del |
 | Remove the node but keep its argument (`cos(θ)` → `θ`, `√x` → `x`, `∫f dx` → `f`) | **Unwrap** | Backspace — after ↑ from a term, that term is the one kept |
 | Transform the selection | pick an operation in the **Transform ▾** menu (general) or the type menu ("Matrix ▾"...): it applies at once | |
+| Copy / cut / paste a part | **Copy** (toolbar or action bar) | Ctrl+C / Ctrl+X copy the selection's SymPy source; Ctrl+V pastes over a selection or at a caret |
 | Undo / redo | ↶ / ↷ | Ctrl+Z / Ctrl+Shift+Z |
+
+A small action bar appears under whatever is selected — ↑ parent, Edit,
+Unwrap, Delete — so these actions are one click or one tap away from the
+object; the same commands sit in the toolbar and on the keys.
 
 Editing happens *inside* the formula: the selected node is swapped for a small
 text field at its position, and the formula re-renders when you press Enter.

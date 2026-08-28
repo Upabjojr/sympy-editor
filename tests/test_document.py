@@ -467,3 +467,19 @@ def test_unwrap_keeps_an_argument():
     assert doc.expr in (x, y)
     doc = Document(Integral(x, (x, 0, 1)))
     assert "not an expression" in doc.handle({"action": "unwrap", "path": "/", "keep": 1})["error"]
+
+
+def test_insert_splices_between_both_neighbours():
+    from sympy import MatrixSymbol, cos, symbols
+    x, y, z, t = symbols("x y z t")
+    def ins(expr, src, **kw):
+        d = Document(expr); d.handle(dict({"action": "insert", "path": "/", "index": 1, "src": src}, **kw)); return d.expr
+    assert ins(x * z, "+y+", left=0, right=1) == x + y + z                     # a product split at the caret
+    assert ins(x + z, "+y+", left=0, right=1) == x + y + z
+    assert ins(x + z, "cos(t)", left=0, right=1, attach="left") == x * cos(t) + z
+    assert ins(x + z, "cos(t)", left=0, right=1, attach="right") == x + cos(t) * z
+    assert ins(x + z, "cos(t)", left=0, right=1) == x * cos(t) + z             # on the operator: the left neighbour
+    assert ins(x * y * z, "^2", left=1, right=2, attach="left") == x * y**2 * z  # ^ binds to the factor, not the half
+    A, B = MatrixSymbol("A", 2, 2), MatrixSymbol("B", 2, 2)
+    assert ins(A * B, "+ B*A", left=1, attach="left") == A * B + B * A          # + at the sum level: the whole product
+    assert ins(A * B, "C", left=0, right=1, attach="left") == A * MatrixSymbol("C", 2, 2) * B

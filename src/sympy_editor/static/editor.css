@@ -222,9 +222,36 @@
 .se-toolbar button[data-cmd="keyboard"] { display: none; }
 @media (any-pointer: coarse) { .se-toolbar button[data-cmd="keyboard"] { display: inline-block; font-size: 1.1em; } }
 
+/* floating action bar under the selection */
+.se-actions {
+  position: absolute;
+  z-index: 20;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--se-bg);
+  border: 1px solid var(--se-border);
+  border-radius: 0.35rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+.se-actions[hidden] { display: none; }
+.se-actions button {
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 0.15rem 0.45rem;
+  border: none;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.se-actions button:hover:not(:disabled) { background: rgba(var(--se-accent), 0.14); }
+.se-actions button:disabled { opacity: 0.35; cursor: default; }
+
 /* touch screens: bigger targets, larger formula */
 @media (pointer: coarse) {
-  .se-toolbar button, .se-ops, .se-sym select, .se-sym input, .se-sym button {
+  .se-toolbar button, .se-ops, .se-sym select, .se-sym input, .se-sym button, .se-actions button {
     font-size: 14px;
     padding: 0.45rem 0.7rem;
     min-height: 2.2rem;

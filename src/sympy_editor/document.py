@@ -43,6 +43,7 @@ from .printer import (
     replace_range,
     parse_path,
     plain_latex,
+    rebuild,
     replace_at,
 )
 
@@ -186,17 +187,20 @@ class Document:
         return self._commit(delete_at(self.expr, self._path(path)))
 
     def insert(self, path: PathLike, index: int, new: Union[Basic, str],
-               left: Optional[int] = None, right: Optional[int] = None) -> Basic:
-        """Type at a caret between the arguments of the node at ``path`` (an
-        Add, Mul, function call...).  ``left``/``right`` are the argument
-        indices next to the caret (``index`` is where a new argument would go).
+               left: Optional[int] = None, right: Optional[int] = None,
+               attach: Optional[str] = None) -> Basic:
+        """Type at a caret between the arguments of the node at ``path``.
 
-        The text behaves like typing next to a character: without an
-        operator it is *juxtaposed* with the neighbour, which multiplies
-        (``cos(t)`` after ``x`` gives ``x*cos(t)``); ``+``/``-`` at the junction
-        add a term (to the enclosing sum), ``*`` multiplies, ``/`` and ``^``
-        act on the left neighbour, ``,`` makes a new argument.  A SymPy
-        object is inserted as an argument as is.
+        ``left``/``right`` are the indices of the arguments next to the caret
+        (``index`` is where a plain new argument would go) and ``attach``
+        (``"left"``/``"right"``) which of them the caret belongs to.
+
+        The text is *spliced* between its neighbours like in a text editor:
+        an operator typed at a junction is used as written, a missing one
+        means juxtaposition (multiplication) with the attached neighbour, and
+        ``+``/``-`` bind at the level of the sum - in a product they split it
+        at the caret (``x*z`` with ``+y+`` typed between gives ``x + y + z``).
+        ``,`` makes a new argument.  A SymPy object is inserted as is.
         """
         p = self._path(path)
         parent = get_at(self.expr, p)
@@ -206,47 +210,69 @@ class Document:
         text = new.strip()
         if not text:
             raise ValueError("Empty input")
-        lead = text[0] if text[0] in "+-*/^," else ""
-        trail = text[-1] if text[-1] in "+-*," else ""
-        left_arg = args[left] if left is not None and 0 <= left < len(args) else None
-        right_arg = args[right] if right is not None and 0 <= right < len(args) else None
+        ops = "+-*/^,"
+        lead = text[0] if text[0] in ops else ""
+        trail = text[-1] if text[-1] in ops else ""
 
         def parse(src, context=None):
             return self.parse(src, context=context if context is not None else parent)
 
-        if lead in ("+", "-") or trail in ("+", "-"):
-            # a term: of this sum, or of the sum this node becomes
-            if trail and not lead:
-                term = parse(text[:-1])
-                if trail == "-" and right_arg is not None:      # "y -" before x: y - x
-                    return self._commit(replace_range(self.expr, p, [right], -right_arg) if False else
-                                        insert_at(replace_at(self.expr, p + (right,), -right_arg), p, int(index), term))
-            else:
-                term = parse(text)
-            if parent.is_Add:
-                return self._commit(insert_at(self.expr, p, int(index), term))
-            return self._commit(replace_at(self.expr, p, parent + term))
         if lead == "," or trail == ",":
             return self._commit(insert_at(self.expr, p, int(index), parse(text.strip(",").strip())))
-        if lead == "*" or trail == "*":
-            factor = parse(text.strip("*").strip())
-            if parent.is_Mul:
-                return self._commit(insert_at(self.expr, p, int(index), factor))
-            if left_arg is not None:
-                return self._commit(replace_at(self.expr, p + (left,), left_arg * factor))
-            if right_arg is not None:
-                return self._commit(replace_at(self.expr, p + (right,), factor * right_arg))
-            return self._commit(replace_at(self.expr, p, parent * factor))
-        if lead in ("/", "^"):
-            if left_arg is None:
-                raise ValueError(f"Nothing to the left of the caret to apply {lead!r} to")
-            return self._commit(replace_at(self.expr, p + (left,), parse(f"({left_arg}){text}", left_arg)))
-        # juxtaposition: multiply the neighbour (the left one when there are two)
-        if left_arg is not None:
-            return self._commit(replace_at(self.expr, p + (left,), parse(f"({left_arg})*({text})", left_arg)))
-        if right_arg is not None:
-            return self._commit(replace_at(self.expr, p + (right,), parse(f"({text})*({right_arg})", right_arg)))
-        return self._commit(insert_at(self.expr, p, int(index), parse(text)))
+        n = len(args)
+        L = left if left is not None and 0 <= left < n else None
+        R = right if right is not None and 0 <= right < n else None
+        is_sum, is_prod = bool(parent.is_Add), bool(parent.is_Mul)
+
+        if not (is_sum or is_prod) or (L is None and R is None):
+            # Function arguments, sets, or no neighbours: one neighbour at most.
+            if lead in ("+", "-") and L is None and R is None:
+                if is_sum:
+                    return self._commit(insert_at(self.expr, p, int(index), parse(text)))
+                return self._commit(replace_at(self.expr, p, parent + parse(text)))
+            if L is None and R is None:
+                if lead == "*":                     # "* c" with nothing next to the caret: multiply the node
+                    return self._commit(replace_at(self.expr, p, parent * parse(text[1:].strip())))
+                return self._commit(insert_at(self.expr, p, int(index), parse(text)))
+            side, k = ("left", L) if (L is not None and attach != "right") else ("right", R if R is not None else L)
+            nb = args[k]
+            if lead == "*" and side == "left":
+                combined = f"({nb})*{text[1:].strip()}"
+            elif trail == "*" and side == "right":
+                combined = f"{text[:-1].strip()}*({nb})"
+            elif lead in ("/", "^") and side == "left":
+                combined = f"({nb}){text}"
+            elif lead in ("+", "-"):
+                combined = f"({nb}){text}"
+            elif trail in ("+", "-"):
+                combined = f"{text}({nb})"
+            else:
+                combined = f"({nb})*({text})" if side == "left" else f"({text})*({nb})"
+            return self._commit(replace_at(self.expr, p + (k,), parse(combined, nb)))
+
+        # Sums and products: splice the text between its neighbours.
+        def piece(indices):
+            sub = args[indices[0]] if len(indices) == 1 else rebuild(parent, [args[i] for i in indices])
+            return f"({sub})"
+
+        if lead in ("+", "-"):
+            left_idx = (list(range(0, L + 1)) if is_prod else [L]) if L is not None else []
+        else:
+            left_idx = [L] if L is not None and attach != "right" else []
+        if trail in ("+", "-"):
+            right_idx = (list(range(R, n)) if is_prod else [R]) if R is not None else []
+        else:
+            right_idx = [R] if R is not None and (attach == "right" or not left_idx) else []
+        combined = text
+        if left_idx:
+            combined = piece(left_idx) + ("" if lead else "*") + combined
+        if right_idx:
+            combined = combined + ("" if trail else "*") + piece(right_idx)
+        new_expr = parse(combined)
+        consumed = sorted(set(left_idx + right_idx))
+        if not consumed:
+            return self._commit(insert_at(self.expr, p, int(index), new_expr))
+        return self._commit(replace_range(self.expr, p, consumed, new_expr))
 
     def apply(self, path: PathLike, op: Union[str, Callable], children=None) -> Basic:
         """Apply a registered op (by name) or a callable to the node at ``path``
@@ -561,7 +587,7 @@ class Document:
                 self.undeclare(str(message.get("name", "")))
             elif action == "insert":
                 self.insert(path, int(message.get("index", 0)), str(message.get("src", "")),
-                            left=message.get("left"), right=message.get("right"))
+                            left=message.get("left"), right=message.get("right"), attach=message.get("attach"))
             elif action == "unwrap":
                 self.unwrap(path, message.get("keep"))
             elif action == "extend":

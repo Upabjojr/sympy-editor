@@ -241,7 +241,7 @@ var SympyEditor = (function () {
         sep();
       }
       if (!o.readOnly) btn("keyboard", "⌨", "Open the keyboard: edit the selection, insert at the caret, or edit the whole expression");
-      btn("copy", "Copy", "Copy the SymPy source to the clipboard");
+      btn("copy", "Copy", "Copy the SymPy source of the selection, or of the whole expression (Ctrl+C / Ctrl+X / Ctrl+V work on selections and carets)");
       if (o.finishButton && !o.readOnly) {
         btn("finish", "Done", "Finish editing and hand the expression back to Python");
       }
@@ -281,6 +281,20 @@ var SympyEditor = (function () {
 
       this.error = h("div", { class: "se-error", role: "alert", hidden: "" });
       root.appendChild(this.error);
+      // Floating action bar under the selection: the same commands as the
+      // toolbar, one click or tap away from the object they act on.
+      this.actions = null;
+      if (!o.readOnly) {
+        var abtn = function (cmd, label, title) { return h("button", { type: "button", "data-cmd": cmd, title: title }, [label]); };
+        this.actions = h("div", { class: "se-actions", hidden: "", role: "toolbar" }, [
+          abtn("parent", "↑", "Select the enclosing expression"),
+          abtn("edit", "Edit", "Edit in place"),
+          abtn("unwrap", "Unwrap", "Remove this node but keep its argument: cos(θ) → θ"),
+          abtn("delete", "Delete", "Remove entirely"),
+          abtn("copy", "Copy", "Copy the SymPy source of the selection (Ctrl+C; Ctrl+X cuts, Ctrl+V pastes)")
+        ]);
+        root.appendChild(this.actions);
+      }
 
       this.input = null;  // the in-place <input> while editing
       // Insertion caret: a point between two arguments of an insertable node
@@ -323,7 +337,7 @@ var SympyEditor = (function () {
         self._setHover(gap ? null : leaf);
         self.view.classList.toggle("se-gap", !!gap);
       });
-      this.view.addEventListener("scroll", function () { self._gapCache = null; if (self.caret) self._hideCaret(); });
+      this.view.addEventListener("scroll", function () { self._gapCache = null; if (self.caret) self._hideCaret(); self._applySelection(); });
       this.view.addEventListener("mouseleave", function () { self._setHover(null); });
       this.view.addEventListener("click", function (ev) { self._onClick(ev); });
       // Dragging (mouse, touch or pen) over the formula selects a range.
@@ -379,6 +393,10 @@ var SympyEditor = (function () {
       });
       this.source.addEventListener("blur", function () { if (self.sourceDirty) self.commitSource(); });
       document.addEventListener("selectionchange", function () { self._onSourceSelection(); });
+      // Copy / cut / paste while the formula has the focus (no clipboard permission needed).
+      ["copy", "cut", "paste"].forEach(function (kind) {
+        document.addEventListener(kind, function (ev) { self._onClipboard(ev, kind); });
+      });
       var applyFromMenu = function (menu) {
         var op = menu.value;
         menu.selectedIndex = 0;
@@ -682,6 +700,15 @@ var SympyEditor = (function () {
       return this.view.querySelectorAll('[data-path="' + esc + '"]');
     }
 
+    /** Select the parent of `path`, remembering where we came from (for ↓ and Unwrap). */
+    _selectParent(path) {
+      var parent = this.tree[path] ? this.tree[path].parent : null;
+      if (!parent) return false;
+      this._cameFrom[parent] = path;
+      this.select(parent);
+      return true;
+    }
+
     /** Select a path (null to clear). */
     select(path) {
       this.range = null;
@@ -707,6 +734,7 @@ var SympyEditor = (function () {
         this._drawBoxes("select", u ? [u] : []);
         this._setStatus(this.state.nodes[this.range.parent].type + " range: " + this._rangeSource(rangePaths));
         this._markSource(rangePaths);
+        this._placeActions(u);
         return;
       }
       var node = this.selected && this.state && this.state.nodes ? this.state.nodes[this.selected] : null;
@@ -717,9 +745,11 @@ var SympyEditor = (function () {
         this._drawBoxes("select", els.length && !els[0].classList.contains("se-editing") ? srects : []);
         this._setStatus(node.type + ": " + node.src + (node.reciprocal ? "  (denominator: the node is 1 over this)" : ""));
         this._markSource([this.selected]);
+        this._placeActions(els.length && !els[0].classList.contains("se-editing") ? this._unionRect(srects) : null);
       } else {
         this._drawBoxes("select", []);
         this._markSource([]);
+        this._placeActions(null);
       }
       if (!node && !this.closed) {
         this._setStatus(this.annotated ? (this.opts.readOnly ? "" : "Click to select; click between terms to insert")
@@ -761,8 +791,7 @@ var SympyEditor = (function () {
       }
       // Clicking repeatedly on the same spot walks up the ancestors.
       if (this.selected && this.lastLeaf === lp && isAncestorOrSelf(this.selected, lp)) {
-        var up = this.tree[this.selected] ? this.tree[this.selected].parent : null;
-        this.select(up || lp);
+        if (!this._selectParent(this.selected)) this.select(lp);   // from the root, back to the glyph
       } else {
         this.select(lp);
       }
@@ -836,7 +865,7 @@ var SympyEditor = (function () {
       } else if (k === "Delete") {
         if (!ro && this.selected && this.selected !== "/") this.send({ action: "delete", path: this.selected });
       } else if (k === "ArrowUp") {
-        if (t && t.parent) { this._cameFrom[t.parent] = this.selected; this.select(t.parent); }
+        if (this.selected) this._selectParent(this.selected);
       } else if (k === "ArrowDown") {
         if (!this.selected) this.select("/");
         else if (t && t.children.length) {
@@ -908,6 +937,7 @@ var SympyEditor = (function () {
       });
       this.select(path);
       this._drawBoxes("select", []);
+      this._placeActions(null);
       this._setStatus("Editing " + this.state.nodes[path].type + " – Enter to apply, Esc to cancel");
       input.focus();
       if (initial === undefined) input.select();
@@ -922,6 +952,73 @@ var SympyEditor = (function () {
       var back = this._cameFrom[this.selected];
       if (back && isAncestorOrSelf(this.selected, back) && back !== this.selected) msg.keep = this._argIndex(this.selected, back);
       this.send(msg);
+    }
+
+    /** Show the floating action bar under a viewport rectangle (null hides it). */
+    _placeActions(rect) {
+      if (!this.actions) return;
+      if (!rect || this.input || this.closed) { this.actions.hidden = true; this.view.style.paddingBottom = ""; return; }
+      var t = this.selected ? this.tree[this.selected] : null;
+      var unwrapOk = !!(this.selected && !this.range && this.state.nodes[this.selected] && this.state.nodes[this.selected].nargs);
+      var buttons = this.actions.querySelectorAll("button");
+      for (var i = 0; i < buttons.length; i++) {
+        var cmd = buttons[i].getAttribute("data-cmd");
+        buttons[i].disabled = cmd === "parent" ? !(this.range || (t && t.parent))
+                            : cmd === "unwrap" ? !unwrapOk
+                            : cmd === "delete" ? !(this.range || (this.selected && this.selected !== "/"))
+                            : false;
+      }
+      this.actions.hidden = false;
+      var rr = this.root.getBoundingClientRect();
+      var left = rect.left - rr.left, top = rect.bottom - rr.top + 6;
+      var maxLeft = Math.max(0, this.root.clientWidth - this.actions.offsetWidth - 4);
+      this.actions.style.left = Math.round(Math.max(0, Math.min(left, maxLeft))) + "px";
+      this.actions.style.top = Math.round(top) + "px";
+      // Keep the bar inside the formula area so it never covers the source line
+      // (measured against the view's own padding, not the room added before).
+      this.view.style.paddingBottom = "";
+      var vr = this.view.getBoundingClientRect();
+      var overflow = (rect.bottom + 6 + this.actions.offsetHeight + 4) - vr.bottom;
+      if (overflow > 0) this.view.style.paddingBottom = (parseFloat(getComputedStyle(this.view).paddingBottom) + overflow) + "px";
+    }
+
+    /* ---- clipboard ---- */
+
+    /** SymPy source of the selection (node or range), or null. */
+    _selectionSource() {
+      var paths = this._rangePaths();
+      if (paths.length) return this._rangeSource(paths);
+      if (this.selected && this.state.nodes[this.selected]) return this.state.nodes[this.selected].src;
+      return null;
+    }
+
+    _onClipboard(ev, kind) {
+      var active = document.activeElement;
+      if (active !== this.view || this.closed || !this.state) return;   // fields and the source line keep the native behaviour
+      if (kind === "paste") {
+        if (this.opts.readOnly) return;
+        var text = (ev.clipboardData && ev.clipboardData.getData("text/plain")) || this._clip || "";
+        text = text.trim();
+        if (!text) return;
+        ev.preventDefault();
+        if (this.caret) { this.beginInsert(text); this.commitEdit(); }
+        else if (this.range) { this.beginRangeEdit(text); this.commitEdit(); }
+        else if (this.selected) { this.beginEdit(this.selected, text); this.commitEdit(); }
+        else this._setStatus("Select where to paste (a node, or a caret between terms)");
+        return;
+      }
+      var src = this._selectionSource();
+      if (!src) return;
+      ev.preventDefault();
+      if (ev.clipboardData) ev.clipboardData.setData("text/plain", src);
+      this._clip = src;
+      if (kind === "cut" && !this.opts.readOnly) {
+        if (this.range) this.send({ action: "delete", path: this.range.parent, children: this._rangeIndices() });
+        else if (this.selected !== "/") this.send({ action: "delete", path: this.selected });
+        else this._setStatus("Copied: " + src + " (the whole expression cannot be cut)");
+      } else {
+        this._setStatus("Copied: " + src);
+      }
     }
 
     /* ---- the source line ---- */
@@ -1140,6 +1237,7 @@ var SympyEditor = (function () {
     _showCaret(gap, x) {
       this._hideCaret();
       this.caret = gap;
+      this._placeActions(null);
       // Vertical extent: the object the caret sits next to (measured now,
       // since the gap may have been computed before a scroll).
       var beside = gap.leftEl || gap.rightEl;
@@ -1350,6 +1448,7 @@ var SympyEditor = (function () {
       });
       this._drawBoxes("select", []);
       this._drawBoxes("hover", []);
+      this._placeActions(null);
       this._setStatus("Editing " + this.state.nodes[parent].type + " range – Enter to apply, Esc to cancel");
       input.focus();
       if (initial === undefined) input.select();
@@ -1440,8 +1539,9 @@ var SympyEditor = (function () {
         else if (src) {
           var parent = inserting.path;
           var msg = { action: "insert", path: parent, index: inserting.index, src: src };
-          if (inserting.leftEl && inserting.attach !== "right") msg.left = this._argIndex(parent, inserting.leftEl.getAttribute("data-path"));
-          if (inserting.rightEl && inserting.attach !== "left") msg.right = this._argIndex(parent, inserting.rightEl.getAttribute("data-path"));
+          if (inserting.leftEl) msg.left = this._argIndex(parent, inserting.leftEl.getAttribute("data-path"));
+          if (inserting.rightEl) msg.right = this._argIndex(parent, inserting.rightEl.getAttribute("data-path"));
+          if (inserting.attach) msg.attach = inserting.attach;
           this.send(msg);
         }
         return;
@@ -1479,8 +1579,7 @@ var SympyEditor = (function () {
           return;
         case "parent": {
           if (this.range) { this.select(this.range.parent); return; }
-          var t = this.selected ? this.tree[this.selected] : null;
-          if (t && t.parent) this.select(t.parent);
+          if (this.selected) this._selectParent(this.selected);
           return;
         }
         case "keyboard":
@@ -1514,7 +1613,8 @@ var SympyEditor = (function () {
     }
 
     copySource() {
-      var text = this.state ? this.state.src : "";
+      var text = this._selectionSource() || (this.state ? this.state.src : "");
+      this._clip = text;
       var self = this;
       var done = function () { self._setStatus("Copied: " + text); };
       if (navigator.clipboard && navigator.clipboard.writeText) {

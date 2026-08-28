@@ -174,9 +174,9 @@ def test_ops_undo_redo_delete_and_errors(browser, served):
 def test_done_button_closes_session(browser, served):
     srv, doc = served
     page = _open(browser, srv.url)
-    page.locator('[data-cmd="finish"]').click()
+    page.locator('.se-toolbar [data-cmd="finish"]').click()
     page.wait_for_selector(".sympy-editor.se-closed")
-    assert page.locator('[data-cmd="edit"]').is_disabled()
+    assert page.locator('.se-toolbar [data-cmd="edit"]').is_disabled()
 
 
 def test_readonly_page(browser, tmp_path):
@@ -185,7 +185,7 @@ def test_readonly_page(browser, tmp_path):
     page = browser.new_page()
     page.goto(path.as_uri())
     page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
-    assert page.locator('[data-cmd="edit"]').count() == 0
+    assert page.locator('.se-toolbar [data-cmd="edit"]').count() == 0
     _click(page, '/0')
     assert page.locator(".se-selected").count() == 1
 
@@ -345,7 +345,7 @@ def test_caret_and_selection_are_exclusive(browser, serve_expr):
     page.keyboard.press("Tab")                         # caret after x: the selection is gone
     assert page.locator(".se-caret").count() == 1
     assert page.locator(".se-selected").count() == 0
-    assert page.locator('[data-cmd="delete"]').is_disabled()
+    assert page.locator('.se-toolbar [data-cmd="delete"]').is_disabled()
     page.keyboard.press("Delete")                      # nothing to delete with a caret
     page.keyboard.press("Backspace")
     page.wait_for_timeout(300)
@@ -422,7 +422,7 @@ def test_shift_arrows_select_ranges(browser, serve_expr):
     assert page.locator(".se-selected").count() == 3
     page.keyboard.press("Shift+ArrowLeft")             # shrink back
     assert page.locator(".se-selected").count() == 2
-    assert page.locator('[data-cmd="delete"]').is_enabled()
+    assert page.locator('.se-toolbar [data-cmd="delete"]').is_enabled()
     _next_state(page, lambda: page.locator(".se-ops").select_option("negate"))   # an op acts on the range only
     assert doc.expr == a - b - c + d
     assert page.locator(".se-selected").count() == 0   # a new state drops the range
@@ -845,11 +845,11 @@ def test_backspace_unwraps_and_delete_removes(browser, serve_expr):
     _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "theta"))
     page.keyboard.press("ArrowUp")                        # cos(theta)
     assert page.locator(".se-status").inner_text() == "cos: cos(theta)"
-    assert page.locator('[data-cmd="unwrap"]').is_enabled()
+    assert page.locator('.se-toolbar [data-cmd="unwrap"]').is_enabled()
     _next_state(page, lambda: page.keyboard.press("Backspace"))   # keep theta, drop cos
     assert doc.expr == x * t + sqrt(y)
     _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "sqrt(y)"))
-    _next_state(page, lambda: page.locator('[data-cmd="unwrap"]').click())
+    _next_state(page, lambda: page.locator('.se-toolbar [data-cmd="unwrap"]').click())
     assert doc.expr == x * t + y
     _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "x"))
     page.keyboard.press("ArrowUp")                        # x*theta
@@ -858,6 +858,84 @@ def test_backspace_unwraps_and_delete_removes(browser, serve_expr):
     _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "y"))
     _next_state(page, lambda: page.keyboard.press("Delete"))     # Delete removes entirely
     assert doc.expr == x
+    assert page.errors == []
+
+
+def test_floating_action_bar_click_and_tap(browser, serve_expr):
+    from sympy import cos
+    t = symbols("theta")
+    srv, doc = serve_expr(x * cos(t) + y)
+    page = _open(browser, srv.url)
+    bar = page.locator(".se-actions")
+    assert not bar.is_visible()
+    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "theta"))
+    page.keyboard.press("ArrowUp")
+    assert bar.is_visible()
+    box = page.locator(".se-box-select").bounding_box()
+    bb = bar.bounding_box()
+    assert bb["y"] >= box["y"] + box["height"]                # right under the selection
+    _next_state(page, lambda: bar.locator('[data-cmd="unwrap"]').click())
+    assert doc.expr == x * t + y
+    assert bar.is_visible()                                   # the selection survives on the changed node
+    page.keyboard.press("Escape")
+    assert not bar.is_visible()                               # nothing selected: no bar
+    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "y"))
+    _next_state(page, lambda: bar.locator('[data-cmd="delete"]').click())
+    assert doc.expr == x * t
+    # by finger
+    ctx = browser.new_context(has_touch=True, is_mobile=True, viewport={"width": 420, "height": 800})
+    tp = ctx.new_page()
+    tp.goto(srv.url)
+    tp.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    cx, cy = _center(tp, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "theta"))
+    tp.touchscreen.tap(cx, cy)
+    tp.locator(".se-actions [data-cmd=\"parent\"]").tap()   # x*theta
+    assert tp.locator(".se-status").inner_text().startswith("Mul")
+    tp.locator(".se-actions [data-cmd=\"unwrap\"]").tap()   # keeps theta: the factor ↑ came from
+    tp.wait_for_function("document.querySelector('.se-source').textContent === 'theta'")
+    assert doc.expr == t
+    ctx.close()
+    assert page.errors == []
+
+
+def test_copy_cut_paste_of_a_selection(browser, serve_expr):
+    from sympy import cos
+    t = symbols("theta")
+    srv, doc = serve_expr(x * cos(t) + y)
+    page = _open(browser, srv.url)
+    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "theta"))
+    page.keyboard.press("ArrowUp")                        # cos(theta)
+    # Ctrl+C: the copy event carries the SymPy source of the selection
+    copied = page.evaluate("""() => { const dt = new DataTransfer(); const ev = new ClipboardEvent('copy', {clipboardData: dt, bubbles: true, cancelable: true});
+        document.activeElement.dispatchEvent(ev); return dt.getData('text/plain'); }""")
+    assert copied == "cos(theta)"
+    # Ctrl+V on another selection replaces it with the pasted text
+    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "y"))
+    _next_state(page, lambda: page.evaluate("""() => { const dt = new DataTransfer(); dt.setData('text/plain', 'cos(theta)');
+        document.activeElement.dispatchEvent(new ClipboardEvent('paste', {clipboardData: dt, bubbles: true, cancelable: true})); }"""))
+    assert doc.expr == x * cos(t) + cos(t)
+    # Ctrl+X: copies and removes
+    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "x"))
+    _next_state(page, lambda: page.evaluate("""() => { const dt = new DataTransfer();
+        document.activeElement.dispatchEvent(new ClipboardEvent('cut', {clipboardData: dt, bubbles: true, cancelable: true})); window.__cut = dt.getData('text/plain'); }"""))
+    assert page.evaluate("window.__cut") == "x" and doc.expr == 2 * cos(t)
+    # paste at a caret splices like typing
+    kids = _display_children(page, "/")
+    gx, gy = _gap_between(page, kids[0], kids[1]) if len(kids) > 1 else _center(page, kids[0])
+    page.mouse.click(gx, gy) if len(kids) > 1 else page.keyboard.press("Tab")
+    assert page.locator(".se-caret").count() == 1
+    _next_state(page, lambda: page.evaluate("""() => { const dt = new DataTransfer(); dt.setData('text/plain', '+ y');
+        document.activeElement.dispatchEvent(new ClipboardEvent('paste', {clipboardData: dt, bubbles: true, cancelable: true})); }"""))
+    assert doc.expr.has(y)
+    # the action bar's Copy button (system clipboard, permission granted here)
+    ctx = browser.new_context(permissions=["clipboard-read", "clipboard-write"])
+    p2 = ctx.new_page()
+    p2.goto(srv.url)
+    p2.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    _click(p2, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "y"))
+    p2.locator(".se-actions [data-cmd=\"copy\"]").click()
+    assert p2.evaluate("navigator.clipboard.readText()") == "y"
+    ctx.close()
     assert page.errors == []
 
 
@@ -908,7 +986,7 @@ def test_touch_tap_again_edits_and_caret_tap_inserts(browser, serve_expr):
     page.keyboard.press("Enter")
     page.wait_for_function("document.querySelector('.se-source').textContent === 'y + z + 2'")
     # the keyboard button: visible on touch devices, opens a field for the selection
-    kb = page.locator('[data-cmd="keyboard"]')
+    kb = page.locator('.se-toolbar [data-cmd="keyboard"]')
     assert kb.is_visible()
     x0, y0 = _center(page, "/0")
     page.touchscreen.tap(x0, y0)
@@ -928,8 +1006,8 @@ def test_touch_tap_again_edits_and_caret_tap_inserts(browser, serve_expr):
 def test_keyboard_button_hidden_with_a_mouse(browser, serve_expr):
     srv, doc = serve_expr(x + y)
     page = _open(browser, srv.url)
-    assert page.locator('[data-cmd="keyboard"]').count() == 1
-    assert not page.locator('[data-cmd="keyboard"]').is_visible()
+    assert page.locator('.se-toolbar [data-cmd="keyboard"]').count() == 1
+    assert not page.locator('.se-toolbar [data-cmd="keyboard"]').is_visible()
     # double-clicking a gap opens the insertion field, not an edit of the whole expression
     gx, gy = _gap_between(page, "/0", "/1")
     page.mouse.dblclick(gx, gy)

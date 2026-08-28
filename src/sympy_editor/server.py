@@ -25,7 +25,9 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 (http.server API)
         if self.path.split("?", 1)[0] in ("/", "/index.html"):
-            self._reply(200, "text/html; charset=utf-8", self.server.page.encode("utf-8"))
+            with self.server.lock:                     # the current state, not the one at start-up
+                page = self.server.render_page()
+            self._reply(200, "text/html; charset=utf-8", page.encode("utf-8"))
         else:
             self.send_error(404)
 
@@ -93,8 +95,17 @@ class EditorServer(ThreadingHTTPServer):
         self.lock = threading.Lock()
         self.closing = False
         self.verbose = verbose
-        config = build_config(document, backend="http", options=options, urls=urls, api_url="/api", token=self.token)
-        self.page = render_page(config, title)
+        self._page_args = (options, urls, title)
+
+    def render_page(self) -> str:
+        """The editor page for the document's current state."""
+        options, urls, title = self._page_args
+        config = build_config(self.document, backend="http", options=options, urls=urls, api_url="/api", token=self.token)
+        return render_page(config, title)
+
+    @property
+    def page(self) -> str:
+        return self.render_page()
 
     @property
     def url(self) -> str:

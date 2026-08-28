@@ -77,10 +77,13 @@ Two conventions between printer, document and front end:
   in the context of the node so a new name in a `MatMul` is a matrix).
   Commutative nodes re-order, so the index only matters for `MatMul` and
   function arguments.
-  Messages carry `left`/`right` (argument indices next to the caret):
-  without an operator at the junction the text is juxtaposed with the
-  neighbour (multiplied); `+`/`-` add a term, `*` a factor, `/` `^` act on
-  the left neighbour, `,` inserts an argument (`Document.insert`).
+  Messages carry `left`/`right` (argument indices next to the caret) and
+  `attach`.  In sums and products `Document.insert` *splices*: the text is
+  joined with the neighbour(s) - typed operators as written, juxtaposition
+  (`*`) otherwise; `+`/`-` at a junction take the whole half of a product;
+  the involved arguments are replaced by the parsed result (which flattens
+  into the parent).  Elsewhere one neighbour is combined; `,` inserts an
+  argument.
   An edge-click caret remembers its side (`gap.attach`), so the left edge
   of `y` attaches typed text to `y`, the right edge of `x` to `x`; a caret
   on the operator attaches to the left neighbour.
