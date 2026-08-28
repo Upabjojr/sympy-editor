@@ -85,9 +85,16 @@
 }
 .se-view:focus-visible { box-shadow: 0 0 0 2px rgba(var(--se-accent), 0.5); }
 .se-view .katex-display { margin: 0.2em 0; }
-.se-view [data-path] { border-radius: 0.15em; transition: background-color 0.08s; }
-.se-view .se-hover { background: rgba(var(--se-accent), 0.14); }
-.se-view .se-selected {
+/* hover / selection highlights are overlay boxes sized to the node's real
+ * visual extent (Editor._visualRect), drawn behind the glyphs */
+.se-box {
+  position: absolute;
+  border-radius: 0.2em;
+  pointer-events: none;
+  z-index: -1;
+}
+.se-box-hover { background: rgba(var(--se-accent), 0.14); }
+.se-box-select {
   background: rgba(var(--se-accent), 0.22);
   box-shadow: 0 0 0 1.5px rgba(var(--se-accent), 0.9);
 }
@@ -141,7 +148,7 @@
 }
 
 /* insertion caret between two arguments (see Editor._gapsOf) */
-.se-view { position: relative; }
+.se-view { position: relative; z-index: 0; }   /* stacking context: boxes stay inside the view */
 .se-view.se-gap { cursor: text; }
 .se-caret {
   position: absolute;

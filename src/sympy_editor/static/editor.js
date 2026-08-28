@@ -278,6 +278,7 @@ var SympyEditor = (function () {
       this._editRange = null; // {path, children} while a range is being edited
       this._drag = null;      // pointer drag in progress: {anchor, moved}
       this._suppressClick = false;
+      this._boxes = { hover: [], select: [] };   // highlight overlays (see _visualRect)
 
       this.host.appendChild(root);
       this._wire();
@@ -402,7 +403,9 @@ var SympyEditor = (function () {
       }
       this.source.textContent = this.state.src || "";
       this._gapCache = null;
-      this.caret = null;   // the rendering replaced the caret element too
+      this.caret = null;   // the rendering replaced the caret element and the boxes too
+      this._boxes = { hover: [], select: [] };
+      this._hoverEl = null;
     }
 
     /** The dropdown offers the ops that apply to the selection (the whole
@@ -558,7 +561,67 @@ var SympyEditor = (function () {
       if (this._hoverEl === el) return;
       if (this._hoverEl) this._hoverEl.classList.remove("se-hover");
       this._hoverEl = el;
-      if (el && !this.closed) el.classList.add("se-hover");
+      if (el && !this.closed) {
+        el.classList.add("se-hover");
+        var sel = this.view.querySelectorAll(".se-selected");
+        var covered = false;   // no hover box on what is already selected
+        for (var i = 0; i < sel.length; i++) if (sel[i] === el) covered = true;
+        this._drawBoxes("hover", covered ? [] : [this._visualRect(el)]);
+      } else {
+        this._drawBoxes("hover", []);
+      }
+    }
+
+    /** The rectangle a rendered node really occupies: KaTeX's inline spans
+     *  are one text line tall, while their content (matrices, fractions,
+     *  big operators) overflows them, so take the union of the glyph boxes. */
+    _visualRect(el) {
+      var r = el.getBoundingClientRect();
+      var top = r.top, bottom = r.bottom, left = r.left, right = r.right;
+      var all = el.querySelectorAll("*");
+      for (var i = 0; i < all.length; i++) {
+        var b = all[i].getBoundingClientRect();
+        if (!b.width && !b.height) continue;
+        if (all[i].classList.contains("pstrut") || all[i].classList.contains("vlist-s")) continue;
+        if (b.top < top) top = b.top;
+        if (b.bottom > bottom) bottom = b.bottom;
+        if (b.left < left) left = b.left;
+        if (b.right > right) right = b.right;
+      }
+      return { top: top, bottom: bottom, left: left, right: right, width: right - left, height: bottom - top };
+    }
+
+    /** Draw highlight boxes of `kind` ("hover" or "select") around `rects`
+     *  (viewport rectangles); an empty list removes them. */
+    _drawBoxes(kind, rects) {
+      var old = this._boxes[kind];
+      for (var i = 0; i < old.length; i++) if (old[i].parentNode) old[i].parentNode.removeChild(old[i]);
+      var boxes = [];
+      var vr = this.view.getBoundingClientRect();
+      var pad = 2;
+      for (var j = 0; j < rects.length; j++) {
+        var r = rects[j];
+        var box = h("span", { class: "se-box se-box-" + kind, "aria-hidden": "true" });
+        box.style.left = Math.round(r.left - vr.left + this.view.scrollLeft - pad) + "px";
+        box.style.top = Math.round(r.top - vr.top + this.view.scrollTop - pad) + "px";
+        box.style.width = Math.round(r.width + 2 * pad) + "px";
+        box.style.height = Math.round(r.height + 2 * pad) + "px";
+        this.view.appendChild(box);
+        boxes.push(box);
+      }
+      this._boxes[kind] = boxes;
+    }
+
+    _unionRect(rects) {
+      var u = null;
+      for (var i = 0; i < rects.length; i++) {
+        var r = rects[i];
+        if (!u) { u = { top: r.top, bottom: r.bottom, left: r.left, right: r.right }; continue; }
+        u.top = Math.min(u.top, r.top); u.bottom = Math.max(u.bottom, r.bottom);
+        u.left = Math.min(u.left, r.left); u.right = Math.max(u.right, r.right);
+      }
+      if (u) { u.width = u.right - u.left; u.height = u.bottom - u.top; }
+      return u;
     }
 
     _els(path) {
@@ -579,21 +642,30 @@ var SympyEditor = (function () {
     _applySelection() {
       var old = this.view.querySelectorAll(".se-selected");
       for (var i = 0; i < old.length; i++) old[i].classList.remove("se-selected");
+      this._drawBoxes("hover", []);
       var rangePaths = this._rangePaths();
       if (rangePaths.length) {
+        var rects = [];
         for (var r = 0; r < rangePaths.length; r++) {
           var rels = this._els(rangePaths[r]);
-          for (var q = 0; q < rels.length; q++) rels[q].classList.add("se-selected");
+          for (var q = 0; q < rels.length; q++) { rels[q].classList.add("se-selected"); rects.push(this._visualRect(rels[q])); }
         }
+        var u = this._unionRect(rects);
+        this._drawBoxes("select", u ? [u] : []);
         this._setStatus(this.state.nodes[this.range.parent].type + " range: " + this._rangeSource(rangePaths));
         return;
       }
       var node = this.selected && this.state && this.state.nodes ? this.state.nodes[this.selected] : null;
       if (node) {
         var els = this._els(this.selected);
-        for (var j = 0; j < els.length; j++) els[j].classList.add("se-selected");
+        var srects = [];
+        for (var j = 0; j < els.length; j++) { els[j].classList.add("se-selected"); srects.push(this._visualRect(els[j])); }
+        this._drawBoxes("select", els.length && !els[0].classList.contains("se-editing") ? srects : []);
         this._setStatus(node.type + ": " + node.src + (node.reciprocal ? "  (denominator: the node is 1 over this)" : ""));
-      } else if (!this.closed) {
+      } else {
+        this._drawBoxes("select", []);
+      }
+      if (!node && !this.closed) {
         this._setStatus(this.annotated ? (this.opts.readOnly ? "" : "Click to select; click between terms to insert")
                                        : "Structure unavailable (plain rendering)");
       }
@@ -743,6 +815,7 @@ var SympyEditor = (function () {
         if (self.editing === path && self.input === input) self.commitEdit();
       });
       this.select(path);
+      this._drawBoxes("select", []);
       this._setStatus("Editing " + this.state.nodes[path].type + " – Enter to apply, Esc to cancel");
       input.focus();
       if (initial === undefined) input.select();
@@ -769,7 +842,7 @@ var SympyEditor = (function () {
       var kids = this.tree[p].children
         .map(function (c) { return { path: c, el: self._els(c)[0] }; })
         .filter(function (k) { return k.el; })
-        .map(function (k) { k.rect = k.el.getBoundingClientRect(); return k; })
+        .map(function (k) { k.rect = self._visualRect(k.el); return k; })
         .sort(function (a, b) { return a.rect.left - b.rect.left; });
       // Room before the first and after the last argument: generous around
       // the whole expression, a few pixels inside a nested node so that its
@@ -1014,6 +1087,8 @@ var SympyEditor = (function () {
       input.addEventListener("blur", function () {
         if (self._editRange && self.input === input) self.commitEdit();
       });
+      this._drawBoxes("select", []);
+      this._drawBoxes("hover", []);
       this._setStatus("Editing " + this.state.nodes[parent].type + " range – Enter to apply, Esc to cancel");
       input.focus();
       if (initial === undefined) input.select();

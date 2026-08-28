@@ -512,6 +512,33 @@ def test_touch_drag_selects_a_range(browser, serve_expr):
     assert page.errors == []
 
 
+def test_selection_box_covers_tall_content(browser, serve_expr):
+    srv, doc = serve_expr(Matrix([[x, y], [z, 1]]))
+    page = _open(browser, srv.url)
+    _click(page, "/2/0")                               # the x entry, then up to the matrix
+    page.keyboard.press("ArrowUp")
+    assert page.locator(".se-status").inner_text().startswith("ImmutableDenseMatrix")
+    box = page.locator(".se-box-select").bounding_box()
+    glyphs = page.evaluate("""() => {
+        const el = document.querySelector('.se-selected');
+        let top = Infinity, bottom = -Infinity, left = Infinity, right = -Infinity;
+        for (const g of el.querySelectorAll('.mord, .mopen, .mclose, .delimsizing')) {
+            const b = g.getBoundingClientRect(); if (!b.height) continue;
+            top = Math.min(top, b.top); bottom = Math.max(bottom, b.bottom); left = Math.min(left, b.left); right = Math.max(right, b.right);
+        }
+        return { top, bottom, left, right }; }""")
+    assert box["y"] <= glyphs["top"] + 1 and box["y"] + box["height"] >= glyphs["bottom"] - 1
+    assert box["x"] <= glyphs["left"] + 1 and box["x"] + box["width"] >= glyphs["right"] - 1
+    assert box["height"] > 1.5 * page.locator(".se-selected").bounding_box()["height"]   # taller than the inline span
+    # hover box follows the same rule, and disappears when leaving
+    x0, y0 = _center(page, "/2/1")
+    page.mouse.move(x0, y0)
+    assert page.locator(".se-box-hover").count() == 1
+    page.mouse.move(5, 5)
+    assert page.locator(".se-box-hover").count() == 0
+    assert page.errors == []
+
+
 @pytest.mark.skipif(not os.environ.get("SYMPY_EDITOR_SLOW_TESTS"), reason="set SYMPY_EDITOR_SLOW_TESTS=1")
 def test_pyodide_runtime_is_shared_and_matrix_names_survive(browser, tmp_path):
     A, B = MatrixSymbol("A", 2, 2), MatrixSymbol("B", 2, 2)
