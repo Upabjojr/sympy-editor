@@ -80,6 +80,11 @@ Two conventions between printer, document and front end:
   Clicking within the edge zone (≤ 5 px, 15 % of the width) of an object
   gives a caret before/after it in the nearest insertable ancestor whose
   argument shares that edge (`_edgeCaretAt`); the middle selects.
+  When there is no such ancestor (matrix/array entries, a power's base, a
+  function's argument) the caret *extends* the object itself:
+  `{"action": "extend", "path", "side", "src"}` -> `Document.extend`,
+  which joins the text and the node with the typed operator, or `*` when
+  there is none.
 - **Ranges.**  Adjacent arguments of a *rangeable* node (`AssocOp`,
   `LatticeOp`: Add, Mul, MatAdd, MatMul, And, Or, Max...; snapshot flag
   `rangeable`) can be selected together: `Editor.range = {parent, anchor,

@@ -703,7 +703,7 @@ var SympyEditor = (function () {
       var edge = leaf && !this.opts.readOnly ? this._edgeCaretAt(leaf, ev.clientX) : null;
       var gap = edge ? edge.gap : (this.opts.readOnly ? null : this._gapAt(ev.clientX, ev.clientY, leaf));
       if (gap) {
-        var same = this.caret && this.caret.path === gap.path && this.caret.index === gap.index;
+        var same = this.caret && this.caret.path === gap.path && this.caret.index === gap.index && this.caret.extend === gap.extend;
         this.select(null);
         this.lastLeaf = null;
         this._showCaret(gap, edge ? edge.x : ev.clientX);
@@ -787,7 +787,9 @@ var SympyEditor = (function () {
       } else if (this.caret && (k === "ArrowLeft" || k === "ArrowRight")) {
         this._moveCaret(k === "ArrowLeft" ? -1 : 1);
       } else if (this.caret && k === "ArrowUp") {
-        var container = this.caret.path;
+        // From a caret, ↑ first selects the object it sits next to (then the usual ancestors).
+        var beside = this.caret.leftEl || this.caret.rightEl;
+        var container = beside ? beside.getAttribute("data-path") : this.caret.path;
         this._hideCaret();
         this.select(container);
       } else if (this.caret && !ro && !mod && !ev.altKey && k.length === 1) {
@@ -806,6 +808,22 @@ var SympyEditor = (function () {
           var back = this._cameFrom[this.selected];      // return to where ↑ came from
           this.select(back && this.tree[back] && isAncestorOrSelf(this.selected, back) ? back
                       : this._displayChildren(this.selected)[0]);
+        } else if (!ro) {
+          // ↓ on an atom: down to the "text level", a caret right after it
+          // (between the arguments of its parent, or extending the atom).
+          var atom = this.selected, ael = this._els(atom)[0];
+          var ap = this.tree[atom] ? this.tree[atom].parent : null;
+          var placed = false;
+          if (ap && this.state.nodes[ap] && this.state.nodes[ap].insertable) {
+            var ags = this._gapsOf(ap);
+            for (var gi = 0; gi < ags.length; gi++) {
+              if (ags[gi].leftEl === ael) { this._showCaret(ags[gi], ags[gi].a); placed = true; break; }
+            }
+          }
+          if (!placed) {
+            var eg = this._extendGap(atom, "after");
+            if (eg) this._showCaret(eg.gap, eg.x);
+          }
         }
       } else if (k === "ArrowLeft" || k === "ArrowRight") {
         this._moveSideways(k === "ArrowLeft" ? -1 : 1);
@@ -918,31 +936,46 @@ var SympyEditor = (function () {
     _edgeCaretAt(leaf, x) {
       if (!leaf || !this.state) return null;
       var path = leaf.getAttribute("data-path");
-      var side = null;
+      var side = null, first = null;
       while (path) {
         var parent = this.tree[path] ? this.tree[path].parent : null;
-        if (!parent) return null;
         var el = this._els(path)[0];
         if (!el) return null;
         var r = this._visualRect(el);
         // A thin strip on the clicked object (its middle is for selecting);
         // going up, the edge only has to be near (scripts add trailing space).
-        var zone = side ? 10 : Math.max(3, Math.min(5, r.width * 0.15));
+        var zone = side ? 10 : Math.min(5, Math.max(1.5, r.width * 0.2));
         var here = x <= r.left + zone ? "before" : (x >= r.right - zone ? "after" : null);
-        if (!here || (side && here !== side)) return null;
+        if (!here || (side && here !== side)) break;
         side = here;
-        if (this.state.nodes[parent] && this.state.nodes[parent].insertable) {
+        if (!first) first = { path: path, el: el, rect: r };
+        var pnode = parent ? this.state.nodes[parent] : null;
+        if (pnode && pnode.insertable) {
           var gaps = this._allGaps();
           for (var i = 0; i < gaps.length; i++) {
             var g = gaps[i];
             if (g.path !== parent) continue;
             if (side === "before" ? g.rightEl === el : g.leftEl === el) return { gap: g, x: side === "before" ? g.b : g.a };
           }
-          return null;
+          break;
         }
+        // Entries of a matrix/array stay their own: typing at their edge extends them.
+        if (!parent || (pnode && pnode.kinds && (pnode.kinds[0] === "matrix" || pnode.kinds[0] === "array") && !pnode.insertable)) break;
         path = parent;   // this edge is also the enclosing node's edge: try one level up
       }
-      return null;
+      if (!first || !side) return null;
+      return this._extendGap(first.path, side);   // no argument list to insert into: type next to the object itself
+    }
+
+    /** An "extend" caret before/after the node at `path`: typing there is
+     *  combined with the node (see Document.extend). */
+    _extendGap(path, side) {
+      var el = this._els(path)[0];
+      if (!el) return null;
+      var r = this._visualRect(el), x = side === "before" ? r.left : r.right;
+      return { gap: { path: path, extend: side, index: 0, a: x, b: x,
+                      leftEl: side === "after" ? el : null, rightEl: side === "before" ? el : null,
+                      top: r.top, bottom: r.bottom, height: r.height }, x: x };
     }
 
     _allGaps() {
@@ -984,7 +1017,9 @@ var SympyEditor = (function () {
       var old = this.view.querySelectorAll(".se-selected");
       for (var i = 0; i < old.length; i++) old[i].classList.remove("se-selected");
       var node = this.state.nodes[gap.path];
-      this._setStatus("Insert into " + node.type + " " + node.src + " – type a term (Enter to apply, Esc to cancel)");
+      this._setStatus(gap.extend
+        ? "Type " + (gap.extend === "before" ? "before " : "after ") + node.type + " " + node.src + " (\"+ 1\" adds, \"y\" multiplies; Enter to apply)"
+        : "Insert into " + node.type + " " + node.src + " – type a term (Enter to apply, Esc to cancel)");
       this._updateToolbar();
     }
 
@@ -1202,7 +1237,7 @@ var SympyEditor = (function () {
       input.addEventListener("blur", function () {
         if (self.inserting === gap && self.input === input) self.commitEdit();
       });
-      this._setStatus("Inserting into " + this.state.nodes[gap.path].type + " – Enter to apply, Esc to cancel");
+      this._setStatus((gap.extend ? "Typing next to " : "Inserting into ") + this.state.nodes[gap.path].type + " – Enter to apply, Esc to cancel");
       input.focus();
     }
 
@@ -1259,7 +1294,8 @@ var SympyEditor = (function () {
         return;
       }
       if (inserting) {
-        if (src) this.send({ action: "insert", path: inserting.path, index: inserting.index, src: src });
+        if (src && inserting.extend) this.send({ action: "extend", path: inserting.path, side: inserting.extend, src: src });
+        else if (src) this.send({ action: "insert", path: inserting.path, index: inserting.index, src: src });
         return;
       }
       if (!src || src === original) return;

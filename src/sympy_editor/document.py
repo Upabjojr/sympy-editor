@@ -229,6 +229,26 @@ class Document:
             return self._commit(replace_range(self.expr, p, children, result))
         return self._commit(replace_at(self.expr, p, sympify(func(get_at(self.expr, p)))))
 
+    def extend(self, path: PathLike, side: str, src: str) -> Basic:
+        """Type next to the node at ``path`` (an entry of a matrix, the base of a
+        power...): ``src`` is combined with the node - after it for
+        ``side="after"``, before it otherwise.  An operator in ``src`` at the
+        junction is used (``"+ 1"`` gives ``node + 1``); without one the two
+        are multiplied (``"y"`` after ``x`` gives ``x*y``)."""
+        p = self._path(path)
+        node = get_at(self.expr, p)
+        text = (src or "").strip()
+        if not text:
+            raise ValueError("Empty input")
+        node_src = f"({node})"
+        if side == "after":
+            joiner = " " if text[0] in "+-*/^" else "*"
+            combined = node_src + joiner + text
+        else:
+            joiner = " " if text[-1] in "+-*/^(" else "*"
+            combined = text + joiner + node_src
+        return self._commit(replace_at(self.expr, p, self.parse(combined, context=node)))
+
     def used_symbols(self) -> Dict[str, Any]:
         """Symbols, matrix symbols, indexed bases and undefined functions
         occurring in the current expression, by name."""
@@ -454,6 +474,7 @@ class Document:
         ``{"action": "apply", "path": "/", "op": "expand"}``,
         ``{"action": "delete", "path": "/1"}``, ``{"action": "set", "src": ...}``,
         ``{"action": "insert", "path": "/", "index": 2, "src": "y"}``,
+        ``{"action": "extend", "path": "/2/0", "side": "after", "src": "+ 1"}``,
         ``{"action": "retype", "name": "A", "type": "MatrixSymbol", "rows": 2, "cols": 2}``
         (``"assumptions": ["positive"]`` for a Symbol), ``{"action": "declare", ...}``
         with the same fields for a name not yet in the expression,
@@ -478,6 +499,8 @@ class Document:
                 self.undeclare(str(message.get("name", "")))
             elif action == "insert":
                 self.insert(path, int(message.get("index", 0)), str(message.get("src", "")))
+            elif action == "extend":
+                self.extend(path, str(message.get("side", "after")), str(message.get("src", "")))
             elif action == "set":
                 self.replace("/", str(message.get("src", "")))
             elif action == "apply":

@@ -402,3 +402,25 @@ def test_kinds_and_type_specific_ops():
     assert doc.expr == Matrix([[x, 1], [2, 3]])
     assert Document(x).snapshot()["nodes"]["/"]["kinds"] == ["scalar"]
     assert Document(MatrixSymbol("A", 2, 2)).snapshot()["nodes"]["/"]["kinds"] == ["matrix", "scalar"]
+
+
+def test_extend_types_next_to_a_node():
+    from sympy import Matrix, MatrixSymbol, sin, symbols
+    x, y = symbols("x y")
+    doc = Document(Matrix([[x, y], [1, 2]]))
+    entry = next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "x")
+    doc.handle({"action": "extend", "path": entry, "side": "after", "src": "+ 1"})
+    assert doc.expr[0, 0] == x + 1
+    doc.handle({"action": "extend", "path": entry, "side": "before", "src": "2"})     # juxtaposition multiplies
+    assert doc.expr[0, 0] == 2 * (x + 1)
+    doc.handle({"action": "extend", "path": entry, "side": "after", "src": "y"})
+    assert (doc.expr[0, 0] - 2 * y * (x + 1)).expand() == 0
+    doc = Document(sin(x) ** 2)
+    base = next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "x")
+    doc.extend(base, "after", "- 1")
+    assert doc.expr == sin(x - 1) ** 2
+    A = MatrixSymbol("A", 2, 2)
+    doc = Document(A.T)
+    doc.extend("/0", "after", "B")                                               # a new name in a matrix slot is a matrix
+    assert doc.expr.doit() == (A * MatrixSymbol("B", 2, 2)).T
+    assert "Empty" in doc.handle({"action": "extend", "path": "/0", "side": "after", "src": " "})["error"]

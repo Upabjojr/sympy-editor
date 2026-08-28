@@ -672,6 +672,10 @@ def test_arrow_navigation_remembers_and_crosses_levels(scenario):
     assert s.status.startswith("MatMul")
     s.key("ArrowDown", "ArrowDown")                     # ...and ↓ returns where ↑ came from, twice
     assert s.status == "Integer: 2"
+    s.key("ArrowDown")                                  # ↓ on an atom: a caret after it
+    assert s.page.locator(".se-caret").count() == 1
+    s.key("ArrowUp")                                    # ↑ from the caret: the atom again
+    assert s.status == "Integer: 2"
     x, y = symbols("x y")
     s2 = scenario(x**2 + x + 1)                         # args (1, x, x**2) but displayed x² + x + 1
     s2.click(s2.path_of("1")).key("ArrowLeft")
@@ -742,6 +746,39 @@ def test_edges_give_a_caret_and_the_middle_selects(browser, serve_expr):
     page.keyboard.press("Enter")
     page.wait_for_function("document.querySelector('.se-source').textContent.includes('w')")
     assert doc.expr == x**2 + y + 3 + symbols("w")
+    assert page.errors == []
+
+
+def test_edge_of_a_matrix_entry_extends_it(browser, serve_expr):
+    from sympy import Matrix
+    srv, doc = serve_expr(Matrix([[x, y], [z, 1]]))
+    page = _open(browser, srv.url)
+    entry = next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "y")
+    r = _rect(page, entry)
+    page.mouse.click(r["r"] - 1, r["y"])                  # right edge of the entry: a caret to type next to it
+    assert page.locator(".se-caret").count() == 1 and page.locator(".se-selected").count() == 0
+    assert page.locator(".se-status").inner_text().startswith("Type after Symbol y")
+    page.keyboard.type("+ 1")
+    page.keyboard.press("Enter")
+    page.wait_for_function("document.querySelector('.se-source').textContent.includes('y + 1')")
+    assert doc.expr[0, 1] == y + 1
+    entry = next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "z")
+    r = _rect(page, entry)
+    page.mouse.click(r["l"] + 1, r["y"])                  # left edge: typing "2" multiplies
+    assert page.locator(".se-status").inner_text().startswith("Type before Symbol z")
+    page.keyboard.type("2")
+    page.keyboard.press("Enter")
+    page.wait_for_function("document.querySelector('.se-source').textContent.includes('2*z')")
+    assert doc.expr[1, 0] == 2 * z
+    zpath = next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "z")
+    r = _rect(page, zpath)
+    page.mouse.click((r["l"] + r["r"]) / 2, r["y"])       # the middle of a glyph still selects it
+    assert page.locator(".se-status").inner_text() == "Symbol: z" and page.locator(".se-caret").count() == 0
+    # ↓ on an atom gives a caret after it; ↑ from a caret selects that atom first
+    page.keyboard.press("ArrowDown")
+    assert page.locator(".se-caret").count() == 1 and page.locator(".se-selected").count() == 0
+    page.keyboard.press("ArrowUp")
+    assert page.locator(".se-status").inner_text() == "Symbol: z"
     assert page.errors == []
 
 
