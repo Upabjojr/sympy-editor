@@ -72,7 +72,8 @@ when nothing is selected).
 
 Typed input is parsed with `sympy.parsing.sympy_parser.parse_expr` in the
 context of the expression, so existing symbols keep their assumptions and
-undefined functions are reused.  Ancestors are rebuilt with SymPy's normal
+undefined functions (and `MatrixSymbol`s / `IndexedBase`s) are reused; names
+that do not occur in the current expression become plain symbols.  Ancestors are rebuilt with SymPy's normal
 automatic evaluation (replacing `y` by `-x` in `x + y` gives `0`).
 
 Matrices (dense and sparse), `MatrixSymbol` expressions, block matrices,
