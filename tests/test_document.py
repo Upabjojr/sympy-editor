@@ -349,3 +349,29 @@ def test_ranges_replace_delete_apply():
     # errors: bad indices, non-rangeable target
     assert "Invalid argument range" in doc.handle({"action": "delete", "path": "/", "children": [7]})["error"]
     assert "Invalid argument range" in doc.handle({"action": "delete", "path": "/", "children": []})["error"]
+
+
+def test_insert_honours_a_leading_operator():
+    from sympy import MatrixSymbol, symbols
+    x, y, z = symbols("x y z")
+    A, B = MatrixSymbol("A", 2, 2), MatrixSymbol("B", 2, 2)
+    doc = Document(A * B)
+    doc.handle({"action": "insert", "path": "/", "index": 2, "src": "+ B * A"})   # caret after B, in the product
+    assert doc.expr == A * B + B * A
+    doc = Document(A * B + A)
+    mul = next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "A*B")
+    doc.handle({"action": "insert", "path": mul, "index": 2, "src": "- B*A"})
+    assert doc.expr == A * B + A - B * A
+    doc = Document(x * z + 1)
+    mul = next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "x*z")
+    doc.insert(mul, 2, "+ y")
+    assert doc.expr == x * z + y + 1
+    mul = next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "x*z")
+    doc.insert(mul, 0, "* 2")                         # "* 2" in the product: a factor
+    assert doc.expr == 2 * x * z + y + 1
+    doc = Document(x + y)
+    doc.insert("/", 2, "* 2")                         # "* 2" in a sum: multiplies it
+    assert doc.expr == 2 * (x + y)
+    doc = Document(x + y)
+    doc.insert("/", 2, "- z")                         # in a sum, a signed term is just a term
+    assert doc.expr == x + y - z

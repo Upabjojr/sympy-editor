@@ -192,7 +192,25 @@ class Document:
         nodes re-order their arguments."""
         p = self._path(path)
         parent = get_at(self.expr, p)
-        new_expr = self.parse(new, context=parent) if isinstance(new, str) else sympify(new)
+        if isinstance(new, str):
+            src = new.strip()
+            lead = src[:1] if src[:1] in "+-*" else ""
+            # A leading operator states the intent regardless of where the
+            # caret landed: "+ B*A" typed inside the product A*B adds a term
+            # to the surrounding sum (A*B + B*A), "* c" typed in a sum
+            # multiplies it, and "* c" in a product is the factor c.
+            if lead in ("+", "-") and not parent.is_Add:
+                term = self.parse(src, context=parent)
+                return self._commit(replace_at(self.expr, p, parent + term))
+            if lead == "*":
+                factor = self.parse(src[1:], context=parent)
+                if not parent.is_Mul:
+                    return self._commit(replace_at(self.expr, p, parent * factor))
+                new_expr = factor
+            else:
+                new_expr = self.parse(src, context=parent)
+        else:
+            new_expr = sympify(new)
         return self._commit(insert_at(self.expr, p, int(index), new_expr))
 
     def apply(self, path: PathLike, op: Union[str, Callable], children=None) -> Basic:
