@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e ".[jupyter,test]"
+      - run: pytest -q --ignore=tests/test_browser.py
+
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[jupyter,test]" playwright
+      - run: python -m playwright install --with-deps chromium
+      - run: pytest -q tests/test_browser.py
+        env:
+          SYMPY_EDITOR_SLOW_TESTS: "1"
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build
+      - run: python -m build
+      - run: |
+          pip install dist/*.whl
+          python -c "import sympy_editor, sympy; print(sympy_editor.to_html(sympy.Symbol('x'))[:40])"

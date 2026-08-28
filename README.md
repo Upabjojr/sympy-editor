@@ -109,7 +109,21 @@ sympy-editor itself is BSD-3-Clause.
 
 ```bash
 pip install -e ".[jupyter,test]"
-pytest
+pytest                           # Python tests (printer, document, HTML, server, widget)
 python examples/demo.py          # writes examples/demo.html
 python examples/demo.py --serve  # local-server mode
+jupyter lab examples/demo.ipynb  # notebook demo
 ```
+
+Browser end-to-end tests of the JavaScript front end use
+[Playwright](https://playwright.dev/python/) (dev-only, Apache-2.0, never
+shipped) and a real headless Chromium:
+
+```bash
+pip install playwright && python -m playwright install chromium
+pytest tests/test_browser.py                       # needs network for the KaTeX CDN
+SYMPY_EDITOR_SLOW_TESTS=1 pytest tests/test_browser.py   # also the Pyodide page
+```
+
+They are skipped automatically when Playwright, the browser or the network
+are unavailable.  `.github/workflows/ci.yml` runs everything on push.

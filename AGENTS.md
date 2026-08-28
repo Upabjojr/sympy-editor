@@ -94,7 +94,22 @@ direct call into Pyodide.
 ## Conventions
 
 - Python ≥ 3.9, no type-checking tooling enforced; keep type hints and
-  docstrings.  Tests: `pytest` (fast, no browser).
+  docstrings.
+- Tests (`pytest`, run by `.github/workflows/ci.yml`):
+  - `tests/test_printer.py` — annotation transparency (`strip_annotations`
+    == `sympy.latex`) and path correctness for a corpus of expressions;
+    add any expression that ever mis-mapped to `EXPRS`.
+  - `tests/test_document.py`, `test_html.py`, `test_server.py`,
+    `test_widget.py` — Python behaviour; widget tests skip without anywidget.
+  - `tests/test_browser.py` — the JavaScript front end driven by Playwright
+    in headless Chromium against the HTTP backend (selection, in-place
+    editing, ops, undo, errors, Done, read-only page; Pyodide page with
+    `SYMPY_EDITOR_SLOW_TESTS=1`).  Skipped without Playwright/Chromium/network.
+    Playwright is a dev-only tool, not a project dependency.  Use
+    `_click(page, path)` (force click) for glyphs: KaTeX struts intercept
+    Playwright's actionability check.
+  - Any change to editor.js should come with a browser test; there is no
+    JavaScript unit-test runner by design (no node.js toolchain).
 - Front-end options live in `DEFAULTS` in editor.js and are passed through
   `options=` from Python; CDN URLs are in `html.default_urls()` and can be
   overridden (`urls=`) for offline/vendored use.
