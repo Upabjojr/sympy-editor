@@ -11,9 +11,8 @@
   --se-error: #b42318;
   --se-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   position: relative;
-  display: inline-block;
+  display: block;            /* block, not shrink-to-fit: the status text must not shift the formula */
   box-sizing: border-box;
-  min-width: 20rem;
   max-width: 100%;
   padding: 0.4rem 0.6rem 0.5rem;
   border: 1px solid var(--se-border);
@@ -75,6 +74,10 @@
 .se-toolbar button:disabled, .se-ops:disabled { opacity: 0.4; cursor: default; }
 .se-sep { width: 1px; height: 1.1rem; background: var(--se-border); margin: 0 0.2rem; }
 .se-status {
+  /* takes the remaining space and shrinks (never wraps the toolbar onto a
+   * second line, which would move the formula under the pointer) */
+  flex: 1 1 0;
+  min-width: 0;
   margin-left: auto;
   padding-left: 0.5rem;
   color: var(--se-muted);
@@ -83,7 +86,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 50%;
+  text-align: right;
 }
 
 .se-view {
