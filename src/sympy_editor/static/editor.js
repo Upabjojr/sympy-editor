@@ -226,7 +226,8 @@ var SympyEditor = (function () {
         btn("redo", "↷", "Redo (Ctrl+Shift+Z, Ctrl+Y)");
         sep();
         btn("edit", "Edit", "Edit the selection in place (Enter, double-click, or just start typing)");
-        btn("delete", "Delete", "Remove the selection from its parent (Del)");
+        btn("unwrap", "Unwrap", "Remove the selected node but keep its argument: cos(θ) → θ (Backspace)");
+        btn("delete", "Delete", "Remove the selection entirely (Del)");
         btn("parent", "↑", "Select the enclosing expression (↑)");
         sep();
         // General menu: picking an operation applies it to the selection (or
@@ -830,7 +831,9 @@ var SympyEditor = (function () {
         if (!ro) this.beginEdit(this.selected || "/");
       } else if (k === "Escape") {
         this.select(null);
-      } else if (k === "Delete" || k === "Backspace") {
+      } else if (k === "Backspace") {
+        if (!ro && this.selected) this.unwrapSelection();
+      } else if (k === "Delete") {
         if (!ro && this.selected && this.selected !== "/") this.send({ action: "delete", path: this.selected });
       } else if (k === "ArrowUp") {
         if (t && t.parent) { this._cameFrom[t.parent] = this.selected; this.select(t.parent); }
@@ -909,6 +912,16 @@ var SympyEditor = (function () {
       input.focus();
       if (initial === undefined) input.select();
       else if (extend) input.setSelectionRange(input.value.length, input.value.length);
+    }
+
+    /** Drop the selected node, keeping the argument the user came up from
+     *  (↑ from a child) or the natural one. */
+    unwrapSelection() {
+      if (!this.selected || this.opts.readOnly) return;
+      var msg = { action: "unwrap", path: this.selected };
+      var back = this._cameFrom[this.selected];
+      if (back && isAncestorOrSelf(this.selected, back) && back !== this.selected) msg.keep = this._argIndex(this.selected, back);
+      this.send(msg);
     }
 
     /* ---- the source line ---- */
@@ -1459,6 +1472,7 @@ var SympyEditor = (function () {
           if (this.caret) return this.beginInsert("");
           if (this.range) return this.beginRangeEdit();
           return this.beginEdit(this.selected || "/");
+        case "unwrap": return this.unwrapSelection();
         case "delete":
           if (this.range) return this.send({ action: "delete", path: this.range.parent, children: this._rangeIndices() });
           if (this.selected && this.selected !== "/") return this.send({ action: "delete", path: this.selected });
@@ -1549,6 +1563,7 @@ var SympyEditor = (function () {
       set("edit", dis);
       set("keyboard", dis);
       set("delete", dis || !(range || (this.selected && this.selected !== "/")));
+      set("unwrap", dis || range || !this.selected || !(s.nodes && s.nodes[this.selected] && s.nodes[this.selected].nargs));
       set("parent", dis || !(range || (t && t.parent)));
       set("copy", !s.src);
       set("finish", dis);

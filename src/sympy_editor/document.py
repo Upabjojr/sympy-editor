@@ -15,10 +15,10 @@ import keyword
 import tokenize
 
 import sympy
-from sympy import Basic, Dummy, Function, IndexedBase, MatrixSymbol, Pow, S, Symbol, sympify, srepr
+from sympy import Add, Basic, Dummy, Function, IndexedBase, MatrixSymbol, Mul, Pow, S, Symbol, Tuple, sympify, srepr
 from sympy.core.function import AppliedUndef, UndefinedFunction
 from sympy.core.symbol import Str
-from sympy.matrices.expressions import MatrixExpr
+from sympy.matrices.expressions import MatAdd, MatMul, MatrixExpr
 from sympy.matrices.matrixbase import MatrixBase
 from sympy.parsing.sympy_parser import (
     convert_xor,
@@ -263,6 +263,31 @@ class Document:
             result = sympify(func(extract_range(self.expr, p, children)))
             return self._commit(replace_range(self.expr, p, children, result))
         return self._commit(replace_at(self.expr, p, sympify(func(get_at(self.expr, p)))))
+
+    def unwrap(self, path: PathLike, keep: Optional[int] = None) -> Basic:
+        """Remove the node at ``path`` but keep one of its arguments in its
+        place: ``cos(x)`` becomes ``x``, ``Integral(f, (x, a, b))`` becomes
+        ``f``, ``x**2`` becomes ``x``.  ``keep`` is the index of the argument
+        to keep; by default the natural one (the function body, the base, the
+        first argument).  A sum or product with several terms needs ``keep``.
+        """
+        p = self._path(path)
+        node = get_at(self.expr, p)
+        args = node.args
+        if not args:
+            raise ValueError(f"{node} has nothing inside to keep")
+        if keep is None:
+            if isinstance(node, (Add, Mul)) and len(args) > 1 and not isinstance(node, (MatAdd, MatMul)) or \
+                    isinstance(node, (MatAdd, MatMul)) and len(args) > 1:
+                raise ValueError(f"{type(node).__name__} has {len(args)} terms: select the one to keep, press ↑, then Backspace "
+                                 "(or Delete the others)")
+            keep = 0
+        if not 0 <= int(keep) < len(args):
+            raise ValueError(f"Invalid argument {keep} for {node}")
+        kept = args[int(keep)]
+        if isinstance(kept, Tuple):
+            raise ValueError(f"Cannot keep {kept}: it is not an expression")
+        return self._commit(replace_at(self.expr, p, kept))
 
     def extend(self, path: PathLike, side: str, src: str) -> Basic:
         """Type next to the node at ``path`` (an entry of a matrix, the base of a
@@ -511,6 +536,7 @@ class Document:
         ``{"action": "delete", "path": "/1"}``, ``{"action": "set", "src": ...}``,
         ``{"action": "insert", "path": "/", "index": 2, "src": "y", "left": 1}``,
         ``{"action": "extend", "path": "/2/0", "side": "after", "src": "+ 1"}``,
+        ``{"action": "unwrap", "path": "/1", "keep": 0}`` (keep an argument, drop the node),
         ``{"action": "retype", "name": "A", "type": "MatrixSymbol", "rows": 2, "cols": 2}``
         (``"assumptions": ["positive"]`` for a Symbol), ``{"action": "declare", ...}``
         with the same fields for a name not yet in the expression,
@@ -536,6 +562,8 @@ class Document:
             elif action == "insert":
                 self.insert(path, int(message.get("index", 0)), str(message.get("src", "")),
                             left=message.get("left"), right=message.get("right"))
+            elif action == "unwrap":
+                self.unwrap(path, message.get("keep"))
             elif action == "extend":
                 self.extend(path, str(message.get("side", "after")), str(message.get("src", "")))
             elif action == "set":

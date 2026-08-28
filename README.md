@@ -66,7 +66,8 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | LaTeX shortcuts in the field | | `\theta` becomes `θ` as you type (Greek letters, `\infty`, `\sin`, `\cdot`, `\le`...); Greek letters are SymPy's names (`θ` is `theta`, `λ` is `lamda`, `∞` is `oo`) |
 | Edit selection's existing text | double-click / **Edit** | Enter |
 | Apply / cancel an edit | click elsewhere applies | Enter / Esc |
-| Remove selection from its parent | **Delete** | Del |
+| Remove the selection entirely | **Delete** | Del |
+| Remove the node but keep its argument (`cos(θ)` → `θ`, `√x` → `x`, `∫f dx` → `f`) | **Unwrap** | Backspace — after ↑ from a term, that term is the one kept |
 | Transform the selection | pick an operation in the **Transform ▾** menu (general) or the type menu ("Matrix ▾"...): it applies at once | |
 | Undo / redo | ↶ / ↷ | Ctrl+Z / Ctrl+Shift+Z |
 

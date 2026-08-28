@@ -443,3 +443,27 @@ def test_insert_juxtaposition_and_junction_operators():
     assert ins(f(x), "y", left=0) == f(x * y)
     d = Document(x + y); d.insert("/", 2, "t")                                # no neighbours given: plain insertion
     assert d.expr == x + y + t
+
+
+def test_unwrap_keeps_an_argument():
+    from sympy import Integral, cos, sqrt, symbols
+    x, y, t = symbols("x y t")
+    doc = Document(cos(t) + y)
+    c = next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "cos(t)")
+    doc.handle({"action": "unwrap", "path": c})
+    assert doc.expr == t + y
+    doc = Document(Integral(x**2, (x, 0, 1)))
+    doc.unwrap("/")
+    assert doc.expr == x**2
+    doc.unwrap("/")                                   # x**2 -> x (the base)
+    assert doc.expr == x
+    assert "nothing inside" in doc.handle({"action": "unwrap", "path": "/"})["error"]
+    doc = Document(sqrt(x) * 3)
+    doc.unwrap(next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "sqrt(x)"))
+    assert doc.expr == 3 * x
+    doc = Document(x + y)
+    assert "select the one to keep" in doc.handle({"action": "unwrap", "path": "/"})["error"]
+    doc.handle({"action": "unwrap", "path": "/", "keep": 1})
+    assert doc.expr in (x, y)
+    doc = Document(Integral(x, (x, 0, 1)))
+    assert "not an expression" in doc.handle({"action": "unwrap", "path": "/", "keep": 1})["error"]

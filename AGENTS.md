@@ -112,6 +112,10 @@ Two conventions between printer, document and front end:
   the document selection, which would move focus into the editable line);
   Enter sends `set`, Esc reverts.  `beginEdit("/")`
   edits there - the rendering is never swapped for a text field.
+- **Unwrap.**  `{"action": "unwrap", "path", "keep"}` → `Document.unwrap`
+  replaces a node by one argument (`keep`, default the first; sums/products
+  with several terms require it).  The front end passes the child ↑ came
+  from (`_cameFrom`) as `keep`; Backspace/Unwrap button.  Delete removes.
 - **Caret vs selection.**  `Editor.selected` and `Editor.caret` are mutually
   exclusive (`select()` hides the caret, `_showCaret()` clears the
   selection): keys replace a selection, insert at a caret, and never delete

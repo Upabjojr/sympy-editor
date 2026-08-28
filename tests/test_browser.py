@@ -837,6 +837,30 @@ def test_source_line_is_linked_to_the_rendering(browser, serve_expr):
     assert page.errors == []
 
 
+def test_backspace_unwraps_and_delete_removes(browser, serve_expr):
+    from sympy import cos, sqrt
+    t = symbols("theta")
+    srv, doc = serve_expr(x * cos(t) + sqrt(y))
+    page = _open(browser, srv.url)
+    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "theta"))
+    page.keyboard.press("ArrowUp")                        # cos(theta)
+    assert page.locator(".se-status").inner_text() == "cos: cos(theta)"
+    assert page.locator('[data-cmd="unwrap"]').is_enabled()
+    _next_state(page, lambda: page.keyboard.press("Backspace"))   # keep theta, drop cos
+    assert doc.expr == x * t + sqrt(y)
+    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "sqrt(y)"))
+    _next_state(page, lambda: page.locator('[data-cmd="unwrap"]').click())
+    assert doc.expr == x * t + y
+    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "x"))
+    page.keyboard.press("ArrowUp")                        # x*theta
+    _next_state(page, lambda: page.keyboard.press("Backspace"))   # keeps x, the term ↑ came from
+    assert doc.expr == x + y
+    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "y"))
+    _next_state(page, lambda: page.keyboard.press("Delete"))     # Delete removes entirely
+    assert doc.expr == x
+    assert page.errors == []
+
+
 def test_plus_term_typed_after_a_product_is_added_not_multiplied(scenario):
     A, B = MatrixSymbol("A", 2, 2), MatrixSymbol("B", 2, 2)
     s = scenario(A * B + 2 * A.T)
