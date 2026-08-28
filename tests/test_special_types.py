@@ -61,8 +61,9 @@ def test_edit_matrix_expression():
     doc.replace(_path_of(doc, "B"), "A")
     assert doc.expr == A * A + 2 * A.T
     assert doc.namespace()["A"] == A                      # MatrixSymbols are in scope
-    doc.replace("/", "A*B + B.T")
-    assert doc.expr == A * B + B.T
+    assert "B" not in doc.namespace()                     # ...only while they occur in the expression
+    doc.replace("/", "A*A.T + A")
+    assert doc.expr == A * A.T + A
 
 
 def test_edit_block_matrix():
