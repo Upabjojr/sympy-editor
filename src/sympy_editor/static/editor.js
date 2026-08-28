@@ -243,6 +243,17 @@ var SympyEditor = (function () {
       }
       if (!o.readOnly) btn("keyboard", "⌨", "Open the keyboard: edit the selection, insert at the caret, or edit the whole expression");
       btn("copy", "Copy", "Copy the SymPy source of the selection, or of the whole expression (Ctrl+C / Ctrl+X / Ctrl+V work on selections and carets)");
+      if (!o.readOnly) {
+        btn("paste", "Paste", "Paste the clipboard over the selection, or at the caret (Ctrl+V)");
+        sep();
+        // Function box: any SymPy function or method applied to the selection.
+        this.fnList = h("datalist", { id: "se-fn-" + Math.random().toString(36).slice(2, 8) });
+        this.fnInput = h("input", { class: "se-fn", type: "text", list: this.fnList.id, placeholder: "SymPy function… e.g. diff(x)",
+          title: "Apply any SymPy function or method to the selection (or the whole expression): diff(x), series(x, 0, 5), subs(x, 1), .T — Enter applies",
+          spellcheck: "false", autocomplete: "off" });
+        this.toolbar.appendChild(this.fnInput);
+        this.toolbar.appendChild(this.fnList);
+      }
       if (o.finishButton && !o.readOnly) {
         btn("finish", "Done", "Finish editing and hand the expression back to Python");
       }
@@ -293,7 +304,8 @@ var SympyEditor = (function () {
           abtn("edit", "Edit", "Edit in place"),
           abtn("unwrap", "Unwrap", "Remove this node but keep its argument: cos(θ) → θ"),
           abtn("delete", "Delete", "Remove entirely"),
-          abtn("copy", "Copy", "Copy the SymPy source of the selection (Ctrl+C; Ctrl+X cuts, Ctrl+V pastes)")
+          abtn("copy", "Copy", "Copy the SymPy source of the selection (Ctrl+C; Ctrl+X cuts, Ctrl+V pastes)"),
+          abtn("paste", "Paste", "Paste the clipboard over the selection (Ctrl+V)")
         ]);
         root.appendChild(this.actions);
       }
@@ -316,6 +328,12 @@ var SympyEditor = (function () {
       this._cameFrom = {};    // ancestor path -> the descendant ↑ was pressed on (for ↓)
       this._stateCount = 0;   // states applied so far (data-seq on the root)
 
+      // Loading overlay: shown in front of everything while Python loads.
+      this.loading = false;
+      this.overlay = h("div", { class: "se-loading", hidden: "", role: "status", "aria-live": "polite" }, [
+        h("div", { class: "se-spinner" }), h("div", { class: "se-loading-text" }, ["Loading…"])
+      ]);
+      root.appendChild(this.overlay);
       this.host.appendChild(root);
       root.__sympyEditor = this;   // handy for debugging and tests
       this._wire();
@@ -370,7 +388,8 @@ var SympyEditor = (function () {
       this.view.addEventListener("dblclick", function (ev) { self._onDblClick(ev); });
       this.root.addEventListener("keydown", function (ev) {
         if (self.symbols && self.symbols.contains(ev.target)) return;
-        if (ev.target === self.source) return;
+        if (ev.target === self.source || ev.target === self.fnInput) return;
+        if (self.loading) { ev.preventDefault(); return; }
         var t = ev.target;
         if (t === self.input || (t && t.tagName === "SELECT")) return;
         self._onKey(ev);
@@ -408,6 +427,14 @@ var SympyEditor = (function () {
         self.send(msg);
         self.view.focus({ preventScroll: true });
       };
+      if (this.fnInput) {
+        this.fnInput.addEventListener("focus", function () { self._loadFunctions(); });
+        this.fnInput.addEventListener("keydown", function (ev) {
+          ev.stopPropagation();
+          if (ev.key === "Enter") { ev.preventDefault(); self.callFunction(self.fnInput.value); }
+          else if (ev.key === "Escape") { ev.preventDefault(); self.fnInput.value = ""; self.view.focus({ preventScroll: true }); }
+        });
+      }
       [this.opsSelect, this.typeMenu].forEach(function (menu) {
         if (!menu) return;
         menu.addEventListener("change", function () { applyFromMenu(menu); });
@@ -432,6 +459,11 @@ var SympyEditor = (function () {
       this.selected = sel;
       this._fillOps();
       this._fillSymbols();
+      if (snap.functions && this.fnList && !this._functionsLoaded) {
+        this._functionsLoaded = true;
+        var self2 = this;
+        snap.functions.forEach(function (name) { self2.fnList.appendChild(h("option", { value: name })); });
+      }
       this.root.setAttribute("data-seq", String(++this._stateCount));   // lets tests wait for a re-render
       this._applySelection();
       this._showError(snap.error);
@@ -787,6 +819,7 @@ var SympyEditor = (function () {
 
     _onClick(ev) {
       if (this._suppressClick) { this._suppressClick = false; return; }   // end of a drag
+      if (this.loading) return;
       if (this.closed || (this.input && ev.target === this.input)) return;
       var leaf = this._leafAt(ev);
       this._gapCache = null;
@@ -972,6 +1005,7 @@ var SympyEditor = (function () {
         var cmd = buttons[i].getAttribute("data-cmd");
         buttons[i].disabled = cmd === "parent" ? !(this.range || (t && t.parent))
                             : cmd === "child" ? false
+                            : cmd === "paste" ? false
                             : cmd === "unwrap" ? !unwrapOk
                             : cmd === "delete" ? !(this.range || (this.selected && this.selected !== "/"))
                             : false;
@@ -1027,6 +1061,68 @@ var SympyEditor = (function () {
       } else {
         this._setStatus("Copied: " + src);
       }
+    }
+
+    /** Progress from a backend: loading messages block the UI behind an overlay. */
+    _report(text) {
+      if (text && /loading|waiting/i.test(text)) this._showLoading(text);
+      else if (!text) this._hideLoading();
+      else this._setStatus(text);
+    }
+
+    _showLoading(text) {
+      this.loading = true;
+      this.overlay.querySelector(".se-loading-text").textContent = text || "Loading…";
+      this.overlay.hidden = false;
+      if (this.root.contains(document.activeElement) && document.activeElement !== document.body) document.activeElement.blur();
+      this._setStatus(text || "");
+    }
+
+    _hideLoading() {
+      if (!this.loading) return;
+      this.loading = false;
+      this.overlay.hidden = true;
+      this._applySelection();
+    }
+
+    /** The Paste button: the system clipboard when readable, else the last copy made here. */
+    pasteClipboard() {
+      var self = this;
+      var apply = function (text) {
+        text = (text || "").trim();
+        if (!text) { self._setStatus("Nothing to paste (copy something first, or use Ctrl+V)"); return; }
+        if (self.caret) { self.beginInsert(text); self.commitEdit(); }
+        else if (self.range) { self.beginRangeEdit(text); self.commitEdit(); }
+        else if (self.selected) { self.beginEdit(self.selected, text); self.commitEdit(); }
+        else self._setStatus("Select where to paste (a node, or a caret between terms)");
+      };
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        navigator.clipboard.readText().then(apply, function () { apply(self._clip); });
+      } else {
+        apply(this._clip);
+      }
+    }
+
+    /** Ask the backend for SymPy's function names once (for the box's autocompletion). */
+    _loadFunctions() {
+      if (this._functionsLoaded || this._functionsRequested || !this.backend) return;
+      this._functionsRequested = true;
+      var self = this;
+      Promise.resolve(this.backend.send({ action: "functions" }, function (text) { self._report(text); })).then(function (snap) {
+        self._hideLoading();
+        if (snap) self.setState(snap);   // the widget backend answers through its trait instead
+      }, function () { self._hideLoading(); self._functionsRequested = false; });
+    }
+
+    /** Apply "name(args)" / ".method(args)" from the function box to the selection. */
+    callFunction(text) {
+      text = (text || "").trim();
+      if (!text || this.opts.readOnly || this.closed) return;
+      var msg = { action: "call", path: this.range ? this.range.parent : (this.selected || "/"), func: text };
+      if (this.range) msg.children = this._rangeIndices();
+      this.fnInput.value = "";
+      this.send(msg);
+      this.view.focus({ preventScroll: true });
     }
 
     /* ---- the source line ---- */
@@ -1597,6 +1693,7 @@ var SympyEditor = (function () {
           if (this.range) return this.beginRangeEdit();
           return this.beginEdit(this.selected || "/");
         case "copy": return this.copySource();
+        case "paste": return this.pasteClipboard();
         case "finish": return this.send({ action: "close" });
       }
     }
@@ -1609,12 +1706,13 @@ var SympyEditor = (function () {
       this._updateToolbar();
       var self = this;
       try {
-        var snap = await this.backend.send(msg, function (text) { self._setStatus(text); });
+        var snap = await this.backend.send(msg, function (text) { self._report(text); });
         if (snap) await this.setState(snap);
       } catch (e) {
         this._showError(String((e && e.message) || e));
         this._applySelection();
       } finally {
+        this._hideLoading();
         this.busy = false;
         this.root.classList.remove("se-busy");
         this._updateToolbar();
@@ -1676,6 +1774,8 @@ var SympyEditor = (function () {
       set("parent", dis || !(range || (t && t.parent)));
       set("child", dis);
       set("copy", !s.src);
+      set("paste", dis);
+      if (this.fnInput) this.fnInput.disabled = dis;
       set("finish", dis);
       if (this.opsSelect) this.opsSelect.disabled = dis;
       if (this.typeMenu) this.typeMenu.disabled = dis;
@@ -1788,7 +1888,8 @@ var SympyEditor = (function () {
     var editor = new Editor(host, backend, options);
     editor.setState(cfg.snapshot).then(function () {
       if (backend.warmup && editor.opts.preload !== false) {
-        backend.warmup(function (text) { if (!editor.input && !editor.busy) editor._setStatus(text); });
+        editor._showLoading("Loading Python runtime…");
+        backend.warmup(function (text) { editor._report(text); }).then(function () { editor._hideLoading(); });
       }
     });
     return editor;

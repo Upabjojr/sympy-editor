@@ -52,6 +52,48 @@
   cursor: pointer;
 }
 .se-ops { max-width: 12rem; }
+.se-fn {
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 0.2rem 0.5rem;
+  width: 15rem;
+  border: 1px solid var(--se-border);
+  border-radius: 0.3rem;
+  background: transparent;
+  color: inherit;
+}
+.se-fn:focus { outline: 2px solid rgba(var(--se-accent), 0.6); outline-offset: -1px; }
+
+/* loading overlay: in front of the whole editor while Python loads */
+.se-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  background: rgba(127, 127, 127, 0.25);
+  backdrop-filter: blur(1.5px);
+  border-radius: 0.5rem;
+  cursor: progress;
+  font-size: 13px;
+  color: var(--se-fg);
+}
+.se-loading[hidden] { display: none; }
+.se-loading-text { background: var(--se-bg); padding: 0.2rem 0.6rem; border-radius: 0.3rem; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2); }
+.se-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid rgba(var(--se-accent), 0.25);
+  border-top-color: rgba(var(--se-accent), 0.95);
+  border-radius: 50%;
+  animation: se-spin 0.9s linear infinite;
+}
+@keyframes se-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .se-spinner { animation: none; } }
 /* the type menu: operations of the selection's type, made hard to miss */
 .se-typemenu {
   font: inherit;

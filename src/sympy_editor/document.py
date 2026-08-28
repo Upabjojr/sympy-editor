@@ -8,6 +8,7 @@ snapshot, so the same JavaScript works everywhere.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import io
@@ -53,6 +54,43 @@ __all__ = ["Document", "SYMBOL_TYPES"]
 SYMBOL_TYPES = ("Symbol", "MatrixSymbol", "Matrix", "Function")
 
 PathLike = Union[str, Path]
+
+
+def _split_args(text: str) -> List[str]:
+    """Split ``"x, (a, b), f(1, 2)"`` on top-level commas."""
+    out, depth, cur = [], 0, []
+    for ch in text:
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        if ch == "," and depth == 0:
+            out.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    if "".join(cur).strip():
+        out.append("".join(cur))
+    return [a.strip() for a in out if a.strip()]
+
+
+#: Names offered first in the function box (any callable of sympy works).
+COMMON_FUNCTIONS = (
+    "simplify", "expand", "factor", "cancel", "apart", "together", "collect", "trigsimp", "expand_trig",
+    "powsimp", "logcombine", "expand_log", "radsimp", "nsimplify", "refine", "diff", "integrate", "series",
+    "limit", "summation", "solve", "solveset", "roots", "subs", "evalf", "N", "doit", "rewrite", "sqrt",
+    "exp", "log", "Abs", "sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh", "tanh", "conjugate",
+    "re", "im", "arg", "gamma", "factorial", "binomial", "Rational", "Poly", "degree", "LC", "gcd", "lcm",
+    "primitive", "sqf", "discriminant", "resultant", "det", "inv", "T", "transpose", "trace", "rank",
+    "eigenvals", "eigenvects", "nullspace", "rref", "norm", "Matrix", "eye", "zeros", "ones",
+)
+
+
+def sympy_functions() -> List[str]:
+    """Names of SymPy's public callables, the common ones first."""
+    names = [n for n in dir(sympy) if not n.startswith("_") and callable(getattr(sympy, n, None))]
+    rest = sorted(n for n in names if n not in COMMON_FUNCTIONS)
+    return [n for n in COMMON_FUNCTIONS if n in names or n in ("subs", "evalf", "doit", "rewrite", "det", "inv", "T", "transpose", "trace", "rank", "eigenvals", "eigenvects", "nullspace", "rref", "norm", "degree", "LC")] + rest
 
 
 class Document:
@@ -289,6 +327,40 @@ class Document:
             result = sympify(func(extract_range(self.expr, p, children)))
             return self._commit(replace_range(self.expr, p, children, result))
         return self._commit(replace_at(self.expr, p, sympify(func(get_at(self.expr, p)))))
+
+    def call(self, path: PathLike, func: str, children=None) -> Basic:
+        """Apply a SymPy function or a method to the node at ``path`` (or to
+        the range ``children`` of it): ``func`` is ``"diff(x)"``,
+        ``"series(x, 0, 5)"``, ``"subs(x, 1)"``, ``"factor"``, ``".T"``,
+        ``".det()"``...  A name that is a SymPy function is called as
+        ``name(node, *args)``; a name starting with ``.`` (or that is only an
+        attribute of the node) is looked up on the node.  Extra arguments are
+        parsed in the expression's namespace.
+        """
+        m = re.match(r"^\s*(\.?)([A-Za-z_][A-Za-z_0-9]*)\s*(?:\((.*)\))?\s*$", func or "", re.S)
+        if not m:
+            raise ValueError(f"Not a function call: {func!r} (try diff(x), series(x, 0, 5) or .T)")
+        dotted, name, argsrc = m.group(1), m.group(2), m.group(3)
+        p = self._path(path)
+        target = extract_range(self.expr, p, children) if children is not None else get_at(self.expr, p)
+        args = [self.parse(a, context=target) for a in _split_args(argsrc)] if argsrc else []
+        fn = None
+        if not dotted and not name.startswith("_") and callable(getattr(sympy, name, None)):
+            fn = getattr(sympy, name)
+            result = fn(target, *args)
+        elif not name.startswith("_") and hasattr(target, name):
+            attr = getattr(target, name)
+            result = attr(*args) if callable(attr) else attr
+        else:
+            raise ValueError(f"Unknown SymPy function or method: {name!r}")
+        if isinstance(result, (list, tuple, set, frozenset)):
+            result = sympy.FiniteSet(*result) if all(isinstance(r, Basic) for r in result) else sympify(result)
+        result = sympify(result)
+        if not isinstance(result, Basic):
+            raise ValueError(f"{name} returned {type(result).__name__}, not an expression")
+        if children is not None:
+            return self._commit(replace_range(self.expr, p, children, result))
+        return self._commit(replace_at(self.expr, p, result))
 
     def unwrap(self, path: PathLike, keep: Optional[int] = None) -> Basic:
         """Remove the node at ``path`` but keep one of its arguments in its
@@ -563,6 +635,8 @@ class Document:
         ``{"action": "insert", "path": "/", "index": 2, "src": "y", "left": 1}``,
         ``{"action": "extend", "path": "/2/0", "side": "after", "src": "+ 1"}``,
         ``{"action": "unwrap", "path": "/1", "keep": 0}`` (keep an argument, drop the node),
+        ``{"action": "call", "path": "/", "func": "diff(x)"}`` (any SymPy function/method),
+        ``{"action": "functions"}`` (a snapshot with the list of SymPy function names),
         ``{"action": "retype", "name": "A", "type": "MatrixSymbol", "rows": 2, "cols": 2}``
         (``"assumptions": ["positive"]`` for a Symbol), ``{"action": "declare", ...}``
         with the same fields for a name not yet in the expression,
@@ -590,6 +664,12 @@ class Document:
                             left=message.get("left"), right=message.get("right"), attach=message.get("attach"))
             elif action == "unwrap":
                 self.unwrap(path, message.get("keep"))
+            elif action == "call":
+                self.call(path, str(message.get("func", "")), children=children)
+            elif action == "functions":
+                snap = self.snapshot()
+                snap["functions"] = sympy_functions()
+                return snap
             elif action == "extend":
                 self.extend(path, str(message.get("side", "after")), str(message.get("src", "")))
             elif action == "set":

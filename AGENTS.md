@@ -115,6 +115,16 @@ Two conventions between printer, document and front end:
   the document selection, which would move focus into the editable line);
   Enter sends `set`, Esc reverts.  `beginEdit("/")`
   edits there - the rendering is never swapped for a text field.
+- **Function box.**  `{"action": "call", "path", "func": "diff(x)"}` →
+  `Document.call`: a public callable of `sympy` is called as `f(node, *args)`,
+  a `.name`/attribute of the node otherwise; extra args are parsed in the
+  document's namespace; lists become `FiniteSet`s.  `{"action":
+  "functions"}` returns a snapshot with `functions` (common names first) for
+  the box's `<datalist>`, requested once on focus.
+- **Loading overlay.**  Backend progress messages go through
+  `Editor._report`: texts mentioning loading/waiting show `.se-loading` (a
+  blocking spinner overlay, keys and clicks ignored) until the message
+  clears; `mount()` shows it during Pyodide preloading.
 - **Unwrap.**  `{"action": "unwrap", "path", "keep"}` → `Document.unwrap`
   replaces a node by one argument (`keep`, default the first; sums/products
   with several terms require it).  The front end passes the child ↑ came

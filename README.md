@@ -42,8 +42,9 @@ save_html(expr, "expr.html")   # open in any browser
 
 The file is self-contained: it renders immediately and loads
 [Pyodide](https://pyodide.org) + SymPy from a CDN in the background to run
-the editing logic inside the browser (`options={"preload": False}` defers
-that to the first edit).  Use `editable=False` for a view-only page (still
+the editing logic inside the browser; a spinner overlay blocks the editor
+until they are ready (`options={"preload": False}` defers that to the first
+edit).  Use `editable=False` for a view-only page (still
 selectable).
 
 ### Local server (scripts, plain Python sessions)
@@ -69,7 +70,8 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | Remove the selection entirely | **Delete** | Del |
 | Remove the node but keep its argument (`cos(θ)` → `θ`, `√x` → `x`, `∫f dx` → `f`) | **Unwrap** | Backspace — after ↑ from a term, that term is the one kept |
 | Transform the selection | pick an operation in the **Transform ▾** menu (general) or the type menu ("Matrix ▾"...): it applies at once | |
-| Copy / cut / paste a part | **Copy** (toolbar or action bar) | Ctrl+C / Ctrl+X copy the selection's SymPy source; Ctrl+V pastes over a selection or at a caret |
+| Copy / cut / paste a part | **Copy** / **Paste** (toolbar or action bar) | Ctrl+C / Ctrl+X copy the selection's SymPy source; Ctrl+V pastes over a selection or at a caret |
+| Apply any SymPy function | the **function box** in the toolbar (autocompletes SymPy's names): `diff(x)`, `series(x, 0, 5)`, `subs(x, 1)`, `.T`, `det()` — Enter applies it to the selection | |
 | Undo / redo | ↶ / ↷ | Ctrl+Z / Ctrl+Shift+Z |
 
 A small action bar appears under whatever is selected — ↑ parent, ↓ inside,

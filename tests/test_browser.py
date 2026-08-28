@@ -947,6 +947,37 @@ def test_copy_cut_paste_of_a_selection(browser, serve_expr):
     assert page.errors == []
 
 
+def test_function_box_and_paste_button(browser, serve_expr):
+    srv, doc = serve_expr(x**3 + y)
+    ctx = browser.new_context(permissions=["clipboard-read", "clipboard-write"])
+    page = ctx.new_page()
+    page.errors = []
+    page.on("pageerror", lambda e: page.errors.append(str(e)))
+    page.goto(srv.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    assert not page.locator(".se-loading").is_visible()     # no overlay on the HTTP backend
+    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "x**3") + "/0")   # the x glyph...
+    page.keyboard.press("ArrowUp")                                                                      # ...then the power
+    assert page.locator(".se-status").inner_text() == "Pow: x**3"
+    fn = page.locator(".se-fn")
+    fn.click()
+    page.wait_for_function("document.querySelector('datalist option[value=\"diff\"]') !== null")   # names loaded on focus
+    fn.fill("diff(x)")
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    assert doc.expr == 3 * x**2 + y and fn.input_value() == ""
+    fn.click()
+    fn.fill("bogus(")
+    page.keyboard.press("Enter")
+    page.wait_for_selector(".se-error:not([hidden])")
+    # Paste button over a selection
+    page.evaluate("navigator.clipboard.writeText('z + 1')")
+    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "y"))
+    _next_state(page, lambda: page.locator('.se-toolbar [data-cmd="paste"]').click())
+    assert doc.expr == 3 * x**2 + z + 1
+    assert page.errors == []
+    ctx.close()
+
+
 def test_plus_term_typed_after_a_product_is_added_not_multiplied(scenario):
     A, B = MatrixSymbol("A", 2, 2), MatrixSymbol("B", 2, 2)
     s = scenario(A * B + 2 * A.T)
@@ -1062,7 +1093,10 @@ def test_pyodide_page_preloads_the_runtime(browser, tmp_path):
     page.goto(path.as_uri())
     page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
     page.wait_for_function("document.querySelector('.se-status').textContent.includes('Python')", timeout=30000)
+    assert page.locator(".se-loading").is_visible()            # a blocking overlay while Python loads
+    assert "Python" in page.locator(".se-loading-text").inner_text()
     page.wait_for_function("window.__sympyEditorPyodide && window.__sympyEditorPyodide.docs === 1", timeout=180000)
+    page.wait_for_function("document.querySelector('.se-loading').hidden", timeout=30000)
     assert page.locator(".se-status").inner_text() == ""      # status cleared once ready, no edit happened
     page.locator('[data-path="/0"]').click(force=True)
     page.keyboard.type("z")
