@@ -28,8 +28,14 @@ var SympyEditor = (function () {
     showSource: true,    // show str(expr) under the rendering
     readOnly: false,     // selection only, no editing
     finishButton: false, // "Done" button (used by the HTTP server backend)
-    preload: true        // Pyodide pages: start loading Python at page load, not at the first edit
+    preload: true,       // Pyodide pages: start loading Python at page load, not at the first edit
+    zoom: 1,             // initial magnification of the formula (1 = the CSS size)
+    minZoom: 0.4,
+    maxZoom: 4,
+    rememberZoom: false  // keep the zoom in localStorage across page loads (the mobile app does)
   };
+  var ZOOM_KEY = "sympy-editor:zoom";
+  var ZOOM_STEP = 1.2;
 
   /* ------------------------------------------------------------------ */
   /* Resource loading                                                    */
@@ -213,13 +219,17 @@ var SympyEditor = (function () {
       this.root = root;
       this.buttons = {};
       this.toolbar = h("div", { class: "se-toolbar", role: "toolbar" });
+      // The tools sit in their own strip: on a narrow screen it scrolls
+      // sideways instead of wrapping onto several rows.
+      this.tools = h("div", { class: "se-tools" });
+      this.toolbar.appendChild(this.tools);
       var btn = function (cmd, label, title) {
         var b = h("button", { type: "button", "data-cmd": cmd, title: title }, [label]);
-        self.toolbar.appendChild(b);
+        self.tools.appendChild(b);
         self.buttons[cmd] = b;
         return b;
       };
-      var sep = function () { self.toolbar.appendChild(h("span", { class: "se-sep" })); };
+      var sep = function () { self.tools.appendChild(h("span", { class: "se-sep" })); };
 
       if (!o.readOnly) {
         btn("undo", "↶", "Undo (Ctrl+Z)");
@@ -235,11 +245,11 @@ var SympyEditor = (function () {
         // General menu: picking an operation applies it to the selection (or
         // the whole expression) at once.
         this.opsSelect = h("select", { class: "se-ops", title: "Transform the selection (or the whole expression)" });
-        this.toolbar.appendChild(this.opsSelect);
+        this.tools.appendChild(this.opsSelect);
         // Type menu: the operations specific to the selection's type (Matrix,
         // Integral, Equation...); picking one applies it at once.
         this.typeMenu = h("select", { class: "se-typemenu", hidden: "", title: "Operations specific to the selected type" });
-        this.toolbar.appendChild(this.typeMenu);
+        this.tools.appendChild(this.typeMenu);
         sep();
       }
       if (!o.readOnly) btn("keyboard", "⌨", "Open the keyboard: edit the selection, insert at the caret, or edit the whole expression");
@@ -252,7 +262,7 @@ var SympyEditor = (function () {
         this.fnInput = h("input", { class: "se-fn", type: "text", placeholder: "SymPy function… (search)",
           title: "Apply any SymPy function or method to the selection (or the whole expression): type to search, Enter to pick; functions with parameters ask for them",
           spellcheck: "false", autocomplete: "off" });
-        this.toolbar.appendChild(this.fnInput);
+        this.tools.appendChild(this.fnInput);
         this.fnMenu = h("div", { class: "se-fn-menu", hidden: "", role: "listbox" });
         this.fnForm = h("div", { class: "se-fn-form", hidden: "" });
         this._fnNames = [];
@@ -262,6 +272,11 @@ var SympyEditor = (function () {
       if (o.finishButton && !o.readOnly) {
         btn("finish", "Done", "Finish editing and hand the expression back to Python");
       }
+      sep();
+      // Zoom: the formula's size (also Ctrl+wheel, Ctrl+plus/minus/0, pinch).
+      btn("zoomout", "\u2212", "Zoom out (Ctrl+minus, Ctrl+wheel, pinch)");
+      btn("zoomreset", "100%", "Reset the zoom (Ctrl+0)");
+      btn("zoomin", "+", "Zoom in (Ctrl+plus, Ctrl+wheel, pinch)");
       this.status = h("span", { class: "se-status", "aria-live": "polite" });
       this.toolbar.appendChild(this.status);
       if (o.toolbar) root.appendChild(this.toolbar);
@@ -271,6 +286,8 @@ var SympyEditor = (function () {
         "aria-label": "SymPy expression; click to select a sub-expression"
       });
       root.appendChild(this.view);
+      this.zoom = 1;
+      this._applyZoom(this._initialZoom());
 
       // The SymPy source line: editable text (Enter applies, Esc reverts) whose
       // selection is linked to the rendering both ways.  The rendering itself is
@@ -328,6 +345,9 @@ var SympyEditor = (function () {
       this.range = null;      // {parent, anchor, focus} or null
       this._editRange = null; // {path, children} while a range is being edited
       this._drag = null;      // pointer drag in progress: {anchor, moved}
+      this._pointers = {};    // pointers currently down (id -> {x, y}), for pinching
+      this._pinch = null;     // {dist, zoom} while two pointers are down
+      this._pan = null;       // {x, left, moved} while a drag scrolls the view sideways
       this._suppressClick = false;
       this._pointerType = "mouse";   // of the last pointerdown: touch gets tap-to-edit
       this._boxes = { hover: [], select: [] };   // highlight overlays (see _visualRect)
@@ -365,16 +385,67 @@ var SympyEditor = (function () {
         self.view.classList.toggle("se-gap", !!gap);
       });
       this.view.addEventListener("scroll", function () { self._gapCache = null; if (self.caret) self._hideCaret(); self._applySelection(); });
+      // Zoom with Ctrl/Cmd + wheel (a trackpad pinch arrives the same way); a
+      // plain wheel over a formula wider than the view scrolls it sideways
+      // (the view never scrolls vertically) and reaches the page at the ends.
+      this.view.addEventListener("wheel", function (ev) {
+        var unit = ev.deltaMode === 1 ? 16 : ev.deltaMode === 2 ? 100 : 1;
+        if (ev.ctrlKey || ev.metaKey) {
+          ev.preventDefault();
+          self.setZoom(self.zoom * Math.exp(-ev.deltaY * unit * 0.002), ev.clientX);
+          return;
+        }
+        if (self.view.scrollWidth <= self.view.clientWidth) return;
+        var before = self.view.scrollLeft;
+        self.view.scrollLeft = before + (ev.deltaX || ev.deltaY) * unit;
+        if (self.view.scrollLeft !== before) ev.preventDefault();
+      }, { passive: false });
+      // Two fingers pinch the formula, not the page: the browser must be told
+      // before it takes the gesture (one finger still scrolls the page
+      // vertically, see touch-action in the CSS).
+      this.view.addEventListener("touchstart", function (ev) { if (ev.touches.length >= 2) ev.preventDefault(); }, { passive: false });
+      this.view.addEventListener("touchmove", function (ev) { if (self._pinch) ev.preventDefault(); }, { passive: false });
       this.view.addEventListener("mouseleave", function () { self._setHover(null); });
       this.view.addEventListener("click", function (ev) { self._onClick(ev); });
       // Dragging (mouse, touch or pen) over the formula selects a range.
       this.view.addEventListener("pointerdown", function (ev) {
         self._pointerType = ev.pointerType || "mouse";
         if (ev.pointerType === "mouse" && ev.button !== 0) return;
+        self._pointers[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
+        if (Object.keys(self._pointers).length === 2) {   // a second finger: a pinch, no longer a drag
+          self._drag = null;
+          self._endPan();
+          self._pinch = { dist: self._pointerSpread(), zoom: self.zoom };
+          return;
+        }
         var leaf = self._leafAt(ev);
+        if (!leaf && self.view.scrollWidth > self.view.clientWidth) {
+          // Empty space of a formula wider than the view: dragging scrolls it.
+          self._drag = null;
+          self._pan = { x: ev.clientX, left: self.view.scrollLeft, moved: false, id: ev.pointerId };
+          if (ev.pointerType === "mouse" && self.view.setPointerCapture) {
+            try { self.view.setPointerCapture(ev.pointerId); } catch (e) { /* not capturable */ }
+          }
+          return;
+        }
         self._drag = { anchor: leaf ? leaf.getAttribute("data-path") : null, moved: false };
       });
       this.view.addEventListener("pointermove", function (ev) {
+        if (self._pointers[ev.pointerId]) self._pointers[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
+        if (self._pinch) {
+          if (Object.keys(self._pointers).length < 2) return;
+          self.setZoom(self._pinch.zoom * self._pointerSpread() / self._pinch.dist, self._pointerCentre());
+          ev.preventDefault();
+          return;
+        }
+        if (self._pan) {
+          if (ev.pointerType === "mouse" && ev.buttons === 0) { self._endPan(); return; }
+          var dx = ev.clientX - self._pan.x;
+          if (Math.abs(dx) > 3) { self._pan.moved = true; self.view.classList.add("se-panning"); }
+          self.view.scrollLeft = self._pan.left - dx;
+          if (self._pan.moved) ev.preventDefault();
+          return;
+        }
         var d = self._drag;
         if (!d || !d.anchor) return;
         if (ev.pointerType === "mouse" && ev.buttons === 0) { self._drag = null; return; }
@@ -386,12 +457,19 @@ var SympyEditor = (function () {
         self._dragSelect(d.anchor, lp);
         ev.preventDefault();
       });
-      var endDrag = function () {
-        if (self._drag && self._drag.moved) self._suppressClick = true;
+      var endPointer = function (ev, cancelled) {
+        delete self._pointers[ev.pointerId];
+        if (self._pinch && Object.keys(self._pointers).length < 2) {
+          self._pinch = null;
+          self._pointers = {};              // the finger left behind must not start anything
+          self._suppressClick = true;
+        }
+        if (self._pan) { if (self._pan.moved && !cancelled) self._suppressClick = true; self._endPan(); }
+        if (self._drag && self._drag.moved && !cancelled) self._suppressClick = true;
         self._drag = null;
       };
-      this.view.addEventListener("pointerup", endDrag);
-      this.view.addEventListener("pointercancel", function () { self._drag = null; });
+      this.view.addEventListener("pointerup", function (ev) { endPointer(ev, false); });
+      this.view.addEventListener("pointercancel", function (ev) { endPointer(ev, true); });
       this.view.addEventListener("dblclick", function (ev) { self._onDblClick(ev); });
       this.root.addEventListener("keydown", function (ev) {
         if (self.symbols && self.symbols.contains(ev.target)) return;
@@ -927,6 +1005,8 @@ var SympyEditor = (function () {
         if (!ro) this.send({ action: ev.shiftKey ? "redo" : "undo" });
       } else if (mod && (k === "y" || k === "Y")) {
         if (!ro) this.send({ action: "redo" });
+      } else if (mod && (k === "+" || k === "=" || k === "-" || k === "_" || k === "0")) {
+        this.setZoom(k === "0" ? 1 : this.zoom * ((k === "-" || k === "_") ? 1 / ZOOM_STEP : ZOOM_STEP));
       } else if (mod && ev.shiftKey && (k === "i" || k === "I")) {
         this.isolateSelection();
       } else if (ev.shiftKey && (k === "ArrowLeft" || k === "ArrowRight") && !this.caret) {
@@ -1894,6 +1974,9 @@ var SympyEditor = (function () {
           return this.beginEdit(this.selected || "/");
         case "copy": return this.copySource();
         case "paste": return this.pasteClipboard();
+        case "zoomin": return this.setZoom(this.zoom * ZOOM_STEP);
+        case "zoomout": return this.setZoom(this.zoom / ZOOM_STEP);
+        case "zoomreset": return this.setZoom(1);
         case "finish": return this.send({ action: "close" });
       }
     }
@@ -1941,6 +2024,62 @@ var SympyEditor = (function () {
       document.body.removeChild(ta);
     }
 
+    /* ---- zoom and sideways scrolling ---- */
+
+    _initialZoom() {
+      var z = this.opts.zoom;
+      if (this.opts.rememberZoom) {
+        try { var saved = parseFloat(localStorage.getItem(ZOOM_KEY)); if (saved > 0) z = saved; } catch (e) { /* no storage */ }
+      }
+      return z;
+    }
+
+    _applyZoom(zoom) {
+      var o = this.opts;
+      zoom = Math.max(o.minZoom, Math.min(o.maxZoom, +zoom || 1));
+      this.zoom = Math.round(zoom * 1000) / 1000;
+      this.view.style.setProperty("--se-zoom", String(this.zoom));   // the CSS multiplies the base font size by it
+      if (this.buttons.zoomreset) this.buttons.zoomreset.textContent = Math.round(this.zoom * 100) + "%";
+    }
+
+    /** Magnify the formula to `zoom` (1 = the CSS size), keeping the content
+     *  under viewport x `anchorX` (default: the middle of the view) in place. */
+    setZoom(zoom, anchorX) {
+      var vr = this.view.getBoundingClientRect();
+      var ax = (anchorX === undefined ? vr.left + vr.width / 2 : anchorX) - vr.left;
+      var content = this.view.scrollLeft + ax;
+      var old = this.zoom;
+      this._applyZoom(zoom);
+      if (this.zoom === old) return;
+      this.view.scrollLeft = content * this.zoom / old - ax;
+      this._gapCache = null;
+      if (this.caret) this._hideCaret();
+      this._applySelection();
+      this._updateToolbar();
+      if (this.opts.rememberZoom) {
+        try { localStorage.setItem(ZOOM_KEY, String(this.zoom)); } catch (e) { /* no storage */ }
+      }
+    }
+
+    _pointerSpread() {
+      var pts = Object.keys(this._pointers).map(function (id) { return this._pointers[id]; }, this);
+      if (pts.length < 2) return 1;
+      return Math.max(1, Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y));
+    }
+
+    _pointerCentre() {
+      var pts = Object.keys(this._pointers).map(function (id) { return this._pointers[id]; }, this);
+      return pts.length ? pts.reduce(function (sum, p) { return sum + p.x; }, 0) / pts.length : undefined;
+    }
+
+    _endPan() {
+      if (this._pan && this.view.releasePointerCapture && this._pan.id !== undefined) {
+        try { this.view.releasePointerCapture(this._pan.id); } catch (e) { /* not captured */ }
+      }
+      this._pan = null;
+      this.view.classList.remove("se-panning");
+    }
+
     /* ---- misc UI ---- */
 
     _setStatus(text) {
@@ -1976,6 +2115,9 @@ var SympyEditor = (function () {
       set("child", dis);
       set("copy", !s.src);
       set("paste", dis);
+      set("zoomin", this.zoom >= this.opts.maxZoom);
+      set("zoomout", this.zoom <= this.opts.minZoom);
+      set("zoomreset", this.zoom === 1);
       if (this.fnInput) this.fnInput.disabled = dis;
       set("finish", dis);
       if (this.opsSelect) this.opsSelect.disabled = dis;

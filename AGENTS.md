@@ -138,9 +138,24 @@ Two conventions between printer, document and front end:
   with several terms require it).  The front end passes the child ↑ came
   from (`_cameFrom`) as `keep`; Backspace/Unwrap button.  Delete removes.
 - **Layout stability.**  `.sympy-editor` is `display: block` and
-  `.se-status` has `flex: 1 1 0; min-width: 0`: the status text must never
-  change the container's width nor wrap the toolbar onto a second line,
-  either of which moves the formula under the pointer between two clicks.
+  `.se-status` has `flex: 1 1 0; min-width: 0; min-height: 1.3em`: the
+  status text must never change the container's width nor wrap the toolbar
+  onto a second line, either of which moves the formula under the pointer
+  between two clicks.  The tools sit in `.se-tools` (wrapping on the
+  desktop; on screens up to 640 px one strip that scrolls sideways, with
+  the status on its own line under it).
+- **Zoom and sideways scrolling.**  `Editor.setZoom(zoom, anchorX)` sets the
+  CSS variable `--se-zoom` on `.se-view` (`font-size: calc(base *
+  var(--se-zoom))`), keeps the content under `anchorX` in place, drops the
+  gap cache and the caret and redraws the selection; sources: the −/100%/+
+  buttons, Ctrl+wheel, Ctrl+plus/minus/0 and a two-pointer pinch
+  (`_pointers`/`_pinch`; a non-passive `touchstart` listener prevents the
+  browser's own pinch when two fingers land, so `touch-action: pan-y` can
+  stay for one-finger page scrolling).  `rememberZoom` (option; on in the
+  mobile bundle) keeps it in `localStorage`.  A formula wider than the view
+  (`overflow-x: auto`) scrolls with a plain wheel over it (the event reaches
+  the page again at the ends) and by dragging its empty space
+  (`_pan`; a drag that starts on a glyph still selects a range).
 - **Caret vs selection.**  `Editor.selected` and `Editor.caret` are mutually
   exclusive (`select()` hides the caret, `_showCaret()` clears the
   selection): keys replace a selection, insert at a caret, and never delete

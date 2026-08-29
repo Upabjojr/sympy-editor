@@ -145,6 +145,7 @@ _PAGE = """<!DOCTYPE html>
          background: #ffffff; color: #1f2328; }
   @media (prefers-color-scheme: dark) { body { background: #1e1e1e; color: #e6e6e6; } }
   h1 { font-size: 1.2rem; font-weight: 600; margin: 0 0 1rem; }
+  @media (max-width: 640px) { body { margin: 0.5rem; } h1 { font-size: 1rem; margin: 0.2rem 0 0.5rem; } }
 </style>
 </head>
 <body>

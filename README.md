@@ -81,6 +81,8 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | Copy / cut / paste a part | **Copy** / **Paste** (toolbar or action bar) | Ctrl+C / Ctrl+X copy the selection's SymPy source; Ctrl+V pastes over a selection or at a caret |
 | Apply any SymPy function | the **function box** in the toolbar: type to search SymPy's functions, pick one; a function that needs parameters asks for them (symbol parameters offer the selection's free symbols — `solve` on `sin(x)cos(y)` asks x or y); `diff(x)`, `.T`, `det()` typed in full apply as written | |
 | Undo / redo | ↶ / ↷ | Ctrl+Z / Ctrl+Shift+Z |
+| Zoom the formula | **−** / **100%** (reset) / **+**, Ctrl+mouse wheel, pinch with two fingers | Ctrl+plus / Ctrl+minus / Ctrl+0 |
+| Scroll a formula wider than the view | the scrollbar, the mouse wheel over the formula, or drag its empty space (one finger on a phone) | |
 
 A small action bar appears under whatever is selected — ↑ parent, ↓ inside,
 Edit, Unwrap, Delete, Copy — so these actions are one click or one tap away
@@ -95,9 +97,11 @@ removes its terms, an operation picked in a menu transforms just those terms.
 
 On phones and tablets: tap to select, **tap the selected node again to edit
 it**, tap a gap for a caret and tap it again to insert, drag to select a
-range; the toolbar's ↑ selects the parent and its ⌨ button opens the
-keyboard for the selection, the caret or the whole expression; the menus
-apply an operation as soon as it is picked.  Vertical swipes and pinches still scroll and zoom the page.
+range; the toolbar (one strip that scrolls sideways on a narrow screen) has ↑
+for the parent and a ⌨ button that opens the keyboard for the selection, the
+caret or the whole expression; the menus apply an operation as soon as it is
+picked.  Two fingers zoom the formula, a drag on its empty space scrolls it
+sideways, and vertical swipes still scroll the page.
 Transformations act on the selected sub-expression only (on the whole formula
 when nothing is selected).
 

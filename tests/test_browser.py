@@ -1031,6 +1031,85 @@ def test_paste_over_the_whole_expression_applies_at_once(browser, serve_expr):
     assert page.errors == []
 
 
+def _view_font_px(page):
+    return page.evaluate("parseFloat(getComputedStyle(document.querySelector('.se-view')).fontSize)")
+
+
+def test_zoom_buttons_wheel_keys_and_pinch(browser, serve_expr):
+    srv, doc = serve_expr(x**2 + sin(y))
+    page = _open(browser, srv.url)
+    base = _view_font_px(page)
+    zoom = lambda: page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.zoom")
+    label = page.locator('.se-toolbar [data-cmd="zoomreset"]')
+    assert zoom() == 1 and label.inner_text() == "100%" and label.is_disabled()
+    # buttons: the formula grows, the selection box follows it
+    _click(page, "/0")
+    page.locator('.se-toolbar [data-cmd="zoomin"]').click()
+    assert zoom() == 1.2 and abs(_view_font_px(page) - base * 1.2) < 0.5 and label.inner_text() == "120%"
+    box = page.evaluate("document.querySelector('.se-box-select').getBoundingClientRect().toJSON()")
+    node = page.evaluate("document.querySelector('.se-selected').getBoundingClientRect().toJSON()")   # the innermost node under the click
+    assert box["left"] <= node["left"] + 1 and box["right"] >= node["right"] - 1 and box["top"] <= node["top"] + 1
+    assert page.locator(".se-selected").count() == 1
+    page.locator('.se-toolbar [data-cmd="zoomout"]').click()
+    assert zoom() == 1 and label.is_disabled()
+    # Ctrl+wheel over the formula zooms (a trackpad pinch arrives the same way)
+    page.evaluate("""() => { const v = document.querySelector('.se-view'), r = v.getBoundingClientRect();
+        v.dispatchEvent(new WheelEvent('wheel', {deltaY: -100, ctrlKey: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, bubbles: true, cancelable: true})); }""")
+    assert zoom() > 1
+    # keys: Ctrl+0 resets, Ctrl+minus shrinks below 1
+    page.locator(".se-view").focus()
+    page.keyboard.press("Control+0")
+    assert zoom() == 1
+    page.keyboard.press("Control+-")
+    assert abs(zoom() - 1 / 1.2) < 0.01
+    page.keyboard.press("Control+0")
+    # pinch: two touch pointers moving apart
+    page.evaluate("""() => { const v = document.querySelector('.se-view'), r = v.getBoundingClientRect();
+        const y = r.top + r.height / 2, cx = r.left + r.width / 2;
+        const ev = (type, id, x) => v.dispatchEvent(new PointerEvent(type, {bubbles: true, cancelable: true, clientX: x, clientY: y, pointerType: 'touch', pointerId: id, isPrimary: id === 1, buttons: 1}));
+        ev('pointerdown', 1, cx - 50); ev('pointerdown', 2, cx + 50);
+        ev('pointermove', 1, cx - 100); ev('pointermove', 2, cx + 100);
+        ev('pointerup', 1, cx - 100); ev('pointerup', 2, cx + 100); }""")
+    assert abs(zoom() - 2) < 0.01
+    assert page.locator(".se-selected").count() == 1   # the pinch selected nothing new (no range, no click)
+    assert page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.range") is None
+    assert doc.expr == x**2 + sin(y) and page.errors == []
+
+
+def test_long_formula_scrolls_sideways_and_fits_a_phone(browser, serve_expr):
+    terms = symbols("a0:24")
+    srv, doc = serve_expr(sum(t**2 for t in terms))
+    page = browser.new_page(viewport={"width": 400, "height": 800})
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(srv.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    view = page.locator(".se-view")
+    scroll_left = lambda: page.evaluate("document.querySelector('.se-view').scrollLeft")
+    assert page.evaluate("(() => { const v = document.querySelector('.se-view'); return v.scrollWidth > v.clientWidth; })()")
+    # the page itself does not overflow: the editor fits the screen, the tools are one scrollable strip
+    assert page.evaluate("document.documentElement.scrollWidth") <= 400
+    assert page.evaluate("getComputedStyle(document.querySelector('.se-tools')).flexWrap") == "nowrap"
+    assert page.evaluate("(() => { const t = document.querySelector('.se-tools'); return t.scrollWidth > t.clientWidth; })()")
+    # a plain wheel over the formula scrolls it sideways instead of the page
+    r = view.bounding_box()
+    page.mouse.move(r["x"] + r["width"] / 2, r["y"] + r["height"] / 2)
+    page.mouse.wheel(0, 120)
+    page.wait_for_timeout(100)
+    assert scroll_left() > 0 and page.evaluate("window.scrollY") == 0
+    # dragging empty space (the padding above the glyphs) pans it back, without selecting anything
+    before = scroll_left()
+    x0, y0 = r["x"] + 100, r["y"] + 3
+    assert page.evaluate("([x, y]) => !document.elementFromPoint(x, y).closest('[data-path]')", [x0, y0])
+    page.mouse.move(x0, y0)
+    page.mouse.down()
+    page.mouse.move(x0 + 60, y0, steps=4)
+    page.mouse.up()
+    assert before - scroll_left() >= 50
+    assert page.locator(".se-selected").count() == 0 and page.locator(".se-caret").count() == 0
+    assert errors == []
+
+
 def test_replacing_the_whole_expression(browser, serve_expr):
     srv, doc = serve_expr(x**2 + sin(y))
     page = _open(browser, srv.url)
