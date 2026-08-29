@@ -148,6 +148,19 @@ Two conventions between printer, document and front end:
   `revertSource`, and `commitSource` compares against it.  Deleting the
   whole expression empties the line and hides the formula (`.se-empty`)
   until something is typed.
+- **Change animation.**  `_captureRendering` (before a re-render of a
+  committed change) keeps a clone of the old rendering and every node's
+  box; `_animateChange` diffs old and new nodes - kept when the same `src`
+  is still there, or a container of the same `type` at the same path;
+  otherwise removed / added - and animates two ghosts (`.se-ghost`, no
+  `data-path`, `pointer-events: none`) over the real rendering, which is
+  `.se-changing` (opacity 0, still hit-testable) meanwhile: the old
+  ghost's top-most removed parts (`.se-removed`, red) move to the new node
+  at the same path and fade, the new ghost's top-most added parts
+  (`.se-added`, green) fade in and its top-most kept parts slide from their
+  old boxes (FLIP).  The real rendering keeps `.se-added` until a
+  pointerdown on the view (`_clearChangeMarks`).  Previews, unchanged
+  re-renders and `prefers-reduced-motion` do not animate.
 - **Long computations.**  `Editor.send` shows the spinner overlay after
   `workingAfter` ms and the Interrupt button after `interruptAfter` ms when
   the backend has `interrupt()` (and `canInterrupt()` allows).  Backends:
@@ -172,7 +185,13 @@ Two conventions between printer, document and front end:
   and switches with `backend.openDocument(state)` (Pyodide: a new document
   id in the shared runtime).  All of it lives in a lateral drawer
   (`.se-drawer`, `position: fixed`, the ☰ toolbar button, Esc / backdrop /
-  ✕ close it), not in the widget's own layout.  The mobile bundle turns it on.
+  ✕ close it) with two tabs (`showDrawerTab`: sessions, history), not in
+  the widget's own layout.  "New session…" opens a chooser
+  (`_showSessionPicker`): empty (the default - a placeholder `0` behind
+  the empty state, flagged `empty` until a first real expression is
+  committed), a copy of the current expression, or an example
+  (`sympy_editor.examples.EXAMPLES`, carried as `cfg.examples` →
+  `options.examples` when `sessions` is on).  The mobile bundle turns it on.
 - **Isolate.**  `{"action": "isolate", "path"[, "children"]}` → `Document.isolate`
   commits the node (or range) as the whole expression; undoable.
 - **Unwrap.**  `{"action": "unwrap", "path", "keep"}` → `Document.unwrap`

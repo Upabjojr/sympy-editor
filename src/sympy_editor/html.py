@@ -25,6 +25,7 @@ from typing import Any, Dict, Optional, Union
 from sympy import Basic, srepr
 
 from .document import Document
+from .examples import examples
 
 __all__ = [
     "KATEX_VERSION",
@@ -99,6 +100,8 @@ def build_config(
     opts: Dict[str, Any] = {"katexJs": all_urls["katexJs"], "katexCss": all_urls["katexCss"]}
     opts.update(options or {})
     cfg: Dict[str, Any] = {"backend": backend, "snapshot": doc.snapshot(), "options": opts}
+    if opts.get("sessions"):
+        cfg["examples"] = examples()      # what a new session can start from
     if backend == "pyodide":
         cfg.update(
             pyodideJs=all_urls["pyodideJs"],

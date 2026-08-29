@@ -189,6 +189,15 @@ leaves the formula alone); Enter commits it — as one undo step — and Esc
 reverts.  That is where whole-expression edits happen: the rendered formula
 itself is never replaced by code.
 
+### What changed
+
+A committed change is animated: the parts of the old formula that disappear
+turn **red** and slide towards their replacements while fading out, the new
+parts fade in in **green** (and stay green until you touch the formula
+again), and the parts that survive slide to their new places
+(`options={"animate": False}` turns it off; it is off under
+`prefers-reduced-motion`).
+
 ### Long computations
 
 A transformation that takes a while does not freeze the page: after a moment
@@ -203,13 +212,14 @@ lost.
 
 ### Sessions and history (mobile app, or `options={"sessions": True}`)
 
-The **☰** button opens a lateral drawer, out of the widget, with your
-**sessions** — expressions, each with its own undo history, kept in the
-browser's storage: **New session** starts one from the current expression,
-**Open** switches (the one you leave is saved first), **Delete** (click
-twice) removes one — and the **history** of the current session, one line per
-step: click a step to go back (or forward) to it.  Available on
-Pyodide-backed pages.
+The **☰** button opens a lateral drawer, out of the widget, with two tabs.
+**Sessions** lists your expressions, each with its own undo history, kept in
+the browser's storage: **New session…** offers an empty formula (the
+default: you type it in the source line), a copy of the current expression,
+or one of the built-in examples (`sympy_editor.examples`); **Open** switches
+(the one you leave is saved first); **Delete** (click twice) removes one.
+**History** shows the current session's steps, one line each: click a step
+to go back (or forward) to it.  Available on Pyodide-backed pages.
 
 On a narrow screen the toolbar buttons wrap onto as many rows as they need,
 and so does the action bar under a selection: every button stays reachable.

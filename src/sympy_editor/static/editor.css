@@ -9,6 +9,8 @@
   --se-border: var(--jp-border-color2, #d0d7de);
   --se-muted: var(--jp-ui-font-color2, #656d76);
   --se-error: #b42318;
+  --se-removed: #d1242f;     /* change animation: what disappears */
+  --se-added: #1a7f37;       /* change animation: what is new (stays until the formula is touched) */
   --se-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   position: relative;
   display: block;            /* block, not shrink-to-fit: the status text must not shift the formula */
@@ -29,6 +31,8 @@
     --se-border: var(--jp-border-color2, #444444);
     --se-muted: var(--jp-ui-font-color2, #a0a0a0);
     --se-error: #ff8a80;
+    --se-removed: #ff7b72;
+    --se-added: #3fb950;
   }
 }
 .sympy-editor * { box-sizing: border-box; }
@@ -310,6 +314,18 @@
 .se-sym input.se-sym-name { width: 4.5rem; font-family: var(--se-mono); }
 .se-sym input.se-sym-assume { width: 9rem; }
 
+/* change animation: two ghosts over the (invisible, still clickable) new rendering */
+.se-view .se-ghost { position: absolute; margin: 0; pointer-events: none; z-index: 3; }
+.se-view .se-ghost-old { color: transparent; }
+.se-view .se-ghost-old .se-kept { color: transparent; }
+.se-view .se-ghost-old .se-removed { color: var(--se-removed); }
+.se-view .se-ghost-old .se-removed .se-kept { color: transparent; }
+.se-view .se-ghost-new .se-added, .se-view .se-added { color: var(--se-added); }
+.se-view .se-ghost-new .se-added .se-kept { color: inherit; }
+.se-view .se-changing { opacity: 0; }
+.se-view .se-ghost .frac-line, .se-view .se-ghost .overline-line, .se-view .se-ghost .underline-line { border-color: currentColor; }
+.se-view .se-ghost svg { fill: currentColor; }
+
 /* the whole expression was deleted: nothing to show until something is typed */
 .se-view.se-empty .katex-display, .se-view.se-empty .katex { display: none; }
 .se-view.se-empty::before { content: "Empty – type the new expression in the line below (Esc brings the old one back)"; color: var(--se-muted); font-size: 0.7em; }
@@ -336,7 +352,19 @@
 .se-drawer.se-open { transform: none; }
 .se-drawer[hidden] { display: none; }
 @media (prefers-reduced-motion: reduce) { .se-drawer, .se-backdrop { transition: none; } }
-.se-drawer-head { display: flex; align-items: center; justify-content: space-between; margin: 0.4rem 0 0.3rem; font-size: 13px; }
+.se-drawer-head { display: flex; align-items: center; justify-content: space-between; margin: 0.4rem 0 0.5rem; font-size: 13px; }
+.se-drawer-tabs { display: flex; gap: 0.2rem; }
+.se-tab { font: inherit; font-size: 13px; padding: 0.3rem 0.8rem; border: 1px solid var(--se-border); border-bottom-width: 2px; border-radius: 0.3rem 0.3rem 0 0; background: transparent; color: var(--se-muted); cursor: pointer; }
+.se-tab-current { color: var(--se-fg); font-weight: 600; border-bottom-color: rgba(var(--se-accent), 0.9); background: rgba(var(--se-accent), 0.08); }
+.se-drawer-pane[hidden] { display: none; }
+.se-history-of { color: var(--se-muted); margin: 0 0 0.4rem; font-family: var(--se-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.se-session-picker { display: flex; flex-direction: column; gap: 2px; margin: 0.3rem 0 0.5rem; padding: 0.3rem; border: 1px solid var(--se-border); border-radius: 0.4rem; }
+.se-choice { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; text-align: left; font: inherit; padding: 0.3rem 0.5rem; border: 1px solid transparent; border-radius: 0.3rem; background: transparent; color: var(--se-fg); cursor: pointer; }
+.se-choice-default { border-color: rgba(var(--se-accent), 0.8); background: rgba(var(--se-accent), 0.08); }
+.se-choice:focus-visible { outline: 2px solid rgba(var(--se-accent), 0.6); }
+.se-choice-name { font-weight: 600; }
+.se-choice-src { font-family: var(--se-mono); color: var(--se-muted); font-size: 11px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.se-choice-head { color: var(--se-muted); margin: 0.4rem 0 0.1rem 0.3rem; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
 .se-drawer-close { font: inherit; font-size: 14px; padding: 0.2rem 0.5rem; border: 1px solid var(--se-border); border-radius: 0.3rem; background: transparent; color: inherit; cursor: pointer; }
 .se-sessions { color: var(--se-muted); }
 .se-session { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; margin: 0.2rem 0; }

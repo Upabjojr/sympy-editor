@@ -81,3 +81,18 @@ def test_embedded_sources_are_importable(tmp_path):
 def test_katex_css_url_is_escaped_in_the_link():
     page = to_html(x, urls={"katexCss": 'https://cdn.example/katex.css?a=1&b="2"'})
     assert 'href="https://cdn.example/katex.css?a=1&amp;b=&quot;2&quot;"' in page
+
+
+def test_examples_are_valid_and_reach_pages_with_sessions():
+    from sympy import sympify, latex
+    from sympy_editor.examples import EXAMPLES, examples
+    from sympy_editor.printer import annotate, strip_annotations
+    records = examples()
+    assert len(records) == len(EXAMPLES) >= 8 and all(r["name"] and r["src"] and r["srepr"] for r in records)
+    for (name, expr), r in zip(EXAMPLES, records):
+        assert Document(r["srepr"]).expr == expr, name                 # rebuilds in a Pyodide document
+        tex, nodes = annotate(expr)
+        assert strip_annotations(tex) == latex(expr) and () in nodes, name
+    cfg = build_config(Document(x), options={"sessions": True})
+    assert [e["name"] for e in cfg["examples"]] == [name for name, _ in EXAMPLES]
+    assert "examples" not in build_config(Document(x))

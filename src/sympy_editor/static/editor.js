@@ -36,7 +36,9 @@ var SympyEditor = (function () {
     previewDelay: 250,   // ms after the last keystroke in the source line before it is previewed
     workingAfter: 400,   // ms a request may take before the spinner overlay appears
     interruptAfter: 2000, // ms after which the overlay offers to interrupt the computation
-    sessions: false      // a list of sessions (expressions with their own history) kept in localStorage
+    sessions: false,     // a list of sessions (expressions with their own history) kept in localStorage
+    animate: true,       // animate a change: the old parts in red turn into the new ones in green
+    animateDuration: 700 // ms
   };
   var SESSIONS_KEY = "sympy-editor:sessions";
   var ZOOM_KEY = "sympy-editor:zoom";
@@ -335,11 +337,22 @@ var SympyEditor = (function () {
         close.addEventListener("click", function () { self.closeDrawer(); });
         this.sessionsBody = h("div", { class: "se-sessions" });
         this.historyBody = h("div", { class: "se-history" });
+        // Two tabs: the list of sessions, and the history of the current one.
+        this.drawerTabs = h("div", { class: "se-drawer-tabs", role: "tablist" }, [
+          h("button", { type: "button", role: "tab", "data-tab": "sessions", class: "se-tab se-tab-current" }, ["Sessions"]),
+          h("button", { type: "button", role: "tab", "data-tab": "history", class: "se-tab" }, ["History"])
+        ]);
+        this.drawerTabs.addEventListener("click", function (ev) {
+          var tab = ev.target.closest("[data-tab]");
+          if (tab) self.showDrawerTab(tab.getAttribute("data-tab"));
+        });
+        this.sessionsPane = h("div", { class: "se-drawer-pane", "data-pane": "sessions" }, [this.sessionsBody]);
+        this.historyPane = h("div", { class: "se-drawer-pane", "data-pane": "history", hidden: "" }, [
+          h("div", { class: "se-history-of" }), this.historyBody]);
         this.drawer = h("aside", { class: "se-drawer", hidden: "", role: "dialog", "aria-label": "Sessions and history" }, [
-          h("div", { class: "se-drawer-head" }, [h("strong", {}, ["Sessions"]), close]),
-          this.sessionsBody,
-          h("div", { class: "se-drawer-head" }, [h("strong", {}, ["History of this session"])]),
-          this.historyBody
+          h("div", { class: "se-drawer-head" }, [this.drawerTabs, close]),
+          this.sessionsPane,
+          this.historyPane
         ]);
         this.backdrop = h("div", { class: "se-backdrop", hidden: "" });
         this.backdrop.addEventListener("click", function () { self.closeDrawer(); });
@@ -457,6 +470,7 @@ var SympyEditor = (function () {
       // Dragging (mouse, touch or pen) over the formula selects a range.
       this.view.addEventListener("pointerdown", function (ev) {
         self._pointerType = ev.pointerType || "mouse";
+        self._clearChangeMarks();
         if (ev.pointerType === "mouse" && ev.button !== 0) return;
         self._pointers[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
         if (Object.keys(self._pointers).length === 2) {   // a second finger: a pinch, no longer a drag
@@ -678,6 +692,7 @@ var SympyEditor = (function () {
         strict: function (code) { return code === "htmlExtension" ? "ignore" : "warn"; }
       };
       this.annotated = true;
+      var before = this._captureRendering();   // for the change animation (null when there is nothing to animate)
       try {
         katex.render(this.state.latex, this.view, base);
       } catch (err) {
@@ -699,6 +714,146 @@ var SympyEditor = (function () {
       this.caret = null;   // the rendering replaced the caret element and the boxes too
       this._boxes = { hover: [], select: [] };
       this._hoverEl = null;
+      if (before) this._animateChange(before);
+    }
+
+    /* ---- change animation ---- */
+
+    /** What is on screen before a re-render, when the coming state is a
+     *  committed change of the expression: the old rendering (cloned) and
+     *  the box of every node. */
+    _captureRendering() {
+      var prev = this._shown;      // {snap, nodes} of the rendering on screen
+      this._shown = { snap: this.state, nodes: this.state.nodes || {} };
+      if (!this.opts.animate || !prev || !prev.snap || this.state.preview || prev.snap.preview) return null;
+      if (prev.snap.srepr === this.state.srepr || !this.annotated) return null;
+      if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return null;
+      var disp = this.view.querySelector(".katex-display") || this.view.querySelector(".katex");
+      if (!disp) return null;
+      var rects = {};
+      var els = disp.querySelectorAll("[data-path]");
+      for (var i = 0; i < els.length; i++) {
+        var p = els[i].getAttribute("data-path");
+        if (!(p in rects)) rects[p] = this._visualRect(els[i]);
+      }
+      var vr = this.view.getBoundingClientRect(), dr = disp.getBoundingClientRect();
+      return { clone: disp.cloneNode(true), rects: rects, nodes: prev.nodes,
+               left: dr.left - vr.left + this.view.scrollLeft, top: dr.top - vr.top + this.view.scrollTop, width: dr.width };
+    }
+
+    /** Old parts that disappear (red) move to their replacements and fade
+     *  out; new parts (green) fade in; kept parts slide from their old place
+     *  to their new one.  Two ghosts animate over the real rendering, which
+     *  stays in place (invisible, still clickable) and is revealed at the
+     *  end with its new parts still green - until the formula is touched. */
+    _animateChange(before) {
+      var self = this;
+      var disp = this.view.querySelector(".katex-display") || this.view.querySelector(".katex");
+      if (!disp) return;
+      var oldNodes = before.nodes, newNodes = this.state.nodes || {};
+      var oldSrc = {}, newSrc = {};
+      Object.keys(oldNodes).forEach(function (p) { oldSrc[oldNodes[p].src] = true; });
+      Object.keys(newNodes).forEach(function (p) { newSrc[newNodes[p].src] = true; });
+      // A node is kept when its expression is still there, or when it is a
+      // container of the same type at the same place (its operators stay).
+      var oldKept = {}, newKept = {};
+      Object.keys(oldNodes).forEach(function (p) {
+        oldKept[p] = !!newSrc[oldNodes[p].src] || (p in newNodes && newNodes[p].type === oldNodes[p].type);
+      });
+      Object.keys(newNodes).forEach(function (p) {
+        newKept[p] = !!oldSrc[newNodes[p].src] || (p in oldNodes && oldNodes[p].type === newNodes[p].type);
+      });
+      var oldRectOf = function (path) {   // where the same expression was (same path first)
+        var src = newNodes[path].src;
+        if (path in oldNodes && oldNodes[path].src === src) return before.rects[path];
+        for (var p in oldNodes) if (oldNodes[p].src === src && before.rects[p]) return before.rects[p];
+        return null;
+      };
+      var topMost = function (paths, flags) {   // those without an ancestor in the same set
+        return paths.filter(function (p) {
+          var q = parentPath(p);
+          while (q !== null) { if (flags[q]) return false; q = parentPath(q); }
+          return true;
+        });
+      };
+      var oldPaths = Object.keys(oldNodes), newPaths = Object.keys(newNodes);
+      var removed = oldPaths.filter(function (p) { return !oldKept[p]; });
+      var added = newPaths.filter(function (p) { return !newKept[p]; });
+      if (!removed.length && !added.length) return;
+      var flip = topMost(newPaths.filter(function (p) { return newKept[p]; }), newKept);
+      var ms = this.opts.animateDuration, ease = "cubic-bezier(0.2, 0.7, 0.2, 1)";
+      var vr = this.view.getBoundingClientRect(), dr = disp.getBoundingClientRect();
+      var ghost = function (source, left, top, width) {
+        var g = source.cloneNode(true);
+        g.classList.add("se-ghost");
+        g.style.left = Math.round(left) + "px";
+        g.style.top = Math.round(top) + "px";
+        g.style.width = Math.round(width) + "px";
+        var all = g.querySelectorAll("*");
+        for (var i = 0; i < all.length; i++) {
+          all[i].classList.remove("se-selected", "se-hover", "se-editing", "se-added");
+          if (all[i].hasAttribute("data-path")) { all[i].setAttribute("data-ghost", all[i].getAttribute("data-path")); all[i].removeAttribute("data-path"); }
+          if (all[i].classList.contains("se-inline")) all[i].parentNode.removeChild(all[i]);
+        }
+        return g;
+      };
+      var byGhost = function (g, path) { return g.querySelector('[data-ghost="' + ((window.CSS && CSS.escape) ? CSS.escape(path) : path) + '"]'); };
+      var animations = [];
+      var run = function (el, frames) { try { animations.push(el.animate(frames, { duration: ms, easing: ease, fill: "forwards" })); } catch (e) { /* no Web Animations */ } };
+      // the old ghost: only its removed parts are visible (red), moving to their replacements
+      var oldGhost = ghost(before.clone, before.left, before.top, before.width);
+      oldGhost.classList.add("se-ghost-old");
+      oldPaths.forEach(function (p) { var el = byGhost(oldGhost, p); if (el) el.classList.add(oldKept[p] ? "se-kept" : "se-removed"); });
+      this.view.appendChild(oldGhost);
+      var removedTop = removed.filter(function (p) { var q = parentPath(p); while (q !== null) { if (!oldKept[q]) return false; q = parentPath(q); } return true; });
+      removedTop.forEach(function (p) {
+        var el = byGhost(oldGhost, p);
+        if (!el) return;
+        var from = before.rects[p];
+        var to = null;
+        if (p in newNodes) { var real = self._els(p)[0]; if (real) to = self._visualRect(real); }
+        var dx = to && from ? (to.left + to.width / 2) - (from.left + from.width / 2) : 0;
+        var dy = to && from ? (to.top + to.height / 2) - (from.top + from.height / 2) : 0;
+        run(el, [{ transform: "translate(0, 0)", opacity: 1 }, { transform: "translate(" + dx + "px, " + dy + "px)", opacity: 0 }]);
+      });
+      // the new ghost: new parts fade in (green), kept parts slide from where they were
+      var newGhost = ghost(disp, dr.left - vr.left + this.view.scrollLeft, dr.top - vr.top + this.view.scrollTop, dr.width);
+      newGhost.classList.add("se-ghost-new");
+      this.view.appendChild(newGhost);
+      var addedTop = added.filter(function (p) { var q = parentPath(p); while (q !== null) { if (!newKept[q]) return false; q = parentPath(q); } return true; });
+      addedTop.forEach(function (p) {
+        var el = byGhost(newGhost, p);
+        if (el) { el.classList.add("se-added"); run(el, [{ opacity: 0 }, { opacity: 0 }, { opacity: 1 }]); }
+      });
+      flip.forEach(function (p) {
+        var el = byGhost(newGhost, p), was = oldRectOf(p), real = self._els(p)[0];
+        if (!el || !was || !real) return;
+        var now = self._visualRect(real);
+        var dx = was.left - now.left, dy = was.top - now.top;
+        if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
+        run(el, [{ transform: "translate(" + dx + "px, " + dy + "px)" }, { transform: "translate(0, 0)" }]);
+      });
+      // meanwhile the real rendering is invisible (but in place, so clicks work); at the end it shows its new parts green
+      disp.classList.add("se-changing");
+      added.forEach(function (p) { var els = self._els(p); for (var i = 0; i < els.length; i++) els[i].classList.add("se-added"); });
+      var done = false;
+      var finish = function () {
+        if (done) return;
+        done = true;
+        disp.classList.remove("se-changing");
+        if (oldGhost.parentNode) oldGhost.parentNode.removeChild(oldGhost);
+        if (newGhost.parentNode) newGhost.parentNode.removeChild(newGhost);
+      };
+      this._finishAnimation = finish;
+      Promise.all(animations.map(function (a) { return a.finished.catch(function () {}); })).then(finish, finish);
+      setTimeout(finish, ms + 200);
+    }
+
+    /** The green marks of the last change go when the formula is touched. */
+    _clearChangeMarks() {
+      if (this._finishAnimation) { this._finishAnimation(); this._finishAnimation = null; }
+      var marked = this.view.querySelectorAll(".se-added");
+      for (var i = 0; i < marked.length; i++) marked[i].classList.remove("se-added");
     }
 
     /** The general dropdown lists the ops that apply everywhere; the type
@@ -2330,6 +2485,7 @@ var SympyEditor = (function () {
       if (cur && cur.state) {
         try {
           await this.setState(await this.backend.openDocument(cur.state, this._report.bind(this)));
+          if (cur.empty) this.editSource("");
         } catch (e) {
           this._showError("The session could not be opened: " + ((e && e.message) || e));
         }
@@ -2365,7 +2521,8 @@ var SympyEditor = (function () {
       var cur = store.list.filter(function (s) { return s.id === store.current; })[0];
       if (!cur) return;
       cur.state = snap.export;
-      cur.name = (snap.src || "").slice(0, 60);
+      if (cur.empty && snap.export && snap.export.history.length > 1) cur.empty = false;   // something was typed
+      cur.name = cur.empty ? "(empty)" : (snap.src || "").slice(0, 60);
       cur.updated = Date.now();
       if (snap.history) this._history = snap.history;
       this._saveSessions(store);
@@ -2375,6 +2532,14 @@ var SympyEditor = (function () {
     toggleDrawer() {
       if (!this.drawer) return;
       if (this.drawer.hidden) this.openDrawer(); else this.closeDrawer();
+    }
+
+    showDrawerTab(name) {
+      if (!this.drawer) return;
+      var tabs = this.drawerTabs.querySelectorAll("[data-tab]");
+      for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle("se-tab-current", tabs[i].getAttribute("data-tab") === name);
+      this.sessionsPane.hidden = name !== "sessions";
+      this.historyPane.hidden = name !== "history";
     }
 
     openDrawer() {
@@ -2427,6 +2592,7 @@ var SympyEditor = (function () {
         this.select(null);
         this._hideCaret();
         await this.setState(snap);
+        if (sess.empty) { this.closeDrawer(); this.editSource(""); }   // an empty session: type the formula
       } catch (e) {
         this._showError("The session could not be opened: " + ((e && e.message) || e));
       } finally {
@@ -2437,15 +2603,47 @@ var SympyEditor = (function () {
       }
     }
 
-    /** A new session: the current expression, with a fresh history. */
-    newSession() {
+    /** A new session from `start`: "empty" (an empty formula to type into),
+     *  "current" (a copy of the current expression) or an example's srepr -
+     *  with a fresh history. */
+    newSession(start) {
       if (!this._sessionsReady || !this.state) return;
       var store = this._sessionStore || this._loadSessions();
-      var sess = { id: "s" + Date.now(), name: (this.state.src || "").slice(0, 60), updated: Date.now(),
-                   state: { history: [this.state.srepr], index: 0, symbols: this.state.declared || [] } };
+      var sess = { id: "s" + Date.now(), name: "", updated: Date.now(), state: null, empty: false };
+      if (!start || start === "empty") {
+        sess.empty = true;                     // a placeholder 0 hidden by the empty state until something is typed
+        sess.name = "(empty)";
+        sess.state = { history: ["Integer(0)"], index: 0, symbols: [] };
+      } else if (start === "current") {
+        sess.name = (this.state.src || "").slice(0, 60);
+        sess.state = { history: [this.state.srepr], index: 0, symbols: this.state.declared || [] };
+      } else {
+        sess.state = { history: [start], index: 0, symbols: [] };
+      }
       store.list.push(sess);
       this._saveSessions(store);
       this.openSession(sess.id);
+    }
+
+    /** The chooser under "New session": empty (default), a copy, the examples. */
+    _showSessionPicker(anchor) {
+      var self = this;
+      var old = this.sessionsBody.querySelector(".se-session-picker");
+      if (old) { old.parentNode.removeChild(old); return; }
+      var picker = h("div", { class: "se-session-picker", role: "listbox" });
+      var choice = function (label, detail, start, isDefault) {
+        var b = h("button", { type: "button", class: "se-choice" + (isDefault ? " se-choice-default" : ""), "data-start": start }, [
+          h("span", { class: "se-choice-name" }, [label]), h("code", { class: "se-choice-src" }, [detail || ""])]);
+        b.addEventListener("click", function () { self.newSession(start); });
+        picker.appendChild(b);
+      };
+      choice("Empty formula", "type the expression in the source line", "empty", true);
+      choice("Copy of the current expression", (this.state.src || "").slice(0, 60), "current", false);
+      var examples = this.opts.examples || [];
+      if (examples.length) picker.appendChild(h("div", { class: "se-choice-head" }, ["Examples"]));
+      examples.forEach(function (ex) { choice(ex.name, ex.src, ex.srepr, false); });
+      anchor.parentNode.insertBefore(picker, anchor.nextSibling);
+      picker.querySelector(".se-choice-default").focus();
     }
 
     deleteSession(id) {
@@ -2493,11 +2691,14 @@ var SympyEditor = (function () {
         row.appendChild(del);
         body.appendChild(row);
       });
-      var add = h("button", { type: "button", class: "se-session-new", title: "Start a new session from the current expression, with a fresh history" }, ["New session"]);
+      var add = h("button", { type: "button", class: "se-session-new", title: "Start a new session: an empty formula, a copy of this one, or an example" }, ["New session\u2026"]);
       add.disabled = !this._sessionsReady;
-      add.addEventListener("click", function () { self.newSession(); });
-      body.appendChild(h("div", { class: "se-session se-session-add" }, [add]));
+      var addRow = h("div", { class: "se-session se-session-add" }, [add]);
+      add.addEventListener("click", function () { self._showSessionPicker(addRow); });
+      body.appendChild(addRow);
       // The history of the current session: one row per step, the current one marked.
+      var current = list.filter(function (s) { return s.id === store.current; })[0];
+      this.historyPane.querySelector(".se-history-of").textContent = current ? "Session: " + (current.name || "(new)") : "";
       var hist = this.historyBody;
       hist.textContent = "";
       var h_ = this._history;
@@ -2895,6 +3096,7 @@ var SympyEditor = (function () {
     var make = backends[cfg.backend] || readonlyBackend;
     var options = Object.assign({}, cfg.options || {});
     if (cfg.backend === "readonly") options.readOnly = true;
+    if (cfg.examples) options.examples = cfg.examples;     // what a new session can start from
     var backend = make(cfg);
     var editor = new Editor(host, backend, options);
     editor.setState(cfg.snapshot).then(function () {

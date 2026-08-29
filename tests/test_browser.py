@@ -139,7 +139,7 @@ def test_in_place_edit_commits_to_python(browser, served):
     assert page.locator(".se-inline").input_value() == "z"
     page.keyboard.press("Escape")
     assert page.locator(".se-inline").count() == 0
-    assert page.locator(".se-view .katex").count() == 1
+    assert page.locator(".se-view .katex:not(.se-ghost *)").count() == 1
     assert doc.expr == x**2 / z**2 - sin(x)
     assert page.errors == []
 
@@ -835,7 +835,7 @@ def test_source_line_is_linked_to_the_rendering(browser, serve_expr):
     page.keyboard.press("Enter")
     page.wait_for_function("document.querySelector('.se-source').textContent === 'x*y + 1'")
     assert doc.expr == x * y + 1
-    assert page.locator(".se-view .katex").count() == 1       # still rendered
+    assert page.locator(".se-view .katex:not(.se-ghost *)").count() == 1       # still rendered
     assert page.errors == []
 
 
@@ -1348,6 +1348,43 @@ def test_empty_formula_keeps_the_cursor_and_zoom_block_stays_together(browser, s
     assert errors == []
 
 
+def test_change_animation_red_to_green(browser, serve_expr):
+    from sympy import cos
+    srv, doc = serve_expr(x**2 + sin(y))
+    page = _open(browser, srv.url)
+    nodes = doc.snapshot()["nodes"]
+    ps = next(k for k, v in nodes.items() if v["src"] == "sin(y)")
+    _click(page, ps)
+    page.keyboard.press("ArrowUp")                                # sin(y) (the click lands on y)
+    assert page.locator(".se-selected").get_attribute("data-path") == ps
+    page.keyboard.type("cos(y)")
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    # right after the change: a red ghost of the old part, a green ghost of the new one, the real rendering hidden but present
+    assert page.locator(".se-ghost").count() == 2
+    assert page.locator(".se-ghost-old .se-removed").count() >= 1 and "sin" in page.locator(".se-ghost-old").inner_text()
+    assert page.locator(".se-ghost-new .se-added").count() >= 1 and "cos" in page.locator(".se-ghost-new .se-added").first.inner_text()
+    assert page.evaluate("getComputedStyle(document.querySelector('.se-view .se-changing')).opacity") == "0"
+    assert page.locator('.se-view [data-path="/"]').count() == 1     # the ghosts carry no paths: hit-testing is untouched
+    red = page.evaluate("getComputedStyle(document.querySelector('.se-ghost-old .se-removed')).color")
+    green = page.evaluate("getComputedStyle(document.querySelector('.se-ghost-new .se-added')).color")
+    assert red != green
+    # when it is over: no ghosts, the new part stays green in the real rendering
+    assert _wait(lambda: page.locator(".se-ghost").count() == 0, timeout=5)
+    assert page.locator(".se-view .se-added").count() >= 1
+    assert page.evaluate("getComputedStyle(document.querySelector('.se-view .se-added')).color") == green
+    assert doc.expr == x**2 + cos(y)
+    # ... until the formula is touched
+    _click(page, "/0")
+    assert page.locator(".se-view .se-added").count() == 0
+    # a preview does not animate; neither does an unchanged re-render
+    page.locator(".se-source").click()
+    page.keyboard.press("End")
+    page.keyboard.type(" + 1")
+    _wait(lambda: page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.src") == "x**2 + cos(y) + 1")
+    assert page.locator(".se-ghost").count() == 0
+    assert page.errors == []
+
+
 def test_replacing_the_whole_expression(browser, serve_expr):
     srv, doc = serve_expr(x**2 + sin(y))
     page = _open(browser, srv.url)
@@ -1572,22 +1609,43 @@ def test_pyodide_worker_interrupt_and_sessions(browser, tmp_path):
         assert _wait(lambda: page.locator(".se-drawer").is_visible())
         assert page.locator(".se-session").count() == 2                # one session + the "new" row
         assert _wait(lambda: page.locator(".se-step").count() >= 1, timeout=10)
-        page.locator(".se-session-new").click()                        # a second one starts from the same expression
+        # two tabs: the session list, and the history of the current session
+        assert page.locator(".se-drawer-pane[data-pane=sessions]").is_visible() and page.locator(".se-drawer-pane[data-pane=history]").is_hidden()
+        page.locator('.se-tab[data-tab="history"]').click()
+        assert page.locator(".se-drawer-pane[data-pane=history]").is_visible() and page.locator(".se-drawer-pane[data-pane=sessions]").is_hidden()
+        assert page.locator(".se-history-of").inner_text().startswith("Session:")
+        page.locator('.se-tab[data-tab="sessions"]').click()
+        # "New session…" offers an empty formula (default), a copy, and the examples
+        page.locator(".se-session-new").click()
+        picker = page.locator(".se-session-picker")
+        assert picker.is_visible() and "se-choice-default" in picker.locator('.se-choice[data-start="empty"]').get_attribute("class")
+        assert picker.locator(".se-choice").count() >= 2 + 8
+        assert picker.locator(".se-choice", has_text="Quadratic formula").count() == 1
+        # an example starts a session with that expression
+        _next_state(page, lambda: picker.locator(".se-choice", has_text="Quadratic formula").click())
         assert _wait(lambda: page.locator(".se-session").count() == 3, timeout=30)
+        assert page.evaluate(f"{ed}.state.src") == "Eq(x, (-b + sqrt(-4*a*c + b**2))/(2*a))"
         page.keyboard.press("Escape")                                  # closes the drawer
         assert page.locator(".se-drawer").is_hidden()
-        page.locator(".se-source").click()
-        page.keyboard.press("Control+a")
+        # an empty session: the formula area is empty and the cursor is in the source line
+        page.locator('.se-toolbar [data-cmd="drawer"]').click()
+        page.locator(".se-session-new").click()
+        page.locator('.se-choice[data-start="empty"]').click()
+        assert _wait(lambda: page.locator(".se-session").count() == 4, timeout=30)
+        assert _wait(lambda: page.locator(".se-drawer").is_hidden() and "se-empty" in page.locator(".se-view").get_attribute("class"), timeout=10)
+        assert page.evaluate("document.activeElement.className").startswith("se-source") and page.locator(".se-source").inner_text() == ""
         page.keyboard.type("x + 1")
         _next_state(page, lambda: page.keyboard.press("Enter"))
         assert _wait(lambda: page.evaluate("JSON.parse(localStorage.getItem('sympy-editor:sessions')).list.some(s => s.name === 'x + 1')"), timeout=10)
-        # the history of this session has two steps; the first one can be jumped to
+        # the history of this session has two steps (the placeholder, then x + 1); the first one can be jumped to
         page.locator('.se-toolbar [data-cmd="drawer"]').click()
+        page.locator('.se-tab[data-tab="history"]').click()
         assert _wait(lambda: page.locator(".se-step").count() == 2 and "se-step-current" in page.locator(".se-step").nth(1).get_attribute("class"), timeout=10)
         _next_state(page, lambda: page.locator(".se-step").first.click())
-        assert page.evaluate(f"{ed}.state.src") == str(big) and page.evaluate(f"{ed}.state.can_redo")
+        assert page.evaluate(f"{ed}.state.src") == "0" and page.evaluate(f"{ed}.state.can_redo")
         # switching back to the first session restores its expression
-        page.locator('.se-session button[data-open]:not(:disabled)').first.click()
+        page.locator('.se-tab[data-tab="sessions"]').click()
+        page.locator('.se-session code', has_text=str(big)).first.locator("xpath=..").locator("button[data-open]").click()
         assert _wait(lambda: page.evaluate(f"{ed}.state.src") == str(big) and page.locator(".se-session-current code").inner_text() == str(big), timeout=60)
         page.locator(".se-drawer-close").click()
         assert page.locator(".se-drawer").is_hidden()
