@@ -1246,6 +1246,12 @@ def test_selection_box_of_a_square_root_stays_on_the_glyphs(browser, serve_expr)
         # KaTeX's root sign is a 400em-wide SVG clipped by its wrapper: the box must not follow the SVG
         assert box["right"] <= own["right"] + 6 and box["left"] >= own["left"] - 6, (src, box, own)   # 2 px padding + KaTeX's root wrapper
         assert box["width"] < 4 * own["width"]
+        # ... nor the zero-height vlist rows that start a strut height above the glyphs
+        glyphs = page.evaluate("""p => { const el = document.querySelector(`[data-path="${p}"]`); const r = document.createRange();
+            let top = Infinity, bottom = -Infinity; const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+            while (w.nextNode()) { if (!w.currentNode.textContent.trim()) continue; r.selectNodeContents(w.currentNode); const b = r.getBoundingClientRect(); top = Math.min(top, b.top); bottom = Math.max(bottom, b.bottom); }
+            return [top, bottom]; }""", path)
+        assert box["y"] >= glyphs[0] - 8 and box["y"] + box["height"] <= glyphs[1] + 8, (src, box, glyphs)
     # hit-testing next to the root uses the same box: the left edge of x is a caret, not a root selection
     xp = next(k for k, v in nodes.items() if v["src"] == "x")
     r = page.evaluate("p => document.querySelector(`[data-path=\"${p}\"]`).getBoundingClientRect().toJSON()", xp)

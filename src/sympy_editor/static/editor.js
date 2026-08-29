@@ -875,8 +875,11 @@ var SympyEditor = (function () {
         for (var c = 0; c < clips.length; c++) if (clips[c].contains(node)) { clipped = true; break; }
         if (clipped) continue;
         if (node.classList.contains("pstrut") || node.classList.contains("vlist-s")) continue;
+        // vlist rows are zero-height positioning wrappers that start a strut
+        // height above their content (the content itself is measured below).
+        if (node.parentElement && node.parentElement.classList.contains("vlist")) continue;
         var b = node.getBoundingClientRect();
-        if (!b.width && !b.height) continue;
+        if (!b.width || !b.height) continue;    // draws nothing
         if (node.classList.contains("hide-tail") || node.classList.contains("stretchy") || getComputedStyle(node).overflow !== "visible") clips.push(node);
         if (b.top < top) top = b.top;
         if (b.bottom > bottom) bottom = b.bottom;
