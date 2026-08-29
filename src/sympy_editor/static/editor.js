@@ -38,7 +38,7 @@ var SympyEditor = (function () {
     interruptAfter: 2000, // ms after which the overlay offers to interrupt the computation
     sessions: false,     // a list of sessions (expressions with their own history) kept in localStorage
     animate: true,       // animate a change: the old parts in red turn into the new ones in green
-    animateDuration: 700 // ms
+    animateDuration: 1600 // ms: a quarter to show what goes (red), the rest to move it and fade the new in (green)
   };
   var SESSIONS_KEY = "sympy-editor:sessions";
   var ZOOM_KEY = "sympy-editor:zoom";
@@ -814,7 +814,8 @@ var SympyEditor = (function () {
         if (p in newNodes) { var real = self._els(p)[0]; if (real) to = self._visualRect(real); }
         var dx = to && from ? (to.left + to.width / 2) - (from.left + from.width / 2) : 0;
         var dy = to && from ? (to.top + to.height / 2) - (from.top + from.height / 2) : 0;
-        run(el, [{ transform: "translate(0, 0)", opacity: 1 }, { transform: "translate(" + dx + "px, " + dy + "px)", opacity: 0 }]);
+        run(el, [{ transform: "translate(0, 0)", opacity: 1, offset: 0 }, { transform: "translate(0, 0)", opacity: 1, offset: 0.25 },
+                 { transform: "translate(" + dx + "px, " + dy + "px)", opacity: 0, offset: 1 }]);
       });
       // the new ghost: new parts fade in (green), kept parts slide from where they were
       var newGhost = ghost(disp, dr.left - vr.left + this.view.scrollLeft, dr.top - vr.top + this.view.scrollTop, dr.width);
@@ -823,7 +824,7 @@ var SympyEditor = (function () {
       var addedTop = added.filter(function (p) { var q = parentPath(p); while (q !== null) { if (!newKept[q]) return false; q = parentPath(q); } return true; });
       addedTop.forEach(function (p) {
         var el = byGhost(newGhost, p);
-        if (el) { el.classList.add("se-added"); run(el, [{ opacity: 0 }, { opacity: 0 }, { opacity: 1 }]); }
+        if (el) { el.classList.add("se-added"); run(el, [{ opacity: 0, offset: 0 }, { opacity: 0, offset: 0.45 }, { opacity: 1, offset: 1 }]); }
       });
       flip.forEach(function (p) {
         var el = byGhost(newGhost, p), was = oldRectOf(p), real = self._els(p)[0];
@@ -831,7 +832,8 @@ var SympyEditor = (function () {
         var now = self._visualRect(real);
         var dx = was.left - now.left, dy = was.top - now.top;
         if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
-        run(el, [{ transform: "translate(" + dx + "px, " + dy + "px)" }, { transform: "translate(0, 0)" }]);
+        run(el, [{ transform: "translate(" + dx + "px, " + dy + "px)", offset: 0 }, { transform: "translate(" + dx + "px, " + dy + "px)", offset: 0.25 },
+                 { transform: "translate(0, 0)", offset: 1 }]);
       });
       // meanwhile the real rendering is invisible (but in place, so clicks work); at the end it shows its new parts green
       disp.classList.add("se-changing");
