@@ -202,10 +202,11 @@ class Document:
         Symbol-like objects (``Symbol``, ``MatrixSymbol``, undefined
         ``Function``; ``srepr`` strings are accepted too) put in scope for
         typed input before they occur in the expression; see :meth:`declare`.
-    history, index
-        A saved undo history (expressions or ``srepr`` strings, oldest first)
-        and the position of the current expression in it, as given by
-        :meth:`export`; ``expr`` is ignored when a history is given.
+    history, index, labels
+        A saved undo history (expressions or ``srepr`` strings, oldest first),
+        the position of the current expression in it and what produced each
+        step, as given by :meth:`export`; ``expr`` is ignored when a history
+        is given.
     """
 
     def __init__(
@@ -219,6 +220,7 @@ class Document:
         symbols=(),
         history=None,
         index: Optional[int] = None,
+        labels=None,
     ):
         if parser not in ("strict", "implicit"):
             raise ValueError("parser must be 'strict' or 'implicit'")
@@ -227,6 +229,10 @@ class Document:
         self.ops: Dict[str, Op] = dict(ops) if ops is not None else get_ops()
         self.max_history = max_history
         self._history: List[Basic] = []
+        #: What produced each step of the history (None for the start, or an
+        #: edit made from Python): set by ``handle`` from the message.
+        self._labels: List[Optional[str]] = []
+        self._action_label: Optional[str] = None
         self._index = -1
         self._seq = 0
         self._listeners: List[Callable[[Basic], None]] = []
@@ -239,6 +245,8 @@ class Document:
             self.declared[self._symbol_name(obj)] = obj
         if history:
             self._history = [self._coerce(e) for e in history][-self.max_history:]
+            given = list(labels or [])[-len(self._history):]
+            self._labels = [None] * (len(self._history) - len(given)) + [None if not l else str(l) for l in given]
             self._index = len(self._history) - 1 if index is None else max(0, min(int(index), len(self._history) - 1))
         else:
             self._commit(self._coerce(expr))
@@ -247,7 +255,7 @@ class Document:
         """The state that :class:`Document` takes back: ``{"history": [srepr,
         ...], "index", "symbols": [srepr of the declared names]}`` (a
         session's editing history, kept by the front end)."""
-        return {"history": [srepr(e) for e in self._history], "index": self._index,
+        return {"history": [srepr(e) for e in self._history], "index": self._index, "labels": list(self._labels),
                 "symbols": [srepr(obj) for obj in self.declared.values()]}
 
     # -- state --------------------------------------------------------------
@@ -305,7 +313,8 @@ class Document:
         steps = []
         for e in self._history:
             steps.append(self._render_cache_get(e))
-        return {"labels": [str(e) for e in self._history], "index": self._index, "steps": steps}
+        return {"labels": [str(e) for e in self._history], "index": self._index, "steps": steps,
+                "actions": list(self._labels)}
 
     def _render_cache_get(self, expr: Basic) -> Dict[str, Any]:
         cache = self.__dict__.setdefault("_render_cache", {})
@@ -862,6 +871,7 @@ class Document:
             action = message.get("action")
             path = message.get("path", "/")
             children = message.get("children")
+            self._action_label = self._describe(message)
             if action == "preview":
                 return self.preview(str(message.get("src", "")))
             if action == "export":
@@ -928,6 +938,51 @@ class Document:
             return snap
         except Exception as exc:
             return self.snapshot(error=f"{type(exc).__name__}: {exc}")
+        finally:
+            self._action_label = None
+
+    def _describe(self, message: Dict[str, Any]) -> Optional[str]:
+        """What a message does, for the history ("Transform: Simplify",
+        "SymPy: diff(x)", "Edit: y → cos(y)"...)."""
+        def short(text: Any, n: int = 48) -> str:
+            text = str(text).replace("\n", " ")
+            return text if len(text) <= n else text[: n - 1] + "…"
+
+        def node() -> str:
+            try:
+                p = self._path(message.get("path", "/"))
+                if message.get("children") is not None:
+                    return short(extract_range(self.expr, p, message["children"]))
+                return short(get_at(self.expr, p))
+            except Exception:
+                return "…"
+
+        action = message.get("action")
+        try:
+            if action == "replace":
+                return f"Edit: {node()} → {short(message.get('src', ''))}"
+            if action == "set":
+                return f"Type the whole expression: {short(message.get('src', ''))}"
+            if action == "apply":
+                op = self.ops.get(str(message.get("op", "")))
+                return f"Transform: {op.label if op else message.get('op')}"
+            if action == "call":
+                return f"SymPy: {short(message.get('func', ''))}"
+            if action == "insert":
+                return f"Insert \"{short(message.get('src', ''))}\" in {node()}"
+            if action == "extend":
+                return f"Type \"{short(message.get('src', ''))}\" {'after' if message.get('side', 'after') == 'after' else 'before'} {node()}"
+            if action == "delete":
+                return f"Delete {node()}"
+            if action == "unwrap":
+                return f"Unwrap {node()}"
+            if action == "isolate":
+                return f"Isolate {node()}"
+            if action in ("retype", "declare"):
+                return f"{'Retype' if action == 'retype' else 'Declare'} {message.get('name')} as {message.get('type', 'Symbol')}"
+        except Exception:
+            pass
+        return str(action).capitalize() if action else None
 
     # -- helpers ------------------------------------------------------------
 
@@ -947,9 +1002,12 @@ class Document:
 
     def _commit(self, expr: Basic) -> Basic:
         del self._history[self._index + 1:]
+        del self._labels[self._index + 1:]
         self._history.append(expr)
+        self._labels.append(self._action_label)
         if len(self._history) > self.max_history:
             del self._history[: len(self._history) - self.max_history]
+            del self._labels[: len(self._labels) - self.max_history]
         self._index = len(self._history) - 1
         self._notify()
         return expr

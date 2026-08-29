@@ -28,7 +28,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.9"
-      - run: pip install -e ".[jupyter,test]" "sympy==1.13.*"
+      - run: pip install -e ".[jupyter,test]" "sympy==1.14.*"
       - run: pytest -q --ignore=tests/test_browser.py
 
   browser:

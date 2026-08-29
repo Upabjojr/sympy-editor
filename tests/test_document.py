@@ -615,3 +615,32 @@ def test_rational_parts_are_editable():
     assert doc.handle({"action": "extend", "path": "/n", "side": "after", "src": "+ 2"})["src"] == "3/2"
     assert "cannot be removed" in doc.handle({"action": "delete", "path": "/n"})["error"]
     assert "nothing inside" in doc.handle({"action": "unwrap", "path": "/n"})["error"]
+
+
+def test_history_records_what_produced_each_step():
+    from sympy import symbols, sin
+    x, y = symbols("x y")
+    doc = Document(x + sin(y))
+    doc.handle({"action": "replace", "path": "/1", "src": "cos(y)"})
+    doc.handle({"action": "apply", "path": "/", "op": "expand"})            # no change: not a step
+    doc.handle({"action": "call", "path": "/", "func": "diff(y)"})
+    doc.handle({"action": "set", "src": "x**2"})
+    doc.handle({"action": "insert", "path": "/", "index": 0, "src": "+ 1"})
+    labels = doc.export()["labels"]
+    assert labels[0] is None
+    assert labels[1] == "Edit: sin(y) → cos(y)" and labels[2] == "Transform: Expand"      # expand did commit (same value)
+    assert labels[3] == "SymPy: diff(y)" and labels[4] == "Type the whole expression: x**2"
+    assert labels[5].startswith('Insert "+ 1" in')
+    assert doc.history_labels()["actions"] == labels
+    # undo then a new edit drops the later labels with the later steps
+    doc.undo(); doc.undo()
+    doc.handle({"action": "delete", "path": "/0"})
+    assert doc.export()["labels"][-1].startswith("Delete ") and len(doc.export()["labels"]) == len(doc.export()["history"])
+    # restored with a session
+    state = doc.export()
+    doc2 = Document(None, **state)
+    assert doc2.history_labels()["actions"] == state["labels"]
+    assert Document(None, history=state["history"], index=state["index"]).history_labels()["actions"] == [None] * len(state["history"])
+    # edits from Python carry no label
+    doc.replace("/", "y")
+    assert doc.export()["labels"][-1] is None

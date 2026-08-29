@@ -1,20 +1,28 @@
 package org.sympy.editor
 
 import android.annotation.SuppressLint
+import android.content.ContentValues
+import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.MediaStore
+import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.widget.FrameLayout
 import androidx.activity.addCallback
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewClientCompat
+import java.io.File
 
 /**
  * The whole app: a WebView showing the shared bundle (assets/www, built by
@@ -51,6 +59,9 @@ class MainActivity : AppCompatActivity() {
         web.settings.javaScriptEnabled = true
         web.settings.domStorageEnabled = true
         web.settings.allowFileAccess = false
+        // The page hands files (the history report) to the app: a WebView
+        // cannot download a blob, so they go to Downloads and the share sheet.
+        web.addJavascriptInterface(ReportBridge(), "SympyEditorApp")
         // Without focus on the WebView itself, input.focus() from the page
         // does not bring up the soft keyboard.
         web.isFocusable = true
@@ -74,6 +85,35 @@ class MainActivity : AppCompatActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         web.saveState(outState)
+    }
+
+    /** ``window.SympyEditorApp`` in the page. */
+    inner class ReportBridge {
+        /** Save `html` as `name` in Downloads (Android 10+) and offer to share it. */
+        @JavascriptInterface
+        fun shareHtml(name: String, html: String) {
+            val safe = name.replace(Regex("[^A-Za-z0-9._-]"), "_")
+            val dir = File(cacheDir, "reports").apply { mkdirs() }
+            val file = File(dir, safe).apply { writeText(html) }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, safe)
+                    put(MediaStore.Downloads.MIME_TYPE, "text/html")
+                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                }
+                contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)?.let { uri ->
+                    contentResolver.openOutputStream(uri)?.use { it.write(html.toByteArray()) }
+                }
+            }
+            val uri = FileProvider.getUriForFile(this@MainActivity, "$packageName.fileprovider", file)
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "text/html"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_SUBJECT, safe)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            runOnUiThread { startActivity(Intent.createChooser(send, getString(R.string.share_report))) }
+        }
     }
 
     /** The asset loader guesses MIME types from extensions and misses these. */

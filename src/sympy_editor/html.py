@@ -30,6 +30,7 @@ from .examples import examples
 __all__ = [
     "KATEX_VERSION",
     "PYODIDE_VERSION",
+    "SYMPY_VERSION",
     "default_urls",
     "to_html",
     "save_html",
@@ -40,7 +41,13 @@ __all__ = [
 STATIC_DIR = Path(__file__).parent / "static"
 
 KATEX_VERSION = "0.16.22"
-PYODIDE_VERSION = "0.27.7"
+PYODIDE_VERSION = "0.28.3"
+#: SymPy in the browser: Pyodide's own package lags behind (1.13.3 in 0.28),
+#: so the pages load this release's pure-Python wheel from PyPI (after
+#: Pyodide's mpmath); the offline bundles vendor it.
+SYMPY_VERSION = "1.14.0"
+SYMPY_WHEEL = ("https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/"
+               f"sympy-{SYMPY_VERSION}-py3-none-any.whl")
 
 #: Python modules embedded in Pyodide-backed pages (order matters for nothing,
 #: but keep this list in sync with the imports of document.py).
@@ -54,6 +61,7 @@ def default_urls() -> Dict[str, str]:
         "katexCss": f"https://cdn.jsdelivr.net/npm/katex@{KATEX_VERSION}/dist/katex.min.css",
         "pyodideJs": f"https://cdn.jsdelivr.net/pyodide/v{PYODIDE_VERSION}/full/pyodide.js",
         "pyodideIndex": f"https://cdn.jsdelivr.net/pyodide/v{PYODIDE_VERSION}/full/",
+        "sympyWheel": SYMPY_WHEEL,     # "" to use Pyodide's own sympy package instead
     }
 
 
@@ -106,6 +114,7 @@ def build_config(
         cfg.update(
             pyodideJs=all_urls["pyodideJs"],
             pyodideIndex=all_urls["pyodideIndex"],
+            sympyWheel=all_urls.get("sympyWheel", ""),
             sources=python_sources(),
             srepr=srepr(doc.expr),
             document={
@@ -202,7 +211,9 @@ def to_html(
         Front-end options (``displayMode``, ``toolbar``, ``showSource``,
         ``readOnly``...), see ``DEFAULTS`` in editor.js.
     urls
-        Override CDN URLs (``katexJs``, ``katexCss``, ``pyodideJs``, ``pyodideIndex``).
+        Override CDN URLs (``katexJs``, ``katexCss``, ``pyodideJs``, ``pyodideIndex``,
+        ``sympyWheel`` - the SymPy wheel to load in the browser, ``""`` for
+        Pyodide's own package).
     head
         Extra markup for the ``<head>`` of a full page (ignored for a fragment).
     element_id

@@ -9,7 +9,7 @@ android {
 
     defaultConfig {
         applicationId = "org.sympy.editor"
-        minSdk = 24
+        minSdk = 21
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"

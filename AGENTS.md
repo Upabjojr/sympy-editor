@@ -165,6 +165,19 @@ Two conventions between printer, document and front end:
   (`_committedCapture`) and the commit animates from it; unchanged
   re-renders (a reverted preview included) and `prefers-reduced-motion`
   do not animate.
+- **History labels and the report.**  `Document.handle` describes each
+  message (`_describe`: "Transform: Simplify", "SymPy: diff(x)", "Edit: a →
+  b"...) and `_commit` records it per step (`_labels`, exported/restored
+  with sessions, `history_labels()["actions"]`; edits made from Python
+  have None).  `Editor.buildReport()` asks for an export and writes a
+  self-contained page: `katex.renderToString` per step (data-path
+  attributes turned into `rep-added` / `rep-removed` classes with
+  `diffNodes`), the KaTeX stylesheet with its woff2 fonts inlined as data
+  URIs (`_katexCssInline`, cached on `window`), `REPORT_CSS`, no script.
+  `exportReport()` hands it to `window.SympyEditorApp.shareHtml` (the
+  Android app's `@JavascriptInterface`: Downloads via MediaStore on API
+  29+, then a share sheet through the FileProvider), else the Web Share
+  API with a File, else a blob download.
 - **Long computations.**  `Editor.send` shows the spinner overlay after
   `workingAfter` ms and the Interrupt button after `interruptAfter` ms when
   the backend has `interrupt()` (and `canInterrupt()` allows).  Backends:
@@ -374,8 +387,12 @@ builds a `--cdn` copy and checks the worker installs and caches in Chromium;
 
 ## Conventions
 
-- Python ≥ 3.9, SymPy ≥ 1.13 (`pyproject.toml`; Pyodide bundles 1.13.3); no
-  type-checking tooling enforced; keep type hints and docstrings.  CI runs
+- Python ≥ 3.9, SymPy ≥ 1.14 (`pyproject.toml`); no type-checking tooling
+  enforced; keep type hints and docstrings.  In the browser, Pyodide's own
+  sympy package lags behind (1.13.3 in Pyodide 0.28), so the pages load
+  the `SYMPY_VERSION` wheel from PyPI (`SYMPY_WHEEL`, `urls["sympyWheel"]`;
+  after Pyodide's `mpmath`) and the offline bundles vendor it - keep the
+  three in step when bumping.  CI runs
   the suite with the latest SymPy *and* with the oldest admitted one (job
   `oldest-sympy`): only use what exists in both.
 - Tests (`pytest`, run by `.github/workflows/ci.yml`):
@@ -402,8 +419,9 @@ builds a `--cdn` copy and checks the worker installs and caches in Chromium;
 - Front-end options live in `DEFAULTS` in editor.js and are passed through
   `options=` from Python; CDN URLs are in `html.default_urls()` and can be
   overridden (`urls=`) for offline/vendored use.
-- Pinned CDN versions: KaTeX `KATEX_VERSION`, Pyodide `PYODIDE_VERSION`
-  (in html.py).  Bump deliberately and re-test in a browser.
+- Pinned CDN versions: KaTeX `KATEX_VERSION`, Pyodide `PYODIDE_VERSION`,
+  SymPy in the browser `SYMPY_VERSION`/`SYMPY_WHEEL` (in html.py).  Bump
+  deliberately and re-test in a browser (`SYMPY_EDITOR_SLOW_TESTS=1`).
 - Manual browser check: `python examples/demo.py --serve` (server backend)
   and `python examples/demo.py` then open `examples/demo.html` (Pyodide).
 

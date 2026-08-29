@@ -30,17 +30,18 @@ sys.path.insert(0, str(HERE.parent / "src"))  # run from a checkout without inst
 from sympy import Function, Integral, Sum, exp, oo, pi, sin, sqrt, symbols  # noqa: E402
 
 from sympy_editor import to_html  # noqa: E402
-from sympy_editor.html import KATEX_VERSION, PYODIDE_VERSION, default_urls  # noqa: E402
+from sympy_editor.html import KATEX_VERSION, PYODIDE_VERSION, SYMPY_VERSION, SYMPY_WHEEL, default_urls  # noqa: E402
 
 PYODIDE_CORE = ("pyodide.js", "pyodide.asm.js", "pyodide.asm.wasm", "python_stdlib.zip", "pyodide-lock.json")
-PYODIDE_PACKAGES = ("sympy",)   # their dependency closure is read from pyodide-lock.json
+PYODIDE_PACKAGES = ("mpmath",)  # from Pyodide's index (dependency closure read from pyodide-lock.json); SymPy itself is the PyPI wheel
 
 NOTICE = """Third-party components vendored in this bundle
 ================================================
 KaTeX {katex}      MIT           https://katex.org
 Pyodide {pyodide}  MPL-2.0       https://pyodide.org  (core runtime, python_stdlib.zip)
 CPython (in Pyodide)  PSF-2.0    https://www.python.org
-SymPy, mpmath (wheels) BSD-3     https://www.sympy.org  https://mpmath.org
+SymPy {sympy} (wheel from PyPI)  BSD-3  https://www.sympy.org
+mpmath (wheel)        BSD-3     https://mpmath.org
 sympy-editor          BSD-3
 """
 
@@ -88,12 +89,15 @@ def vendor(out: Path, cache: Path) -> dict:
         todo.extend(info["depends"])
     for file_name in files.values():
         fetch(pyodide_base + file_name, pdir / file_name, cache)
-    (out / "vendor" / "NOTICE.txt").write_text(NOTICE.format(katex=KATEX_VERSION, pyodide=PYODIDE_VERSION), encoding="utf-8")
+    wheel = SYMPY_WHEEL.rsplit("/", 1)[1]
+    fetch(SYMPY_WHEEL, pdir / wheel, cache)
+    (out / "vendor" / "NOTICE.txt").write_text(NOTICE.format(katex=KATEX_VERSION, pyodide=PYODIDE_VERSION, sympy=SYMPY_VERSION), encoding="utf-8")
     return {
         "katexJs": "vendor/katex/katex.min.js",
         "katexCss": "vendor/katex/katex.min.css",
         "pyodideJs": "vendor/pyodide/pyodide.js",
         "pyodideIndex": "vendor/pyodide/",
+        "sympyWheel": "vendor/pyodide/" + wheel,
     }
 
 

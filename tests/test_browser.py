@@ -1422,6 +1422,46 @@ def test_change_animation_term_typed_at_a_caret_merges_green(browser, serve_expr
     assert page.errors == []
 
 
+def test_history_report_is_self_contained_and_works_offline(browser, serve_expr, tmp_path):
+    from sympy import cos
+    srv, doc = serve_expr(x**2 + sin(y))
+    page = _open(browser, srv.url)
+    nodes = doc.snapshot()["nodes"]
+    _click(page, next(k for k, v in nodes.items() if v["src"] == "y"))
+    page.keyboard.press("ArrowUp")
+    page.keyboard.type("cos(y)")
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    _next_state(page, lambda: page.select_option(".se-ops", "factor"))
+    assert doc.expr == x**2 + cos(y)
+    html = page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.buildReport()")
+    assert html.startswith("<!DOCTYPE html>") and "data:font/woff2;base64," in html and "<script" not in html
+    assert "Edit: sin(y) → cos(y)" in html and "Transform: Factor" in html
+    assert html.count('<section class="step"') == 3 and 'rep-added' in html and 'rep-removed' in html
+    assert "cdn.jsdelivr.net" not in html.split("</style>")[1]      # no external resource in the body either
+    # the file works offline, fonts included
+    path = tmp_path / "report.html"
+    path.write_text(html, encoding="utf-8")
+    ctx = browser.new_context()
+    ctx.route("**/*", lambda route: route.abort() if not route.request.url.startswith("file:") else route.continue_())
+    rp = ctx.new_page()
+    errors = []
+    rp.on("pageerror", lambda e: errors.append(str(e)))
+    rp.goto(path.as_uri())
+    assert rp.locator(".step .katex").count() == 3 and rp.locator(".transition").count() == 2
+    assert rp.evaluate("document.fonts.ready.then(() => document.fonts.check('12px KaTeX_Main'))")
+    assert rp.locator(".transition .what").first.inner_text() == "Edit: sin(y) → cos(y)"
+    assert rp.locator('.step[data-current="1"] h2').inner_text().startswith("STEP 3") or "current" in rp.locator('.step[data-current="1"] h2').inner_text().lower()
+    green = rp.evaluate("getComputedStyle(document.querySelector('.rep-added')).color")
+    red = rp.evaluate("getComputedStyle(document.querySelector('.rep-removed')).color")
+    assert green != red and errors == []
+    ctx.close()
+    # the toolbar button downloads it
+    with page.expect_download() as dl:
+        page.locator('.se-toolbar [data-cmd="report"]').click()
+    assert dl.value.suggested_filename.startswith("sympy-editor-history-") and dl.value.suggested_filename.endswith(".html")
+    assert page.errors == []
+
+
 def test_replacing_the_whole_expression(browser, serve_expr):
     srv, doc = serve_expr(x**2 + sin(y))
     page = _open(browser, srv.url)

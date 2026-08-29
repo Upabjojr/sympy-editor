@@ -41,6 +41,26 @@ var SympyEditor = (function () {
     animateDuration: 1600 // ms: a quarter to show what goes (red), the rest to move it and fade the new in (green)
   };
   var SESSIONS_KEY = "sympy-editor:sessions";
+
+  // The history report: a self-contained page (KaTeX pre-rendered, its CSS
+  // and fonts inlined), see Editor.buildReport.
+  var REPORT_CSS = [
+    "body { margin: 0; padding: 1.5rem; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; background: #ffffff; color: #1f2328; }",
+    "@media (prefers-color-scheme: dark) { body { background: #1e1e1e; color: #e6e6e6; } .step, .transition .before { border-color: #444; } .meta, .transition .what, .step code, footer { color: #a0a0a0; } }",
+    "main { max-width: 60rem; margin: 0 auto; }",
+    "h1 { font-size: 1.3rem; margin: 0 0 0.3rem; } .meta { color: #656d76; font-size: 0.9rem; margin: 0 0 1.5rem; }",
+    ".step { border: 1px solid #d0d7de; border-radius: 0.6rem; padding: 0.8rem 1rem; margin: 0; overflow-x: auto; }",
+    ".step h2 { font-size: 0.85rem; font-weight: 600; margin: 0 0 0.4rem; color: #656d76; text-transform: uppercase; letter-spacing: 0.04em; }",
+    ".step .formula { font-size: 1.25em; } .step code { display: block; margin-top: 0.5rem; font-size: 0.8rem; color: #656d76; white-space: pre-wrap; word-break: break-word; }",
+    ".transition { display: grid; grid-template-columns: 2.5rem 1fr; align-items: center; gap: 0.3rem 0.6rem; margin: 0.4rem 0 0.4rem 1rem; }",
+    ".transition .arrow { grid-row: 1 / 3; font-size: 1.8rem; text-align: center; color: #3b82f6; }",
+    ".transition .what { font-weight: 600; } .transition .before { font-size: 0.9em; padding: 0.3rem 0.6rem; border-left: 3px solid #d0d7de; overflow-x: auto; }",
+    ".transition .before .label { display: block; font-size: 0.75rem; color: #656d76; margin-bottom: 0.2rem; }",
+    ".rep-added { color: #1a7f37; } .rep-removed { color: #d1242f; } .rep-added .rep-added, .rep-removed .rep-removed { color: inherit; }",
+    "@media (prefers-color-scheme: dark) { .rep-added { color: #3fb950; } .rep-removed { color: #ff7b72; } }",
+    ".katex-display { margin: 0.3em 0; text-align: left; } .katex-display > .katex { text-align: left; }",
+    "footer { margin-top: 2rem; font-size: 0.8rem; color: #656d76; }"
+  ].join("\n");
   var ZOOM_KEY = "sympy-editor:zoom";
   var ZOOM_STEP = 1.2;
 
@@ -299,6 +319,7 @@ var SympyEditor = (function () {
       if (o.finishButton && !o.readOnly) {
         btn("finish", "Done", "Finish editing and hand the expression back to Python");
       }
+      if (!o.readOnly) btn("report", "Report", "A self-contained HTML report of the history: every step, what changed, what produced it (download or share)");
       sep();
       // Zoom: the formula's size (also Ctrl+wheel, Ctrl+plus/minus/0, pinch);
       // the three buttons form one block that wraps as a unit.
@@ -2377,6 +2398,7 @@ var SympyEditor = (function () {
           if (this.caret) return;    // nothing to go into from a caret
           return this._selectChild();
         case "drawer": return this.toggleDrawer();
+        case "report": return this.exportReport();
         case "left":
         case "right": {
           var step = cmd === "left" ? -1 : 1;
@@ -2638,6 +2660,117 @@ var SympyEditor = (function () {
       this.view.focus({ preventScroll: true });
     }
 
+    /* ---- the history report ---- */
+
+    /** The KaTeX stylesheet with its fonts inlined as data URIs (fetched
+     *  once per page): what makes a report self-contained. */
+    async _katexCssInline() {
+      var cache = window.__sympyEditorKatexInline || (window.__sympyEditorKatexInline = {});
+      var href = this.opts.katexCss;
+      if (!cache[href]) {
+        cache[href] = (async function () {
+          var base = new URL(href, document.baseURI);
+          var css = await (await fetch(base.href)).text();
+          var fonts = {};
+          var re = /url\((?:"|')?(fonts\/[^)"']+\.woff2)(?:"|')?\)/g, m;
+          while ((m = re.exec(css))) fonts[m[1]] = true;
+          await Promise.all(Object.keys(fonts).map(async function (rel) {
+            var blob = await (await fetch(new URL(rel, base).href)).blob();
+            fonts[rel] = await new Promise(function (resolve, reject) {
+              var r = new FileReader();
+              r.onload = function () { resolve(r.result); };
+              r.onerror = reject;
+              r.readAsDataURL(blob);
+            });
+          }));
+          // keep the woff2 face only, as a data URI (the woff/ttf fallbacks would be dead links)
+          return css.replace(/src:\s*url\((?:"|')?(fonts\/[^)"']+\.woff2)(?:"|')?\)\s*format\((?:"|')woff2(?:"|')\)[^;]*;/g, function (all, rel) {
+            return "src: url(" + fonts[rel] + ") format(\"woff2\");";
+          });
+        })().catch(function (e) { delete cache[href]; throw e; });
+      }
+      return cache[href];
+    }
+
+    /** KaTeX HTML for `latex`, the nodes not in `kept` marked with `cls`
+     *  (all of them plain when `kept` is null), no data-path attributes. */
+    _renderMarked(latex, kept, cls) {
+      var div = document.createElement("div");
+      div.innerHTML = katex.renderToString(latex, { displayMode: true, output: "html", throwOnError: false,
+        trust: function (ctx) { return ctx.command === "\\htmlData"; },
+        strict: function (code) { return code === "htmlExtension" ? "ignore" : "warn"; } });
+      var els = div.querySelectorAll("[data-path]");
+      for (var i = 0; i < els.length; i++) {
+        var p = els[i].getAttribute("data-path");
+        if (kept && !kept[p]) els[i].classList.add(cls);
+        els[i].removeAttribute("data-path");
+      }
+      return div.innerHTML;
+    }
+
+    /** The self-contained HTML report of the current history: every step
+     *  rendered (what came in green), and between two steps what produced
+     *  the change and the previous formula with what went in red. */
+    async buildReport() {
+      var esc = function (s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+      var snap = await this.backend.send({ action: "export" }, function () {});
+      var hist = snap && snap.history ? snap.history : this._history;
+      if (!hist || !hist.steps) throw new Error("No history to report");
+      if (snap && snap.history) this._history = snap.history;
+      var css = await this._katexCssInline();
+      var sess = this._currentSession();
+      var title = "SymPy editor \u2014 history" + (sess && sess.name ? " of " + sess.name : "");
+      var out = [];
+      for (var i = 0; i < hist.steps.length; i++) {
+        var step = hist.steps[i], prev = i > 0 ? hist.steps[i - 1] : null, diff = null;
+        if (prev) {
+          diff = diffNodes(prev.nodes, step.nodes);
+          out.push('<div class="transition"><div class="arrow">\u2193</div><div class="what">' + esc((hist.actions && hist.actions[i]) || "Edit") + "</div>" +
+            '<div class="before"><span class="label">from (what went is red)</span>' + this._renderMarked(prev.latex, diff.oldKept, "rep-removed") + "</div></div>");
+        }
+        out.push('<section class="step"' + (i === hist.index ? ' data-current="1"' : "") + "><h2>Step " + (i + 1) + (i === hist.index ? " \u2014 current" : "") +
+          (i === 0 ? " \u2014 start" : "") + '</h2><div class="formula">' + this._renderMarked(step.latex, diff ? diff.newKept : null, "rep-added") +
+          "</div><code>" + esc(hist.labels[i]) + "</code></section>");
+      }
+      var when = new Date();
+      return "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
+        "<title>" + esc(title) + "</title><style>\n" + css + "\n" + REPORT_CSS + "\n</style></head><body><main>" +
+        "<h1>" + esc(title) + "</h1><p class=\"meta\">" + esc(when.toLocaleString()) + " \u00b7 " + hist.steps.length + " step" + (hist.steps.length === 1 ? "" : "s") +
+        " \u00b7 green: what a step brought, red: what the previous one lost</p>" + out.join("\n") +
+        "<footer>Generated by sympy-editor. This file is self-contained (KaTeX rendering and fonts included) and works offline.</footer></main></body></html>\n";
+    }
+
+    /** Download the report - or hand it to the app / the share sheet. */
+    async exportReport() {
+      if (this.busy || this.closed || !this.backend) return;
+      var self = this;
+      this._setStatus("Building the report\u2026");
+      try {
+        var html = await this.buildReport();
+        var name = "sympy-editor-history-" + new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-") + ".html";
+        if (window.SympyEditorApp && window.SympyEditorApp.shareHtml) {          // the Android app: save or share
+          window.SympyEditorApp.shareHtml(name, html);
+          this._setStatus("Report ready: choose where to save or share it");
+          return;
+        }
+        var file = null;
+        try { file = new File([html], name, { type: "text/html" }); } catch (e) { /* no File constructor */ }
+        if (file && navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+          try { await navigator.share({ files: [file], title: name }); this._setStatus("Report shared"); return; }
+          catch (e) { if (e && e.name === "AbortError") { this._setStatus(""); return; } }
+        }
+        var url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+        var a = h("a", { href: url, download: name });
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+        this._setStatus("Report downloaded: " + name);
+      } catch (e) {
+        this._showError("The report could not be built: " + ((e && e.message) || e));
+      }
+    }
+
     /** Jump to step `index` of the current session's history. */
     gotoStep(index) {
       if (this.busy || this.closed) return;
@@ -2787,6 +2920,11 @@ var SympyEditor = (function () {
       var hist = this.historyBody;
       hist.textContent = "";
       var h_ = this._history;
+      var tools = h("div", { class: "se-history-tools" });
+      var report = h("button", { type: "button", class: "se-history-report", title: "A self-contained HTML report of this history: download or share" }, ["Report\u2026"]);
+      report.addEventListener("click", function () { self.exportReport(); });
+      tools.appendChild(report);
+      hist.appendChild(tools);
       if (!h_ || !h_.labels) { hist.appendChild(h("div", { class: "se-step se-step-note" }, ["(open the drawer again after an edit)"])); return; }
       h_.labels.forEach(function (label, i) {
         var row = h("button", { type: "button", class: "se-step" + (i === h_.index ? " se-step-current" : ""), "data-index": String(i),
@@ -2794,7 +2932,8 @@ var SympyEditor = (function () {
           h("span", { class: "se-step-no" }, [String(i + 1)]),
           h("span", { class: "se-step-body" }, [
             h("span", { class: "se-step-formulas" }),     // filled by _renderHistory: previous (red) -> this (green)
-            h("code", {}, [label])
+            h("code", {}, [label]),
+            h("span", { class: "se-step-action" }, [i === 0 ? "Start" : (h_.actions && h_.actions[i]) || "Edit"])
           ])
         ]);
         row.disabled = i === h_.index;
@@ -2900,6 +3039,7 @@ var SympyEditor = (function () {
       set("right", dis || (at ? at.index >= at.count - 1 : (this.selected && !range ? !this._sidewaysTarget(this.selected, 1) : false)));
       set("copy", !s.src);
       set("paste", dis);
+      set("report", dis);
       set("zoomin", this.zoom >= this.opts.maxZoom);
       set("zoomout", this.zoom <= this.opts.minZoom);
       set("zoomreset", this.zoom === 1);
@@ -2975,7 +3115,8 @@ var SympyEditor = (function () {
     "      importScripts(m.pyodideJs);",
     "      var py = await self.loadPyodide({ indexURL: m.indexURL });",
     "      self.postMessage({ type: 'progress', text: 'Loading SymPy…' });",
-    "      await py.loadPackage('sympy');",
+    "      if (m.sympyWheel) { await py.loadPackage('mpmath'); await py.loadPackage(m.sympyWheel); }",
+    "      else await py.loadPackage('sympy');",
     "      py.FS.mkdirTree(m.dir);",
     "      for (var name in m.sources) py.FS.writeFile(m.dir + '/' + name, m.sources[name]);",
     "      py.runPython(m.boot);",
@@ -3008,7 +3149,8 @@ var SympyEditor = (function () {
     if (typeof window.loadPyodide !== "function") await loadScript(cfg.pyodideJs);
     var py = await window.loadPyodide({ indexURL: new URL(cfg.pyodideIndex, document.baseURI).href });
     report("Loading SymPy…");
-    await py.loadPackage("sympy");
+    if (cfg.sympyWheel) { await py.loadPackage("mpmath"); await py.loadPackage(new URL(cfg.sympyWheel, document.baseURI).href); }
+    else await py.loadPackage("sympy");
     py.FS.mkdirTree(PYODIDE_DIR);
     for (var name in cfg.sources) py.FS.writeFile(PYODIDE_DIR + "/" + name, cfg.sources[name]);
     py.runPython(PYODIDE_BOOT);
@@ -3064,6 +3206,7 @@ var SympyEditor = (function () {
           try {
             await post({ type: "init", pyodideJs: new URL(cfg.pyodideJs, document.baseURI).href,
               indexURL: new URL(cfg.pyodideIndex, document.baseURI).href,
+              sympyWheel: cfg.sympyWheel ? new URL(cfg.sympyWheel, document.baseURI).href : "",
               dir: PYODIDE_DIR, sources: cfg.sources, boot: PYODIDE_BOOT });
             return;
           } catch (e) {

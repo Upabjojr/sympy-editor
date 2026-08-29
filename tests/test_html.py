@@ -101,3 +101,11 @@ def test_examples_are_valid_and_reach_pages_with_sessions():
     cfg = build_config(Document(x), options={"sessions": True})
     assert [e["name"] for e in cfg["examples"]] == [name for name, _ in EXAMPLES]
     assert "examples" not in build_config(Document(x))
+
+
+def test_browser_sympy_is_the_pinned_wheel():
+    from sympy_editor.html import SYMPY_VERSION, SYMPY_WHEEL, PYODIDE_VERSION
+    cfg = build_config(Document(x))
+    assert cfg["sympyWheel"] == SYMPY_WHEEL and SYMPY_WHEEL.endswith(f"sympy-{SYMPY_VERSION}-py3-none-any.whl")
+    assert cfg["pyodideIndex"] == f"https://cdn.jsdelivr.net/pyodide/v{PYODIDE_VERSION}/full/"
+    assert build_config(Document(x), urls={"sympyWheel": ""})["sympyWheel"] == ""      # Pyodide's own package instead
