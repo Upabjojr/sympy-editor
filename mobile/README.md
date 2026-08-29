@@ -29,7 +29,7 @@ from `file://` URLs.  `tests/test_mobile.py` builds the bundle and, with
 ## 2. Android: .apk and .aab
 
 Requirements: JDK 17 or 21 and the Android SDK (Android Studio installs both;
-on a bare machine `sdkmanager "platforms;android-35" "build-tools;35.0.0"`).
+on a bare machine `sdkmanager "platforms;android-36" "build-tools;36.0.0"`).
 `build.py` finds them on its own when the environment does not say: a JDK 17/21
 under the usual install roots when the default `java` is newer (Gradle 8.9 /
 Kotlin cannot run on JDK 25), and the SDK at `~/Android/Sdk` (or the macOS /

@@ -5,12 +5,12 @@ plugins {
 
 android {
     namespace = "org.sympy.editor"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "org.sympy.editor"
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
     }
