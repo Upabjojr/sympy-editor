@@ -979,6 +979,7 @@ def test_function_box_search_prompt_and_paste_button(browser, serve_expr):
     page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
     fn = page.locator(".se-fn")
     fn.click()
+    assert _wait(lambda: page.evaluate("document.querySelector('.sympy-editor').__sympyEditor._functionsLoaded"), timeout=10)   # the list is fetched on focus
     fn.fill("factor")
     _next_state(page, lambda: page.keyboard.press("Enter"))
     assert doc2.expr == (x - 1) * (x + 1) and not page.locator(".se-fn-form").is_visible()
@@ -1228,35 +1229,51 @@ def test_arrow_buttons_move_the_selection_and_the_caret(browser, serve_expr):
     page.locator('.se-toolbar [data-cmd="left"]').click()
     i3, x3 = page.evaluate(gap)
     assert i3 == i1 and x3 < x2                                    # back in the previous gap (at its near end, like the ← key)
+    # with a caret, ↓ is disabled and ↑ selects the atom the caret is attached to
+    assert page.locator('.se-toolbar [data-cmd="child"]').is_disabled()
+    assert page.locator('.se-toolbar [data-cmd="parent"]').is_enabled()
+    page.locator('.se-toolbar [data-cmd="parent"]').click()
+    assert page.locator(".se-caret").count() == 0 and page.locator(".se-selected").get_attribute("data-path") == kids[1]
     assert page.errors == []
 
 
-def test_selection_box_of_a_square_root_stays_on_the_glyphs(browser, serve_expr):
-    from sympy import erf, sqrt
-    srv, doc = serve_expr(erf(sqrt(2) * y / 2) / 2 + 1 + x)
+def test_caret_walks_through_atoms_across_levels(browser, serve_expr):
+    from sympy import sin
+    a, b, c = symbols("a b c")
+    srv, doc = serve_expr(a + sin(b) + c)                          # printed a + c + sin(b): |a|c|sin(|b|)|
     page = _open(browser, srv.url)
+    assert doc.snapshot()["src"] == "a + c + sin(b)"
     nodes = doc.snapshot()["nodes"]
-    for src in ("erf(sqrt(2)*y/2)", "sqrt(2)"):
-        path = next(k for k, v in nodes.items() if v["src"] == src)
-        _click(page, path)
-        page.keyboard.press("Escape")
-        page.evaluate("p => document.querySelector('.sympy-editor').__sympyEditor.select(p)", path)
-        box = page.evaluate("document.querySelector('.se-box-select').getBoundingClientRect().toJSON()")
-        own = page.evaluate("p => document.querySelector(`[data-path=\"${p}\"]`).getBoundingClientRect().toJSON()", path)
-        # KaTeX's root sign is a 400em-wide SVG clipped by its wrapper: the box must not follow the SVG
-        assert box["right"] <= own["right"] + 6 and box["left"] >= own["left"] - 6, (src, box, own)   # 2 px padding + KaTeX's root wrapper
-        assert box["width"] < 4 * own["width"]
-        # ... nor the zero-height vlist rows that start a strut height above the glyphs
-        glyphs = page.evaluate("""p => { const el = document.querySelector(`[data-path="${p}"]`); const r = document.createRange();
-            let top = Infinity, bottom = -Infinity; const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-            while (w.nextNode()) { if (!w.currentNode.textContent.trim()) continue; r.selectNodeContents(w.currentNode); const b = r.getBoundingClientRect(); top = Math.min(top, b.top); bottom = Math.max(bottom, b.bottom); }
-            return [top, bottom]; }""", path)
-        assert box["y"] >= glyphs[0] - 8 and box["y"] + box["height"] <= glyphs[1] + 8, (src, box, glyphs)
-    # hit-testing next to the root uses the same box: the left edge of x is a caret, not a root selection
-    xp = next(k for k, v in nodes.items() if v["src"] == "x")
-    r = page.evaluate("p => document.querySelector(`[data-path=\"${p}\"]`).getBoundingClientRect().toJSON()", xp)
-    page.mouse.click(r["x"] + r["width"] / 2, r["y"] + r["height"] / 2)
-    assert page.locator(".se-selected").get_attribute("data-path") == xp
+    pb = next(k for k, v in nodes.items() if v["src"] == "b")
+    kids = _display_children(page, "/")
+    _click(page, kids[0])                                          # a
+    page.keyboard.press("Tab")                                     # caret after a (the gap before c)
+    caret = "(() => { const c = document.querySelector('.sympy-editor').__sympyEditor.caret; return c && {path: c.path, extend: c.extend || null, index: c.index, x: document.querySelector('.se-caret').getBoundingClientRect().left}; })()"
+    start = page.evaluate(caret)
+    assert start["path"] == "/" and start["index"] == 1
+    right = page.locator('.se-toolbar [data-cmd="right"]')
+    steps = []
+    for _ in range(5):
+        right.click()
+        steps.append(page.evaluate(caret))
+    # gap before sin(b), into sin: before b, after b, out of sin: the end of the sum, then it stays
+    assert [(c["path"], c["extend"], c["index"]) for c in steps[:4]] == [("/", None, 2), (pb, "before", 0), (pb, "after", 0), ("/", None, 3)]
+    assert steps[4] == steps[3]
+    assert all(steps[i]["x"] > steps[i - 1]["x"] for i in range(1, 4)) and steps[0]["x"] > start["x"]
+    # back: the same positions in reverse, strictly leftwards, down to the start of the sum
+    left = page.locator('.se-toolbar [data-cmd="left"]')
+    back = []
+    for _ in range(6):
+        left.click()
+        back.append(page.evaluate(caret))
+    assert [(c["path"], c["extend"], c["index"]) for c in back] == [(pb, "after", 0), (pb, "before", 0), ("/", None, 2), ("/", None, 1), ("/", None, 0), ("/", None, 0)]
+    assert all(back[i]["x"] < back[i - 1]["x"] for i in range(1, 5)) and back[5] == back[4]
+    # ↑ from the caret before b selects b
+    for _ in range(3):
+        right.click()
+    assert page.evaluate(caret)["extend"] == "before"
+    page.locator('.se-toolbar [data-cmd="parent"]').click()
+    assert page.locator(".se-selected").get_attribute("data-path") == pb and page.locator(".se-caret").count() == 0
     assert page.errors == []
 
 

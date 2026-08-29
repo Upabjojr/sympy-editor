@@ -637,7 +637,10 @@ var SympyEditor = (function () {
       }
       if (snap.signature && this.fnInput) {
         this._fnSigs[snap.signature.name] = snap.signature;
-        this._showFnForm(snap.signature);
+        // After the request that brought it has settled: a function without
+        // parameters is applied at once, which is a send of its own.
+        var self = this, sig = snap.signature;
+        setTimeout(function () { self._showFnForm(sig); }, 0);
       }
       this.root.setAttribute("data-seq", String(++this._stateCount));   // lets tests wait for a re-render
       this._applySelection();
@@ -1107,11 +1110,9 @@ var SympyEditor = (function () {
       } else if (this.caret && (k === "ArrowLeft" || k === "ArrowRight")) {
         this._moveCaret(k === "ArrowLeft" ? -1 : 1);
       } else if (this.caret && k === "ArrowUp") {
-        // From a caret, ↑ first selects the object it sits next to (then the usual ancestors).
-        var beside = this.caret.leftEl || this.caret.rightEl;
-        var container = beside ? beside.getAttribute("data-path") : this.caret.path;
-        this._hideCaret();
-        this.select(container);
+        this._selectBesideCaret();   // ↑ first selects the object the caret sits next to (then the ancestors)
+      } else if (this.caret && k === "ArrowDown") {
+        // nothing to go into from a caret
       } else if (this.caret && !ro && !mod && !ev.altKey && k.length === 1) {
         this.beginInsert(k);
       } else if (k === "Enter") {
@@ -1762,15 +1763,105 @@ var SympyEditor = (function () {
       if (this.caretEl.parentNode) this.caretEl.parentNode.removeChild(this.caretEl);
     }
 
+    /** Children of `p` in reading order: left to right on a line, a higher
+     *  line before a lower one (the numerator before the denominator). */
+    _readingChildren(p) {
+      var self = this;
+      var kids = (this.tree[p] ? this.tree[p].children : [])
+        .map(function (c) { var el = self._els(c)[0]; return { path: c, rect: el ? self._visualRect(el) : null }; })
+        .filter(function (k) { return k.rect; });
+      kids.sort(function (a, b) {
+        var overlap = Math.min(a.rect.bottom, b.rect.bottom) - Math.max(a.rect.top, b.rect.top);
+        if (overlap >= 0.5 * Math.min(a.rect.height, b.rect.height)) return a.rect.left - b.rect.left;
+        return a.rect.top - b.rect.top;
+      });
+      return kids.map(function (k) { return k.path; });
+    }
+
+    /** Every place a caret can be, in reading order, like the positions of a
+     *  text cursor: the gaps of insertable nodes and, elsewhere, before and
+     *  after each argument (extend carets).  Coinciding positions are
+     *  merged: a gap wins over an extend caret, the innermost extend caret
+     *  over an outer one (what an edge click gives). */
+    _caretPositions() {
+      var self = this;
+      var list = [];
+      var gapWith = function (parent, side, el) {
+        var gaps = self._gapsOf(parent);
+        for (var i = 0; i < gaps.length; i++) {
+          if (side === "before" ? gaps[i].rightEl === el : gaps[i].leftEl === el) {
+            return { gap: Object.assign({}, gaps[i], { attach: side === "before" ? "right" : "left" }), x: side === "before" ? gaps[i].b : gaps[i].a };
+          }
+        }
+        return null;
+      };
+      var edge = function (parent, side, kid) {
+        var el = self._els(kid)[0];
+        var pnode = self.state.nodes[parent];
+        var pos = pnode && pnode.insertable ? gapWith(parent, side, el) : null;
+        return pos || self._extendGap(kid, side);
+      };
+      var walk = function (p) {
+        var kids = self._readingChildren(p);
+        for (var i = 0; i < kids.length; i++) {
+          var before = edge(p, "before", kids[i]);
+          if (before) list.push(before);
+          walk(kids[i]);
+          var after = edge(p, "after", kids[i]);
+          if (after) list.push(after);
+        }
+      };
+      walk("/");
+      // merge coinciding positions (the same gap is reached as "after the
+      // left argument" and "before the right one")
+      var sameGap = function (g, h) {
+        return g.path === h.path && !!g.extend === !!h.extend && (g.extend ? g.extend === h.extend : g.index === h.index);
+      };
+      var out = [];
+      for (var i = 0; i < list.length; i++) {
+        var pos = list[i], last = out[out.length - 1];
+        if (last && (sameGap(last.gap, pos.gap) || Math.abs(last.x - pos.x) < 1.5)) {
+          var better = (!pos.gap.extend && last.gap.extend) ||
+            (!!pos.gap.extend === !!last.gap.extend && pos.gap.path.length > last.gap.path.length);
+          if (better) out[out.length - 1] = pos;
+          continue;
+        }
+        out.push(pos);
+      }
+      return out;
+    }
+
+    /** ←/→ at a caret: the previous/next caret position of the formula -
+     *  out of the current node at its ends, into a composite neighbour. */
     _moveCaret(step) {
       var cur = this.caret;
-      var gaps = this._gapsOf(cur.path);
-      var idx = -1;
-      for (var i = 0; i < gaps.length; i++) {
-        if (gaps[i].index === cur.index && gaps[i].leftEl === cur.leftEl) idx = i;
+      var list = this._caretPositions();
+      var idx = -1, best = Infinity;
+      for (var i = 0; i < list.length; i++) {
+        var g = list[i].gap;
+        var same = g.path === cur.path && !!g.extend === !!cur.extend && (g.extend ? g.extend === cur.extend : g.index === cur.index);
+        var d = Math.abs(list[i].x - (cur.a + cur.b) / 2);
+        if (same && d < best) { idx = i; best = d; }
+      }
+      if (idx < 0) {           // not in the list (e.g. an operator caret): the nearest position
+        for (var k = 0; k < list.length; k++) {
+          var dk = Math.abs(list[k].x - (cur.a + cur.b) / 2);
+          if (dk < best) { idx = k; best = dk; }
+        }
       }
       var j = idx + step;
-      if (j >= 0 && j < gaps.length) this._showCaret(gaps[j], step < 0 ? gaps[j].b : gaps[j].a);
+      if (j < 0 || j >= list.length) return;
+      var g = list[j].gap;
+      this._showCaret(g, g.extend ? list[j].x : (step < 0 ? g.b : g.a));   // the near end of a gap
+    }
+
+    /** ↑ at a caret: the object the caret is attached to (then its ancestors). */
+    _selectBesideCaret() {
+      var c = this.caret;
+      var beside = c.attach === "right" ? (c.rightEl || c.leftEl) : (c.leftEl || c.rightEl);
+      var path = beside ? beside.getAttribute("data-path") : c.path;
+      this._hideCaret();
+      this.select(path);
     }
 
     /** Put the caret right after (before, with `before`) the selection, in
@@ -2073,7 +2164,9 @@ var SympyEditor = (function () {
           if (this.selected === "/") return this.editSource("");
           if (this.selected) return this.send({ action: "delete", path: this.selected });
           return;
-        case "child": return this._selectChild();
+        case "child":
+          if (this.caret) return;    // nothing to go into from a caret
+          return this._selectChild();
         case "drawer": return this.toggleDrawer();
         case "left":
         case "right": {
@@ -2084,6 +2177,7 @@ var SympyEditor = (function () {
           return this.select("/");
         }
         case "parent": {
+          if (this.caret) return this._selectBesideCaret();
           if (this.range) { this.select(this.range.parent); return; }
           if (this.selected) this._selectParent(this.selected);
           return;
@@ -2473,8 +2567,8 @@ var SympyEditor = (function () {
       set("delete", dis || !(range || this.selected));
       set("unwrap", dis || range || !this.selected || !(s.nodes && s.nodes[this.selected] && s.nodes[this.selected].nargs));
       set("isolate", dis || !(range || (this.selected && this.selected !== "/")));
-      set("parent", dis || !(range || (t && t.parent)));
-      set("child", dis);
+      set("parent", dis || !(range || (t && t.parent) || this.caret));
+      set("child", dis || !!this.caret);
       set("left", dis);
       set("right", dis);
       set("copy", !s.src);

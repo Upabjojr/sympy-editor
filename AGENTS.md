@@ -194,7 +194,15 @@ Two conventions between printer, document and front end:
 - **Caret vs selection.**  `Editor.selected` and `Editor.caret` are mutually
   exclusive (`select()` hides the caret, `_showCaret()` clears the
   selection): keys replace a selection, insert at a caret, and never delete
-  anything while a caret is shown.
+  anything while a caret is shown.  ←/→ at a caret (`_moveCaret`) step
+  through `_caretPositions()`: every caret position of the formula in
+  reading order (`_readingChildren`: left to right on a line, higher lines
+  first), built by a depth-first walk - the gaps of insertable nodes,
+  extend carets before/after the arguments of the others - with coinciding
+  positions merged (a gap beats an extend caret, an inner extend caret an
+  outer one, as an edge click does).  ↑ at a caret selects the object it is
+  attached to (`_selectBesideCaret`); ↓ does nothing and its button is
+  disabled.
 - **LaTeX shortcuts.**  The text field expands complete `\command`s as they
   are typed (`expandCommands`, tables `GREEK`/`COMMANDS` in editor.js) and
   converts between the displayed Greek letters and SymPy's names
