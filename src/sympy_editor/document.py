@@ -297,9 +297,33 @@ class Document:
         return self.expr
 
     def history_labels(self) -> Dict[str, Any]:
-        """``{"labels": [str of every step, oldest first], "index"}`` for a
-        history list in the front end."""
-        return {"labels": [str(e) for e in self._history], "index": self._index}
+        """The history for the front end's list: ``{"labels": [str of every
+        step, oldest first], "index", "steps": [{"latex", "nodes"}]}`` -
+        ``steps`` carry the annotated LaTeX and the node table of each step,
+        so consecutive steps can be shown as a diff (renders are cached per
+        expression)."""
+        steps = []
+        for e in self._history:
+            steps.append(self._render_cache_get(e))
+        return {"labels": [str(e) for e in self._history], "index": self._index, "steps": steps}
+
+    def _render_cache_get(self, expr: Basic) -> Dict[str, Any]:
+        cache = self.__dict__.setdefault("_render_cache", {})
+        try:
+            hit = cache.get(expr)
+        except TypeError:          # unhashable
+            hit = None
+        if hit is None:
+            tex, nodes = annotate(expr, **self.printer_settings)
+            hit = {"latex": tex, "nodes": {format_path(p): {"src": str(n), "type": type(n).__name__, "nargs": len(n.args)}
+                                            for p, n in nodes.items()}}
+            try:
+                if len(cache) > 400:
+                    cache.clear()
+                cache[expr] = hit
+            except TypeError:
+                pass
+        return hit
 
     def on_change(self, callback: Callable[[Basic], None]) -> Callable[[Basic], None]:
         """Call ``callback(expr)`` after every change.  Returns ``callback``."""

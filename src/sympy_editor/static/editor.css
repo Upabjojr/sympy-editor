@@ -357,6 +357,8 @@
 /* the current session is a card; its history is a sub-tab nested inside it */
 .se-session { flex-direction: column; align-items: stretch; gap: 0; }
 .se-session-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; }
+.se-session[role="button"] { cursor: pointer; border-radius: 0.4rem; padding: 0.35rem 0.4rem; border: 1px solid transparent; }
+.se-session[role="button"]:focus-visible { outline: 2px solid rgba(var(--se-accent), 0.6); }
 .se-session-current { border: 1px solid rgba(var(--se-accent), 0.7); border-radius: 0.4rem; padding: 0.35rem 0.4rem; background: rgba(var(--se-accent), 0.05); }
 .se-session-sub { margin: 0.4rem 0 0 0.6rem; padding-left: 0.6rem; border-left: 2px solid rgba(var(--se-accent), 0.5); }
 .se-subtabs { display: flex; gap: 0.2rem; }
@@ -381,7 +383,13 @@
   font: inherit; padding: 0.2rem 0.4rem; border: 1px solid transparent; border-radius: 0.3rem;
   background: transparent; color: var(--se-muted); cursor: pointer;
 }
-.se-step code { font-family: var(--se-mono); color: var(--se-fg); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.se-step code { font-family: var(--se-mono); color: var(--se-muted); font-size: 11px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.se-step-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.se-step-formulas { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; color: var(--se-fg); font-size: 15px; overflow-x: auto; }
+.se-step-arrow { color: var(--se-muted); }
+.se-step .se-diff-removed { color: var(--se-removed); }
+.se-step .se-diff-added { color: var(--se-added); }
+.se-step .se-diff-removed .se-diff-removed, .se-step .se-diff-added .se-diff-added { color: inherit; }
 .se-step-no { min-width: 1.6em; text-align: right; }
 .se-step-current { border-color: rgba(var(--se-accent), 0.8); background: rgba(var(--se-accent), 0.12); cursor: default; }
 .se-step-current code { font-weight: 600; }
@@ -456,6 +464,7 @@
   .se-toolbar button:hover:not(:disabled) { background: rgba(var(--se-accent), 0.12); }
   .se-actions button:hover:not(:disabled) { background: rgba(var(--se-accent), 0.14); }
   .se-sym button:hover:not(:disabled), .se-session button:hover:not(:disabled), .se-step:hover:not(:disabled) { background: rgba(var(--se-accent), 0.12); }
+  .se-session[role="button"]:hover { background: rgba(var(--se-accent), 0.08); }
   .se-fn-item:hover { background: rgba(var(--se-accent), 0.14); }
   .se-source[contenteditable]:hover { background: rgba(var(--se-accent), 0.06); }
 }

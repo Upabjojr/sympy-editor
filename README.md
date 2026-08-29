@@ -219,8 +219,10 @@ you type it in the source line), a copy of the current expression, or one
 of the built-in examples (`sympy_editor.examples`); **Open** switches (the
 one you leave is saved first); **Delete** (click twice) removes one.  The
 current session is a card, and its **History** is a sub-tab inside that
-card: one line per step, click one to go back (or forward) to it.
-Available on Pyodide-backed pages.
+card: one row per step, each shown as a diff - the previous formula with
+what went in red, then this one with what came in green - and clicking a
+row goes back (or forward) to that step.  Tapping a session's row opens
+it.  Available on Pyodide-backed pages.
 
 On a narrow screen the toolbar buttons wrap onto as many rows as they need,
 and so does the action bar under a selection: every button stays reachable.

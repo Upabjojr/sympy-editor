@@ -192,7 +192,13 @@ Two conventions between printer, document and front end:
   ✕ close it), not in the widget's own layout; the history is a sub-tab
   (`.se-subtabs`, `showDrawerTab("history")` toggles `.se-drawer-pane`)
   nested in the current session's card, so the hierarchy session ⊃ history
-  is visible.  "New session…" opens a chooser
+  is visible.  `history_labels()` also carries `steps` (annotated LaTeX +
+  node table per step, cached per expression in `Document`), which
+  `_renderHistory` renders lazily into the rows as diffs - `diffNodes`, the
+  same rule as the change animation; the rendered `data-path` attributes
+  become `data-hpath` so they never collide with the formula's.  A session
+  row is a tap target; `openSession` moves `store.current` only once the
+  document has opened.  "New session…" opens a chooser
   (`_showSessionPicker`): empty (the default - a placeholder `0` behind
   the empty state, flagged `empty` until a first real expression is
   committed), a copy of the current expression, or an example

@@ -182,6 +182,23 @@ var SympyEditor = (function () {
     return { text: out, delta: delta };
   }
 
+  /** What changed between two node tables (path -> {src, type, nargs}):
+   *  a node is kept when its expression is still there.  The root is also
+   *  kept when it stays a container of the same type (a sum stays a sum:
+   *  its operators do not flash on every edit); any other node whose
+   *  expression changed goes as a whole - 2x typed into 3x is a red 2x
+   *  turning into a green 3x, not a red 2 next to a green 3. */
+  function diffNodes(oldNodes, newNodes) {
+    var oldSrc = {}, newSrc = {};
+    Object.keys(oldNodes).forEach(function (p) { oldSrc[oldNodes[p].src] = true; });
+    Object.keys(newNodes).forEach(function (p) { newSrc[newNodes[p].src] = true; });
+    var sameRoot = "/" in oldNodes && "/" in newNodes && oldNodes["/"].type === newNodes["/"].type && oldNodes["/"].nargs > 0;
+    var oldKept = {}, newKept = {};
+    Object.keys(oldNodes).forEach(function (p) { oldKept[p] = !!newSrc[oldNodes[p].src] || (p === "/" && sameRoot); });
+    Object.keys(newNodes).forEach(function (p) { newKept[p] = !!oldSrc[newNodes[p].src] || (p === "/" && sameRoot); });
+    return { oldKept: oldKept, newKept: newKept };
+  }
+
   function h(tag, attrs, children) {
     var el = document.createElement(tag);
     if (attrs) {
@@ -763,18 +780,8 @@ var SympyEditor = (function () {
       var disp = this.view.querySelector(".katex-display") || this.view.querySelector(".katex");
       if (!disp) return;
       var oldNodes = before.nodes, newNodes = this.state.nodes || {};
-      var oldSrc = {}, newSrc = {};
-      Object.keys(oldNodes).forEach(function (p) { oldSrc[oldNodes[p].src] = true; });
-      Object.keys(newNodes).forEach(function (p) { newSrc[newNodes[p].src] = true; });
-      // A node is kept when its expression is still there.  The root is
-      // also kept when it stays a container of the same type (a sum stays
-      // a sum: its operators do not flash on every edit); any other node
-      // whose expression changed goes as a whole - 2x typed into 3x is a
-      // red 2x turning into a green 3x, not a red 2 next to a green 3.
-      var sameRoot = "/" in oldNodes && "/" in newNodes && oldNodes["/"].type === newNodes["/"].type && oldNodes["/"].nargs > 0;
-      var oldKept = {}, newKept = {};
-      Object.keys(oldNodes).forEach(function (p) { oldKept[p] = !!newSrc[oldNodes[p].src] || (p === "/" && sameRoot); });
-      Object.keys(newNodes).forEach(function (p) { newKept[p] = !!oldSrc[newNodes[p].src] || (p === "/" && sameRoot); });
+      var diff = diffNodes(oldNodes, newNodes);
+      var oldKept = diff.oldKept, newKept = diff.newKept;
       var oldRectOf = function (path) {   // where the same expression was (same path first)
         var src = newNodes[path].src;
         if (path in oldNodes && oldNodes[path].src === src) return before.rects[path];
@@ -2558,6 +2565,52 @@ var SympyEditor = (function () {
       var tabs = this.subtabs.querySelectorAll("[data-tab]");
       for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle("se-subtab-current", tabs[i].getAttribute("data-tab") === name);
       this.historyPane.hidden = name !== "history";
+      if (name === "history") this._renderHistory();
+    }
+
+    /** Render the formulas of the history rows (once per row), each step as
+     *  a diff: the previous formula with what went in red, this one with what
+     *  came in green. */
+    _renderHistory() {
+      var hist = this._history;
+      if (!hist || !hist.steps || this.historyPane.hidden || !window.katex) return;
+      var self = this;
+      var rows = this.historyBody.querySelectorAll(".se-step[data-index]");
+      var opts = { displayMode: false, output: "html", throwOnError: false, trust: function (ctx) { return ctx.command === "\\htmlData"; },
+                   strict: function (code) { return code === "htmlExtension" ? "ignore" : "warn"; } };
+      var render = function (holder, step, marks, cls) {
+        holder.textContent = "";
+        try { katex.render(step.latex, holder, opts); } catch (e) { holder.textContent = "?"; }
+        var els = holder.querySelectorAll("[data-path]");
+        for (var i = 0; i < els.length; i++) {
+          var p = els[i].getAttribute("data-path");
+          els[i].setAttribute("data-hpath", p);      // not a node of the formula being edited
+          els[i].removeAttribute("data-path");
+          if (marks && !marks[p]) els[i].classList.add(cls);
+        }
+      };
+      for (var r = 0; r < rows.length; r++) {
+        var row = rows[r];
+        if (row.getAttribute("data-rendered")) continue;
+        var i = parseInt(row.getAttribute("data-index"), 10);
+        var step = hist.steps[i], prev = i > 0 ? hist.steps[i - 1] : null;
+        var formulas = row.querySelector(".se-step-formulas");
+        if (!step || !formulas) continue;
+        if (prev) {
+          var diff = diffNodes(prev.nodes, step.nodes);
+          var before = h("span", { class: "se-step-before" }), after = h("span", { class: "se-step-after" });
+          render(before, prev, diff.oldKept, "se-diff-removed");
+          render(after, step, diff.newKept, "se-diff-added");
+          formulas.appendChild(before);
+          formulas.appendChild(h("span", { class: "se-step-arrow" }, ["\u2192"]));
+          formulas.appendChild(after);
+        } else {
+          var only = h("span", { class: "se-step-after" });
+          render(only, step, null, "");
+          formulas.appendChild(only);
+        }
+        row.setAttribute("data-rendered", "1");
+      }
     }
 
     openDrawer() {
@@ -2602,10 +2655,12 @@ var SympyEditor = (function () {
       try {
         var saved = await this.backend.send({ action: "export" }, function () {});   // the one we leave, up to date
         if (saved) this._storeSession(saved);
-        store.current = id;
-        this._saveSessions(store);
         var state = sess.state || { history: [this.state.srepr], index: 0, symbols: this.state.declared || [] };
         var snap = await this.backend.openDocument(state, this._report.bind(this));
+        if (snap && snap.error) throw new Error(snap.error);
+        store.current = id;                 // only once the document is open: a failure leaves the pointer alone
+        this._saveSessions(store);
+        this._history = null;
         this.busy = false;
         this.select(null);
         this._hideCaret();
@@ -2700,6 +2755,13 @@ var SympyEditor = (function () {
         open.disabled = current || !self._sessionsReady;
         open.addEventListener("click", function () { self.openSession(sess.id); });
         head.appendChild(open);
+        if (!current) {   // the whole row is the target (a phone has no room for aiming at a small button)
+          row.setAttribute("role", "button");
+          row.setAttribute("tabindex", "0");
+          row.title = "Open this session";
+          head.addEventListener("click", function (ev) { if (!ev.target.closest("button")) self.openSession(sess.id); });
+          row.addEventListener("keydown", function (ev) { if (ev.key === "Enter" && ev.target === row) self.openSession(sess.id); });
+        }
         var del = h("button", { type: "button", "data-delete": sess.id, title: "Delete this session (click twice)" }, ["Delete"]);
         del.disabled = list.length < 2;
         del.addEventListener("click", function () {
@@ -2729,12 +2791,17 @@ var SympyEditor = (function () {
       h_.labels.forEach(function (label, i) {
         var row = h("button", { type: "button", class: "se-step" + (i === h_.index ? " se-step-current" : ""), "data-index": String(i),
           title: i === h_.index ? "The current expression" : "Go to this step" }, [
-          h("span", { class: "se-step-no" }, [String(i + 1)]), h("code", {}, [label])
+          h("span", { class: "se-step-no" }, [String(i + 1)]),
+          h("span", { class: "se-step-body" }, [
+            h("span", { class: "se-step-formulas" }),     // filled by _renderHistory: previous (red) -> this (green)
+            h("code", {}, [label])
+          ])
         ]);
         row.disabled = i === h_.index;
         row.addEventListener("click", function () { self.gotoStep(i); });
         hist.appendChild(row);
       });
+      this._renderHistory();
     }
 
     /* ---- zoom and sideways scrolling ---- */

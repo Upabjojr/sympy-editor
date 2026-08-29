@@ -588,12 +588,17 @@ def test_goto_history_step_and_labels():
     doc = Document(x)
     doc.set("x + 1")
     doc.set("x**2")
-    assert doc.history_labels() == {"labels": ["x", "x + 1", "x**2"], "index": 2}
+    labels = doc.history_labels()
+    assert labels["labels"] == ["x", "x + 1", "x**2"] and labels["index"] == 2 and len(labels["steps"]) == 3
     assert doc.goto(0) == x and doc.can_redo and not doc.can_undo
     snap = doc.handle({"action": "goto", "index": 1})
     assert snap["src"] == "x + 1" and snap["can_undo"] and snap["can_redo"]
     assert "No history step" in doc.handle({"action": "goto", "index": 5})["error"]
-    assert doc.handle({"action": "export"})["history"] == {"labels": ["x", "x + 1", "x**2"], "index": 1}
+    hist = doc.handle({"action": "export"})["history"]
+    assert hist["labels"] == ["x", "x + 1", "x**2"] and hist["index"] == 1
+    assert [s["nodes"]["/"]["src"] for s in hist["steps"]] == ["x", "x + 1", "x**2"]
+    assert "\\htmlData{path=/}" in hist["steps"][2]["latex"] and hist["steps"][2]["nodes"]["/1"]["type"] == "Integer"
+    assert doc.history_labels()["steps"][0] is doc.history_labels()["steps"][0]     # cached per expression
     doc.set("x + 3")                      # a new edit from the middle drops the later steps
     assert doc.history_labels()["labels"] == ["x", "x + 1", "x + 3"]
 

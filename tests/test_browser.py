@@ -1680,10 +1680,17 @@ def test_pyodide_worker_interrupt_and_sessions(browser, tmp_path):
         page.locator('.se-session-current .se-subtab[data-tab="history"]').click()
         assert _wait(lambda: page.locator(".se-step").count() == 2 and "se-step-current" in page.locator(".se-step").nth(1).get_attribute("class"), timeout=10)
         assert "(2)" in page.locator('.se-session-current .se-subtab[data-tab="history"]').inner_text()
+        # each step is rendered as a diff: the previous formula (0, red) -> this one (x + 1, green)
+        step2 = page.locator(".se-step").nth(1)
+        assert _wait(lambda: step2.locator(".se-step-formulas .katex").count() == 2, timeout=10)
+        assert step2.locator(".se-step-before .se-diff-removed").count() >= 1 and step2.locator(".se-step-after .se-diff-added").count() >= 1
+        assert "0" in step2.locator(".se-step-before").inner_text() and "x+1" in step2.locator(".se-step-after").inner_text().replace(" ", "")
+        assert page.locator(".se-drawer [data-path]").count() == 0     # history formulas carry no live paths
+        assert page.locator(".se-step").first.locator(".se-step-formulas .katex").count() == 1   # the first step: just the formula
         _next_state(page, lambda: page.locator(".se-step").first.click())
         assert page.evaluate(f"{ed}.state.src") == "0" and page.evaluate(f"{ed}.state.can_redo")
-        # switching back to the first session restores its expression
-        page.locator('.se-session code', has_text=str(big)).first.locator("xpath=..").locator("button[data-open]").click()
+        # switching back to the first session: tapping its row (not only its Open button) opens it
+        page.locator('.se-session[role="button"]', has_text=str(big)).first.locator(".se-session-row code").click()
         assert _wait(lambda: page.evaluate(f"{ed}.state.src") == str(big) and page.locator(".se-session-current .se-session-row code").inner_text() == str(big), timeout=60)
         page.locator(".se-drawer-close").click()
         assert page.locator(".se-drawer").is_hidden()
