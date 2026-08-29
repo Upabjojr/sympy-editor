@@ -42,11 +42,57 @@ def build_www(cdn: bool, android: bool) -> None:
     run(cmd)
 
 
+#: JDK majors the pinned Gradle/AGP/Kotlin accept (a newer default `java`,
+#: e.g. 25, fails with a bare "IllegalArgumentException: 25.0.4").
+JDK_MAJORS = (17, 21)
+
+
+def java_major(java: str) -> int:
+    """The major version of ``java`` (0 if it cannot be run)."""
+    try:
+        out = subprocess.run([java, "-version"], capture_output=True, text=True).stderr
+        version = out.split('"')[1]                      # openjdk version "17.0.2" ...
+        return int(version.split(".")[0])
+    except (OSError, IndexError, ValueError):
+        return 0
+
+
+def android_env() -> dict:
+    """The build environment: ANDROID_HOME set to the SDK at its usual place
+    when neither it nor local.properties says where it is, and JAVA_HOME
+    pointing at a supported JDK when the default one is not (looked up under
+    the usual install roots)."""
+    env = dict(os.environ)
+    if not (env.get("ANDROID_HOME") or env.get("ANDROID_SDK_ROOT") or (ANDROID / "local.properties").is_file()):
+        home = Path.home()
+        for sdk in (home / "Android" / "Sdk", home / "Library" / "Android" / "sdk",
+                    Path(os.environ.get("LOCALAPPDATA", str(home / "AppData" / "Local"))) / "Android" / "Sdk"):
+            if (sdk / "platforms").is_dir():
+                print(f"note: using ANDROID_HOME={sdk}", flush=True)
+                env["ANDROID_HOME"] = str(sdk)
+                break
+    if env.get("JAVA_HOME") or java_major("java") in JDK_MAJORS:
+        return env
+    roots = [Path("/usr/lib/jvm"), Path("/usr/local/opt"), Path("/opt/homebrew/opt"), Path("/Library/Java/JavaVirtualMachines"),
+             Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Eclipse Adoptium",
+             Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Java"]
+    for root in roots:
+        for home in sorted(root.glob("*")) if root.is_dir() else []:
+            for candidate in (home, home / "Contents" / "Home"):
+                java = candidate / "bin" / ("java.exe" if platform.system() == "Windows" else "java")
+                if java.is_file() and java_major(str(java)) in JDK_MAJORS:
+                    print(f"note: the default java is {java_major('java') or 'missing'}; using JAVA_HOME={candidate}", flush=True)
+                    env["JAVA_HOME"] = str(candidate)
+                    return env
+    print(f"warning: no JDK {'/'.join(map(str, JDK_MAJORS))} found; set JAVA_HOME if the build fails", flush=True)
+    return env
+
+
 def android_build(release: bool, cdn: bool) -> list[Path]:
     build_www(cdn, android=True)
     gradlew = ANDROID / ("gradlew.bat" if platform.system() == "Windows" else "gradlew")
     tasks = ["assembleRelease", "bundleRelease"] if release else ["assembleDebug"]
-    run([str(gradlew), "--no-daemon", *tasks], cwd=ANDROID)
+    run([str(gradlew), "--no-daemon", *tasks], cwd=ANDROID, env=android_env())
     outputs = ANDROID / "app" / "build" / "outputs"
     made = sorted(p for p in outputs.rglob("*") if p.suffix in (".apk", ".aab"))
     if release and not os.environ.get("ANDROID_KEYSTORE"):

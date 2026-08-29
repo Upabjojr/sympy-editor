@@ -6,4 +6,6 @@ if [ ! -f "$JAR" ]; then
   echo "Downloading gradle-wrapper.jar..." >&2
   curl -fsSL -o "$JAR" https://raw.githubusercontent.com/gradle/gradle/v8.9.0/gradle/wrapper/gradle-wrapper.jar || exit 1
 fi
-exec java -classpath "$JAR" org.gradle.wrapper.GradleWrapperMain "$@"
+# Like the official wrapper, JAVA_HOME wins over the java on the PATH.
+if [ -n "$JAVA_HOME" ]; then JAVACMD="$JAVA_HOME/bin/java"; else JAVACMD=java; fi
+exec "$JAVACMD" -classpath "$JAR" org.gradle.wrapper.GradleWrapperMain "$@"
