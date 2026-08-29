@@ -1110,6 +1110,119 @@ def test_long_formula_scrolls_sideways_and_fits_a_phone(browser, serve_expr):
     assert errors == []
 
 
+def test_source_line_previews_while_typing(browser, serve_expr):
+    srv, doc = serve_expr(x**2 + sin(y))
+    page = _open(browser, srv.url)
+    src = page.locator(".se-source")
+    src.click()
+    page.keyboard.press("Control+a")
+    page.keyboard.type("cos(x)*3")
+    _wait(lambda: page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.src") == "3*cos(x)")
+    assert page.locator('.se-view [data-path="/"]').count() == 1
+    assert "3" in page.locator(".se-view .katex").inner_text()     # rendered
+    assert doc.expr == x**2 + sin(y)                                 # not committed
+    assert src.inner_text() == "cos(x)*3"                            # the line is left alone (no normalisation while typing)
+    assert "Previewing" in page.locator(".se-status").inner_text()
+    # a string that does not parse marks the line and keeps the rendering
+    page.keyboard.type("+(")
+    page.wait_for_timeout(500)
+    assert "se-invalid" in src.get_attribute("class")
+    assert page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.src") == "3*cos(x)"
+    page.keyboard.press("Backspace")
+    page.keyboard.press("Backspace")
+    _wait(lambda: "se-invalid" not in src.get_attribute("class"))
+    # Esc reverts to what is committed
+    page.keyboard.press("Escape")
+    _wait(lambda: page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.src") == "x**2 + sin(y)")
+    assert src.inner_text() == "x**2 + sin(y)" and doc.expr == x**2 + sin(y)
+    # Enter commits the previewed text
+    src.click()
+    page.keyboard.press("Control+a")
+    page.keyboard.type("y**3")
+    _wait(lambda: page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.src") == "y**3")
+    assert doc.expr == x**2 + sin(y)
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    assert doc.expr == y**3 and "se-dirty" not in src.get_attribute("class")
+    assert page.errors == []
+
+
+def test_long_computation_shows_spinner_and_can_be_interrupted(browser):
+    import time
+    from sympy_editor.ops import Op, get_ops
+
+    def forever(expr):
+        while True:
+            time.sleep(0.001)
+
+    ops = get_ops()
+    ops["forever"] = Op("forever", "Take forever", forever)
+    doc = Document(x + 1, ops=ops)
+    srv = EditorServer(doc, port=0, options={"workingAfter": 100, "interruptAfter": 600})
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        page = _open(browser, srv.url)
+        page.select_option(".se-ops", "forever")
+        overlay = page.locator(".se-loading")
+        _wait(lambda: overlay.is_visible())
+        assert "Take forever" in overlay.inner_text() and page.locator(".se-spinner").is_visible()
+        button = page.locator(".se-interrupt")
+        assert not button.is_visible()                         # not yet: only after interruptAfter
+        _wait(lambda: button.is_visible(), timeout=5)
+        _next_state(page, lambda: button.click())
+        assert "Interrupted" in page.locator(".se-error").inner_text()
+        assert not overlay.is_visible() and doc.expr == x + 1
+        # the editor works normally afterwards
+        _next_state(page, lambda: page.select_option(".se-ops", "expand"))
+        assert page.locator(".se-error").is_hidden() and page.errors == []
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_delete_button_empties_the_whole_expression(browser, serve_expr):
+    srv, doc = serve_expr(x**2 + sin(y))
+    page = _open(browser, srv.url)
+    page.locator(".se-view").focus()
+    page.keyboard.press("ArrowDown")                              # the whole expression
+    page.locator('.se-toolbar [data-cmd="delete"]').click()        # the button (a phone has no Delete key)
+    # the focus stays in the source line, which is empty; the formula is hidden
+    assert page.evaluate("document.activeElement.className").startswith("se-source")
+    assert page.locator(".se-source").inner_text() == ""
+    assert "se-empty" in page.locator(".se-view").get_attribute("class")
+    assert page.locator(".se-view .katex").is_hidden()
+    page.keyboard.type("z")
+    _wait(lambda: "se-empty" not in page.locator(".se-view").get_attribute("class"))   # previewed as it is typed
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    assert doc.expr == z
+    assert page.errors == []
+
+
+def test_arrow_buttons_move_the_selection_and_the_caret(browser, serve_expr):
+    a, b, c = symbols("a b c")
+    srv, doc = serve_expr(a + b + c)
+    page = _open(browser, srv.url)
+    kids = _display_children(page, "/")
+    _click(page, kids[0])
+    page.locator('.se-toolbar [data-cmd="right"]').click()
+    assert page.locator(".se-selected").get_attribute("data-path") == kids[1]
+    page.locator('.se-actions [data-cmd="right"]').click()
+    assert page.locator(".se-selected").get_attribute("data-path") == kids[2]
+    page.locator('.se-actions [data-cmd="left"]').click()
+    assert page.locator(".se-selected").get_attribute("data-path") == kids[1]
+    # with a caret, the buttons move it between the terms
+    page.keyboard.press("Tab")                                     # caret after b
+    assert page.locator(".se-caret").count() == 1
+    gap = "(() => { const c = document.querySelector('.sympy-editor').__sympyEditor.caret; return [c.index, document.querySelector('.se-caret').getBoundingClientRect().left]; })()"
+    i1, x1 = page.evaluate(gap)
+    page.locator('.se-toolbar [data-cmd="right"]').click()
+    i2, x2 = page.evaluate(gap)
+    assert i2 == i1 + 1 and x2 > x1
+    page.locator('.se-toolbar [data-cmd="left"]').click()
+    i3, x3 = page.evaluate(gap)
+    assert i3 == i1 and x3 < x2                                    # back in the previous gap (at its near end, like the ← key)
+    assert page.errors == []
+
+
 def test_replacing_the_whole_expression(browser, serve_expr):
     srv, doc = serve_expr(x**2 + sin(y))
     page = _open(browser, srv.url)
@@ -1246,7 +1359,8 @@ def test_pyodide_runtime_is_shared_and_matrix_names_survive(browser, tmp_path):
         timeout=180000)
     assert page.evaluate("Object.keys(window.__sympyEditorPyodide.runtimes).length") == 1
     assert page.evaluate("window.__sympyEditorPyodide.docs") == 2
-    assert page.evaluate("performance.getEntriesByType('resource').filter(e => e.name.endsWith('pyodide.asm.js')).length") == 1
+    # one runtime: the page itself fetched Pyodide at most once (in a worker, not at all)
+    assert page.evaluate("performance.getEntriesByType('resource').filter(e => e.name.endsWith('pyodide.asm.js')).length") <= 1
     assert page.evaluate("document.querySelectorAll('.se-error:not([hidden])').length") == 0
 
 
@@ -1290,3 +1404,58 @@ def test_pyodide_page_edits_in_browser(browser, tmp_path):
     page.keyboard.press("Enter")
     page.wait_for_function("document.querySelector('.se-source').textContent.includes('sin(x)')", timeout=180000)
     assert page.locator(".se-error").is_hidden()
+
+
+@pytest.mark.skipif(not os.environ.get("SYMPY_EDITOR_SLOW_TESTS"), reason="set SYMPY_EDITOR_SLOW_TESTS=1")
+def test_pyodide_worker_interrupt_and_sessions(browser, tmp_path):
+    from sympy import Integer
+    from sympy_editor import save_html
+    big = Integer(3 * 10**6)                        # its factorial takes a minute or more (and 7 MB, not gigabytes)
+    path = save_html(big, tmp_path / "sessions.html", options={"sessions": True, "workingAfter": 100, "interruptAfter": 500})
+    page = browser.new_page()
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(f"file://{path}")
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    if page.evaluate("typeof Worker === 'undefined'"):
+        pytest.skip("no Worker")
+    # a file:// page cannot spawn a worker in Chromium: serve the page instead
+    import http.server, functools
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(tmp_path))
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        page.goto(f"http://127.0.0.1:{httpd.server_address[1]}/sessions.html")
+        page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+        _wait(lambda: page.locator(".se-loading").is_hidden(), timeout=180)
+        ed = "document.querySelector('.sympy-editor').__sympyEditor"
+        assert page.evaluate(f"{ed}.backend.canInterrupt()")
+        # the long computation: the page stays alive (the spinner animates in the DOM), Interrupt stops it
+        page.locator(".se-fn").fill("factorial()")     # with parentheses: applied as written, one request
+        page.keyboard.press("Enter")
+        assert _wait(lambda: page.locator(".se-interrupt").is_visible(), timeout=10)
+        assert page.evaluate("document.querySelector('.se-spinner') !== null")
+        _next_state(page, lambda: page.locator(".se-interrupt").click())
+        assert "Interrupted" in page.locator(".se-error").inner_text()
+        # Python restarts on the next request; the document is back from its last state
+        _next_state(page, lambda: page.select_option(".se-ops", "expand"))
+        assert _wait(lambda: page.locator(".se-loading").is_hidden(), timeout=180)
+        assert page.evaluate(f"{ed}.state.src") == str(big)
+        # the sessions panel has the first session; a second one starts from the same expression
+        assert page.locator(".se-session").count() == 2                # one session + the "new" row
+        page.locator(".se-sessions summary").click()                   # the panel is collapsed by default
+        page.locator(".se-session-new").click()
+        assert _wait(lambda: page.locator(".se-session").count() == 3, timeout=30)
+        page.locator(".se-source").click()
+        page.keyboard.press("Control+a")
+        page.keyboard.type("x + 1")
+        _next_state(page, lambda: page.keyboard.press("Enter"))
+        assert _wait(lambda: page.evaluate("JSON.parse(localStorage.getItem('sympy-editor:sessions')).list.some(s => s.name === 'x + 1')"), timeout=10)
+        # switching back to the first session restores its expression
+        page.locator('.se-session button[data-open]:not(:disabled)').first.click()
+        assert _wait(lambda: page.evaluate(f"{ed}.state.src") == str(big), timeout=60)
+        assert page.locator(".se-session-current code").inner_text() == str(big)
+        assert errors == []
+    finally:
+        httpd.shutdown()
+        httpd.server_close()

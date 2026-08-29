@@ -66,6 +66,7 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | Action | Mouse | Keyboard |
 | --- | --- | --- |
 | Select sub-expression | click its middle (its left/right edge places a caret before/after it instead; next to a matrix entry or a power's base the caret *extends* it: `+ 1` adds, `y` multiplies) | ↓ (enter children), ←/→ (siblings) |
+| Previous / next sibling (or move the caret) | **←** / **→** (toolbar and action bar) | ←/→ |
 | Select enclosing expression | click again on the same spot, or **↑** | ↑ |
 | Go inside: the sub-expression you came up from, or the first one (on an atom: a caret after it) | **↓** (toolbar or action bar) | ↓ |
 | Select a range of adjacent terms / factors | drag across them (mouse, touch or pen) | Shift+→ / Shift+← grow and shrink the range; ←/→/↓ collapse it, ↑ selects the whole sum/product |
@@ -74,7 +75,7 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | LaTeX shortcuts in the field | | `\theta` becomes `θ` as you type (Greek letters, `\infty`, `\sin`, `\cdot`, `\le`...); Greek letters are SymPy's names (`θ` is `theta`, `λ` is `lamda`, `∞` is `oo`) |
 | Edit selection's existing text | double-click / **Edit** | Enter |
 | Apply / cancel an edit | click elsewhere applies | Enter / Esc |
-| Remove the selection entirely (on the whole expression: start over in the source line) | **Delete** | Del |
+| Remove the selection entirely (on the whole expression: the formula is emptied, type the new one in the source line; Esc brings the old one back) | **Delete** | Del |
 | Remove the node but keep its argument (`cos(θ)` → `θ`, `√x` → `x`, `∫f dx` → `f`) | **Unwrap** | Backspace — after ↑ from a term, that term is the one kept |
 | Keep only the selection (it becomes the whole expression) | **Isolate** | Ctrl+Shift+I |
 | Transform the selection | pick an operation in the **Transform ▾** menu (general) or the type menu ("Matrix ▾"...): it applies at once | |
@@ -182,9 +183,30 @@ just display it.  See `mobile/README.md`.
 The SymPy source under the formula is linked to the rendering: select a
 piece of it and the corresponding sub-expression is selected in the formula;
 select in the formula and the matching source text is highlighted.  The line
-is editable — Enter applies it as the whole expression, Esc reverts — and
-that is where whole-expression edits happen: the rendered formula itself is
-never replaced by code.
+is editable and **previews as you type**: whenever the text parses, the
+formula above shows it (a text that does not parse marks the line red and
+leaves the formula alone); Enter commits it — as one undo step — and Esc
+reverts.  That is where whole-expression edits happen: the rendered formula
+itself is never replaced by code.
+
+### Long computations
+
+A transformation that takes a while does not freeze the page: after a moment
+a spinner overlay names what is being computed, and after a couple of seconds
+it offers an **Interrupt** button, which stops the computation and leaves the
+expression as it was.  In standalone pages Python runs in a Web Worker and is
+restarted on interruption (the undo history of the page is lost then; a
+`file://` page in Chromium cannot create the worker and runs Python in the
+page instead, without interruption); the local server and the Jupyter widget
+interrupt the thread doing the work (`interrupt_thread`), so nothing else is
+lost.
+
+### Sessions (mobile app, or `options={"sessions": True}`)
+
+The **Sessions** panel lists your expressions, each with its own undo
+history, kept in the browser's storage: **New session** starts one from the
+current expression, **Open** switches (the one you leave is saved first),
+**Delete** (click twice) removes one.  Available on Pyodide-backed pages.
 
 ## How it works
 

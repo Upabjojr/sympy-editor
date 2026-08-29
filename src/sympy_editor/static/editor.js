@@ -32,8 +32,13 @@ var SympyEditor = (function () {
     zoom: 1,             // initial magnification of the formula (1 = the CSS size)
     minZoom: 0.4,
     maxZoom: 4,
-    rememberZoom: false  // keep the zoom in localStorage across page loads (the mobile app does)
+    rememberZoom: false, // keep the zoom in localStorage across page loads (the mobile app does)
+    previewDelay: 250,   // ms after the last keystroke in the source line before it is previewed
+    workingAfter: 400,   // ms a request may take before the spinner overlay appears
+    interruptAfter: 2000, // ms after which the overlay offers to interrupt the computation
+    sessions: false      // a list of sessions (expressions with their own history) kept in localStorage
   };
+  var SESSIONS_KEY = "sympy-editor:sessions";
   var ZOOM_KEY = "sympy-editor:zoom";
   var ZOOM_STEP = 1.2;
 
@@ -241,6 +246,8 @@ var SympyEditor = (function () {
         btn("isolate", "Isolate", "Keep only the selection: it becomes the whole expression (Ctrl+Shift+I)");
         btn("parent", "↑", "Select the enclosing expression (↑)");
         btn("child", "↓", "Select inside: the sub-expression you came from, or the first one; on an atom, a caret after it (↓)");
+        btn("left", "←", "Select the previous sibling, or move the caret left (←)");
+        btn("right", "→", "Select the next sibling, or move the caret right (→)");
         sep();
         // General menu: picking an operation applies it to the selection (or
         // the whole expression) at once.
@@ -313,6 +320,19 @@ var SympyEditor = (function () {
         root.appendChild(this.symbols);
       }
 
+      // Sessions: several expressions, each with its own history, kept in
+      // localStorage (needs a backend with openDocument, i.e. Pyodide).
+      this.sessions = null;
+      if (o.sessions && !o.readOnly) {
+        this.sessionsBody = h("div", { class: "se-sessions-body" });
+        this.sessions = h("details", { class: "se-sessions" }, [
+          h("summary", { title: "Your expressions: each session keeps its own undo history" }, ["Sessions"]),
+          this.sessionsBody
+        ]);
+        root.appendChild(this.sessions);
+      }
+      this._sessionsReady = false;
+
       this.error = h("div", { class: "se-error", role: "alert", hidden: "" });
       root.appendChild(this.error);
       // Floating action bar under the selection: the same commands as the
@@ -321,6 +341,8 @@ var SympyEditor = (function () {
       if (!o.readOnly) {
         var abtn = function (cmd, label, title) { return h("button", { type: "button", "data-cmd": cmd, title: title }, [label]); };
         this.actions = h("div", { class: "se-actions", hidden: "", role: "toolbar" }, [
+          abtn("left", "←", "Select the previous sibling"),
+          abtn("right", "→", "Select the next sibling"),
           abtn("parent", "↑", "Select the enclosing expression"),
           abtn("child", "↓", "Select inside (the sub-expression you came from, or the first one)"),
           abtn("edit", "Edit", "Edit in place"),
@@ -356,9 +378,13 @@ var SympyEditor = (function () {
 
       // Loading overlay: shown in front of everything while Python loads.
       this.loading = false;
+      this.interruptBtn = h("button", { type: "button", class: "se-interrupt", hidden: "",
+        title: "Stop the computation (the expression stays as it was)" }, ["Interrupt"]);
+      this.interruptBtn.addEventListener("click", function () { self.interrupt(); });
       this.overlay = h("div", { class: "se-loading", hidden: "", role: "status", "aria-live": "polite" }, [
-        h("div", { class: "se-spinner" }), h("div", { class: "se-loading-text" }, ["Loading…"])
+        h("div", { class: "se-spinner" }), h("div", { class: "se-loading-text" }, ["Loading…"]), this.interruptBtn
       ]);
+      this.committed = null;   // the last snapshot that is not a preview (see _previewSource)
       if (this.fnMenu) { root.appendChild(this.fnMenu); root.appendChild(this.fnForm); }
       root.appendChild(this.overlay);
       this.host.appendChild(root);
@@ -374,7 +400,11 @@ var SympyEditor = (function () {
           ev.preventDefault();
           var cmd = b.getAttribute("data-cmd");
           self.command(cmd);
-          if (cmd !== "edit" && cmd !== "keyboard") self.view.focus({ preventScroll: true });
+          // Back to the formula - unless the command put the focus in a field
+          // (Delete on the whole expression edits in the source line: taking
+          // the focus away would blur it and bring the expression back).
+          var active = document.activeElement;
+          if (cmd !== "edit" && cmd !== "keyboard" && active !== self.source && active !== self.input) self.view.focus({ preventScroll: true });
         }
       });
       this.view.addEventListener("mousemove", function (ev) {
@@ -486,6 +516,7 @@ var SympyEditor = (function () {
         self.sourceDirty = true;
         self.source.classList.add("se-dirty");
         self._setStatus("Enter applies the edited source, Esc reverts it");
+        self._schedulePreview();
       });
       this.source.addEventListener("keydown", function (ev) {
         ev.stopPropagation();
@@ -560,6 +591,16 @@ var SympyEditor = (function () {
     /** Apply a snapshot from the backend. */
     async setState(snap) {
       if (!snap) return;
+      if (snap.export) { this._storeSession(snap); return; }   // the answer to a save, not a new state
+      if (snap.preview) {
+        // The source line being typed: a string that does not parse leaves
+        // the rendering as it is and only marks the line.
+        if (snap.error) { this.source.classList.add("se-invalid"); this._setStatus(snap.error); return; }
+        this.source.classList.remove("se-invalid");
+      } else {
+        this.committed = snap;
+        if (this._sessionsReady && !snap.error) this._scheduleSessionSave();
+      }
       var same = snap === this.state;   // re-render of the current state (keeps the range)
       this.state = snap;
       this.tree = buildTree(snap.nodes || {});
@@ -588,6 +629,7 @@ var SympyEditor = (function () {
       this._applySelection();
       this._showError(snap.error);
       if (snap.note && !snap.error) this._setStatus(snap.note);   // e.g. a name read as SymPy's function
+      else if (snap.preview) this._setStatus("Previewing the edited source – Enter applies it, Esc reverts");
       if (snap.closed) {
         this.closed = true;
         this.root.classList.add("se-closed");
@@ -626,9 +668,12 @@ var SympyEditor = (function () {
           this.view.textContent = this.state.src || "";
         }
       }
-      this.source.textContent = this.state.src || "";
-      this.sourceDirty = false;
-      this.source.classList.remove("se-dirty");
+      this.view.classList.remove("se-empty");
+      if (!this.state.preview) {           // a preview leaves the line being typed alone
+        this.source.textContent = this.state.src || "";
+        this.sourceDirty = false;
+        this.source.classList.remove("se-dirty");
+      }
       this._gapCache = null;
       this.caret = null;   // the rendering replaced the caret element and the boxes too
       this._boxes = { hover: [], select: [] };
@@ -1448,9 +1493,13 @@ var SympyEditor = (function () {
     /** Apply the edited source line as the whole expression. */
     commitSource() {
       var src = toSource(this.source.textContent).trim();
-      var same = src === (this.state ? this.state.src : "");
+      var base = this.committed || this.state;
+      var same = src === (base ? base.src : "");
+      clearTimeout(this._previewTimer);
+      this._previewSrc = null;
       this.sourceDirty = false;
       this.source.classList.remove("se-dirty");
+      this.source.classList.remove("se-invalid");
       if (!src || same) {
         this.revertSource();
         if (!src) this._setStatus("Empty: the previous expression is back (an expression cannot be empty)");
@@ -1460,10 +1509,44 @@ var SympyEditor = (function () {
     }
 
     revertSource() {
-      this.source.textContent = this.state ? this.state.src : "";
+      var base = this.committed || this.state;
+      this.source.textContent = base ? base.src : "";
       this.sourceDirty = false;
       this.source.classList.remove("se-dirty");
+      this.source.classList.remove("se-invalid");
+      clearTimeout(this._previewTimer);
+      this._previewSrc = null;
+      this.view.classList.remove("se-empty");
+      if (this.state && this.state.preview && this.committed) { this.setState(this.committed); return; }   // back to what is committed
       this._applySelection();
+    }
+
+    /** Preview the source line (debounced) while it is typed: a string that
+     *  parses is rendered at once, without being committed (Enter does that). */
+    _schedulePreview() {
+      var self = this;
+      if (this.opts.readOnly || !this.backend) return;
+      clearTimeout(this._previewTimer);
+      this._previewTimer = setTimeout(function () { self._previewSource(); }, this.opts.previewDelay);
+    }
+
+    async _previewSource() {
+      if (!this.sourceDirty || this.closed || !this.backend) return;
+      var src = toSource(this.source.textContent).trim();
+      if (!src) { this.source.classList.remove("se-invalid"); this.view.classList.add("se-empty"); return; }
+      if (src === this._previewSrc) return;                              // shown already (or on its way)
+      if (this._previewing) { this._previewAgain = true; return; }       // one at a time; the latest text goes next
+      this._previewing = true;
+      this._previewSrc = src;
+      try {
+        var snap = await this.backend.send({ action: "preview", src: src }, function () {});
+        if (snap && this.sourceDirty) await this.setState(snap);         // unless Enter committed meanwhile
+      } catch (e) {
+        this._previewSrc = null;
+      } finally {
+        this._previewing = false;
+        if (this._previewAgain) { this._previewAgain = false; this._previewSource(); }
+      }
     }
 
     /** Put the keyboard in the source line with everything selected. */
@@ -1476,6 +1559,8 @@ var SympyEditor = (function () {
         this.source.textContent = text;
         this.sourceDirty = true;
         this.source.classList.add("se-dirty");
+        if (text) this._schedulePreview();
+        else { this.select(null); this.view.classList.add("se-empty"); }   // the formula is gone until something is typed
         if (sel && this.source.firstChild) sel.collapse(this.source.firstChild, this.source.firstChild.length);
         this._setStatus(text ? "Editing the whole expression – Enter applies, Esc restores the previous one"
                              : "Everything removed: type the new expression – Enter applies, Esc restores the previous one");
@@ -1962,6 +2047,14 @@ var SympyEditor = (function () {
           if (this.selected) return this.send({ action: "delete", path: this.selected });
           return;
         case "child": return this._selectChild();
+        case "left":
+        case "right": {
+          var step = cmd === "left" ? -1 : 1;
+          if (this.caret) return this._moveCaret(step);
+          if (this.range) return this.select(this._displayChildren(this.range.parent)[this.range.focus]);
+          if (this.selected) return this._moveSideways(step);
+          return this.select("/");
+        }
         case "parent": {
           if (this.range) { this.select(this.range.parent); return; }
           if (this.selected) this._selectParent(this.selected);
@@ -1988,6 +2081,12 @@ var SympyEditor = (function () {
       this.root.classList.add("se-busy");
       this._updateToolbar();
       var self = this;
+      // A request that takes a while gets the spinner overlay, and after a
+      // few seconds the offer to interrupt it (where the backend can).
+      var working = setTimeout(function () { self._showLoading(self._workingText(msg)); }, this.opts.workingAfter);
+      var offer = setTimeout(function () {
+        if (self.backend.interrupt && (!self.backend.canInterrupt || self.backend.canInterrupt())) self.interruptBtn.hidden = false;
+      }, this.opts.interruptAfter);
       try {
         var snap = await this.backend.send(msg, function (text) { self._report(text); });
         if (snap) await this.setState(snap);
@@ -1995,11 +2094,35 @@ var SympyEditor = (function () {
         this._showError(String((e && e.message) || e));
         this._applySelection();
       } finally {
+        clearTimeout(working);
+        clearTimeout(offer);
+        this.interruptBtn.hidden = true;
+        this.interruptBtn.disabled = false;
         this._hideLoading();
         this.busy = false;
         this.root.classList.remove("se-busy");
         this._updateToolbar();
       }
+    }
+
+    _workingText(msg) {
+      if (msg.action === "apply") {
+        var op = (this.state && this.state.ops || []).filter(function (o) { return o.name === msg.op; })[0];
+        return "Computing " + (op ? op.label : msg.op) + "…";
+      }
+      if (msg.action === "call") return "Computing " + msg.func + "…";
+      return "Working…";
+    }
+
+    /** Stop the request in progress (the Interrupt button of the overlay). */
+    interrupt() {
+      if (!this.busy || !this.backend || !this.backend.interrupt) return;
+      this.interruptBtn.disabled = true;
+      this._showLoading("Interrupting…");
+      var self = this;
+      Promise.resolve(this.backend.interrupt()).then(function (ok) {
+        if (ok === false) self._setStatus("This computation cannot be interrupted here");
+      }, function () {});
     }
 
     copySource() {
@@ -2022,6 +2145,166 @@ var SympyEditor = (function () {
       ta.select();
       try { document.execCommand("copy"); } catch (e) { /* ignore */ }
       document.body.removeChild(ta);
+    }
+
+    /* ---- sessions ---- */
+
+    _loadSessions() {
+      try {
+        var store = JSON.parse(localStorage.getItem(SESSIONS_KEY) || "null");
+        if (store && Array.isArray(store.list)) return store;
+      } catch (e) { /* no storage, or garbage */ }
+      return { current: null, list: [] };
+    }
+
+    _saveSessions(store) {
+      this._sessionStore = store;
+      try { localStorage.setItem(SESSIONS_KEY, JSON.stringify(store)); } catch (e) { /* no storage */ }
+    }
+
+    _currentSession() {
+      var store = this._sessionStore || this._loadSessions();
+      return store.list.filter(function (s) { return s.id === store.current; })[0] || null;
+    }
+
+    /** Open the current session (or start one from the expression shown). */
+    async _initSessions() {
+      if (!this.sessions || !this.backend || !this.backend.openDocument) return;
+      var store = this._loadSessions();
+      var cur = store.list.filter(function (s) { return s.id === store.current; })[0];
+      if (cur && cur.state) {
+        try {
+          await this.setState(await this.backend.openDocument(cur.state, this._report.bind(this)));
+        } catch (e) {
+          this._showError("The session could not be opened: " + ((e && e.message) || e));
+        }
+      } else {
+        cur = { id: "s" + Date.now(), name: "", updated: Date.now(), state: null };
+        store.list.push(cur);
+        store.current = cur.id;
+      }
+      this._saveSessions(store);
+      this._sessionsReady = true;
+      this._fillSessions();
+      this._scheduleSessionSave();
+    }
+
+    _scheduleSessionSave() {
+      var self = this;
+      clearTimeout(this._sessionSaveTimer);
+      this._sessionSaveTimer = setTimeout(function () { self._saveSession(); }, 800);
+    }
+
+    /** Ask the backend for the document's history and store it (setState
+     *  gets the answer, flagged `export`, and calls _storeSession). */
+    _saveSession() {
+      if (!this._sessionsReady || this.closed || !this.backend) return;
+      var self = this;
+      Promise.resolve(this.backend.send({ action: "export" }, function () {})).then(function (snap) {
+        if (snap) self._storeSession(snap);
+      }, function () {});
+    }
+
+    _storeSession(snap) {
+      var store = this._sessionStore || this._loadSessions();
+      var cur = store.list.filter(function (s) { return s.id === store.current; })[0];
+      if (!cur) return;
+      cur.state = snap.export;
+      cur.name = (snap.src || "").slice(0, 60);
+      cur.updated = Date.now();
+      this._saveSessions(store);
+      this._fillSessions();
+    }
+
+    async openSession(id) {
+      if (this.busy || !this._sessionsReady) return;
+      var store = this._sessionStore || this._loadSessions();
+      var sess = store.list.filter(function (s) { return s.id === id; })[0];
+      if (!sess || id === store.current) return;
+      clearTimeout(this._sessionSaveTimer);
+      this.busy = true;
+      this._updateToolbar();
+      try {
+        var saved = await this.backend.send({ action: "export" }, function () {});   // the one we leave, up to date
+        if (saved) this._storeSession(saved);
+        store.current = id;
+        this._saveSessions(store);
+        var state = sess.state || { history: [this.state.srepr], index: 0, symbols: this.state.declared || [] };
+        var snap = await this.backend.openDocument(state, this._report.bind(this));
+        this.busy = false;
+        this.select(null);
+        this._hideCaret();
+        await this.setState(snap);
+      } catch (e) {
+        this._showError("The session could not be opened: " + ((e && e.message) || e));
+      } finally {
+        this._hideLoading();
+        this.busy = false;
+        this._updateToolbar();
+        this._fillSessions();
+      }
+    }
+
+    /** A new session: the current expression, with a fresh history. */
+    newSession() {
+      if (!this._sessionsReady || !this.state) return;
+      var store = this._sessionStore || this._loadSessions();
+      var sess = { id: "s" + Date.now(), name: (this.state.src || "").slice(0, 60), updated: Date.now(),
+                   state: { history: [this.state.srepr], index: 0, symbols: this.state.declared || [] } };
+      store.list.push(sess);
+      this._saveSessions(store);
+      this.openSession(sess.id);
+    }
+
+    deleteSession(id) {
+      var store = this._sessionStore || this._loadSessions();
+      if (store.list.length < 2) return;                       // the last session stays
+      var rest = store.list.filter(function (s) { return s.id !== id; });
+      store.list = rest;
+      this._saveSessions(store);
+      if (id === store.current) {
+        store.current = null;                                  // openSession() may then switch to it
+        this._saveSessions(store);
+        var latest = rest.slice().sort(function (a, b) { return b.updated - a.updated; })[0];
+        this.openSession(latest.id);
+      } else {
+        this._fillSessions();
+      }
+    }
+
+    _fillSessions() {
+      if (!this.sessions) return;
+      var self = this;
+      var store = this._sessionStore || this._loadSessions();
+      var body = this.sessionsBody;
+      body.textContent = "";
+      var list = store.list.slice().sort(function (a, b) { return b.updated - a.updated; });
+      this.sessions.querySelector("summary").textContent = "Sessions (" + list.length + ")";
+      list.forEach(function (sess) {
+        var current = sess.id === store.current;
+        var when = new Date(sess.updated || 0);
+        var row = h("div", { class: "se-session" + (current ? " se-session-current" : ""), "data-id": sess.id });
+        row.appendChild(h("code", { title: sess.name }, [sess.name || "(new)"]));
+        row.appendChild(h("span", { class: "se-session-when" }, [when.toLocaleDateString() + " " + when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })]));
+        var open = h("button", { type: "button", "data-open": sess.id, title: "Open this session" }, [current ? "Current" : "Open"]);
+        open.disabled = current || !self._sessionsReady;
+        open.addEventListener("click", function () { self.openSession(sess.id); });
+        row.appendChild(open);
+        var del = h("button", { type: "button", "data-delete": sess.id, title: "Delete this session (click twice)" }, ["Delete"]);
+        del.disabled = list.length < 2;
+        del.addEventListener("click", function () {
+          if (del.getAttribute("data-armed")) { self.deleteSession(sess.id); return; }
+          del.setAttribute("data-armed", "1");
+          del.textContent = "Sure?";
+          setTimeout(function () { del.removeAttribute("data-armed"); del.textContent = "Delete"; }, 3000);
+        });
+        row.appendChild(del);
+        body.appendChild(row);
+      });
+      var add = h("button", { type: "button", class: "se-session-new", title: "Start a new session from the current expression, with a fresh history" }, ["New session"]);
+      add.disabled = !this._sessionsReady;
+      add.addEventListener("click", function () { self.newSession(); });
+      body.appendChild(h("div", { class: "se-session se-session-add" }, [add]));
     }
 
     /* ---- zoom and sideways scrolling ---- */
@@ -2113,6 +2396,8 @@ var SympyEditor = (function () {
       set("isolate", dis || !(range || (this.selected && this.selected !== "/")));
       set("parent", dis || !(range || (t && t.parent)));
       set("child", dis);
+      set("left", dis);
+      set("right", dis);
       set("copy", !s.src);
       set("paste", dis);
       set("zoomin", this.zoom >= this.opts.maxZoom);
@@ -2148,6 +2433,15 @@ var SympyEditor = (function () {
         });
         if (!r.ok) throw new Error("Server error: HTTP " + r.status + " " + r.statusText);
         return r.json();
+      },
+      /** Stop the message being processed: its request then answers with the error. */
+      interrupt: async function () {
+        var r = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-SymPy-Editor-Token": cfg.token || "" },
+          body: JSON.stringify({ action: "interrupt" })
+        });
+        return r.ok ? (await r.json()).interrupted : false;
       }
     };
   }
@@ -2165,51 +2459,213 @@ var SympyEditor = (function () {
     ""
   ].join("\n");
 
-  /** The one Pyodide interpreter of the page, with SymPy and the editor's
-   *  modules loaded: every editor on the page keeps its Document in it.  The
-   *  cache lives on window, since each embedded fragment may carry its own
-   *  copy of this script. */
+  var PYODIDE_DIR = "/sympy_editor_pkg/sympy_editor";
+
+  // The worker's script: Pyodide, SymPy and the Documents live in a worker
+  // thread, so a long computation leaves the page responsive and can be
+  // stopped by terminating the worker (see pyodideRuntime).
+  var PYODIDE_WORKER = [
+    "var newDoc = null, handle = null;",
+    "self.onmessage = async function (e) {",
+    "  var m = e.data;",
+    "  try {",
+    "    if (m.type === 'init') {",
+    "      self.postMessage({ type: 'progress', text: 'Loading Python runtime (Pyodide)…' });",
+    "      importScripts(m.pyodideJs);",
+    "      var py = await self.loadPyodide({ indexURL: m.indexURL });",
+    "      self.postMessage({ type: 'progress', text: 'Loading SymPy…' });",
+    "      await py.loadPackage('sympy');",
+    "      py.FS.mkdirTree(m.dir);",
+    "      for (var name in m.sources) py.FS.writeFile(m.dir + '/' + name, m.sources[name]);",
+    "      py.runPython(m.boot);",
+    "      newDoc = py.globals.get('__sympy_editor_new');",
+    "      handle = py.globals.get('__sympy_editor_handle');",
+    "      self.postMessage({ type: 'done', req: m.req });",
+    "    } else if (m.type === 'newDoc') {",
+    "      newDoc(m.id, m.srepr, m.settings);",
+    "      self.postMessage({ type: 'done', req: m.req });",
+    "    } else if (m.type === 'handle') {",
+    "      self.postMessage({ type: 'done', req: m.req, json: handle(m.id, m.msg) });",
+    "    }",
+    "  } catch (err) {",
+    "    self.postMessage({ type: 'error', req: m.req, message: String((err && err.message) || err) });",
+    "  }",
+    "};",
+    ""
+  ].join("\n");
+
+  function interruptedError() {
+    var e = new Error("Interrupted: Python was stopped and restarts (the undo history is gone)");
+    e.interrupted = true;
+    return e;
+  }
+
+  /** Pyodide loaded in the page itself (the fallback when a worker cannot be
+   *  created, e.g. by Chrome for a file:// page): no interruption possible. */
+  async function pyodideInPage(cfg, report) {
+    report("Loading Python runtime (Pyodide)…");
+    if (typeof window.loadPyodide !== "function") await loadScript(cfg.pyodideJs);
+    var py = await window.loadPyodide({ indexURL: new URL(cfg.pyodideIndex, document.baseURI).href });
+    report("Loading SymPy…");
+    await py.loadPackage("sympy");
+    py.FS.mkdirTree(PYODIDE_DIR);
+    for (var name in cfg.sources) py.FS.writeFile(PYODIDE_DIR + "/" + name, cfg.sources[name]);
+    py.runPython(PYODIDE_BOOT);
+    return { newDoc: py.globals.get("__sympy_editor_new"), handle: py.globals.get("__sympy_editor_handle") };
+  }
+
+  /** One Python runtime (a worker, or the page) holding the Documents of
+   *  every editor that shares it.  `interrupt()` terminates the worker; the
+   *  next request starts a new one and re-creates the Documents from their
+   *  last committed state (`docs`), so only the undo history is lost. */
+  function makeRuntime(cfg) {
+    var rt = { docs: {}, worker: null, ready: null, inPage: null, pending: {}, req: 0, report: function () {} };
+
+    function post(msg) {
+      return new Promise(function (resolve, reject) {
+        var id = ++rt.req;
+        rt.pending[id] = { resolve: resolve, reject: reject };
+        rt.worker.postMessage(Object.assign({ req: id }, msg));
+      });
+    }
+
+    function failAll(err) {
+      var pending = rt.pending;
+      rt.pending = {};
+      for (var k in pending) pending[k].reject(err);
+    }
+
+    function spawn() {
+      var worker;
+      try {
+        worker = new Worker(URL.createObjectURL(new Blob([PYODIDE_WORKER], { type: "text/javascript" })));
+      } catch (e) {
+        return null;
+      }
+      worker.onmessage = function (e) {
+        var m = e.data;
+        if (m.type === "progress") { rt.report(m.text); return; }
+        var p = rt.pending[m.req];
+        if (!p) return;
+        delete rt.pending[m.req];
+        if (m.type === "error") p.reject(new Error(m.message)); else p.resolve(m.json);
+      };
+      worker.onerror = function (e) { failAll(new Error((e && e.message) || "The Python worker failed")); };
+      return worker;
+    }
+
+    rt.start = function (report) {
+      if (report) rt.report = report;
+      if (rt.ready) return rt.ready;
+      rt.ready = (async function () {
+        rt.worker = spawn();
+        if (rt.worker) {
+          try {
+            await post({ type: "init", pyodideJs: new URL(cfg.pyodideJs, document.baseURI).href,
+              indexURL: new URL(cfg.pyodideIndex, document.baseURI).href,
+              dir: PYODIDE_DIR, sources: cfg.sources, boot: PYODIDE_BOOT });
+            return;
+          } catch (e) {
+            if (window.console) console.warn("sympy-editor: Python could not start in a worker, using the page instead.", e);
+            rt.worker.terminate();
+            rt.worker = null;
+          }
+        }
+        rt.inPage = await pyodideInPage(cfg, rt.report);
+      })().catch(function (e) { rt.ready = null; throw e; });
+      return rt.ready;
+    };
+
+    rt.canInterrupt = function () { return !!rt.worker; };
+
+    rt.interrupt = function () {
+      if (!rt.worker) return false;
+      var worker = rt.worker;
+      rt.worker = null;
+      rt.ready = null;
+      for (var id in rt.docs) rt.docs[id].created = false;
+      worker.terminate();
+      failAll(interruptedError());
+      return true;
+    };
+
+    rt.newDoc = function (id, srepr, settings) {
+      rt.docs[id] = { srepr: srepr, settings: settings || {}, declared: null, last: null, created: false };
+      return rt.ensureDoc(id);
+    };
+
+    rt.ensureDoc = async function (id) {
+      var d = rt.docs[id];
+      if (d.created) return;
+      var settings = Object.assign({}, d.settings);
+      if (d.created === false && d.last) { delete settings.history; delete settings.index; }   // re-created: from its last state
+      if (d.declared) settings.symbols = d.declared;
+      if (rt.inPage) rt.inPage.newDoc(id, d.srepr, JSON.stringify(settings));
+      else await post({ type: "newDoc", id: id, srepr: d.srepr, settings: JSON.stringify(settings) });
+      d.created = true;
+    };
+
+    rt.handle = async function (id, msgJson) {
+      await rt.start();          // a new worker after an interruption
+      await rt.ensureDoc(id);
+      var json = rt.inPage ? rt.inPage.handle(id, msgJson) : await post({ type: "handle", id: id, msg: msgJson });
+      var snap = JSON.parse(json);
+      var d = rt.docs[id];
+      if (!snap.preview && snap.srepr) { d.srepr = snap.srepr; d.declared = snap.declared || null; d.last = snap; }
+      return snap;
+    };
+    return rt;
+  }
+
+  /** The runtime of the page for these URLs (cached on window: each embedded
+   *  fragment may carry its own copy of this script). */
   function pyodideRuntime(cfg, report) {
     var shared = window.__sympyEditorPyodide || (window.__sympyEditorPyodide = { runtimes: {}, docs: 0 });
     var key = cfg.pyodideIndex || cfg.pyodideJs || "default";
-    if (!shared.runtimes[key]) {
-      shared.runtimes[key] = (async function () {
-        report("Loading Python runtime (Pyodide)…");
-        if (typeof window.loadPyodide !== "function") await loadScript(cfg.pyodideJs);
-        // Pyodide wants an absolute index URL; relative ones (vendored bundles) are resolved against the page.
-        var py = await window.loadPyodide({ indexURL: new URL(cfg.pyodideIndex, document.baseURI).href });
-        report("Loading SymPy…");
-        await py.loadPackage("sympy");
-        var dir = "/sympy_editor_pkg/sympy_editor";
-        py.FS.mkdirTree(dir);
-        for (var name in cfg.sources) py.FS.writeFile(dir + "/" + name, cfg.sources[name]);
-        py.runPython(PYODIDE_BOOT);
-        return { py: py, newDoc: py.globals.get("__sympy_editor_new"), handle: py.globals.get("__sympy_editor_handle") };
-      })().catch(function (e) { delete shared.runtimes[key]; throw e; });
-    }
-    return shared.runtimes[key];
+    if (!shared.runtimes[key]) shared.runtimes[key] = makeRuntime(cfg);
+    var rt = shared.runtimes[key];
+    return rt.start(report).then(function () { return rt; });
   }
 
-  /** Run the Python Document inside the browser with Pyodide (loaded lazily
-   *  on the first edit, once per page).  cfg: {pyodideJs, pyodideIndex, sources, srepr, document}. */
+  /** Run the Python Document in the browser with Pyodide (in a worker, loaded
+   *  once per page).  cfg: {pyodideJs, pyodideIndex, sources, srepr, document}. */
   function pyodideBackend(cfg) {
-    var ready = null;
-    async function init(report) {
-      var runtime = await pyodideRuntime(cfg, report);
-      var shared = window.__sympyEditorPyodide;
-      var id = "doc" + (++shared.docs);
-      runtime.newDoc(id, cfg.srepr, JSON.stringify(cfg.document || {}));
-      report("");
-      return function (msg) { return runtime.handle(id, msg); };
-    }
+    var rt = null, id = null, ready = null;
     function start(report) {
-      if (!ready) ready = init(report).catch(function (e) { ready = null; throw e; });
+      if (!ready) {
+        ready = (async function () {
+          rt = await pyodideRuntime(cfg, report);
+          id = "doc" + (++window.__sympyEditorPyodide.docs);
+          await rt.newDoc(id, cfg.srepr, cfg.document || {});
+          report("");
+        })().catch(function (e) { ready = null; throw e; });
+      }
       return ready;
     }
     return {
       send: async function (msg, report) {
-        var handle = await start(report || function () {});
-        return JSON.parse(handle(JSON.stringify(msg)));
+        await start(report || function () {});
+        try {
+          return await rt.handle(id, JSON.stringify(msg));
+        } catch (e) {
+          if (!e.interrupted) throw e;
+          // The document comes back from its last committed state at the next
+          // request; meanwhile, that state with the error and no history.
+          var last = rt.docs[id].last || cfg.snapshot;
+          return Object.assign({}, last, { error: e.message, can_undo: false, can_redo: false, seq: (last.seq || 0) + 1 });
+        }
+      },
+      canInterrupt: function () { return !!rt && rt.canInterrupt(); },
+      interrupt: function () { return !!rt && rt.interrupt(); },
+      /** Switch to a document built from `state` (Document kwargs: history,
+       *  index, symbols - a session), returning its snapshot. */
+      openDocument: async function (state, report) {
+        await start(report || function () {});
+        id = "doc" + (++window.__sympyEditorPyodide.docs);
+        var history = state && state.history;
+        var srepr = history && history.length ? history[Math.min(state.index || 0, history.length - 1)] : cfg.srepr;
+        await rt.newDoc(id, srepr, Object.assign({}, cfg.document || {}, state || {}));
+        return rt.handle(id, JSON.stringify({ action: "snapshot" }));
       },
       /** Load the runtime now (page load) instead of at the first edit. */
       warmup: function (report) { return start(report).then(function () { report(""); }, function (e) { report("Python failed to load: " + e.message); }); }
@@ -2232,10 +2688,15 @@ var SympyEditor = (function () {
     var backend = make(cfg);
     var editor = new Editor(host, backend, options);
     editor.setState(cfg.snapshot).then(function () {
+      var warm = Promise.resolve();
       if (backend.warmup && editor.opts.preload !== false) {
         editor._showLoading("Loading Python runtime…");
-        backend.warmup(function (text) { editor._report(text); }).then(function () { editor._hideLoading(); });
+        warm = backend.warmup(function (text) { editor._report(text); }).then(function () {
+          editor._hideLoading();
+          if (backend.canInterrupt && !backend.canInterrupt()) editor._setStatus("Python runs in the page (no worker): long computations cannot be interrupted here");
+        });
       }
+      warm.then(function () { return editor._initSessions(); });
     });
     return editor;
   }

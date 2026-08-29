@@ -546,3 +546,37 @@ def test_names_versus_sympy_functions():
     snap = doc.handle({"action": "set", "src": "sin(gamma)"})
     assert doc.expr == sin(Symbol("gamma", positive=True)) and "note" not in snap
     assert "not" not in (doc.handle({"action": "set", "src": "x + 2"}).get("note") or "")
+
+
+def test_preview_renders_without_committing():
+    from sympy import symbols
+    x, y = symbols("x y")
+    doc = Document(x + 1)
+    snap = doc.handle({"action": "preview", "src": "x*y"})
+    assert snap["preview"] is True and snap["src"] == "x*y" and snap["error"] is None
+    assert "/" in snap["nodes"] and snap["nodes"]["/"]["src"] == "x*y"
+    assert doc.expr == x + 1 and not doc.can_undo                   # nothing committed
+    bad = doc.handle({"action": "preview", "src": "x*("})
+    assert bad["preview"] is True and "Could not parse" in bad["error"] and bad["src"] == "x + 1"
+    noted = doc.handle({"action": "preview", "src": "E*x"})
+    assert "E" in noted["note"] and noted["error"] is None
+
+
+def test_export_and_restore_history():
+    from sympy import symbols, MatrixSymbol
+    x = symbols("x")
+    doc = Document(x, symbols=[MatrixSymbol("M", 2, 2)])
+    doc.set("x + 1")
+    doc.set("x**2")
+    doc.undo()
+    state = doc.export()
+    assert state["index"] == 1 and len(state["history"]) == 3 and state["symbols"] == ["MatrixSymbol(Str('M'), Integer(2), Integer(2))"]
+    snap = doc.handle({"action": "export"})
+    assert snap["export"] == state and snap["src"] == "x + 1"
+    doc2 = Document(None, **state)
+    assert doc2.expr == x + 1 and doc2.can_undo and doc2.can_redo and doc2.declared["M"] == MatrixSymbol("M", 2, 2)
+    doc2.redo()
+    assert doc2.expr == x**2
+    assert Document("x", history=[], index=None).expr == x           # an empty history: the expression
+    assert Document(None, history=["Symbol('y')"], index=7).expr == symbols("y")   # index clamped
+    assert Document(x + 1).snapshot()["declared"] == []

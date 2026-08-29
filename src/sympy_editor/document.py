@@ -48,7 +48,28 @@ from .printer import (
     replace_at,
 )
 
-__all__ = ["Document", "SYMBOL_TYPES"]
+__all__ = ["Document", "SYMBOL_TYPES", "Interrupted", "interrupt_thread"]
+
+
+class Interrupted(Exception):
+    """Raised inside a computation the user interrupted (see
+    :func:`interrupt_thread`); :meth:`Document.handle` reports it like any
+    other error, with the document unchanged."""
+
+
+def interrupt_thread(ident: int) -> bool:
+    """Raise :class:`Interrupted` asynchronously in the thread ``ident``
+    (``threading.get_ident()`` of the thread running a ``Document`` message).
+
+    SymPy is pure Python, so the exception is delivered at the next bytecode
+    the thread executes.  Returns whether a thread was found.  Not available
+    in Pyodide (no threads there: the runtime is restarted instead)."""
+    import ctypes
+    res = ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_ulong(ident), ctypes.py_object(Interrupted))
+    if res > 1:   # more than one thread affected: undo (should not happen)
+        ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_ulong(ident), None)
+        return False
+    return res == 1
 
 #: Types a name can be declared as (see :meth:`Document.declare`).
 SYMBOL_TYPES = ("Symbol", "MatrixSymbol", "Matrix", "Function")
@@ -181,6 +202,10 @@ class Document:
         Symbol-like objects (``Symbol``, ``MatrixSymbol``, undefined
         ``Function``; ``srepr`` strings are accepted too) put in scope for
         typed input before they occur in the expression; see :meth:`declare`.
+    history, index
+        A saved undo history (expressions or ``srepr`` strings, oldest first)
+        and the position of the current expression in it, as given by
+        :meth:`export`; ``expr`` is ignored when a history is given.
     """
 
     def __init__(
@@ -192,6 +217,8 @@ class Document:
         ops: Optional[Dict[str, Op]] = None,
         max_history: int = 200,
         symbols=(),
+        history=None,
+        index: Optional[int] = None,
     ):
         if parser not in ("strict", "implicit"):
             raise ValueError("parser must be 'strict' or 'implicit'")
@@ -210,7 +237,18 @@ class Document:
             if isinstance(obj, str):  # srepr text; Str is not exported by SymPy < 1.14
                 obj = sympify(obj, locals={"Str": Str})
             self.declared[self._symbol_name(obj)] = obj
-        self._commit(self._coerce(expr))
+        if history:
+            self._history = [self._coerce(e) for e in history][-self.max_history:]
+            self._index = len(self._history) - 1 if index is None else max(0, min(int(index), len(self._history) - 1))
+        else:
+            self._commit(self._coerce(expr))
+
+    def export(self) -> Dict[str, Any]:
+        """The state that :class:`Document` takes back: ``{"history": [srepr,
+        ...], "index", "symbols": [srepr of the declared names]}`` (a
+        session's editing history, kept by the front end)."""
+        return {"history": [srepr(e) for e in self._history], "index": self._index,
+                "symbols": [srepr(obj) for obj in self.declared.values()]}
 
     # -- state --------------------------------------------------------------
 
@@ -694,10 +732,12 @@ class Document:
 
     # -- serialisation ------------------------------------------------------
 
-    def snapshot(self, error: Optional[str] = None) -> Dict[str, Any]:
-        """JSON-able description of the current state for the front end."""
+    def snapshot(self, error: Optional[str] = None, expr: Optional[Basic] = None) -> Dict[str, Any]:
+        """JSON-able description of the current state for the front end
+        (of ``expr`` instead of the current expression, for a preview)."""
         self._seq += 1
-        expr = self.expr
+        if expr is None:
+            expr = self.expr
         tex, nodes = annotate(expr, **self.printer_settings)
         return {
             "seq": self._seq,
@@ -706,7 +746,8 @@ class Document:
             "src": str(expr),
             "spans": {path: list(span) for path, span in annotate_str(expr)[1].items()},
             "srepr": srepr(expr),
-            "nodes": {format_path(path): self._node_info(path, node) for path, node in nodes.items()},
+            "declared": [srepr(obj) for obj in self.declared.values()],   # to rebuild the document elsewhere
+            "nodes": {format_path(path): self._node_info(path, node, expr) for path, node in nodes.items()},
             "symbols": self.symbol_info(),
             "can_undo": self.can_undo,
             "can_redo": self.can_redo,
@@ -716,7 +757,7 @@ class Document:
             "error": error,
         }
 
-    def _node_info(self, path: Path, node: Basic) -> Dict[str, Any]:
+    def _node_info(self, path: Path, node: Basic, expr: Optional[Basic] = None) -> Dict[str, Any]:
         """A node's entry in the snapshot.  ``node`` is what the printer
         printed at ``path``; for a denominator raised to a power that is the
         reciprocal of the tree's node, flagged so that an edit replaces the
@@ -727,13 +768,27 @@ class Document:
                                 "rangeable": is_rangeable(node),
                                 "free": sorted(str(s) for s in getattr(node, "free_symbols", ()))[:12]}
         try:
-            actual = get_at(self.expr, path)
+            actual = get_at(self.expr if expr is None else expr, path)
         except (IndexError, AttributeError):
             return info
         if actual is not node and isinstance(actual, Pow) and isinstance(node, Pow) \
                 and actual.base == node.base and actual.exp == -node.exp:
             info["reciprocal"] = True
         return info
+
+    def preview(self, src: str) -> Dict[str, Any]:
+        """A snapshot of ``src`` parsed as the whole expression, without
+        committing it (the source line shows it while it is typed; Enter
+        commits with ``set``).  Flagged ``preview``; a string that does not
+        parse gives the current snapshot with ``error`` and the flag."""
+        try:
+            snap = self.snapshot(expr=self.parse(src))
+        except Exception as exc:
+            snap = self.snapshot(error=f"{type(exc).__name__}: {exc}")
+        snap["preview"] = True
+        if self.last_note and not snap["error"]:
+            snap["note"] = self.last_note
+        return snap
 
     def handle(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """Process a front-end message and return a snapshot.
@@ -754,14 +809,22 @@ class Document:
         (``"assumptions": ["positive"]`` for a Symbol), ``{"action": "declare", ...}``
         with the same fields for a name not yet in the expression,
         ``{"action": "undeclare", "name": "A"}``,
-        ``{"action": "undo"}``, ``{"action": "redo"}``, ``{"action": "snapshot"}``.
-        Errors are reported in the snapshot's ``"error"`` field.
+        ``{"action": "preview", "src": ...}`` (a snapshot of the parsed source,
+        not committed), ``{"action": "undo"}``, ``{"action": "redo"}``,
+        ``{"action": "snapshot"}``.  Errors are reported in the snapshot's
+        ``"error"`` field.
         """
         self.last_note = None
         try:
             action = message.get("action")
             path = message.get("path", "/")
             children = message.get("children")
+            if action == "preview":
+                return self.preview(str(message.get("src", "")))
+            if action == "export":
+                snap = self.snapshot()
+                snap["export"] = self.export()
+                return snap
             if action == "replace":
                 self.replace(path, str(message.get("src", "")), reciprocal=bool(message.get("reciprocal")),
                              children=children)

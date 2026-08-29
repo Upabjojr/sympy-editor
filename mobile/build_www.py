@@ -101,7 +101,7 @@ def build(out: Path, *, cdn: bool = False, cache: Path | None = None, expr=None,
     out.mkdir(parents=True, exist_ok=True)
     urls = None if cdn else vendor(out, cache or Path.home() / ".cache" / "sympy-editor")
     page = to_html(expr if expr is not None else demo_expression(), urls=urls, title=title,
-                   options={"rememberZoom": True})   # an app keeps its zoom between launches
+                   options={"rememberZoom": True, "sessions": True})   # an app keeps its zoom and sessions between launches
     (out / "index.html").write_text(page, encoding="utf-8")
     return out
 

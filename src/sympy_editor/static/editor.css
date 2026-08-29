@@ -116,6 +116,19 @@
 }
 .se-loading[hidden] { display: none; }
 .se-loading-text { background: var(--se-bg); padding: 0.2rem 0.6rem; border-radius: 0.3rem; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2); }
+.se-interrupt {
+  font: inherit;
+  font-weight: 600;
+  padding: 0.3rem 0.9rem;
+  border: 1px solid var(--se-error);
+  border-radius: 0.3rem;
+  background: var(--se-bg);
+  color: var(--se-error);
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+.se-interrupt[hidden] { display: none; }
+.se-interrupt:disabled { opacity: 0.5; cursor: progress; }
 .se-spinner {
   width: 28px;
   height: 28px;
@@ -215,6 +228,7 @@
 .se-source[contenteditable]:hover { background: rgba(var(--se-accent), 0.06); }
 .se-source[contenteditable]:focus { background: rgba(var(--se-accent), 0.08); box-shadow: 0 0 0 2px rgba(var(--se-accent), 0.5); color: var(--se-fg); }
 .se-source.se-dirty { border-left: 3px solid rgba(var(--se-accent), 0.9); padding-left: 0.3rem; }
+.se-source.se-invalid { border-left-color: var(--se-error); }
 .se-source mark { background: rgba(var(--se-accent), 0.25); color: inherit; border-radius: 2px; }
 
 .se-error {
@@ -299,6 +313,26 @@
 .se-sym-new { border-top: 1px dashed var(--se-border); padding-top: 0.25rem; margin-top: 0.3rem; }
 .se-sym input.se-sym-name { width: 4.5rem; font-family: var(--se-mono); }
 .se-sym input.se-sym-assume { width: 9rem; }
+
+/* the whole expression was deleted: nothing to show until something is typed */
+.se-view.se-empty .katex-display, .se-view.se-empty .katex { display: none; }
+.se-view.se-empty::before { content: "Empty – type the new expression in the line below (Esc brings the old one back)"; color: var(--se-muted); font-size: 0.7em; }
+
+/* sessions panel */
+.se-sessions { margin-top: 0.3rem; font-size: 12px; color: var(--se-muted); }
+.se-sessions summary { cursor: pointer; user-select: none; }
+.se-session { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; margin: 0.2rem 0 0.2rem 0.6rem; }
+.se-session code { font-family: var(--se-mono); color: var(--se-fg); flex: 1 1 10rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.se-session-current code { font-weight: 600; }
+.se-session-when { white-space: nowrap; }
+.se-session button, .se-session-new {
+  font: inherit; font-size: 12px; line-height: 1.2; padding: 0.1rem 0.35rem;
+  border: 1px solid var(--se-border); border-radius: 0.3rem; background: transparent; color: inherit; cursor: pointer;
+}
+.se-session button:hover:not(:disabled) { background: rgba(var(--se-accent), 0.12); }
+.se-session button:disabled { opacity: 0.4; cursor: default; }
+.se-session button[data-armed] { border-color: var(--se-error); color: var(--se-error); }
+.se-session-add { border-top: 1px dashed var(--se-border); padding-top: 0.25rem; margin-top: 0.3rem; }
 
 /* the keyboard button only matters where there is no physical keyboard */
 .se-toolbar button[data-cmd="keyboard"] { display: none; }

@@ -14,7 +14,7 @@ from typing import Any, Dict, Optional, Union
 
 from sympy import Basic
 
-from .document import Document
+from .document import Document, interrupt_thread
 from .html import build_config, new_token, render_page
 
 __all__ = ["EditorServer", "serve"]
@@ -56,13 +56,22 @@ class _Handler(BaseHTTPRequestHandler):
         except ValueError:
             self.send_error(400)
             return
+        if message.get("action") == "interrupt":
+            # Served on its own thread while the computing one holds the lock:
+            # that thread gets Interrupted, and answers its request with the error.
+            self._reply(200, "application/json", json.dumps({"interrupted": srv.interrupt()}).encode("utf-8"))
+            return
         with srv.lock:
             if message.get("action") == "close":
                 snapshot = srv.document.snapshot()
                 snapshot["closed"] = True
                 srv.closing = True
             else:
-                snapshot = srv.document.handle(message)
+                srv.working = threading.get_ident()
+                try:
+                    snapshot = srv.document.handle(message)
+                finally:
+                    srv.working = None
         self._reply(200, "application/json", json.dumps(snapshot).encode("utf-8"))
         if srv.closing:
             threading.Thread(target=srv.shutdown, daemon=True).start()
@@ -113,9 +122,17 @@ class EditorServer(ThreadingHTTPServer):
         self.document = document
         self.token = new_token()
         self.lock = threading.Lock()
+        #: ident of the thread running a Document message, while one does.
+        self.working: Optional[int] = None
         self.closing = False
         self.verbose = verbose
         self._page_args = (options, urls, title)
+
+    def interrupt(self) -> bool:
+        """Interrupt the message being processed, if any (see
+        :func:`~sympy_editor.document.interrupt_thread`)."""
+        ident = self.working
+        return ident is not None and interrupt_thread(ident)
 
     def accepts_host(self, host: Optional[str]) -> bool:
         """Whether a request with this ``Host`` header is for this server

@@ -131,6 +131,36 @@ Two conventions between printer, document and front end:
   `Editor._report`: texts mentioning loading/waiting show `.se-loading` (a
   blocking spinner overlay, keys and clicks ignored) until the message
   clears; `mount()` shows it during Pyodide preloading.
+- **Preview.**  `{"action": "preview", "src"}` → `Document.preview`: a
+  snapshot of the parsed source flagged `preview`, nothing committed (an
+  unparsable source gives the current snapshot with `error` and the flag).
+  The source line sends it, debounced (`previewDelay`), on every change
+  (`_previewSource`); `setState` renders a preview without touching the
+  line, keeps `Editor.committed` (the last non-preview snapshot) for Esc /
+  `revertSource`, and `commitSource` compares against it.  Deleting the
+  whole expression empties the line and hides the formula (`.se-empty`)
+  until something is typed.
+- **Long computations.**  `Editor.send` shows the spinner overlay after
+  `workingAfter` ms and the Interrupt button after `interruptAfter` ms when
+  the backend has `interrupt()` (and `canInterrupt()` allows).  Backends:
+  the HTTP server takes `{"action": "interrupt"}` on another connection and
+  raises `Interrupted` in the thread holding the lock
+  (`interrupt_thread`, `PyThreadState_SetAsyncExc`); the widget runs each
+  message on a thread and interrupts it the same way (`wait()` joins it in
+  tests); the Pyodide backend runs Python in a Web Worker (built from an
+  inline script via a Blob URL; `pyodideInPage` is the fallback when the
+  worker cannot be created, e.g. Chromium on `file://`) and interrupts by
+  terminating it - the next request starts a new worker and re-creates the
+  documents from their last snapshot (`rt.docs`), the undo history being
+  lost.  `Interrupted` is an `Exception`, so `handle` reports it like any
+  error with the document unchanged.
+- **Sessions.**  `Document(history=[srepr...], index=..., symbols=...)` /
+  `Document.export()` (`{"action": "export"}` adds it to a snapshot) carry a
+  document's state; with `options.sessions` the editor keeps a list of them
+  in `localStorage` (`SESSIONS_KEY`), saves the current one after each
+  committed change (debounced `_saveSession`) and switches with
+  `backend.openDocument(state)` (Pyodide: a new document id in the shared
+  runtime).  The mobile bundle turns it on.
 - **Isolate.**  `{"action": "isolate", "path"[, "children"]}` → `Document.isolate`
   commits the node (or range) as the whole expression; undoable.
 - **Unwrap.**  `{"action": "unwrap", "path", "keep"}` → `Document.unwrap`

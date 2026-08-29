@@ -84,3 +84,35 @@ def test_host_header_must_be_loopback(server):
         assert exposed.accepts_host("192.168.1.10:8000") and exposed.accepts_host("my-laptop.local")
     finally:
         exposed.server_close()
+
+
+def test_interrupt_stops_a_long_computation():
+    import time
+    from sympy_editor.ops import Op
+
+    def forever(expr):
+        while True:            # pure Python: interruptible at any bytecode
+            time.sleep(0.001)
+
+    doc = Document(x + 1, ops={"forever": Op("forever", "Forever", forever)})
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        result = {}
+        t = threading.Thread(target=lambda: result.update(snap=_post(srv, {"action": "apply", "path": "/", "op": "forever"})))
+        t.start()
+        for _ in range(100):
+            if srv.working is not None:
+                break
+            time.sleep(0.02)
+        assert srv.working is not None
+        assert _post(srv, {"action": "interrupt"}) == {"interrupted": True}
+        t.join(timeout=5)
+        assert not t.is_alive()
+        assert result["snap"]["error"].startswith("Interrupted") and result["snap"]["src"] == "x + 1"
+        assert srv.working is None and doc.expr == x + 1 and not doc.can_undo
+        assert _post(srv, {"action": "interrupt"}) == {"interrupted": False}     # nothing running
+        assert _post(srv, {"action": "replace", "path": "/", "src": "x*y"})["src"] == "x*y"   # still serving
+    finally:
+        srv.shutdown()
+        srv.server_close()

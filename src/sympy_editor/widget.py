@@ -7,13 +7,14 @@ The widget's JavaScript is the concatenation of ``static/editor.js`` and
 from __future__ import annotations
 
 import json
+import threading
 from typing import Any, Callable, Dict, Optional, Union
 
 import anywidget
 import traitlets
 from sympy import Basic
 
-from .document import Document
+from .document import Document, interrupt_thread
 from .html import default_urls, read_static
 
 __all__ = ["SympyEditorWidget"]
@@ -55,14 +56,37 @@ class SympyEditorWidget(anywidget.AnyWidget):
         opts = {"katexJs": all_urls["katexJs"], "katexCss": all_urls["katexCss"]}
         opts.update(options or {})
         super().__init__(options=opts, **kwargs)
-        self.on_msg(self._on_msg)
+        self._lock = threading.Lock()          # one message at a time
+        self._worker: Optional[threading.Thread] = None
         self._push(self.document.snapshot())
+        self.on_msg(self._on_msg)
 
     # -- kernel <-> browser -------------------------------------------------
 
     def _on_msg(self, widget, content, buffers) -> None:
-        if isinstance(content, dict) and "action" in content:
+        """Messages run on a thread of their own: the kernel stays free to
+        receive the next one - in particular ``interrupt``, which stops a
+        long computation (:func:`~sympy_editor.document.interrupt_thread`).
+        Snapshots are pushed from that thread; :meth:`wait` joins it."""
+        if not isinstance(content, dict) or "action" not in content:
+            return
+        if content["action"] == "interrupt":
+            worker = self._worker
+            if worker is not None and worker.is_alive():
+                interrupt_thread(worker.ident)
+            return
+        self._worker = threading.Thread(target=self._run, args=(content,), daemon=True)
+        self._worker.start()
+
+    def _run(self, content: Dict[str, Any]) -> None:
+        with self._lock:
             self._push(self.document.handle(content))
+
+    def wait(self, timeout: Optional[float] = None) -> None:
+        """Block until the message being processed (if any) is done."""
+        worker = self._worker
+        if worker is not None:
+            worker.join(timeout)
 
     def _push(self, snap: Dict[str, Any]) -> None:
         self.snapshot = json.dumps(snap)
