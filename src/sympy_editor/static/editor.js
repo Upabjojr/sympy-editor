@@ -236,6 +236,7 @@ var SympyEditor = (function () {
       };
       var sep = function () { self.tools.appendChild(h("span", { class: "se-sep" })); };
 
+      if (o.sessions && !o.readOnly) btn("drawer", "\u2630", "Sessions and history");
       if (!o.readOnly) {
         btn("undo", "↶", "Undo (Ctrl+Z)");
         btn("redo", "↷", "Redo (Ctrl+Shift+Z, Ctrl+Y)");
@@ -320,18 +321,30 @@ var SympyEditor = (function () {
         root.appendChild(this.symbols);
       }
 
-      // Sessions: several expressions, each with its own history, kept in
-      // localStorage (needs a backend with openDocument, i.e. Pyodide).
+      // Sessions and history live in a lateral drawer (the ☰ button), out of
+      // the widget: several expressions, each with its own undo history, kept
+      // in localStorage (needs a backend with openDocument, i.e. Pyodide).
       this.sessions = null;
+      this.drawer = null;
       if (o.sessions && !o.readOnly) {
-        this.sessionsBody = h("div", { class: "se-sessions-body" });
-        this.sessions = h("details", { class: "se-sessions" }, [
-          h("summary", { title: "Your expressions: each session keeps its own undo history" }, ["Sessions"]),
-          this.sessionsBody
+        var close = h("button", { type: "button", class: "se-drawer-close", title: "Close" }, ["\u2715"]);
+        close.addEventListener("click", function () { self.closeDrawer(); });
+        this.sessionsBody = h("div", { class: "se-sessions" });
+        this.historyBody = h("div", { class: "se-history" });
+        this.drawer = h("aside", { class: "se-drawer", hidden: "", role: "dialog", "aria-label": "Sessions and history" }, [
+          h("div", { class: "se-drawer-head" }, [h("strong", {}, ["Sessions"]), close]),
+          this.sessionsBody,
+          h("div", { class: "se-drawer-head" }, [h("strong", {}, ["History of this session"])]),
+          this.historyBody
         ]);
-        root.appendChild(this.sessions);
+        this.backdrop = h("div", { class: "se-backdrop", hidden: "" });
+        this.backdrop.addEventListener("click", function () { self.closeDrawer(); });
+        this.sessions = this.drawer;
+        root.appendChild(this.backdrop);
+        root.appendChild(this.drawer);
       }
       this._sessionsReady = false;
+      this._history = null;   // {labels, index} of the current session, from the last export
 
       this.error = h("div", { class: "se-error", role: "alert", hidden: "" });
       root.appendChild(this.error);
@@ -502,6 +515,7 @@ var SympyEditor = (function () {
       this.view.addEventListener("pointercancel", function (ev) { endPointer(ev, true); });
       this.view.addEventListener("dblclick", function (ev) { self._onDblClick(ev); });
       this.root.addEventListener("keydown", function (ev) {
+        if (self.drawer && self.drawer.contains(ev.target)) return;   // Esc is handled at the document level while it is open
         if (self.symbols && self.symbols.contains(ev.target)) return;
         if (ev.target === self.source || ev.target === self.fnInput || (self.fnForm && self.fnForm.contains(ev.target))) return;
         if (self.loading) { ev.preventDefault(); return; }
@@ -849,11 +863,21 @@ var SympyEditor = (function () {
     _visualRect(el) {
       var r = el.getBoundingClientRect();
       var top = r.top, bottom = r.bottom, left = r.left, right = r.right;
+      // Only what is actually drawn counts: KaTeX draws square roots and
+      // stretchy symbols with a 400em-wide SVG clipped by an overflow-hidden
+      // wrapper (.hide-tail), so a clipping element contributes its own box
+      // and nothing inside it; struts and vlist spacers contribute nothing.
+      var clips = [];
       var all = el.querySelectorAll("*");
       for (var i = 0; i < all.length; i++) {
-        var b = all[i].getBoundingClientRect();
+        var node = all[i];
+        var clipped = false;
+        for (var c = 0; c < clips.length; c++) if (clips[c].contains(node)) { clipped = true; break; }
+        if (clipped) continue;
+        if (node.classList.contains("pstrut") || node.classList.contains("vlist-s")) continue;
+        var b = node.getBoundingClientRect();
         if (!b.width && !b.height) continue;
-        if (all[i].classList.contains("pstrut") || all[i].classList.contains("vlist-s")) continue;
+        if (node.classList.contains("hide-tail") || node.classList.contains("stretchy") || getComputedStyle(node).overflow !== "visible") clips.push(node);
         if (b.top < top) top = b.top;
         if (b.bottom > bottom) bottom = b.bottom;
         if (b.left < left) left = b.left;
@@ -2047,6 +2071,7 @@ var SympyEditor = (function () {
           if (this.selected) return this.send({ action: "delete", path: this.selected });
           return;
         case "child": return this._selectChild();
+        case "drawer": return this.toggleDrawer();
         case "left":
         case "right": {
           var step = cmd === "left" ? -1 : 1;
@@ -2212,8 +2237,45 @@ var SympyEditor = (function () {
       cur.state = snap.export;
       cur.name = (snap.src || "").slice(0, 60);
       cur.updated = Date.now();
+      if (snap.history) this._history = snap.history;
       this._saveSessions(store);
       this._fillSessions();
+    }
+
+    toggleDrawer() {
+      if (!this.drawer) return;
+      if (this.drawer.hidden) this.openDrawer(); else this.closeDrawer();
+    }
+
+    openDrawer() {
+      if (!this.drawer) return;
+      this._fillSessions();
+      this.backdrop.hidden = false;
+      this.drawer.hidden = false;
+      var self = this;
+      requestAnimationFrame(function () { self.drawer.classList.add("se-open"); self.backdrop.classList.add("se-open"); });
+      // Esc closes it wherever the focus is (its buttons come and go as the list is redrawn).
+      if (!this._drawerKey) {
+        this._drawerKey = function (ev) { if (ev.key === "Escape") { ev.preventDefault(); self.closeDrawer(); } };
+        document.addEventListener("keydown", this._drawerKey);
+      }
+      if (this._sessionsReady) this._saveSession();   // brings the history list up to date
+    }
+
+    closeDrawer() {
+      if (!this.drawer || this.drawer.hidden) return;
+      if (this._drawerKey) { document.removeEventListener("keydown", this._drawerKey); this._drawerKey = null; }
+      this.drawer.classList.remove("se-open");
+      this.backdrop.classList.remove("se-open");
+      this.drawer.hidden = true;
+      this.backdrop.hidden = true;
+      this.view.focus({ preventScroll: true });
+    }
+
+    /** Jump to step `index` of the current session's history. */
+    gotoStep(index) {
+      if (this.busy || this.closed) return;
+      this.send({ action: "goto", index: index });
     }
 
     async openSession(id) {
@@ -2279,7 +2341,7 @@ var SympyEditor = (function () {
       var body = this.sessionsBody;
       body.textContent = "";
       var list = store.list.slice().sort(function (a, b) { return b.updated - a.updated; });
-      this.sessions.querySelector("summary").textContent = "Sessions (" + list.length + ")";
+      if (this.buttons.drawer) this.buttons.drawer.title = "Sessions (" + list.length + ") and history";
       list.forEach(function (sess) {
         var current = sess.id === store.current;
         var when = new Date(sess.updated || 0);
@@ -2305,6 +2367,20 @@ var SympyEditor = (function () {
       add.disabled = !this._sessionsReady;
       add.addEventListener("click", function () { self.newSession(); });
       body.appendChild(h("div", { class: "se-session se-session-add" }, [add]));
+      // The history of the current session: one row per step, the current one marked.
+      var hist = this.historyBody;
+      hist.textContent = "";
+      var h_ = this._history;
+      if (!h_ || !h_.labels) { hist.appendChild(h("div", { class: "se-step se-step-note" }, ["(open the drawer again after an edit)"])); return; }
+      h_.labels.forEach(function (label, i) {
+        var row = h("button", { type: "button", class: "se-step" + (i === h_.index ? " se-step-current" : ""), "data-index": String(i),
+          title: i === h_.index ? "The current expression" : "Go to this step" }, [
+          h("span", { class: "se-step-no" }, [String(i + 1)]), h("code", {}, [label])
+        ]);
+        row.disabled = i === h_.index;
+        row.addEventListener("click", function () { self.gotoStep(i); });
+        hist.appendChild(row);
+      });
     }
 
     /* ---- zoom and sideways scrolling ---- */
@@ -2411,6 +2487,7 @@ var SympyEditor = (function () {
 
     /** Remove the editor from the page. */
     destroy() {
+      this.closeDrawer();
       (this._docListeners || []).forEach(function (l) { document.removeEventListener(l[0], l[1]); });
       this._docListeners = [];
       if (this.root.parentNode) this.root.parentNode.removeChild(this.root);

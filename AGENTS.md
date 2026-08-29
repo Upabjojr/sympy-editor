@@ -154,13 +154,17 @@ Two conventions between printer, document and front end:
   documents from their last snapshot (`rt.docs`), the undo history being
   lost.  `Interrupted` is an `Exception`, so `handle` reports it like any
   error with the document unchanged.
-- **Sessions.**  `Document(history=[srepr...], index=..., symbols=...)` /
-  `Document.export()` (`{"action": "export"}` adds it to a snapshot) carry a
-  document's state; with `options.sessions` the editor keeps a list of them
-  in `localStorage` (`SESSIONS_KEY`), saves the current one after each
-  committed change (debounced `_saveSession`) and switches with
-  `backend.openDocument(state)` (Pyodide: a new document id in the shared
-  runtime).  The mobile bundle turns it on.
+- **Sessions and history.**  `Document(history=[srepr...], index=...,
+  symbols=...)` / `Document.export()` (`{"action": "export"}` adds it to a
+  snapshot, with `history` = `history_labels()`: the `str` of every step and
+  the index) carry a document's state; `{"action": "goto", "index"}` →
+  `Document.goto` moves within the history.  With `options.sessions` the
+  editor keeps a list of sessions in `localStorage` (`SESSIONS_KEY`), saves
+  the current one after each committed change (debounced `_saveSession`)
+  and switches with `backend.openDocument(state)` (Pyodide: a new document
+  id in the shared runtime).  All of it lives in a lateral drawer
+  (`.se-drawer`, `position: fixed`, the ☰ toolbar button, Esc / backdrop /
+  ✕ close it), not in the widget's own layout.  The mobile bundle turns it on.
 - **Isolate.**  `{"action": "isolate", "path"[, "children"]}` → `Document.isolate`
   commits the node (or range) as the whole expression; undoable.
 - **Unwrap.**  `{"action": "unwrap", "path", "keep"}` → `Document.unwrap`
@@ -171,9 +175,10 @@ Two conventions between printer, document and front end:
   `.se-status` has `flex: 1 1 0; min-width: 0; min-height: 1.3em`: the
   status text must never change the container's width nor wrap the toolbar
   onto a second line, either of which moves the formula under the pointer
-  between two clicks.  The tools sit in `.se-tools` (wrapping on the
-  desktop; on screens up to 640 px one strip that scrolls sideways, with
-  the status on its own line under it).
+  between two clicks.  The tools sit in `.se-tools`, which wraps onto as
+  many rows as needed (on screens up to 640 px the status gets its own line
+  under it); `.se-actions` wraps too (`max-width: calc(100% - 8px)`), so no
+  button is ever off-screen.
 - **Zoom and sideways scrolling.**  `Editor.setZoom(zoom, anchorX)` sets the
   CSS variable `--se-zoom` on `.se-view` (`font-size: calc(base *
   var(--se-zoom))`), keeps the content under `anchorX` in place, drops the
@@ -252,6 +257,13 @@ Two conventions between printer, document and front end:
   preserved.  Hit-testing uses `document.elementsFromPoint` and picks the
   deepest `data-path`, because KaTeX stacks empty `vlist` struts over glyphs
   in fractions/scripts (a plain `target.closest()` selects the wrong node).
+  Highlight boxes, caret gaps and edge zones come from `Editor._visualRect`:
+  the union of the boxes of what is drawn inside the annotated span -
+  struts and `vlist` spacers count for nothing, and a clipping element
+  (`.hide-tail`, `.stretchy`, anything with `overflow` other than
+  `visible`) counts with its own box only: KaTeX draws roots and stretchy
+  symbols with a 400em-wide SVG that its wrapper clips, and following the
+  SVG once put a √'s box 5,000 px to the right.
 - **User input is parsed by `parse_expr`** (evaluates Python).  This is the
   same trust level as running the notebook / script, but the HTTP backend
   therefore requires a per-server random token header so that other web

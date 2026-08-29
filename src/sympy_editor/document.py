@@ -285,6 +285,22 @@ class Document:
             self._notify()
         return self.expr
 
+    def goto(self, index: int) -> Basic:
+        """Make step ``index`` of the history (0 = oldest) the current
+        expression, like a series of undos or redos."""
+        index = int(index)
+        if not 0 <= index < len(self._history):
+            raise ValueError(f"No history step {index} (there are {len(self._history)})")
+        if index != self._index:
+            self._index = index
+            self._notify()
+        return self.expr
+
+    def history_labels(self) -> Dict[str, Any]:
+        """``{"labels": [str of every step, oldest first], "index"}`` for a
+        history list in the front end."""
+        return {"labels": [str(e) for e in self._history], "index": self._index}
+
     def on_change(self, callback: Callable[[Basic], None]) -> Callable[[Basic], None]:
         """Call ``callback(expr)`` after every change.  Returns ``callback``."""
         self._listeners.append(callback)
@@ -824,7 +840,10 @@ class Document:
             if action == "export":
                 snap = self.snapshot()
                 snap["export"] = self.export()
+                snap["history"] = self.history_labels()
                 return snap
+            if action == "goto":
+                self.goto(message.get("index", 0))
             if action == "replace":
                 self.replace(path, str(message.get("src", "")), reciprocal=bool(message.get("reciprocal")),
                              children=children)

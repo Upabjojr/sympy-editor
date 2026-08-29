@@ -1087,10 +1087,18 @@ def test_long_formula_scrolls_sideways_and_fits_a_phone(browser, serve_expr):
     view = page.locator(".se-view")
     scroll_left = lambda: page.evaluate("document.querySelector('.se-view').scrollLeft")
     assert page.evaluate("(() => { const v = document.querySelector('.se-view'); return v.scrollWidth > v.clientWidth; })()")
-    # the page itself does not overflow: the editor fits the screen, the tools are one scrollable strip
+    # the page itself does not overflow: the editor fits the screen, the tools wrap onto several rows
     assert page.evaluate("document.documentElement.scrollWidth") <= 400
-    assert page.evaluate("getComputedStyle(document.querySelector('.se-tools')).flexWrap") == "nowrap"
-    assert page.evaluate("(() => { const t = document.querySelector('.se-tools'); return t.scrollWidth > t.clientWidth; })()")
+    assert page.evaluate("getComputedStyle(document.querySelector('.se-tools')).flexWrap") == "wrap"
+    rows = page.evaluate("(() => { const tops = new Set([...document.querySelectorAll('.se-tools > button')].map(b => Math.round(b.getBoundingClientRect().top))); return tops.size; })()")
+    assert rows >= 2 and page.evaluate("(() => { const t = document.querySelector('.se-tools'); return t.scrollWidth <= t.clientWidth; })()")
+    # the action bar under a selection wraps as well instead of running off the screen
+    _click(page, "/0")
+    bar = page.locator(".se-actions").bounding_box()
+    root = page.locator(".sympy-editor").bounding_box()
+    assert bar["x"] >= root["x"] and bar["x"] + bar["width"] <= root["x"] + root["width"] + 1
+    assert page.evaluate("(() => { const tops = new Set([...document.querySelectorAll('.se-actions button')].map(b => Math.round(b.getBoundingClientRect().top))); return tops.size; })()") >= 2
+    page.keyboard.press("Escape")
     # a plain wheel over the formula scrolls it sideways instead of the page
     r = view.bounding_box()
     page.mouse.move(r["x"] + r["width"] / 2, r["y"] + r["height"] / 2)
@@ -1220,6 +1228,29 @@ def test_arrow_buttons_move_the_selection_and_the_caret(browser, serve_expr):
     page.locator('.se-toolbar [data-cmd="left"]').click()
     i3, x3 = page.evaluate(gap)
     assert i3 == i1 and x3 < x2                                    # back in the previous gap (at its near end, like the ← key)
+    assert page.errors == []
+
+
+def test_selection_box_of_a_square_root_stays_on_the_glyphs(browser, serve_expr):
+    from sympy import erf, sqrt
+    srv, doc = serve_expr(erf(sqrt(2) * y / 2) / 2 + 1 + x)
+    page = _open(browser, srv.url)
+    nodes = doc.snapshot()["nodes"]
+    for src in ("erf(sqrt(2)*y/2)", "sqrt(2)"):
+        path = next(k for k, v in nodes.items() if v["src"] == src)
+        _click(page, path)
+        page.keyboard.press("Escape")
+        page.evaluate("p => document.querySelector('.sympy-editor').__sympyEditor.select(p)", path)
+        box = page.evaluate("document.querySelector('.se-box-select').getBoundingClientRect().toJSON()")
+        own = page.evaluate("p => document.querySelector(`[data-path=\"${p}\"]`).getBoundingClientRect().toJSON()", path)
+        # KaTeX's root sign is a 400em-wide SVG clipped by its wrapper: the box must not follow the SVG
+        assert box["right"] <= own["right"] + 6 and box["left"] >= own["left"] - 6, (src, box, own)   # 2 px padding + KaTeX's root wrapper
+        assert box["width"] < 4 * own["width"]
+    # hit-testing next to the root uses the same box: the left edge of x is a caret, not a root selection
+    xp = next(k for k, v in nodes.items() if v["src"] == "x")
+    r = page.evaluate("p => document.querySelector(`[data-path=\"${p}\"]`).getBoundingClientRect().toJSON()", xp)
+    page.mouse.click(r["x"] + r["width"] / 2, r["y"] + r["height"] / 2)
+    assert page.locator(".se-selected").get_attribute("data-path") == xp
     assert page.errors == []
 
 
@@ -1441,20 +1472,31 @@ def test_pyodide_worker_interrupt_and_sessions(browser, tmp_path):
         _next_state(page, lambda: page.select_option(".se-ops", "expand"))
         assert _wait(lambda: page.locator(".se-loading").is_hidden(), timeout=180)
         assert page.evaluate(f"{ed}.state.src") == str(big)
-        # the sessions panel has the first session; a second one starts from the same expression
+        # the drawer (☰) lists the sessions - the first one so far - and the history of the current one
+        assert page.locator(".se-drawer").is_hidden()
+        page.locator('.se-toolbar [data-cmd="drawer"]').click()
+        assert _wait(lambda: page.locator(".se-drawer").is_visible())
         assert page.locator(".se-session").count() == 2                # one session + the "new" row
-        page.locator(".se-sessions summary").click()                   # the panel is collapsed by default
-        page.locator(".se-session-new").click()
+        assert _wait(lambda: page.locator(".se-step").count() >= 1, timeout=10)
+        page.locator(".se-session-new").click()                        # a second one starts from the same expression
         assert _wait(lambda: page.locator(".se-session").count() == 3, timeout=30)
+        page.keyboard.press("Escape")                                  # closes the drawer
+        assert page.locator(".se-drawer").is_hidden()
         page.locator(".se-source").click()
         page.keyboard.press("Control+a")
         page.keyboard.type("x + 1")
         _next_state(page, lambda: page.keyboard.press("Enter"))
         assert _wait(lambda: page.evaluate("JSON.parse(localStorage.getItem('sympy-editor:sessions')).list.some(s => s.name === 'x + 1')"), timeout=10)
+        # the history of this session has two steps; the first one can be jumped to
+        page.locator('.se-toolbar [data-cmd="drawer"]').click()
+        assert _wait(lambda: page.locator(".se-step").count() == 2 and "se-step-current" in page.locator(".se-step").nth(1).get_attribute("class"), timeout=10)
+        _next_state(page, lambda: page.locator(".se-step").first.click())
+        assert page.evaluate(f"{ed}.state.src") == str(big) and page.evaluate(f"{ed}.state.can_redo")
         # switching back to the first session restores its expression
         page.locator('.se-session button[data-open]:not(:disabled)').first.click()
-        assert _wait(lambda: page.evaluate(f"{ed}.state.src") == str(big), timeout=60)
-        assert page.locator(".se-session-current code").inner_text() == str(big)
+        assert _wait(lambda: page.evaluate(f"{ed}.state.src") == str(big) and page.locator(".se-session-current code").inner_text() == str(big), timeout=60)
+        page.locator(".se-drawer-close").click()
+        assert page.locator(".se-drawer").is_hidden()
         assert errors == []
     finally:
         httpd.shutdown()

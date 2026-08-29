@@ -580,3 +580,19 @@ def test_export_and_restore_history():
     assert Document("x", history=[], index=None).expr == x           # an empty history: the expression
     assert Document(None, history=["Symbol('y')"], index=7).expr == symbols("y")   # index clamped
     assert Document(x + 1).snapshot()["declared"] == []
+
+
+def test_goto_history_step_and_labels():
+    from sympy import symbols
+    x = symbols("x")
+    doc = Document(x)
+    doc.set("x + 1")
+    doc.set("x**2")
+    assert doc.history_labels() == {"labels": ["x", "x + 1", "x**2"], "index": 2}
+    assert doc.goto(0) == x and doc.can_redo and not doc.can_undo
+    snap = doc.handle({"action": "goto", "index": 1})
+    assert snap["src"] == "x + 1" and snap["can_undo"] and snap["can_redo"]
+    assert "No history step" in doc.handle({"action": "goto", "index": 5})["error"]
+    assert doc.handle({"action": "export"})["history"] == {"labels": ["x", "x + 1", "x**2"], "index": 1}
+    doc.set("x + 3")                      # a new edit from the middle drops the later steps
+    assert doc.history_labels()["labels"] == ["x", "x + 1", "x + 3"]

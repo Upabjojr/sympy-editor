@@ -201,12 +201,18 @@ page instead, without interruption); the local server and the Jupyter widget
 interrupt the thread doing the work (`interrupt_thread`), so nothing else is
 lost.
 
-### Sessions (mobile app, or `options={"sessions": True}`)
+### Sessions and history (mobile app, or `options={"sessions": True}`)
 
-The **Sessions** panel lists your expressions, each with its own undo
-history, kept in the browser's storage: **New session** starts one from the
-current expression, **Open** switches (the one you leave is saved first),
-**Delete** (click twice) removes one.  Available on Pyodide-backed pages.
+The **☰** button opens a lateral drawer, out of the widget, with your
+**sessions** — expressions, each with its own undo history, kept in the
+browser's storage: **New session** starts one from the current expression,
+**Open** switches (the one you leave is saved first), **Delete** (click
+twice) removes one — and the **history** of the current session, one line per
+step: click a step to go back (or forward) to it.  Available on
+Pyodide-backed pages.
+
+On a narrow screen the toolbar buttons wrap onto as many rows as they need,
+and so does the action bar under a selection: every button stays reachable.
 
 ## How it works
 
