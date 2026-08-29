@@ -159,8 +159,11 @@ Two conventions between printer, document and front end:
   at the same path and fade, the new ghost's top-most added parts
   (`.se-added`, green) fade in and its top-most kept parts slide from their
   old boxes (FLIP).  The real rendering keeps `.se-added` until a
-  pointerdown on the view (`_clearChangeMarks`).  Previews, unchanged
-  re-renders and `prefers-reduced-motion` do not animate.
+  pointerdown on the view (`_clearChangeMarks`).  Previews do not animate,
+  but the committed rendering the first preview replaces is kept
+  (`_committedCapture`) and the commit animates from it; unchanged
+  re-renders (a reverted preview included) and `prefers-reduced-motion`
+  do not animate.
 - **Long computations.**  `Editor.send` shows the spinner overlay after
   `workingAfter` ms and the Interrupt button after `interruptAfter` ms when
   the backend has `interrupt()` (and `canInterrupt()` allows).  Backends:

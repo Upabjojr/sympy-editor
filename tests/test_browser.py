@@ -1378,12 +1378,23 @@ def test_change_animation_red_to_green(browser, serve_expr):
     # ... until the formula is touched
     _click(page, "/0")
     assert page.locator(".se-view .se-added").count() == 0
-    # a preview does not animate; neither does an unchanged re-render
+    # a preview does not animate - the commit does, from the last committed formula
     page.locator(".se-source").click()
     page.keyboard.press("End")
     page.keyboard.type(" + 1")
     _wait(lambda: page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.src") == "x**2 + cos(y) + 1")
     assert page.locator(".se-ghost").count() == 0
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    assert page.locator(".se-ghost").count() == 2 and "1" in page.locator(".se-ghost-new .se-added").first.inner_text()
+    assert _wait(lambda: page.locator(".se-ghost").count() == 0, timeout=5)
+    # a reverted preview animates nothing
+    page.locator(".se-source").click()
+    page.keyboard.press("End")
+    page.keyboard.type(" + 2")
+    _wait(lambda: page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.src") == "x**2 + cos(y) + 3")
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(200)
+    assert page.locator(".se-ghost").count() == 0 and doc.expr == x**2 + cos(y) + 1
     assert page.errors == []
 
 

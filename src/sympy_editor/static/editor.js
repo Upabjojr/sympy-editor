@@ -722,20 +722,35 @@ var SympyEditor = (function () {
     _captureRendering() {
       var prev = this._shown;      // {snap, nodes} of the rendering on screen
       this._shown = { snap: this.state, nodes: this.state.nodes || {} };
-      if (!this.opts.animate || !prev || !prev.snap || this.state.preview || prev.snap.preview) return null;
-      if (prev.snap.srepr === this.state.srepr || !this.annotated) return null;
-      if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return null;
-      var disp = this.view.querySelector(".katex-display") || this.view.querySelector(".katex");
-      if (!disp) return null;
-      var rects = {};
-      var els = disp.querySelectorAll("[data-path]");
-      for (var i = 0; i < els.length; i++) {
-        var p = els[i].getAttribute("data-path");
-        if (!(p in rects)) rects[p] = this._visualRect(els[i]);
+      if (!this.opts.animate || !prev || !prev.snap || !this.annotated ||
+          (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches)) {
+        this._committedCapture = null;
+        return null;
       }
-      var vr = this.view.getBoundingClientRect(), dr = disp.getBoundingClientRect();
-      return { clone: disp.cloneNode(true), rects: rects, nodes: prev.nodes,
-               left: dr.left - vr.left + this.view.scrollLeft, top: dr.top - vr.top + this.view.scrollTop, width: dr.width };
+      var self = this;
+      var capture = function () {
+        var disp = self.view.querySelector(".katex-display") || self.view.querySelector(".katex");
+        if (!disp) return null;
+        var rects = {};
+        var els = disp.querySelectorAll("[data-path]");
+        for (var i = 0; i < els.length; i++) {
+          var p = els[i].getAttribute("data-path");
+          if (!(p in rects)) rects[p] = self._visualRect(els[i]);
+        }
+        var vr = self.view.getBoundingClientRect(), dr = disp.getBoundingClientRect();
+        return { clone: disp.cloneNode(true), rects: rects, nodes: prev.nodes, srepr: prev.snap.srepr,
+                 left: dr.left - vr.left + self.view.scrollLeft, top: dr.top - vr.top + self.view.scrollTop, width: dr.width };
+      };
+      if (this.state.preview) {
+        // Previews are not animated, but the committed rendering the first
+        // one replaces is kept: the commit animates from it.
+        if (!prev.snap.preview) this._committedCapture = capture();
+        return null;
+      }
+      var before = prev.snap.preview ? this._committedCapture : capture();
+      this._committedCapture = null;
+      if (!before || before.srepr === this.state.srepr) return null;   // nothing changed (or a preview was reverted)
+      return before;
     }
 
     /** Old parts that disappear (red) move to their replacements and fade
