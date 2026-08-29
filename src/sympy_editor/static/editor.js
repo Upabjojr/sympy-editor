@@ -420,10 +420,14 @@ var SympyEditor = (function () {
         document.execCommand("insertText", false, ev.clipboardData.getData("text/plain"));
       });
       this.source.addEventListener("blur", function () { if (self.sourceDirty) self.commitSource(); });
-      document.addEventListener("selectionchange", function () { self._onSourceSelection(); });
+      // Listeners on the document (removed by destroy(): a notebook creates
+      // and disposes of many editors, and each would otherwise stay alive).
+      this._docListeners = [];
+      var onDocument = function (kind, fn) { document.addEventListener(kind, fn); self._docListeners.push([kind, fn]); };
+      onDocument("selectionchange", function () { self._onSourceSelection(); });
       // Copy / cut / paste while the formula has the focus (no clipboard permission needed).
       ["copy", "cut", "paste"].forEach(function (kind) {
-        document.addEventListener(kind, function (ev) { self._onClipboard(ev, kind); });
+        onDocument(kind, function (ev) { self._onClipboard(ev, kind); });
       });
       var applyFromMenu = function (menu) {
         var op = menu.value;
@@ -482,7 +486,9 @@ var SympyEditor = (function () {
       this.state = snap;
       this.tree = buildTree(snap.nodes || {});
       if (!same) { this.range = null; this._cameFrom = {}; }
-      if (this.editing !== null || this.inserting) this.cancelEdit(true);
+      // An open field is dropped without cancelEdit(): that would re-render
+      // on its own (a second, re-entrant setState) - the render below is enough.
+      if (this.editing !== null || this.inserting) this._endEdit();
       await this._render();
       if (this.state !== snap) return;  // superseded meanwhile
       var sel = this.selected;
@@ -1089,13 +1095,9 @@ var SympyEditor = (function () {
       if (kind === "paste") {
         if (this.opts.readOnly) return;
         var text = (ev.clipboardData && ev.clipboardData.getData("text/plain")) || this._clip || "";
-        text = text.trim();
-        if (!text) return;
+        if (!text.trim()) return;
         ev.preventDefault();
-        if (this.caret) { this.beginInsert(text); this.commitEdit(); }
-        else if (this.range) { this.beginRangeEdit(text); this.commitEdit(); }
-        else if (this.selected) { this.beginEdit(this.selected, text); this.commitEdit(); }
-        else this._setStatus("Select where to paste (a node, or a caret between terms)");
+        this._pasteText(text);
         return;
       }
       var src = this._selectionSource();
@@ -1134,16 +1136,26 @@ var SympyEditor = (function () {
       this._applySelection();
     }
 
+    /** Paste `text` where the selection is: spliced at a caret like typing,
+     *  over a range or a node - or, with the whole expression selected, as
+     *  the new expression at once (typing there goes to the source line for
+     *  editing; a paste is complete and applies). */
+    _pasteText(text) {
+      text = (text || "").trim();
+      if (!text) return;
+      if (this.caret) { this.beginInsert(text); this.commitEdit(); }
+      else if (this.range) { this.beginRangeEdit(text); this.commitEdit(); }
+      else if (this.selected === "/") this.send({ action: "set", src: toSource(text) });
+      else if (this.selected) { this.beginEdit(this.selected, text); this.commitEdit(); }
+      else this._setStatus("Select where to paste (a node, or a caret between terms)");
+    }
+
     /** The Paste button: the system clipboard when readable, else the last copy made here. */
     pasteClipboard() {
       var self = this;
       var apply = function (text) {
-        text = (text || "").trim();
-        if (!text) { self._setStatus("Nothing to paste (copy something first, or use Ctrl+V)"); return; }
-        if (self.caret) { self.beginInsert(text); self.commitEdit(); }
-        else if (self.range) { self.beginRangeEdit(text); self.commitEdit(); }
-        else if (self.selected) { self.beginEdit(self.selected, text); self.commitEdit(); }
-        else self._setStatus("Select where to paste (a node, or a caret between terms)");
+        if (!(text || "").trim()) { self._setStatus("Nothing to paste (copy something first, or use Ctrl+V)"); return; }
+        self._pasteText(text);
       };
       if (navigator.clipboard && navigator.clipboard.readText) {
         navigator.clipboard.readText().then(apply, function () { apply(self._clip); });
@@ -1972,6 +1984,8 @@ var SympyEditor = (function () {
 
     /** Remove the editor from the page. */
     destroy() {
+      (this._docListeners || []).forEach(function (l) { document.removeEventListener(l[0], l[1]); });
+      this._docListeners = [];
       if (this.root.parentNode) this.root.parentNode.removeChild(this.root);
     }
   }

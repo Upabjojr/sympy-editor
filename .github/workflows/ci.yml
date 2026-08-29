@@ -19,6 +19,18 @@ jobs:
       - run: pip install -e ".[jupyter,test]"
       - run: pytest -q --ignore=tests/test_browser.py
 
+  # The oldest SymPy pyproject.toml admits (the matrix above always gets the
+  # latest release, so an import that only exists there would go unnoticed).
+  oldest-sympy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+      - run: pip install -e ".[jupyter,test]" "sympy==1.13.*"
+      - run: pytest -q --ignore=tests/test_browser.py
+
   browser:
     runs-on: ubuntu-latest
     steps:

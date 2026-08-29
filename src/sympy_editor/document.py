@@ -19,8 +19,8 @@ import sympy
 from sympy import Add, Basic, Dummy, Function, IndexedBase, MatrixSymbol, Mul, Pow, S, Symbol, Tuple, sympify, srepr
 from sympy.core.function import AppliedUndef, UndefinedFunction
 from sympy.core.symbol import Str
-from sympy.matrices.expressions import MatAdd, MatMul, MatrixExpr
-from sympy.matrices.matrixbase import MatrixBase
+from sympy.matrices.expressions import MatrixExpr
+from sympy.matrices import MatrixBase
 from sympy.parsing.sympy_parser import (
     convert_xor,
     implicit_multiplication_application,
@@ -451,8 +451,7 @@ class Document:
         if not args:
             raise ValueError(f"{node} has nothing inside to keep")
         if keep is None:
-            if isinstance(node, (Add, Mul)) and len(args) > 1 and not isinstance(node, (MatAdd, MatMul)) or \
-                    isinstance(node, (MatAdd, MatMul)) and len(args) > 1:
+            if isinstance(node, (Add, Mul)) and len(args) > 1:   # MatAdd/MatMul are Add/Mul too
                 raise ValueError(f"{type(node).__name__} has {len(args)} terms: select the one to keep, press ↑, then Backspace "
                                  "(or Delete the others)")
             keep = 0
@@ -672,8 +671,10 @@ class Document:
             raise ValueError(f"No symbol named {name!r} in the expression")
         old = ns[name]
         new = self._make(name, kind, rows, cols, assumptions, old)
-        self.declared[name] = new
-        if new == old or name not in self.used_symbols():
+        if new == old:
+            return self.expr
+        if name not in self.used_symbols():
+            self.declared[name] = new
             return self.expr
         if isinstance(old, type) or isinstance(new, type):
             raise ValueError(f"{name} is used as a {'function' if isinstance(old, type) else 'symbol'}; "
@@ -686,6 +687,9 @@ class Document:
             plain_latex(new_expr, **self.printer_settings)
         except Exception as exc:
             raise ValueError(f"{name} cannot become a {kind} where it is used: {exc}") from None
+        # Only a change that went through is recorded: a refused one must not
+        # leave the panel (and typed input) believing the name has changed.
+        self.declared[name] = new
         return self._commit(new_expr)
 
     # -- serialisation ------------------------------------------------------

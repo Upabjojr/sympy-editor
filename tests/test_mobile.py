@@ -76,5 +76,5 @@ def test_native_project_files_are_well_formed():
     import xml.dom.minidom
     xml.dom.minidom.parse(str(ROOT / "mobile" / "android" / "app" / "src" / "main" / "AndroidManifest.xml"))
     xml.dom.minidom.parse(str(ROOT / "mobile" / "ios" / "ExportOptions.plist"))
-    import yaml  # PyYAML ships with Jupyter; skip quietly without it
+    yaml = pytest.importorskip("yaml")   # PyYAML ships with Jupyter; skipped without it
     yaml.safe_load((ROOT / "mobile" / "ios" / "project.yml").read_text(encoding="utf-8"))

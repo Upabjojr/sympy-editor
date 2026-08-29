@@ -210,7 +210,10 @@ Two conventions between printer, document and front end:
 - **User input is parsed by `parse_expr`** (evaluates Python).  This is the
   same trust level as running the notebook / script, but the HTTP backend
   therefore requires a per-server random token header so that other web
-  pages cannot POST to it (cross-site requests fail the CORS preflight).
+  pages cannot POST to it (cross-site requests fail the CORS preflight), and
+  a server bound to a loopback address answers only requests whose `Host`
+  is a loopback name (`EditorServer.accepts_host`): a DNS-rebinding page
+  could otherwise fetch the editor page, token included.
 - **Editing is in place, no dialogs.**  `Editor.beginEdit` stashes the
   children of the selected node's `<span data-path>` and inserts an `<input
   class="se-inline">` there (auto-sized in `ch`); Enter/blur commit, Esc
@@ -250,8 +253,10 @@ pip package.  The rule is minimal wrapping and maximal sharing:
 
 ## Conventions
 
-- Python ≥ 3.9, no type-checking tooling enforced; keep type hints and
-  docstrings.
+- Python ≥ 3.9, SymPy ≥ 1.13 (`pyproject.toml`; Pyodide bundles 1.13.3); no
+  type-checking tooling enforced; keep type hints and docstrings.  CI runs
+  the suite with the latest SymPy *and* with the oldest admitted one (job
+  `oldest-sympy`): only use what exists in both.
 - Tests (`pytest`, run by `.github/workflows/ci.yml`):
   - `tests/test_printer.py` — annotation transparency (`strip_annotations`
     == `sympy.latex`) and path correctness for a corpus of expressions;

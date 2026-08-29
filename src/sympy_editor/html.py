@@ -15,6 +15,7 @@ Editing in the generated HTML is powered by one of three backends (see
 
 from __future__ import annotations
 
+import html as _html
 import json
 import secrets
 import uuid
@@ -119,7 +120,7 @@ def build_config(
 def render_fragment(config: Dict[str, Any], element_id: Optional[str] = None) -> str:
     """HTML fragment (styles + container + inline scripts) for ``config``."""
     element_id = element_id or "sympy-editor-" + uuid.uuid4().hex[:12]
-    katex_css = config["options"].get("katexCss", "")
+    katex_css = _html.escape(str(config["options"].get("katexCss", "")), quote=True)
     return (
         f'<link rel="stylesheet" href="{katex_css}">\n'
         f"<style>\n{read_static('editor.css')}\n</style>\n"
@@ -154,8 +155,6 @@ _PAGE = """<!DOCTYPE html>
 
 
 def render_page(config: Dict[str, Any], title: str = "SymPy editor") -> str:
-    import html as _html
-
     return _PAGE % {"title": _html.escape(title), "fragment": render_fragment(config)}
 
 

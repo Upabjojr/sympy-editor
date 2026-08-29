@@ -57,3 +57,30 @@ def test_close_shuts_down():
     t.join(timeout=5)
     assert not t.is_alive()
     srv.server_close()
+
+
+def test_host_header_must_be_loopback(server):
+    # DNS rebinding: a page at evil.example resolving to 127.0.0.1 could fetch
+    # the editor page (and the token in it) - unless the Host header is checked.
+    req = urllib.request.Request(server.url, headers={"Host": "evil.example"})
+    with pytest.raises(urllib.error.HTTPError) as info:
+        urllib.request.urlopen(req, timeout=5)
+    assert info.value.code == 403
+    req = urllib.request.Request(server.url + "api", data=b"{}", method="POST",
+                                 headers={"Host": "evil.example:80", "X-SymPy-Editor-Token": server.token})
+    with pytest.raises(urllib.error.HTTPError) as info:
+        urllib.request.urlopen(req, timeout=5)
+    assert info.value.code == 403
+    # the browser's own requests name the server
+    port = server.server_address[1]
+    for host in (f"127.0.0.1:{port}", f"localhost:{port}", "localhost", f"[::1]:{port}"):
+        assert server.accepts_host(host), host
+    assert not server.accepts_host(None) and not server.accepts_host("127.0.0.1.evil.example")
+    with urllib.request.urlopen(urllib.request.Request(server.url, headers={"Host": f"localhost:{port}"}), timeout=5) as resp:
+        assert resp.status == 200
+    # a server exposed on purpose (non-loopback bind) accepts any host
+    exposed = EditorServer(Document(x), host="0.0.0.0", port=0)
+    try:
+        assert exposed.accepts_host("192.168.1.10:8000") and exposed.accepts_host("my-laptop.local")
+    finally:
+        exposed.server_close()

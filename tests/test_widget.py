@@ -63,3 +63,10 @@ def test_edit_backend_switch():
     assert isinstance(html, HTML) and "pyodide" in html.data and "SympyEditor.mount" in html.data
     with pytest.raises(ValueError):
         edit(x, backend="server")
+
+
+def test_document_options_cannot_accompany_a_document():
+    with pytest.raises(TypeError):
+        SympyEditorWidget(Document(x), parser="implicit")
+    w = SympyEditorWidget(x, parser="implicit")
+    assert w.document.parser == "implicit"

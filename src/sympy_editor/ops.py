@@ -27,7 +27,7 @@ from sympy import Derivative, Integral, Limit, Product, Sum
 from sympy.core.expr import Expr
 from sympy.core.relational import Relational
 from sympy.matrices.expressions import Determinant, Inverse, MatrixExpr, Trace
-from sympy.matrices.matrixbase import MatrixBase
+from sympy.matrices import MatrixBase
 from sympy.tensor.array import NDimArray
 
 __all__ = ["Op", "register_op", "get_ops", "default_ops", "KINDS", "KIND_LABELS", "node_kind", "node_kinds"]

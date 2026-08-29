@@ -19,11 +19,16 @@ from .html import build_config, new_token, render_page
 
 __all__ = ["EditorServer", "serve"]
 
+#: Host names under which a loopback-bound server accepts requests.
+_LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
+
 
 class _Handler(BaseHTTPRequestHandler):
     server_version = "sympy-editor/0.1"
 
     def do_GET(self) -> None:  # noqa: N802 (http.server API)
+        if not self._host_ok():
+            return
         if self.path.split("?", 1)[0] in ("/", "/index.html"):
             with self.server.lock:                     # the current state, not the one at start-up
                 page = self.server.render_page()
@@ -33,6 +38,8 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         srv: "EditorServer" = self.server  # type: ignore[assignment]
+        if not self._host_ok():
+            return
         if self.path != "/api":
             self.send_error(404)
             return
@@ -59,6 +66,19 @@ class _Handler(BaseHTTPRequestHandler):
         self._reply(200, "application/json", json.dumps(snapshot).encode("utf-8"))
         if srv.closing:
             threading.Thread(target=srv.shutdown, daemon=True).start()
+
+    def _host_ok(self) -> bool:
+        """Reject requests whose ``Host`` header does not name this server.
+
+        A page on the open internet cannot read the token, but with DNS
+        rebinding it could reach a loopback server under its own host name:
+        a request for the page would then hand it the token.  While bound to
+        a loopback address, only loopback host names are accepted."""
+        srv: "EditorServer" = self.server  # type: ignore[assignment]
+        if not srv.accepts_host(self.headers.get("Host")):
+            self.send_error(403, "Unexpected Host header")
+            return False
+        return True
 
     def _reply(self, status: int, content_type: str, body: bytes) -> None:
         self.send_response(status)
@@ -96,6 +116,20 @@ class EditorServer(ThreadingHTTPServer):
         self.closing = False
         self.verbose = verbose
         self._page_args = (options, urls, title)
+
+    def accepts_host(self, host: Optional[str]) -> bool:
+        """Whether a request with this ``Host`` header is for this server
+        (see ``_Handler._host_ok``).  Servers bound to a non-loopback
+        address were exposed on purpose and accept any host name."""
+        bound = self.server_address[0]
+        if bound not in _LOOPBACK:
+            return True
+        name = (host or "").strip().lower()
+        if name.startswith("["):                       # [::1]:port
+            name = name[1:name.find("]")] if "]" in name else name[1:]
+        else:
+            name = name.rsplit(":", 1)[0] if name.count(":") == 1 else name
+        return name in _LOOPBACK or name == bound
 
     def render_page(self) -> str:
         """The editor page for the document's current state."""

@@ -1003,6 +1003,34 @@ def test_function_box_search_prompt_and_paste_button(browser, serve_expr):
     ctx.close()
 
 
+def test_paste_over_the_whole_expression_applies_at_once(browser, serve_expr):
+    srv, doc = serve_expr(x**2 + sin(y))
+    page = _open(browser, srv.url)
+    page.locator(".se-view").focus()
+    page.keyboard.press("ArrowDown")                          # the whole expression is selected
+    paste = """(text) => { const dt = new DataTransfer(); dt.setData('text/plain', text);
+        document.activeElement.dispatchEvent(new ClipboardEvent('paste', {clipboardData: dt, bubbles: true, cancelable: true})); }"""
+    # Ctrl+V replaces it right away (typing there would go to the source line, a paste is complete)
+    _next_state(page, lambda: page.evaluate(paste, "θ + 1"))
+    assert doc.expr == symbols("theta") + 1
+    assert page.locator(".se-inline").count() == 0 and page.evaluate("document.activeElement.className") == "se-view"
+    # the Paste button too (the last copy made here stands in for the system clipboard)
+    page.keyboard.press("Escape")
+    page.keyboard.press("ArrowDown")
+    page.evaluate("() => { navigator.clipboard = undefined; document.querySelector('.sympy-editor').__sympyEditor._clip = 'z**3'; }")
+    _next_state(page, lambda: page.locator('.se-toolbar [data-cmd="paste"]').click())
+    assert doc.expr == z**3
+    # destroy() unhooks the editor from the document (clipboard and selection
+    # listeners), so disposed notebook outputs do not pile up
+    removed = page.evaluate("""() => { const ed = document.querySelector('.sympy-editor').__sympyEditor;
+        const removed = [], orig = document.removeEventListener.bind(document);
+        document.removeEventListener = (k, fn, o) => { removed.push(k); orig(k, fn, o); };
+        ed.destroy(); document.removeEventListener = orig; return removed.sort(); }""")
+    assert removed == ["copy", "cut", "paste", "selectionchange"]
+    assert page.locator(".sympy-editor").count() == 0
+    assert page.errors == []
+
+
 def test_replacing_the_whole_expression(browser, serve_expr):
     srv, doc = serve_expr(x**2 + sin(y))
     page = _open(browser, srv.url)

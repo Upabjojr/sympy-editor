@@ -45,6 +45,8 @@ class SympyEditorWidget(anywidget.AnyWidget):
     ):
         document_kwargs = {k: kwargs.pop(k) for k in ("printer_settings", "parser", "ops", "max_history", "symbols") if k in kwargs}
         if isinstance(expr, Document):
+            if document_kwargs:   # same rule as to_html(): they would be silently ignored
+                raise TypeError("Document options cannot be combined with an existing Document")
             self.document = expr
         else:
             self.document = Document(expr, **document_kwargs)

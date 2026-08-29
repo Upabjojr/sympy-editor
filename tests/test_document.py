@@ -186,7 +186,17 @@ def test_symbols_panel_info_and_retype():
     snap = doc3.handle({"action": "retype", "name": "A", "type": "Symbol"})
     assert snap["error"] and "cannot become" in snap["error"]
     assert doc3.expr == MatrixSymbol("A", 2, 2).T
+    # ... and leaves no trace: the panel still shows a matrix symbol, and a
+    # typed A is the one in the expression (a stale declaration used to win)
+    assert "A" not in doc3.declared
+    assert doc3.symbol_info() == [{"name": "A", "used": True, "type": "MatrixSymbol", "shape": ["2", "2"]}]
+    assert doc3.parse("A*A") == MatrixSymbol("A", 2, 2) ** 2
     assert "No symbol" in doc3.handle({"action": "retype", "name": "Q", "type": "Symbol"})["error"]
+    # the same for a function turned into a symbol
+    from sympy import Function
+    doc4 = Document(Function("f")(x) + x)
+    assert "remove those uses" in doc4.handle({"action": "retype", "name": "f", "type": "Symbol"})["error"]
+    assert "f" not in doc4.declared and doc4.parse("f(y)") == Function("f")(y)
 
 
 def test_ops_have_kinds_and_matrix_ops_apply_to_matrices():

@@ -76,3 +76,8 @@ def test_embedded_sources_are_importable(tmp_path):
     ) % (str(tmp_path), "Add(Symbol('x'), Integer(1))")
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "y"
+
+
+def test_katex_css_url_is_escaped_in_the_link():
+    page = to_html(x, urls={"katexCss": 'https://cdn.example/katex.css?a=1&b="2"'})
+    assert 'href="https://cdn.example/katex.css?a=1&amp;b=&quot;2&quot;"' in page
