@@ -30,8 +30,9 @@ reciprocal of what is printed; see ``Document.snapshot``).
 from __future__ import annotations
 
 from typing import Callable, Dict, List, Optional, Tuple
+from typing import Union as TUnion
 
-from sympy import sympify
+from sympy import Integer, Rational, sympify
 from sympy.core.basic import Basic
 from sympy.core.containers import Tuple as SymTuple
 from sympy.core.power import Pow
@@ -45,7 +46,10 @@ from sympy.sets.sets import FiniteSet, Intersection, Union
 from sympy.printing.latex import LatexPrinter, latex
 from sympy.printing.str import StrPrinter
 
-Path = Tuple[int, ...]
+#: Path elements are ``args`` indices; ``"n"`` and ``"d"`` are the numerator
+#: and denominator of a ``Rational`` (an atom in SymPy, printed as a fraction).
+Path = Tuple[TUnion[int, str], ...]
+RATIONAL_PARTS = ("n", "d")
 
 __all__ = [
     "AnnotatedLatexPrinter",
@@ -85,18 +89,28 @@ def parse_path(text: str) -> Path:
     if text in ("", "/"):
         return ()
     try:
-        return tuple(int(part) for part in text.strip("/").split("/"))
+        return tuple(part if part in RATIONAL_PARTS else int(part) for part in text.strip("/").split("/"))
     except ValueError:
         raise ValueError(f"Invalid path: {text!r}") from None
+
+
+def _is_fraction(node) -> bool:
+    """A ``Rational`` that prints as a fraction (an ``Integer`` is a ``Rational`` too)."""
+    return isinstance(node, Rational) and node.q != 1
 
 
 def get_at(expr: Basic, path: Path) -> Basic:
     """Return the sub-expression of ``expr`` at ``path``."""
     node = expr
     for i in path:
+        if i in RATIONAL_PARTS:
+            if not _is_fraction(node):
+                raise ValueError(f"Invalid path {format_path(path)} for {expr}")
+            node = Integer(node.p if i == "n" else node.q)
+            continue
         try:
             node = node.args[i]
-        except (IndexError, AttributeError):
+        except (IndexError, AttributeError, TypeError):
             raise ValueError(f"Invalid path {format_path(path)} for {expr}") from None
     return node
 
@@ -125,8 +139,14 @@ def replace_at(expr: Basic, path: Path, new: Basic) -> Basic:
     if not path:
         return new
     i = path[0]
+    if i in RATIONAL_PARTS:
+        # The numerator or denominator of a number: the number is rebuilt
+        # around the new part (x over 2 for a numerator x, say).
+        if len(path) != 1 or not _is_fraction(expr):
+            raise ValueError(f"Invalid path {format_path(path)} for {expr}")
+        return sympify(new) / Integer(expr.q) if i == "n" else Integer(expr.p) / sympify(new)
     args = list(expr.args)
-    if not 0 <= i < len(args):
+    if not isinstance(i, int) or not 0 <= i < len(args):
         raise ValueError(f"Invalid path {format_path(path)} for {expr}")
     args[i] = replace_at(args[i], path[1:], new)
     return rebuild(expr, args)
@@ -199,6 +219,8 @@ def delete_at(expr: Basic, path: Path) -> Basic:
     """Return ``expr`` with the node at ``path`` removed from its parent's args."""
     if not path:
         raise ValueError("Cannot delete the root expression")
+    if path[-1] in RATIONAL_PARTS:
+        raise ValueError("The numerator or denominator of a number cannot be removed: edit it, or delete the number")
     parent = get_at(expr, path[:-1])
     args = list(parent.args)
     del args[path[-1]]
@@ -329,6 +351,19 @@ class _AnnotatingMixin:
         self._nodes[path] = expr
         return self.wrap(format_path(path), tex)
 
+    def _rational_parts(self, expr):
+        """``(node, path)`` when ``expr`` is the fraction printed for the
+        innermost frame's node (that node, or its negation - a sum prints a
+        negative term as ``- p/q``), else ``(None, None)``.  The parts are
+        annotated once per node."""
+        frame = self._stack[-1] if self._stack else None
+        if frame is None or not _is_fraction(expr) or not _is_fraction(frame.expr):
+            return None, None
+        node = frame.expr
+        if node.q != expr.q or abs(node.p) != abs(expr.p) or frame.path + ("n",) in self._nodes:
+            return None, None
+        return node, frame.path
+
     def _print(self, expr, **kwargs):
         if self._stack is None or not isinstance(expr, Basic):
             return super()._print(expr, **kwargs)
@@ -378,6 +413,19 @@ class AnnotatedLatexPrinter(_AnnotatingMixin, LatexPrinter):
             term_tex = r"\left(%s\right)" % term_tex
         return term_tex
 
+    def _print_Rational(self, expr):
+        # LatexPrinter._print_Rational, with the numerator and denominator
+        # annotated (paths "n" and "d" under the number's own path).
+        node, path = self._rational_parts(expr)
+        if node is None:
+            return super()._print_Rational(expr)
+        sign, p = ("- ", -expr.p) if expr.p < 0 else ("", expr.p)
+        num = self._annotated(Integer(node.p), path + ("n",), str(p))
+        den = self._annotated(Integer(node.q), path + ("d",), str(expr.q))
+        if self._settings["fold_short_frac"]:
+            return r"%s%s / %s" % (sign, num, den)
+        return r"%s\frac{%s}{%s}" % (sign, num, den)
+
 
 MARK_START, MARK_SEP, MARK_END = "\x01", "\x02", "\x03"
 
@@ -388,6 +436,26 @@ class AnnotatedStrPrinter(_AnnotatingMixin, StrPrinter):
     spans (used to link the source line to the rendering)."""
 
     wrap = staticmethod(lambda path, text: MARK_START + path + MARK_SEP + text + MARK_END)
+
+    def _print_Rational(self, expr):
+        node, path = self._rational_parts(expr)
+        if node is None or self._settings.get("sympy_integers", False):
+            return super()._print_Rational(expr)
+        num = self._annotated(Integer(node.p), path + ("n",), str(expr.p))
+        den = self._annotated(Integer(node.q), path + ("d",), str(expr.q))
+        return num + "/" + den
+
+    @staticmethod
+    def _strip_minus(text: str):
+        """``(text without its leading "-", True)`` when the printed term
+        starts with a minus - possibly inside (nested) wrappers, as for the
+        numerator of an annotated ``-1/2`` - else ``(text, False)``."""
+        i = 0
+        while text.startswith(MARK_START, i):
+            i = text.index(MARK_SEP, i) + 1
+        if i < len(text) and text[i] == "-":
+            return text[:i] + text[i + 1:], True
+        return text, False
 
     @staticmethod
     def _unwrap(text: str):
@@ -420,12 +488,9 @@ class AnnotatedStrPrinter(_AnnotatingMixin, StrPrinter):
             t = self._print(term)
             sign = "+"
             if not is_add(term):
-                unwrapped = self._unwrap(t)
-                inner = unwrapped[1] if unwrapped else t
-                if inner.startswith("-"):
+                t, negative = self._strip_minus(t)
+                if negative:
                     sign = "-"
-                    inner = inner[1:]
-                    t = self.wrap(unwrapped[0], inner) if unwrapped else inner
             if precedence(term) < prec or is_add(term):
                 parts.extend([sign, "(%s)" % t])
             else:

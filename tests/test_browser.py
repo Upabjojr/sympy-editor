@@ -1253,21 +1253,24 @@ def test_caret_walks_through_atoms_across_levels(browser, serve_expr):
     assert start["path"] == "/" and start["index"] == 1
     right = page.locator('.se-toolbar [data-cmd="right"]')
     steps = []
-    for _ in range(5):
+    for _ in range(4):
+        assert right.is_enabled()
         right.click()
         steps.append(page.evaluate(caret))
-    # gap before sin(b), into sin: before b, after b, out of sin: the end of the sum, then it stays
-    assert [(c["path"], c["extend"], c["index"]) for c in steps[:4]] == [("/", None, 2), (pb, "before", 0), (pb, "after", 0), ("/", None, 3)]
-    assert steps[4] == steps[3]
+    # gap before sin(b), into sin: before b, after b, out of sin: the end of the sum, where → is disabled
+    assert [(c["path"], c["extend"], c["index"]) for c in steps] == [("/", None, 2), (pb, "before", 0), (pb, "after", 0), ("/", None, 3)]
     assert all(steps[i]["x"] > steps[i - 1]["x"] for i in range(1, 4)) and steps[0]["x"] > start["x"]
-    # back: the same positions in reverse, strictly leftwards, down to the start of the sum
+    assert right.is_disabled()
+    # back: the same positions in reverse, strictly leftwards, down to the start of the sum, where ← is disabled
     left = page.locator('.se-toolbar [data-cmd="left"]')
     back = []
-    for _ in range(6):
+    for _ in range(5):
+        assert left.is_enabled()
         left.click()
         back.append(page.evaluate(caret))
-    assert [(c["path"], c["extend"], c["index"]) for c in back] == [(pb, "after", 0), (pb, "before", 0), ("/", None, 2), ("/", None, 1), ("/", None, 0), ("/", None, 0)]
-    assert all(back[i]["x"] < back[i - 1]["x"] for i in range(1, 5)) and back[5] == back[4]
+    assert [(c["path"], c["extend"], c["index"]) for c in back] == [(pb, "after", 0), (pb, "before", 0), ("/", None, 2), ("/", None, 1), ("/", None, 0)]
+    assert all(back[i]["x"] < back[i - 1]["x"] for i in range(1, 5))
+    assert left.is_disabled() and right.is_enabled()
     # ↑ from the caret before b selects b
     for _ in range(3):
         right.click()
@@ -1275,6 +1278,74 @@ def test_caret_walks_through_atoms_across_levels(browser, serve_expr):
     page.locator('.se-toolbar [data-cmd="parent"]').click()
     assert page.locator(".se-selected").get_attribute("data-path") == pb and page.locator(".se-caret").count() == 0
     assert page.errors == []
+
+
+def test_caret_enters_a_rational_and_its_parts_are_editable(browser, serve_expr):
+    from sympy import Rational
+    srv, doc = serve_expr(x + Rational(1, 2))                       # printed x + 1/2
+    page = _open(browser, srv.url)
+    nodes = doc.snapshot()["nodes"]
+    pr = next(k for k, v in nodes.items() if v["src"] == "1/2")
+    assert pr + "/n" in nodes and pr + "/d" in nodes
+    caret = "(() => { const c = document.querySelector('.sympy-editor').__sympyEditor.caret; return c && [c.path, c.extend || null]; })()"
+    # ←/→ from nothing: a caret at the start / the end
+    page.locator(".se-view").focus()
+    page.locator('.se-toolbar [data-cmd="right"]').click()
+    assert page.evaluate(caret) == ["/", None] and page.locator(".se-caret").count() == 1
+    assert page.locator('.se-toolbar [data-cmd="right"]').is_disabled()       # nothing further right
+    assert page.locator('.se-toolbar [data-cmd="left"]').is_enabled()
+    # walking left enters the number: after the denominator, before it, after the numerator, before it
+    left = page.locator('.se-toolbar [data-cmd="left"]')
+    seen = []
+    for _ in range(4):
+        left.click()
+        seen.append(page.evaluate(caret))
+    assert seen == [[pr + "/d", "after"], [pr + "/d", "before"], [pr + "/n", "after"], [pr + "/n", "before"]]
+    # the numerator is selectable and editable
+    page.locator('.se-toolbar [data-cmd="parent"]').click()
+    assert page.locator(".se-selected").get_attribute("data-path") == pr + "/n"
+    page.keyboard.type("3")
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    assert doc.expr == x + Rational(3, 2)
+    _click(page, pr + "/d")
+    page.keyboard.type("y")
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    assert doc.expr == x + 3 / y
+    page.keyboard.press("Escape")
+    page.locator('.se-toolbar [data-cmd="left"]').click()                    # from nothing: the start
+    assert page.evaluate(caret) == ["/", None] and page.locator('.se-toolbar [data-cmd="left"]').is_disabled()
+    assert page.errors == []
+
+
+def test_empty_formula_keeps_the_cursor_and_zoom_block_stays_together(browser, serve_expr):
+    srv, doc = serve_expr(x**2 + sin(y))
+    page = browser.new_page(viewport={"width": 420, "height": 800})
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(srv.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    # the zoom buttons share one row even when the toolbar wraps
+    tops = page.evaluate("[...document.querySelectorAll('.se-zoom button')].map(b => Math.round(b.getBoundingClientRect().top))")
+    assert len(tops) == 3 and len(set(tops)) == 1
+    # delete everything, then click the (empty) formula area: the cursor goes to the empty line, nothing comes back
+    page.locator(".se-view").focus()
+    page.keyboard.press("ArrowDown")
+    page.locator('.se-toolbar [data-cmd="delete"]').click()
+    assert "se-empty" in page.locator(".se-view").get_attribute("class")
+    r = page.locator(".se-view").bounding_box()
+    page.mouse.click(r["x"] + r["width"] / 2, r["y"] + r["height"] / 2)
+    assert page.evaluate("document.activeElement.className").startswith("se-source")
+    assert page.locator(".se-source").inner_text() == "" and "se-empty" in page.locator(".se-view").get_attribute("class")
+    page.keyboard.type("q + 1")
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    assert doc.expr == symbols("q") + 1
+    # Esc from the empty state still brings the previous expression back
+    page.locator(".se-view").focus()
+    page.keyboard.press("ArrowDown")
+    page.keyboard.press("Delete")
+    page.keyboard.press("Escape")
+    assert page.locator(".se-source").inner_text() == "q + 1" and "se-empty" not in page.locator(".se-view").get_attribute("class")
+    assert errors == []
 
 
 def test_replacing_the_whole_expression(browser, serve_expr):

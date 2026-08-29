@@ -156,3 +156,33 @@ def test_latex_and_source_spans_share_keys():
     p = next(k for k, (a, b) in sspans.items() if src[a:b] == "sin(x)")
     a, b = tspans[p]
     assert tex[a:b] == r"\sin{\left(x \right)}"
+
+
+def test_rational_numerator_and_denominator_have_paths():
+    from sympy import Rational, symbols
+    from sympy_editor import annotate, annotate_str, get_at, parse_path, replace_at, strip_annotations
+    from sympy_editor.printer import delete_at
+    from sympy import latex
+    x = symbols("x")
+    for expr in (Rational(1, 2), x - Rational(1, 2), -Rational(3, 4), Rational(1, 2) ** 2, x + Rational(3, 4) * x**2):
+        tex, nodes = annotate(expr)
+        assert strip_annotations(tex) == latex(expr)
+        text, spans = annotate_str(expr)
+        assert text == str(expr) and spans, expr
+        for path, node in nodes.items():
+            assert get_at(expr, path) == node
+    tex, nodes = annotate(x - Rational(1, 2))
+    assert nodes[(0, "n")] == -1 and nodes[(0, "d")] == 2       # the tree's number is -1/2, printed as - 1/2
+    assert r"\htmlData{path=/0/n}{1}" in tex and r"\htmlData{path=/0/d}{2}" in tex
+    text, spans = annotate_str(x - Rational(1, 2))
+    assert text[slice(*spans["/0/n"])] == "1" and text[slice(*spans["/0/d"])] == "2"
+    assert parse_path("/0/n") == (0, "n")
+    assert replace_at(x - Rational(1, 2), (0, "n"), 3) == x + Rational(3, 2)
+    assert replace_at(Rational(1, 2), ("d",), x) == 1 / x
+    with pytest.raises(ValueError):
+        delete_at(Rational(1, 2), ("n",))
+    with pytest.raises(ValueError):
+        get_at(x, ("n",))
+    # a coefficient is printed as a fraction of the product, not as a number: no parts
+    tex, nodes = annotate(Rational(1, 2) * x)
+    assert not any("n" in p or "d" in p for p in nodes)

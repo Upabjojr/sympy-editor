@@ -596,3 +596,17 @@ def test_goto_history_step_and_labels():
     assert doc.handle({"action": "export"})["history"] == {"labels": ["x", "x + 1", "x**2"], "index": 1}
     doc.set("x + 3")                      # a new edit from the middle drops the later steps
     assert doc.history_labels()["labels"] == ["x", "x + 1", "x + 3"]
+
+
+def test_rational_parts_are_editable():
+    from sympy import Rational, symbols
+    x, y = symbols("x y")
+    doc = Document(x - Rational(1, 2))
+    nodes = doc.snapshot()["nodes"]
+    assert nodes["/0/n"]["src"] == "-1" and nodes["/0/d"]["src"] == "2" and not nodes["/0/n"]["insertable"]
+    assert doc.handle({"action": "replace", "path": "/0/d", "src": "3"})["src"] == "x - 1/3"
+    assert doc.handle({"action": "replace", "path": "/0/n", "src": "y"})["src"] == "x + y/3"   # the numerator node is -1: y replaces it, sign included
+    doc.set(Rational(1, 2))
+    assert doc.handle({"action": "extend", "path": "/n", "side": "after", "src": "+ 2"})["src"] == "3/2"
+    assert "cannot be removed" in doc.handle({"action": "delete", "path": "/n"})["error"]
+    assert "nothing inside" in doc.handle({"action": "unwrap", "path": "/n"})["error"]

@@ -317,6 +317,9 @@ class Document:
         context of the node being replaced: new names in a matrix slot become
         ``MatrixSymbol``s of its shape).
 
+        A path ending in ``n`` or ``d`` is the numerator or denominator of a
+        ``Rational`` (an atom printed as a fraction): the number is rebuilt.
+
         ``reciprocal``: ``new`` is the printed form of a denominator - the
         node at ``path`` is the tree's ``Pow(b, -n)`` shown as ``b**n`` under
         the fraction bar (``snapshot()`` flags such nodes) - so the node

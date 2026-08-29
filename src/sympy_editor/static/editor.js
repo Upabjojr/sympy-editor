@@ -281,10 +281,14 @@ var SympyEditor = (function () {
         btn("finish", "Done", "Finish editing and hand the expression back to Python");
       }
       sep();
-      // Zoom: the formula's size (also Ctrl+wheel, Ctrl+plus/minus/0, pinch).
-      btn("zoomout", "\u2212", "Zoom out (Ctrl+minus, Ctrl+wheel, pinch)");
-      btn("zoomreset", "100%", "Reset the zoom (Ctrl+0)");
-      btn("zoomin", "+", "Zoom in (Ctrl+plus, Ctrl+wheel, pinch)");
+      // Zoom: the formula's size (also Ctrl+wheel, Ctrl+plus/minus/0, pinch);
+      // the three buttons form one block that wraps as a unit.
+      var zoomBlock = h("span", { class: "se-zoom" });
+      this.tools.appendChild(zoomBlock);
+      var zoomBtn = function (cmd, label, title) { var b = btn(cmd, label, title); zoomBlock.appendChild(b); return b; };
+      zoomBtn("zoomout", "\u2212", "Zoom out (Ctrl+minus, Ctrl+wheel, pinch)");
+      zoomBtn("zoomreset", "100%", "Reset the zoom (Ctrl+0)");
+      zoomBtn("zoomin", "+", "Zoom in (Ctrl+plus, Ctrl+wheel, pinch)");
       this.status = h("span", { class: "se-status", "aria-live": "polite" });
       this.toolbar.appendChild(this.status);
       if (o.toolbar) root.appendChild(this.toolbar);
@@ -1017,6 +1021,7 @@ var SympyEditor = (function () {
       if (this._suppressClick) { this._suppressClick = false; return; }   // end of a drag
       if (this.loading) return;
       if (this.closed || (this.input && ev.target === this.input)) return;
+      if (this.view.classList.contains("se-empty")) { this.source.focus(); return; }   // everything was deleted: type in the line
       var leaf = this._leafAt(ev);
       this._gapCache = null;
       // The edges of an object give a caret before/after it; its middle selects it.
@@ -1130,7 +1135,8 @@ var SympyEditor = (function () {
       } else if (k === "ArrowDown") {
         this._selectChild();
       } else if (k === "ArrowLeft" || k === "ArrowRight") {
-        this._moveSideways(k === "ArrowLeft" ? -1 : 1);
+        if (this.selected) this._moveSideways(k === "ArrowLeft" ? -1 : 1);
+        else this._caretAtEnd(k === "ArrowLeft" ? "start" : "end");
       } else if (!ro && !mod && !ev.altKey && k.length === 1 && this.selected) {
         this.beginEdit(this.selected, k);   // start replacing the selection with what is typed
       } else {
@@ -1528,6 +1534,14 @@ var SympyEditor = (function () {
       this.sourceDirty = false;
       this.source.classList.remove("se-dirty");
       this.source.classList.remove("se-invalid");
+      if (!src && this.view.classList.contains("se-empty")) {
+        // Everything was deleted on purpose: the line stays empty (and dirty)
+        // until something is typed, or Esc brings the expression back.
+        this.sourceDirty = true;
+        this.source.classList.add("se-dirty");
+        this._setStatus("Everything removed: type the new expression – Enter applies, Esc restores the previous one");
+        return;
+      }
       if (!src || same) {
         this.revertSource();
         if (!src) this._setStatus("Empty: the previous expression is back (an expression cannot be empty)");
@@ -1834,25 +1848,51 @@ var SympyEditor = (function () {
     /** ←/→ at a caret: the previous/next caret position of the formula -
      *  out of the current node at its ends, into a composite neighbour. */
     _moveCaret(step) {
-      var cur = this.caret;
+      var at = this._caretIndex();
+      if (!at) return;
+      var j = at.index + step;
+      if (j < 0 || j >= at.count) return;
+      var g = at.list[j].gap;
+      this._showCaret(g, g.extend ? at.list[j].x : (step < 0 ? g.b : g.a));   // the near end of a gap
+    }
+
+    /** A caret at the first or the last position of the formula. */
+    _caretAtEnd(which) {
+      if (this.opts.readOnly || !this.state) return;
       var list = this._caretPositions();
-      var idx = -1, best = Infinity;
+      if (!list.length) return;
+      var pos = list[which === "start" ? 0 : list.length - 1];
+      this._showCaret(pos.gap, pos.gap.extend ? pos.x : (which === "start" ? pos.gap.b : pos.gap.a));
+    }
+
+    /** Where the caret is among the positions of the formula: {index, count}. */
+    _caretIndex() {
+      var cur = this.caret;
+      if (!cur) return null;
+      var list = this._caretPositions();
+      var idx = -1, best = Infinity, mid = (cur.a + cur.b) / 2;
       for (var i = 0; i < list.length; i++) {
         var g = list[i].gap;
         var same = g.path === cur.path && !!g.extend === !!cur.extend && (g.extend ? g.extend === cur.extend : g.index === cur.index);
-        var d = Math.abs(list[i].x - (cur.a + cur.b) / 2);
+        var d = Math.abs(list[i].x - mid);
         if (same && d < best) { idx = i; best = d; }
       }
-      if (idx < 0) {           // not in the list (e.g. an operator caret): the nearest position
-        for (var k = 0; k < list.length; k++) {
-          var dk = Math.abs(list[k].x - (cur.a + cur.b) / 2);
-          if (dk < best) { idx = k; best = dk; }
-        }
+      if (idx < 0) for (var k = 0; k < list.length; k++) { var dk = Math.abs(list[k].x - mid); if (dk < best) { idx = k; best = dk; } }
+      return { index: idx, count: list.length, list: list };
+    }
+
+    /** The sibling ←/→ would select from `path` (null at the ends). */
+    _sidewaysTarget(path, step) {
+      var cur = path;
+      while (cur) {
+        var parent = this.tree[cur] ? this.tree[cur].parent : null;
+        if (!parent) return null;
+        var sib = this._displayChildren(parent);
+        var i = sib.indexOf(cur) + step;
+        if (i >= 0 && i < sib.length) return sib[i];
+        cur = parent;
       }
-      var j = idx + step;
-      if (j < 0 || j >= list.length) return;
-      var g = list[j].gap;
-      this._showCaret(g, g.extend ? list[j].x : (step < 0 ? g.b : g.a));   // the near end of a gap
+      return null;
     }
 
     /** ↑ at a caret: the object the caret is attached to (then its ancestors). */
@@ -1898,15 +1938,8 @@ var SympyEditor = (function () {
     /** ←/→: the neighbouring sub-expression as displayed; at the end of a
      *  group, continue with the neighbour of the enclosing group. */
     _moveSideways(step) {
-      var cur = this.selected;
-      while (cur) {
-        var parent = this.tree[cur] ? this.tree[cur].parent : null;
-        if (!parent) return;
-        var sib = this._displayChildren(parent);
-        var i = sib.indexOf(cur) + step;
-        if (i >= 0 && i < sib.length) { this.select(sib[i]); return; }
-        cur = parent;
-      }
+      var target = this._sidewaysTarget(this.selected, step);
+      if (target) this.select(target);
     }
 
     /* ---- range selection ---- */
@@ -2174,7 +2207,7 @@ var SympyEditor = (function () {
           if (this.caret) return this._moveCaret(step);
           if (this.range) return this.select(this._displayChildren(this.range.parent)[this.range.focus]);
           if (this.selected) return this._moveSideways(step);
-          return this.select("/");
+          return this._caretAtEnd(step < 0 ? "start" : "end");
         }
         case "parent": {
           if (this.caret) return this._selectBesideCaret();
@@ -2569,8 +2602,11 @@ var SympyEditor = (function () {
       set("isolate", dis || !(range || (this.selected && this.selected !== "/")));
       set("parent", dis || !(range || (t && t.parent) || this.caret));
       set("child", dis || !!this.caret);
-      set("left", dis);
-      set("right", dis);
+      // ←/→: at a caret, the previous/next position (none at the ends); on a
+      // selection, a sibling at some level; otherwise a caret at either end.
+      var at = !dis && this.caret ? this._caretIndex() : null;
+      set("left", dis || (at ? at.index <= 0 : (this.selected && !range ? !this._sidewaysTarget(this.selected, -1) : false)));
+      set("right", dis || (at ? at.index >= at.count - 1 : (this.selected && !range ? !this._sidewaysTarget(this.selected, 1) : false)));
       set("copy", !s.src);
       set("paste", dis);
       set("zoomin", this.zoom >= this.opts.maxZoom);

@@ -62,6 +62,14 @@ re-running `editor.js` when `window.SympyEditor` already exists.
 
 Two conventions between printer, document and front end:
 
+- **Rational parts.**  A `Rational` is an atom, but it prints as a
+  fraction: the annotated printers give its numerator and denominator the
+  virtual paths `.../n` and `.../d` (`_rational_parts`; `get_at` returns
+  `Integer(p)` / `Integer(q)`, `replace_at` rebuilds the number as `new/q`
+  or `p/new`, `delete_at` refuses).  `_print_Add` prints a negative term as
+  `- p/q`; the parts then belong to the tree's negative number (`n` is
+  `-1` for `- 1/2`), and the str printer strips the sign inside nested
+  wrappers (`_strip_minus`).
 - **Reciprocal nodes.**  SymPy prints `x/(x+1)**2` by synthesising
   `Pow(x+1, 2)` for the denominator; the printer annotates it with the path of
   the tree's `Pow(x+1, -2)`, `snapshot()` flags the node `reciprocal: true`,
@@ -202,7 +210,11 @@ Two conventions between printer, document and front end:
   positions merged (a gap beats an extend caret, an inner extend caret an
   outer one, as an edge click does).  ↑ at a caret selects the object it is
   attached to (`_selectBesideCaret`); ↓ does nothing and its button is
-  disabled.
+  disabled.  ←/→ with nothing selected put a caret at the first/last
+  position (`_caretAtEnd`); the ←/→ buttons are disabled when the move
+  would do nothing (`_caretIndex`, `_sidewaysTarget`).  Hover styles are
+  under `@media (hover: hover)`: on a touch screen `:hover` sticks to the
+  last tapped button and reads as "active".
 - **LaTeX shortcuts.**  The text field expands complete `\command`s as they
   are typed (`expandCommands`, tables `GREEK`/`COMMANDS` in editor.js) and
   converts between the displayed Greek letters and SymPy's names

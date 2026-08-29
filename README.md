@@ -66,7 +66,7 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | Action | Mouse | Keyboard |
 | --- | --- | --- |
 | Select sub-expression | click its middle (its left/right edge places a caret before/after it instead; next to a matrix entry or a power's base the caret *extends* it: `+ 1` adds, `y` multiplies) | ↓ (enter children), ←/→ (siblings) |
-| Previous / next sibling (or move the caret) | **←** / **→** (toolbar and action bar) | ←/→ |
+| Previous / next sibling (or move the caret; with nothing selected, a caret at the start / the end) | **←** / **→** (toolbar and action bar) | ←/→ |
 | Select enclosing expression | click again on the same spot, or **↑** | ↑ |
 | Go inside: the sub-expression you came up from, or the first one (on an atom: a caret after it) | **↓** (toolbar or action bar) | ↓ |
 | Select a range of adjacent terms / factors | drag across them (mouse, touch or pen) | Shift+→ / Shift+← grow and shrink the range; ←/→/↓ collapse it, ↑ selects the whole sum/product |
@@ -75,7 +75,7 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | LaTeX shortcuts in the field | | `\theta` becomes `θ` as you type (Greek letters, `\infty`, `\sin`, `\cdot`, `\le`...); Greek letters are SymPy's names (`θ` is `theta`, `λ` is `lamda`, `∞` is `oo`) |
 | Edit selection's existing text | double-click / **Edit** | Enter |
 | Apply / cancel an edit | click elsewhere applies | Enter / Esc |
-| Remove the selection entirely (on the whole expression: the formula is emptied, type the new one in the source line; Esc brings the old one back) | **Delete** | Del |
+| Remove the selection entirely (on the whole expression: the formula is emptied and stays so - clicking it puts the cursor in the empty source line - until you type the new one; Esc brings the old one back) | **Delete** | Del |
 | Remove the node but keep its argument (`cos(θ)` → `θ`, `√x` → `x`, `∫f dx` → `f`) | **Unwrap** | Backspace — after ↑ from a term, that term is the one kept |
 | Keep only the selection (it becomes the whole expression) | **Isolate** | Ctrl+Shift+I |
 | Transform the selection | pick an operation in the **Transform ▾** menu (general) or the type menu ("Matrix ▾"...): it applies at once | |
