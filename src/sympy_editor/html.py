@@ -141,14 +141,20 @@ _PAGE = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>%(title)s</title>
 <style>
   body { margin: 2rem; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
          background: #ffffff; color: #1f2328; }
   @media (prefers-color-scheme: dark) { body { background: #1e1e1e; color: #e6e6e6; } }
   h1 { font-size: 1.2rem; font-weight: 600; margin: 0 0 1rem; }
-  @media (max-width: 640px) { body { margin: 0.5rem; } h1 { font-size: 1rem; margin: 0.2rem 0 0.5rem; } }
+  /* phones: a margin that keeps the controls clear of rounded corners and notches
+   * (the safe-area insets where the browser reports them; the Android app pads natively) */
+  @media (max-width: 640px) {
+    body { margin: 0.75rem;
+           padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0); }
+    h1 { font-size: 1rem; margin: 0.2rem 0 0.5rem; }
+  }
 </style>
 </head>
 <body>

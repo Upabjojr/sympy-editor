@@ -78,6 +78,11 @@ def test_embedded_sources_are_importable(tmp_path):
     assert out.stdout.strip() == "y"
 
 
+def test_page_keeps_clear_of_notches_and_rounded_corners():
+    page = to_html(x)
+    assert "viewport-fit=cover" in page and "env(safe-area-inset-top" in page
+
+
 def test_katex_css_url_is_escaped_in_the_link():
     page = to_html(x, urls={"katexCss": 'https://cdn.example/katex.css?a=1&b="2"'})
     assert 'href="https://cdn.example/katex.css?a=1&amp;b=&quot;2&quot;"' in page

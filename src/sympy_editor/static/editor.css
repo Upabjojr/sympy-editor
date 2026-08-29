@@ -340,7 +340,7 @@
   z-index: 901;
   width: min(22rem, 88vw);
   overflow-y: auto;
-  padding: 0.6rem 0.7rem 1rem;
+  padding: calc(0.6rem + env(safe-area-inset-top, 0px)) calc(0.7rem + env(safe-area-inset-right, 0px)) calc(1rem + env(safe-area-inset-bottom, 0px)) 0.7rem;
   background: var(--se-bg);
   color: var(--se-fg);
   border-left: 1px solid var(--se-border);
