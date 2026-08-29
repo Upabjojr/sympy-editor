@@ -20,3 +20,4 @@ mobile/android/gradle/wrapper/gradle-wrapper.jar
 
 # web app build
 webapp/dist/
+mobile/android/.kotlin/
