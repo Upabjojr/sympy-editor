@@ -766,15 +766,15 @@ var SympyEditor = (function () {
       var oldSrc = {}, newSrc = {};
       Object.keys(oldNodes).forEach(function (p) { oldSrc[oldNodes[p].src] = true; });
       Object.keys(newNodes).forEach(function (p) { newSrc[newNodes[p].src] = true; });
-      // A node is kept when its expression is still there, or when it is a
-      // container of the same type at the same place (its operators stay).
+      // A node is kept when its expression is still there.  The root is
+      // also kept when it stays a container of the same type (a sum stays
+      // a sum: its operators do not flash on every edit); any other node
+      // whose expression changed goes as a whole - 2x typed into 3x is a
+      // red 2x turning into a green 3x, not a red 2 next to a green 3.
+      var sameRoot = "/" in oldNodes && "/" in newNodes && oldNodes["/"].type === newNodes["/"].type && oldNodes["/"].nargs > 0;
       var oldKept = {}, newKept = {};
-      Object.keys(oldNodes).forEach(function (p) {
-        oldKept[p] = !!newSrc[oldNodes[p].src] || (p in newNodes && newNodes[p].type === oldNodes[p].type);
-      });
-      Object.keys(newNodes).forEach(function (p) {
-        newKept[p] = !!oldSrc[newNodes[p].src] || (p in oldNodes && oldNodes[p].type === newNodes[p].type);
-      });
+      Object.keys(oldNodes).forEach(function (p) { oldKept[p] = !!newSrc[oldNodes[p].src] || (p === "/" && sameRoot); });
+      Object.keys(newNodes).forEach(function (p) { newKept[p] = !!oldSrc[newNodes[p].src] || (p === "/" && sameRoot); });
       var oldRectOf = function (path) {   // where the same expression was (same path first)
         var src = newNodes[path].src;
         if (path in oldNodes && oldNodes[path].src === src) return before.rects[path];

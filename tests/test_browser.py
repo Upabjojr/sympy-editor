@@ -1398,6 +1398,30 @@ def test_change_animation_red_to_green(browser, serve_expr):
     assert page.errors == []
 
 
+def test_change_animation_term_typed_at_a_caret_merges_green(browser, serve_expr):
+    srv, doc = serve_expr(2 * x + 3 * y)
+    page = _open(browser, srv.url)
+    nodes = doc.snapshot()["nodes"]
+    p3y = next(k for k, v in nodes.items() if v["src"] == "3*y")
+    _click(page, next(k for k, v in nodes.items() if v["src"] == "y"))
+    page.keyboard.press("ArrowUp")                                # 3*y
+    page.keyboard.press("Tab")                                    # caret after it
+    assert page.locator(".se-caret").count() == 1
+    page.keyboard.type("+x")
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    assert doc.expr == 3 * x + 3 * y
+    # the old 2x goes red as a whole and the new 3x comes green as a whole (not a red 2 beside a green 3)
+    assert page.locator(".se-ghost").count() == 2
+    red = [t.strip() for t in page.locator(".se-ghost-old .se-removed").all_inner_texts()]
+    green = [t.strip() for t in page.locator(".se-ghost-new .se-added").all_inner_texts()]
+    assert any("2" in t and "x" in t for t in red), red
+    assert any("3" in t and "x" in t for t in green) and not any("3" in t and "y" in t for t in green), green
+    assert _wait(lambda: page.locator(".se-ghost").count() == 0, timeout=5)
+    p3x = next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "3*x")
+    assert "se-added" in page.locator(f'.se-view [data-path="{p3x}"]').first.get_attribute("class")
+    assert page.errors == []
+
+
 def test_replacing_the_whole_expression(browser, serve_expr):
     srv, doc = serve_expr(x**2 + sin(y))
     page = _open(browser, srv.url)

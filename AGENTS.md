@@ -151,8 +151,9 @@ Two conventions between printer, document and front end:
 - **Change animation.**  `_captureRendering` (before a re-render of a
   committed change) keeps a clone of the old rendering and every node's
   box; `_animateChange` diffs old and new nodes - kept when the same `src`
-  is still there, or a container of the same `type` at the same path;
-  otherwise removed / added - and animates two ghosts (`.se-ghost`, no
+  is still there (the root also when it stays a container of the same
+  `type`, so a sum's operators do not flash); otherwise removed / added as
+  a whole - and animates two ghosts (`.se-ghost`, no
   `data-path`, `pointer-events: none`) over the real rendering, which is
   `.se-changing` (opacity 0, still hit-testable) meanwhile: the old
   ghost's top-most removed parts (`.se-removed`, red) move to the new node
