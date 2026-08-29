@@ -353,11 +353,18 @@
 .se-drawer[hidden] { display: none; }
 @media (prefers-reduced-motion: reduce) { .se-drawer, .se-backdrop { transition: none; } }
 .se-drawer-head { display: flex; align-items: center; justify-content: space-between; margin: 0.4rem 0 0.5rem; font-size: 13px; }
-.se-drawer-tabs { display: flex; gap: 0.2rem; }
-.se-tab { font: inherit; font-size: 13px; padding: 0.3rem 0.8rem; border: 1px solid var(--se-border); border-bottom-width: 2px; border-radius: 0.3rem 0.3rem 0 0; background: transparent; color: var(--se-muted); cursor: pointer; }
-.se-tab-current { color: var(--se-fg); font-weight: 600; border-bottom-color: rgba(var(--se-accent), 0.9); background: rgba(var(--se-accent), 0.08); }
 .se-drawer-pane[hidden] { display: none; }
-.se-history-of { color: var(--se-muted); margin: 0 0 0.4rem; font-family: var(--se-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* the current session is a card; its history is a sub-tab nested inside it */
+.se-session { flex-direction: column; align-items: stretch; gap: 0; }
+.se-session-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; }
+.se-session-current { border: 1px solid rgba(var(--se-accent), 0.7); border-radius: 0.4rem; padding: 0.35rem 0.4rem; background: rgba(var(--se-accent), 0.05); }
+.se-session-sub { margin: 0.4rem 0 0 0.6rem; padding-left: 0.6rem; border-left: 2px solid rgba(var(--se-accent), 0.5); }
+.se-subtabs { display: flex; gap: 0.2rem; }
+.se-subtab { font: inherit; font-size: 12px; padding: 0.2rem 0.6rem; border: 1px solid var(--se-border); border-bottom-width: 2px; border-radius: 0.3rem 0.3rem 0 0; background: transparent; color: var(--se-muted); cursor: pointer; }
+.se-subtab::before { content: "\25B8 "; }
+.se-subtab-current { color: var(--se-fg); font-weight: 600; border-bottom-color: rgba(var(--se-accent), 0.9); background: rgba(var(--se-accent), 0.08); }
+.se-subtab-current::before { content: "\25BE "; }
+.se-session-sub .se-drawer-pane { padding-top: 0.3rem; }
 .se-session-picker { display: flex; flex-direction: column; gap: 2px; margin: 0.3rem 0 0.5rem; padding: 0.3rem; border: 1px solid var(--se-border); border-radius: 0.4rem; }
 .se-choice { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; text-align: left; font: inherit; padding: 0.3rem 0.5rem; border: 1px solid transparent; border-radius: 0.3rem; background: transparent; color: var(--se-fg); cursor: pointer; }
 .se-choice-default { border-color: rgba(var(--se-accent), 0.8); background: rgba(var(--se-accent), 0.08); }

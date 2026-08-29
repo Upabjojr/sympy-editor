@@ -185,8 +185,10 @@ Two conventions between printer, document and front end:
   and switches with `backend.openDocument(state)` (Pyodide: a new document
   id in the shared runtime).  All of it lives in a lateral drawer
   (`.se-drawer`, `position: fixed`, the ☰ toolbar button, Esc / backdrop /
-  ✕ close it) with two tabs (`showDrawerTab`: sessions, history), not in
-  the widget's own layout.  "New session…" opens a chooser
+  ✕ close it), not in the widget's own layout; the history is a sub-tab
+  (`.se-subtabs`, `showDrawerTab("history")` toggles `.se-drawer-pane`)
+  nested in the current session's card, so the hierarchy session ⊃ history
+  is visible.  "New session…" opens a chooser
   (`_showSessionPicker`): empty (the default - a placeholder `0` behind
   the empty state, flagged `empty` until a first real expression is
   committed), a copy of the current expression, or an example

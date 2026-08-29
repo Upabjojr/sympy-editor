@@ -337,22 +337,19 @@ var SympyEditor = (function () {
         close.addEventListener("click", function () { self.closeDrawer(); });
         this.sessionsBody = h("div", { class: "se-sessions" });
         this.historyBody = h("div", { class: "se-history" });
-        // Two tabs: the list of sessions, and the history of the current one.
-        this.drawerTabs = h("div", { class: "se-drawer-tabs", role: "tablist" }, [
-          h("button", { type: "button", role: "tab", "data-tab": "sessions", class: "se-tab se-tab-current" }, ["Sessions"]),
-          h("button", { type: "button", role: "tab", "data-tab": "history", class: "se-tab" }, ["History"])
+        // The history belongs to a session: it is a sub-tab inside the card
+        // of the current session (see _fillSessions), under the session list.
+        this.subtabs = h("div", { class: "se-subtabs", role: "tablist" }, [
+          h("button", { type: "button", role: "tab", "data-tab": "history", class: "se-subtab" }, ["History"])
         ]);
-        this.drawerTabs.addEventListener("click", function (ev) {
+        this.subtabs.addEventListener("click", function (ev) {
           var tab = ev.target.closest("[data-tab]");
-          if (tab) self.showDrawerTab(tab.getAttribute("data-tab"));
+          if (tab) self.showDrawerTab(tab.classList.contains("se-subtab-current") ? "sessions" : tab.getAttribute("data-tab"));
         });
-        this.sessionsPane = h("div", { class: "se-drawer-pane", "data-pane": "sessions" }, [this.sessionsBody]);
-        this.historyPane = h("div", { class: "se-drawer-pane", "data-pane": "history", hidden: "" }, [
-          h("div", { class: "se-history-of" }), this.historyBody]);
-        this.drawer = h("aside", { class: "se-drawer", hidden: "", role: "dialog", "aria-label": "Sessions and history" }, [
-          h("div", { class: "se-drawer-head" }, [this.drawerTabs, close]),
-          this.sessionsPane,
-          this.historyPane
+        this.historyPane = h("div", { class: "se-drawer-pane", "data-pane": "history", hidden: "" }, [this.historyBody]);
+        this.drawer = h("aside", { class: "se-drawer", hidden: "", role: "dialog", "aria-label": "Sessions" }, [
+          h("div", { class: "se-drawer-head" }, [h("strong", {}, ["Sessions"]), close]),
+          this.sessionsBody
         ]);
         this.backdrop = h("div", { class: "se-backdrop", hidden: "" });
         this.backdrop.addEventListener("click", function () { self.closeDrawer(); });
@@ -2399,9 +2396,13 @@ var SympyEditor = (function () {
       var offer = setTimeout(function () {
         if (self.backend.interrupt && (!self.backend.canInterrupt || self.backend.canInterrupt())) self.interruptBtn.hidden = false;
       }, this.opts.interruptAfter);
+      var wasSrepr = this.state ? this.state.srepr : null;
       try {
         var snap = await this.backend.send(msg, function (text) { self._report(text); });
         if (snap) await this.setState(snap);
+        if ((msg.action === "apply" || msg.action === "call") && snap && !snap.error && snap.srepr === wasSrepr) {
+          this._setStatus("No change: " + this._workingText(msg).replace(/^Computing /, "").replace(/…$/, "") + " leaves the expression as it is");
+        }
       } catch (e) {
         this._showError(String((e && e.message) || e));
         this._applySelection();
@@ -2536,11 +2537,11 @@ var SympyEditor = (function () {
       if (this.drawer.hidden) this.openDrawer(); else this.closeDrawer();
     }
 
+    /** "history" opens the current session's history sub-tab; anything else closes it. */
     showDrawerTab(name) {
       if (!this.drawer) return;
-      var tabs = this.drawerTabs.querySelectorAll("[data-tab]");
-      for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle("se-tab-current", tabs[i].getAttribute("data-tab") === name);
-      this.sessionsPane.hidden = name !== "sessions";
+      var tabs = this.subtabs.querySelectorAll("[data-tab]");
+      for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle("se-subtab-current", tabs[i].getAttribute("data-tab") === name);
       this.historyPane.hidden = name !== "history";
     }
 
@@ -2676,12 +2677,14 @@ var SympyEditor = (function () {
         var current = sess.id === store.current;
         var when = new Date(sess.updated || 0);
         var row = h("div", { class: "se-session" + (current ? " se-session-current" : ""), "data-id": sess.id });
-        row.appendChild(h("code", { title: sess.name }, [sess.name || "(new)"]));
-        row.appendChild(h("span", { class: "se-session-when" }, [when.toLocaleDateString() + " " + when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })]));
+        var head = h("div", { class: "se-session-row" });
+        row.appendChild(head);
+        head.appendChild(h("code", { title: sess.name }, [sess.name || "(new)"]));
+        head.appendChild(h("span", { class: "se-session-when" }, [when.toLocaleDateString() + " " + when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })]));
         var open = h("button", { type: "button", "data-open": sess.id, title: "Open this session" }, [current ? "Current" : "Open"]);
         open.disabled = current || !self._sessionsReady;
         open.addEventListener("click", function () { self.openSession(sess.id); });
-        row.appendChild(open);
+        head.appendChild(open);
         var del = h("button", { type: "button", "data-delete": sess.id, title: "Delete this session (click twice)" }, ["Delete"]);
         del.disabled = list.length < 2;
         del.addEventListener("click", function () {
@@ -2690,7 +2693,12 @@ var SympyEditor = (function () {
           del.textContent = "Sure?";
           setTimeout(function () { del.removeAttribute("data-armed"); del.textContent = "Delete"; }, 3000);
         });
-        row.appendChild(del);
+        head.appendChild(del);
+        if (current) {   // the current session's card holds its sub-tabs: the history
+          var steps = self._history && self._history.labels ? self._history.labels.length : 0;
+          self.subtabs.querySelector("[data-tab=history]").textContent = "History" + (steps ? " (" + steps + ")" : "");
+          row.appendChild(h("div", { class: "se-session-sub" }, [self.subtabs, self.historyPane]));
+        }
         body.appendChild(row);
       });
       var add = h("button", { type: "button", class: "se-session-new", title: "Start a new session: an empty formula, a copy of this one, or an example" }, ["New session\u2026"]);
@@ -2699,8 +2707,6 @@ var SympyEditor = (function () {
       add.addEventListener("click", function () { self._showSessionPicker(addRow); });
       body.appendChild(addRow);
       // The history of the current session: one row per step, the current one marked.
-      var current = list.filter(function (s) { return s.id === store.current; })[0];
-      this.historyPane.querySelector(".se-history-of").textContent = current ? "Session: " + (current.name || "(new)") : "";
       var hist = this.historyBody;
       hist.textContent = "";
       var h_ = this._history;

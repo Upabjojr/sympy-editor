@@ -212,14 +212,15 @@ lost.
 
 ### Sessions and history (mobile app, or `options={"sessions": True}`)
 
-The **☰** button opens a lateral drawer, out of the widget, with two tabs.
-**Sessions** lists your expressions, each with its own undo history, kept in
-the browser's storage: **New session…** offers an empty formula (the
-default: you type it in the source line), a copy of the current expression,
-or one of the built-in examples (`sympy_editor.examples`); **Open** switches
-(the one you leave is saved first); **Delete** (click twice) removes one.
-**History** shows the current session's steps, one line each: click a step
-to go back (or forward) to it.  Available on Pyodide-backed pages.
+The **☰** button opens a lateral drawer, out of the widget, listing your
+**sessions** — expressions, each with its own undo history, kept in the
+browser's storage.  **New session…** offers an empty formula (the default:
+you type it in the source line), a copy of the current expression, or one
+of the built-in examples (`sympy_editor.examples`); **Open** switches (the
+one you leave is saved first); **Delete** (click twice) removes one.  The
+current session is a card, and its **History** is a sub-tab inside that
+card: one line per step, click one to go back (or forward) to it.
+Available on Pyodide-backed pages.
 
 On a narrow screen the toolbar buttons wrap onto as many rows as they need,
 and so does the action bar under a selection: every button stays reachable.

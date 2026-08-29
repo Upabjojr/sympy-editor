@@ -1180,9 +1180,11 @@ def test_long_computation_shows_spinner_and_can_be_interrupted(browser):
         _next_state(page, lambda: button.click())
         assert "Interrupted" in page.locator(".se-error").inner_text()
         assert not overlay.is_visible() and doc.expr == x + 1
-        # the editor works normally afterwards
+        # the editor works normally afterwards; a transformation that changes nothing says so
         _next_state(page, lambda: page.select_option(".se-ops", "expand"))
-        assert page.locator(".se-error").is_hidden() and page.errors == []
+        assert page.locator(".se-error").is_hidden()
+        assert _wait(lambda: page.locator(".se-status").inner_text().startswith("No change: Expand"))
+        assert page.errors == []
     finally:
         srv.shutdown()
         srv.server_close()
@@ -1609,12 +1611,13 @@ def test_pyodide_worker_interrupt_and_sessions(browser, tmp_path):
         assert _wait(lambda: page.locator(".se-drawer").is_visible())
         assert page.locator(".se-session").count() == 2                # one session + the "new" row
         assert _wait(lambda: page.locator(".se-step").count() >= 1, timeout=10)
-        # two tabs: the session list, and the history of the current session
-        assert page.locator(".se-drawer-pane[data-pane=sessions]").is_visible() and page.locator(".se-drawer-pane[data-pane=history]").is_hidden()
-        page.locator('.se-tab[data-tab="history"]').click()
-        assert page.locator(".se-drawer-pane[data-pane=history]").is_visible() and page.locator(".se-drawer-pane[data-pane=sessions]").is_hidden()
-        assert page.locator(".se-history-of").inner_text().startswith("Session:")
-        page.locator('.se-tab[data-tab="sessions"]').click()
+        # the history is a sub-tab nested inside the current session's card, collapsed by default
+        assert page.locator(".se-drawer-pane[data-pane=history]").is_hidden()
+        assert page.locator(".se-session-current .se-subtab[data-tab=history]").count() == 1
+        page.locator('.se-session-current .se-subtab[data-tab="history"]').click()
+        assert page.locator(".se-session-current .se-drawer-pane[data-pane=history]").is_visible()
+        page.locator('.se-session-current .se-subtab[data-tab="history"]').click()          # toggles
+        assert page.locator(".se-drawer-pane[data-pane=history]").is_hidden()
         # "New session…" offers an empty formula (default), a copy, and the examples
         page.locator(".se-session-new").click()
         picker = page.locator(".se-session-picker")
@@ -1639,14 +1642,14 @@ def test_pyodide_worker_interrupt_and_sessions(browser, tmp_path):
         assert _wait(lambda: page.evaluate("JSON.parse(localStorage.getItem('sympy-editor:sessions')).list.some(s => s.name === 'x + 1')"), timeout=10)
         # the history of this session has two steps (the placeholder, then x + 1); the first one can be jumped to
         page.locator('.se-toolbar [data-cmd="drawer"]').click()
-        page.locator('.se-tab[data-tab="history"]').click()
+        page.locator('.se-session-current .se-subtab[data-tab="history"]').click()
         assert _wait(lambda: page.locator(".se-step").count() == 2 and "se-step-current" in page.locator(".se-step").nth(1).get_attribute("class"), timeout=10)
+        assert "(2)" in page.locator('.se-session-current .se-subtab[data-tab="history"]').inner_text()
         _next_state(page, lambda: page.locator(".se-step").first.click())
         assert page.evaluate(f"{ed}.state.src") == "0" and page.evaluate(f"{ed}.state.can_redo")
         # switching back to the first session restores its expression
-        page.locator('.se-tab[data-tab="sessions"]').click()
         page.locator('.se-session code', has_text=str(big)).first.locator("xpath=..").locator("button[data-open]").click()
-        assert _wait(lambda: page.evaluate(f"{ed}.state.src") == str(big) and page.locator(".se-session-current code").inner_text() == str(big), timeout=60)
+        assert _wait(lambda: page.evaluate(f"{ed}.state.src") == str(big) and page.locator(".se-session-current .se-session-row code").inner_text() == str(big), timeout=60)
         page.locator(".se-drawer-close").click()
         assert page.locator(".se-drawer").is_hidden()
         assert errors == []
