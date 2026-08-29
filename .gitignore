@@ -17,3 +17,6 @@ mobile/android/.idea/
 mobile/ios/*.xcodeproj/
 mobile/ios/SymPyEditor/Info.plist
 mobile/android/gradle/wrapper/gradle-wrapper.jar
+
+# web app build
+webapp/dist/

@@ -97,10 +97,14 @@ def vendor(out: Path, cache: Path) -> dict:
     }
 
 
-def build(out: Path, *, cdn: bool = False, cache: Path | None = None, expr=None, title: str = "SymPy editor") -> Path:
+def build(out: Path, *, cdn: bool = False, cache: Path | None = None, expr=None, title: str = "SymPy editor",
+          head: str = "") -> Path:
+    """Write the bundle to ``out``; ``head`` is extra ``<head>`` markup (the
+    web app's manifest and service worker, see ``webapp/build.py``)."""
     out.mkdir(parents=True, exist_ok=True)
     urls = None if cdn else vendor(out, cache or Path.home() / ".cache" / "sympy-editor")
-    page = to_html(expr if expr is not None else demo_expression(), urls=urls, title=title,
+    page = to_html(expr if expr is not None else demo_expression(), urls=urls, title=title, head=head,
+                   element_id="sympy-editor-app",                         # reproducible: the web app's cache is keyed by content
                    options={"rememberZoom": True, "sessions": True})   # an app keeps its zoom and sessions between launches
     (out / "index.html").write_text(page, encoding="utf-8")
     return out

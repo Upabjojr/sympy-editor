@@ -178,6 +178,16 @@ and iOS (SwiftUI `WKWebView`) app: `python mobile/build_www.py` produces the
 shared, offline-capable bundle, and each platform folder is a few files that
 just display it.  See `mobile/README.md`.
 
+### Web app
+
+`python webapp/build.py` builds the same page as an installable, offline-capable
+web app (a PWA) in `webapp/dist/`: the bundle plus a manifest, icons and a
+service worker that caches everything on the first visit.  Sessions, history
+and zoom live in the browser's storage, as in the app.  `--serve` tries it at
+`http://127.0.0.1:8000/`; `dist/` is a static site for any https host, and
+`.github/workflows/webapp.yml` publishes it with GitHub Pages (enable Pages
+with "GitHub Actions" as the source once).
+
 ### The source line
 
 The SymPy source under the formula is linked to the rendering: select a

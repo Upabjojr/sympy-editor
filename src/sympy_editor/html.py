@@ -143,7 +143,7 @@ _PAGE = """<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>%(title)s</title>
-<style>
+%(head)s<style>
   body { margin: 2rem; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
          background: #ffffff; color: #1f2328; }
   @media (prefers-color-scheme: dark) { body { background: #1e1e1e; color: #e6e6e6; } }
@@ -164,8 +164,12 @@ _PAGE = """<!DOCTYPE html>
 """
 
 
-def render_page(config: Dict[str, Any], title: str = "SymPy editor") -> str:
-    return _PAGE % {"title": _html.escape(title), "fragment": render_fragment(config)}
+def render_page(config: Dict[str, Any], title: str = "SymPy editor", head: str = "",
+                element_id: Optional[str] = None) -> str:
+    """The full page; ``head`` is extra markup for its ``<head>`` (a web app
+    manifest, meta tags, a service-worker registration...); ``element_id``
+    fixes the editor's element id (random otherwise) for a reproducible page."""
+    return _PAGE % {"title": _html.escape(title), "fragment": render_fragment(config, element_id), "head": head}
 
 
 def to_html(
@@ -177,6 +181,8 @@ def to_html(
     title: str = "SymPy editor",
     options: Optional[Dict[str, Any]] = None,
     urls: Optional[Dict[str, str]] = None,
+    head: str = "",
+    element_id: Optional[str] = None,
     **document_kwargs,
 ) -> str:
     """Render ``expr`` as HTML.
@@ -197,13 +203,18 @@ def to_html(
         ``readOnly``...), see ``DEFAULTS`` in editor.js.
     urls
         Override CDN URLs (``katexJs``, ``katexCss``, ``pyodideJs``, ``pyodideIndex``).
+    head
+        Extra markup for the ``<head>`` of a full page (ignored for a fragment).
+    element_id
+        The id of the editor's element (a random one by default; fix it for a
+        reproducible page, e.g. a web app bundle whose cache is keyed by content).
     document_kwargs
         Passed to :class:`Document` (``printer_settings``, ``parser``...).
     """
     doc = _as_document(expr, **document_kwargs)
     backend = backend or ("pyodide" if editable else "readonly")
     config = build_config(doc, backend=backend, options=options, urls=urls)
-    return render_page(config, title) if full_page else render_fragment(config)
+    return render_page(config, title, head, element_id) if full_page else render_fragment(config, element_id)
 
 
 def save_html(expr, path, **kwargs) -> Path:

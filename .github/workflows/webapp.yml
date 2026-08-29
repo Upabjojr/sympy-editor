@@ -1,0 +1,42 @@
+name: Web app
+
+# Builds the web app (webapp/build.py) and publishes it with GitHub Pages.
+# Enable Pages for the repository (Settings > Pages > Source: GitHub Actions)
+# once; then every push to the default branch deploys it.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, main]
+    paths: ["src/**", "mobile/build_www.py", "webapp/**", ".github/workflows/webapp.yml"]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -e .
+      - run: python webapp/build.py --out webapp/dist
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: webapp/dist }
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

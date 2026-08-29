@@ -359,6 +359,19 @@ pip package.  The rule is minimal wrapping and maximal sharing:
   `tests/test_mobile.py` builds the bundle and, with
   `SYMPY_EDITOR_SLOW_TESTS=1`, edits in it with all external requests blocked.
 
+## Web app (`webapp/`)
+
+`webapp/build.py` builds `webapp/dist/`: `mobile/build_www.build(...)` with a
+`head` (manifest link, theme/mobile meta tags, the service-worker
+registration; `to_html(head=...)` → `render_page`) plus
+`manifest.webmanifest`, icons (an SVG, and PNGs written without any imaging
+library) and `sw.js`, which precaches every file of the bundle under a cache
+named by a hash of the bundle (cache-first for same-origin requests; a new
+build replaces the old cache).  Not part of the Android bundle: a service
+worker cannot fetch through `WebViewAssetLoader`.  `tests/test_webapp.py`
+builds a `--cdn` copy and checks the worker installs and caches in Chromium;
+`.github/workflows/webapp.yml` deploys `dist/` to GitHub Pages.
+
 ## Conventions
 
 - Python ≥ 3.9, SymPy ≥ 1.13 (`pyproject.toml`; Pyodide bundles 1.13.3); no
