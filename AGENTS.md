@@ -94,6 +94,16 @@ Two conventions between printer, document and front end:
   through the annotation wrappers.  `_print_Add` prints a negative term as
   `- (negated term)` inside the term's span, and the str printer strips the
   sign inside nested wrappers (`_strip_minus`).
+- **The empty view.**  Deleting the whole expression (`editSource("")`,
+  also an empty new session) puts `.se-empty` on the view and opens a field
+  in it (`beginEmptyInput`, `.se-inline-empty`, `this.emptyField`); a click
+  or a typed character on the empty view opens it too.  Typing mirrors the
+  text into the source line and schedules the usual preview; `_render`
+  re-appends the field (focus and caret restored) after KaTeX replaced the
+  view's content, so the preview shows above it.  Enter sends `set`, Esc
+  ends it and `revertSource()` brings the expression back; a committed
+  state or `revertSource` ends it (`_endEmptyInput`); blur applies a
+  non-empty field, checked in a timeout so a re-render's blur does not.
 - **Insertion caret.**  `snapshot()` marks nodes whose argument list can
   grow (`insertable`, with `nargs`: Add, Mul, MatMul, function calls, sets...).
   The front end computes the gaps between the rendered arguments of such

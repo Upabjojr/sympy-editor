@@ -563,7 +563,7 @@ var SympyEditor = (function () {
           // (Delete on the whole expression edits in the source line: taking
           // the focus away would blur it and bring the expression back).
           var active = document.activeElement;
-          if (cmd !== "edit" && cmd !== "keyboard" && active !== self.source && active !== self.input) self.view.focus({ preventScroll: true });
+          if (cmd !== "edit" && cmd !== "keyboard" && active !== self.source && active !== self.input && active !== self.emptyField) self.view.focus({ preventScroll: true });
         }
       });
       this.view.addEventListener("mousemove", function (ev) {
@@ -764,6 +764,7 @@ var SympyEditor = (function () {
       } else {
         this.committed = snap;
         if (this._sessionsReady && !snap.error) this._scheduleSessionSave();
+        this._endEmptyInput();
       }
       var same = snap === this.state;   // re-render of the current state (keeps the range)
       var previous = this.state && !this.state.preview ? this.state : this.committed;
@@ -843,6 +844,12 @@ var SympyEditor = (function () {
         }
       }
       this.view.classList.remove("se-empty");
+      if (this.emptyField) {               // the field of the empty view survives the preview rendered above it
+        var field = this.emptyField, pos = field.selectionStart, focused = document.activeElement === field || !field.parentNode;
+        this.view.appendChild(field);
+        this.view.classList.add("se-typing");
+        if (focused) { field.focus({ preventScroll: true }); try { field.setSelectionRange(pos, pos); } catch (e) { /* ignore */ } }
+      }
       if (!this.state.preview) {           // a preview leaves the line being typed alone
         this.source.textContent = this.state.src || "";
         this.sourceDirty = false;
@@ -1323,7 +1330,7 @@ var SympyEditor = (function () {
       if (this._suppressClick) { this._suppressClick = false; return; }   // end of a drag
       if (this.loading) return;
       if (this.closed || (this.input && ev.target === this.input)) return;
-      if (this.view.classList.contains("se-empty")) { this.source.focus(); return; }   // everything was deleted: type in the line
+      if (this.view.classList.contains("se-empty")) { this.beginEmptyInput(); return; }   // everything was deleted: type here
       var leaf = this._leafAt(ev);
       this._gapCache = null;
       // The edges of an object give a caret before/after it; its middle selects it.
@@ -1383,6 +1390,11 @@ var SympyEditor = (function () {
       var ro = this.opts.readOnly;
       var t = this.selected ? this.tree[this.selected] : null;
       var handled = true;
+      if (!ro && !mod && !ev.altKey && k.length === 1 && this.view.classList.contains("se-empty")) {
+        ev.preventDefault();
+        this.beginEmptyInput(k);                                   // everything was deleted: type the new expression here
+        return;
+      }
       if (mod && (k === "z" || k === "Z")) {
         if (!ro) this.send({ action: ev.shiftKey ? "redo" : "undo" });
       } else if (mod && (k === "y" || k === "Y")) {
@@ -1953,6 +1965,7 @@ var SympyEditor = (function () {
       this.source.classList.remove("se-invalid");
       clearTimeout(this._previewTimer);
       this._previewSrc = null;
+      this._endEmptyInput();
       this.view.classList.remove("se-empty");
       if (this.state && this.state.preview && this.committed) { this.setState(this.committed); return; }   // back to what is committed
       this._applySelection();
@@ -1986,22 +1999,91 @@ var SympyEditor = (function () {
       }
     }
 
+    /** The empty formula area takes the new expression in a field of its
+     *  own: what is typed is mirrored in the source line and previewed above
+     *  the field; Enter applies it, Esc brings the previous expression back.
+     *  Returns false when there is nothing to open (read-only, not empty). */
+    beginEmptyInput(initial) {
+      if (this.opts.readOnly || this.closed || !this.view.classList.contains("se-empty")) return false;
+      if (this.emptyField) {
+        this.emptyField.focus();
+        if (initial) { this.emptyField.value += initial; this.emptyField.dispatchEvent(new Event("input")); }
+        return true;
+      }
+      var self = this;
+      var input = h("input", { class: "se-inline se-inline-empty", type: "text", spellcheck: "false", autocomplete: "off",
+        placeholder: "expression", "aria-label": "The new expression (SymPy syntax)" });
+      input.value = initial || "";
+      this.view.appendChild(input);
+      this.view.classList.add("se-typing");
+      this.emptyField = input;
+      this._wireField(input, 10);                                  // sizing and "\command" expansion (its Enter/Esc do nothing here)
+      input.addEventListener("input", function () {
+        self.source.textContent = input.value;                     // the line follows; a parsable text is previewed
+        self.sourceDirty = true;
+        self.source.classList.add("se-dirty");
+        self._schedulePreview();
+      });
+      input.addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          var src = toSource(input.value).trim();
+          if (!src) return;
+          self._endEmptyInput();
+          self.source.textContent = src;
+          self.send({ action: "set", src: src });
+        } else if (ev.key === "Escape") {
+          ev.preventDefault();
+          self._endEmptyInput();
+          self.revertSource();
+          self.view.focus({ preventScroll: true });
+        }
+      });
+      input.addEventListener("blur", function () {
+        // Leaving a non-empty field applies it, like leaving the source line
+        // does - checked after the fact: a preview re-rendering the view
+        // takes the field out and puts it back (with the focus) at once.
+        setTimeout(function () {
+          if (self.emptyField !== input || self.closed || !input.parentNode || document.activeElement === input) return;
+          if (toSource(input.value).trim()) input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+        }, 0);
+      });
+      this._setStatus("Everything removed: type the new expression – Enter applies, Esc restores the previous one");
+      if (initial) input.dispatchEvent(new Event("input"));
+      input.focus();
+      return true;
+    }
+
+    _endEmptyInput() {
+      var field = this.emptyField;
+      if (!field) return;
+      this.emptyField = null;
+      if (field.parentNode) field.parentNode.removeChild(field);
+      this.view.classList.remove("se-typing");
+    }
+
     /** Put the keyboard in the source line with everything selected. */
     editSource(text) {
       if (this.opts.readOnly || !this.opts.showSource) return false;
-      this.source.focus();
       var sel = window.getSelection();
       if (text !== undefined) {
         // Start over: the line holds only `text` (possibly nothing) until Enter applies it.
         this.source.textContent = text;
         this.sourceDirty = true;
         this.source.classList.add("se-dirty");
-        if (text) this._schedulePreview();
-        else { this.select(null); this.view.classList.add("se-empty"); }   // the formula is gone until something is typed
+        if (!text) {
+          // The formula is gone until something is typed - in a field where it was.
+          this.select(null);
+          this.view.classList.add("se-empty");
+          if (!this.beginEmptyInput()) this.source.focus();
+          return true;
+        }
+        this.source.focus();
+        this._schedulePreview();
         if (sel && this.source.firstChild) sel.collapse(this.source.firstChild, this.source.firstChild.length);
-        this._setStatus(text ? "Editing the whole expression – Enter applies, Esc restores the previous one"
-                             : "Everything removed: type the new expression – Enter applies, Esc restores the previous one");
+        this._setStatus("Editing the whole expression – Enter applies, Esc restores the previous one");
       } else {
+        this.source.focus();
         if (sel && this.source.firstChild) sel.selectAllChildren(this.source);
         this._setStatus("Editing the whole expression as SymPy source – Enter applies, Esc reverts");
       }

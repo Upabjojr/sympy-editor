@@ -75,7 +75,7 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | LaTeX shortcuts in the field | | `\theta` becomes `θ` as you type (Greek letters, `\infty`, `\sin`, `\cdot`, `\le`...); Greek letters are SymPy's names (`θ` is `theta`, `λ` is `lamda`, `∞` is `oo`) |
 | Edit selection's existing text | double-click / **Edit** | Enter |
 | Apply / cancel an edit | click elsewhere applies | Enter / Esc |
-| Remove the selection entirely (on the whole expression: the formula is emptied and stays so - clicking it puts the cursor in the empty source line - until you type the new one; Esc brings the old one back) | **Delete** | Del |
+| Remove the selection entirely (on the whole expression: the formula is emptied and a field takes its place - type the new expression there, it is previewed as you type, Enter applies it; Esc brings the old one back) | **Delete** | Del |
 | Remove the node but keep its argument (`cos(θ)` → `θ`, `∫f dx` → `f`) | **Unwrap** | Backspace — a node with several arguments (`x²`: the base or the exponent, a sum, a fraction) asks which one to leave, with the one ↑ came from ready to confirm |
 | Put the node inside a function (`x` → `cos(x)`, `f(x)`, `∫x dx`) | `Document.wrap(path, "cos")` / `{"action": "wrap"}` | — (the function box **calls** a function; wrap builds without computing) |
 | Keep only the selection (it becomes the whole expression) | **Isolate** | Ctrl+Shift+I |

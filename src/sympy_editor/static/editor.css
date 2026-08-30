@@ -335,7 +335,10 @@
 
 /* the whole expression was deleted: nothing to show until something is typed */
 .se-view.se-empty .katex-display, .se-view.se-empty .katex { display: none; }
-.se-view.se-empty::before { content: "Empty – type the new expression in the line below (Esc brings the old one back)"; color: var(--se-muted); font-size: 0.7em; }
+.se-view.se-empty::before { content: "Empty – type the new expression here (Esc brings the old one back)"; color: var(--se-muted); font-size: 0.7em; }
+.se-view.se-empty.se-typing::before { display: none; }
+.se-view .se-inline-empty { display: inline-block; font-size: 1em; min-width: 10ch; margin: 0.3em 0; }
+.se-view:not(.se-empty) .se-inline-empty { display: block; margin-top: 0.5em; }   /* under the preview of what is typed */
 
 /* the lateral drawer: sessions and the history of the current one */
 .se-backdrop { position: fixed; inset: 0; z-index: 900; background: rgba(0, 0, 0, 0); transition: background 0.2s; }

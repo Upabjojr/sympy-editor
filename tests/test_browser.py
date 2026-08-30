@@ -1258,15 +1258,19 @@ def test_delete_button_empties_the_whole_expression(browser, serve_expr):
     page.locator(".se-view").focus()
     page.keyboard.press("ArrowDown")                              # the whole expression
     page.locator('.se-toolbar [data-cmd="delete"]').click()        # the button (a phone has no Delete key)
-    # the focus stays in the source line, which is empty; the formula is hidden
-    assert page.evaluate("document.activeElement.className").startswith("se-source")
+    # the focus is in a field where the formula was; the source line is empty; the formula is hidden
+    assert page.evaluate("document.activeElement.className") == "se-inline se-inline-empty"
+    assert page.locator(".se-view .se-inline-empty").count() == 1
     assert page.locator(".se-source").inner_text() == ""
     assert "se-empty" in page.locator(".se-view").get_attribute("class")
     assert page.locator(".se-view .katex").is_hidden()
     page.keyboard.type("z")
     _wait(lambda: "se-empty" not in page.locator(".se-view").get_attribute("class"))   # previewed as it is typed
+    assert page.locator(".se-source").inner_text() == "z"                              # the line follows
+    assert page.evaluate("document.activeElement.className") == "se-inline se-inline-empty"   # still typing there
+    page.keyboard.type("**2")
     _next_state(page, lambda: page.keyboard.press("Enter"))
-    assert doc.expr == z
+    assert doc.expr == z**2 and page.locator(".se-inline-empty").count() == 0
     assert page.errors == []
 
 
@@ -1441,24 +1445,37 @@ def test_empty_formula_keeps_the_cursor_and_zoom_block_stays_together(browser, s
     # the zoom buttons share one row even when the toolbar wraps
     tops = page.evaluate("[...document.querySelectorAll('.se-zoom button')].map(b => Math.round(b.getBoundingClientRect().top))")
     assert len(tops) == 3 and len(set(tops)) == 1
-    # delete everything, then click the (empty) formula area: the cursor goes to the empty line, nothing comes back
+    # delete everything, then click the (empty) formula area: a field to type in, nothing comes back
     page.locator(".se-view").focus()
     page.keyboard.press("ArrowDown")
     page.locator('.se-toolbar [data-cmd="delete"]').click()
     assert "se-empty" in page.locator(".se-view").get_attribute("class")
+    page.locator(".se-view").focus()                                                   # away from the field
     r = page.locator(".se-view").bounding_box()
     page.mouse.click(r["x"] + r["width"] / 2, r["y"] + r["height"] / 2)
-    assert page.evaluate("document.activeElement.className").startswith("se-source")
+    assert page.evaluate("document.activeElement.className") == "se-inline se-inline-empty"
     assert page.locator(".se-source").inner_text() == "" and "se-empty" in page.locator(".se-view").get_attribute("class")
     page.keyboard.type("q + 1")
     _next_state(page, lambda: page.keyboard.press("Enter"))
     assert doc.expr == symbols("q") + 1
-    # Esc from the empty state still brings the previous expression back
+    # Esc from the empty state still brings the previous expression back; so does typing straight into the empty view
     page.locator(".se-view").focus()
     page.keyboard.press("ArrowDown")
     page.keyboard.press("Delete")
     page.keyboard.press("Escape")
     assert page.locator(".se-source").inner_text() == "q + 1" and "se-empty" not in page.locator(".se-view").get_attribute("class")
+    page.locator(".se-view").focus()
+    page.keyboard.press("ArrowDown")
+    page.keyboard.press("Delete")
+    page.keyboard.press("Escape")                                                      # the field goes, the view keeps the focus
+    page.locator(".se-view").focus()
+    page.keyboard.press("ArrowDown")
+    page.keyboard.press("Delete")
+    page.evaluate("document.querySelector('.se-view').focus()")
+    page.keyboard.type("w")                                                            # typing into the empty view opens the field with it
+    assert page.locator(".se-inline-empty").input_value() == "w"
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    assert doc.expr == symbols("w")
     assert errors == []
 
 
@@ -1900,7 +1917,7 @@ def test_pyodide_worker_interrupt_and_sessions(browser, tmp_path):
         page.locator('.se-choice[data-start="empty"]').click()
         assert _wait(lambda: page.locator(".se-session").count() == 4, timeout=30)
         assert _wait(lambda: page.locator(".se-drawer").is_hidden() and "se-empty" in page.locator(".se-view").get_attribute("class"), timeout=10)
-        assert page.evaluate("document.activeElement.className").startswith("se-source") and page.locator(".se-source").inner_text() == ""
+        assert page.evaluate("document.activeElement.className") == "se-inline se-inline-empty" and page.locator(".se-source").inner_text() == ""
         page.keyboard.type("x + 1")
         _next_state(page, lambda: page.keyboard.press("Enter"))
         assert _wait(lambda: page.evaluate("JSON.parse(localStorage.getItem('sympy-editor:sessions')).list.some(s => s.name === 'x + 1')"), timeout=10)
