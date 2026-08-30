@@ -1935,9 +1935,12 @@ def test_pyodide_worker_interrupt_and_sessions(browser, tmp_path):
         assert page.locator(".se-step").first.locator(".se-step-formulas .katex").count() == 1   # the first step: just the formula
         _next_state(page, lambda: page.locator(".se-step").first.click())
         assert page.evaluate(f"{ed}.state.src") == "0" and page.evaluate(f"{ed}.state.can_redo")
-        # switching back to the first session: tapping its row (not only its Open button) opens it
+        # switching back to the first session: tapping its row (not only its Open button) opens it, and the drawer closes
         page.locator('.se-session[role="button"]', has_text=str(big)).first.locator(".se-session-row code").click()
-        assert _wait(lambda: page.evaluate(f"{ed}.state.src") == str(big) and page.locator(".se-session-current .se-session-row code").inner_text() == str(big), timeout=60)
+        assert _wait(lambda: page.evaluate(f"{ed}.state.src") == str(big) and page.locator(".se-drawer").is_hidden(), timeout=60)
+        page.locator('.se-toolbar [data-cmd="drawer"]').click()
+        assert _wait(lambda: page.locator(".se-drawer").is_visible())
+        assert page.locator(".se-session-current .se-session-row code").inner_text() == str(big)
         page.locator(".se-drawer-close").click()
         assert page.locator(".se-drawer").is_hidden()
         assert errors == []

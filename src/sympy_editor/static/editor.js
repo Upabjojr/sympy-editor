@@ -3178,7 +3178,8 @@ var SympyEditor = (function () {
         this.select(null);
         this._hideCaret();
         await this.setState(snap);
-        if (sess.empty) { this.closeDrawer(); this.editSource(""); }   // an empty session: type the formula
+        this.closeDrawer();                                             // the session is open: back to its formula
+        if (sess.empty) this.editSource("");                            // an empty session: type the formula
       } catch (e) {
         this._showError("The session could not be opened: " + ((e && e.message) || e));
       } finally {
