@@ -938,3 +938,47 @@ def test_history_records_what_produced_each_step():
     # edits from Python carry no label
     doc.replace("/", "y")
     assert doc.export()["labels"][-1] is None
+
+
+def test_the_operator_between_two_arguments_can_be_changed():
+    from sympy import And, Eq, Lt, MatrixSymbol, Or, symbols, sympify
+    x, y, z = symbols("x y z")
+
+    def op(expr, o, left=0, right=1, path="/", **kw):
+        d = Document(expr)
+        snap = d.handle(dict({"action": "operator", "path": path, "left": left, "right": right, "op": o}, **kw))
+        assert not snap["error"], snap["error"]
+        return d.expr
+
+    assert op(x + y, "*") == x * y                       # "+" turned into "*"
+    assert op(x + y, "") == x * y                        # deleted: juxtaposition multiplies
+    assert op(x + y, "-") == x - y
+    assert op(x - y, "*") == x * y                       # the "-" of a negative term is the operator
+    assert op(x - y, "+") == x + y
+    assert op(x - y, "") == x * y
+    assert op(x + y + z, "*", left=0, right=1) == x * y + z   # only the pair binds
+    assert op(x * y * z, "+", left=1, right=2) == x * y + z   # "+" splits the product at the operator
+    assert op(x * y * z, "-", left=0, right=1) == x - y * z
+    assert op(x * y * z, "/", left=1, right=2) == x * y / z
+    assert op(x + y, "^") == x ** y
+    assert op(x + y, "=") == Eq(x, y)
+    assert op(Eq(x, y), "<") == Lt(x, y)
+    assert op(Eq(x, y), "+") == x + y
+    assert op(x ** y, "*") == x * y
+    assert op(And(x > 0, y > 0), "|") == Or(x > 0, y > 0)
+    A, B = MatrixSymbol("A", 2, 2), MatrixSymbol("B", 2, 2)
+    assert op(A + B, "*") == A * B
+    assert op(A * B, "+") == A + B
+    # No-ops do not touch the history; unevaluated keeps 2*3 unevaluated.
+    d = Document(x + y)
+    d.handle({"action": "operator", "path": "/", "left": 0, "right": 1, "op": "+"})
+    assert not d.can_undo
+    assert op(sympify("2 + 3", evaluate=False), "*") == 6
+    assert str(op(sympify("2 + 3", evaluate=False), "*", lazy=True)) == "2*3"
+    # "=" needs the two arguments to be the whole node.
+    snap = Document(x + y + z).handle({"action": "operator", "path": "/", "left": 0, "right": 1, "op": "="})
+    assert "two sides" in snap["error"]
+    # A lone operator typed at a caret between two arguments does the same.
+    d = Document(x * z)
+    d.handle({"action": "insert", "path": "/", "index": 1, "src": "+", "left": 0, "right": 1})
+    assert d.expr == x + z

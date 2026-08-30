@@ -71,7 +71,8 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | Go inside: the sub-expression you came up from, or the first one (on an atom: a caret after it) | **↓** (toolbar or action bar) | ↓ |
 | Select a range of adjacent terms / factors | drag across them (mouse, touch or pen) | Shift+→ / Shift+← grow and shrink the range; ←/→/↓ collapse it, ↑ selects the whole sum/product |
 | Replace selection by typing | | just start typing (SymPy syntax) |
-| Type at a caret | click **between** two terms (or on the operator), or at the edge of an object: a caret appears; what you type is spliced between its neighbours like in a text editor: operators you type are used as written, a missing one means juxtaposition (`cos(t)` after `x` gives `x cos(t)`), `+`/`-` bind at the sum level (`x z` with `+y+` typed between gives `x + y + z`), `, …` adds a function argument | Tab / Shift+Tab put the caret after / before the selection; ←/→ walk it through the formula like a text cursor (into a composite neighbour, out of a node at its ends); ↑ selects the object it is attached to (↓ does nothing at a caret); Enter opens an empty field; Esc removes it |
+| Change the operator between two arguments | click the operator itself (`+`, `−`, `⋅`, `=`, the `−` of `x − y`...): it is selected and a small palette appears; pick `+ − × ÷ ^ =` or **Delete** (side by side, the two multiply: `x + y` → `xy`) | with the operator selected, type `+ - * / ^ = < > & \|`; Del removes it; Esc deselects; ←/→/↓ select an argument, ↑ the node.  In a sum `*` binds just the two terms (`x + y + z` → `xy + z`); in a product `+` splits it there (`x·y·z` → `x + yz`).  A lone operator typed at a caret does the same |
+| Type at a caret | click **between** two terms, or at the edge of an object: a caret appears; what you type is spliced between its neighbours like in a text editor: operators you type are used as written, a missing one means juxtaposition (`cos(t)` after `x` gives `x cos(t)`), `+`/`-` bind at the sum level (`x z` with `+y+` typed between gives `x + y + z`), `, …` adds a function argument | Tab / Shift+Tab put the caret after / before the selection; ←/→ walk it through the formula like a text cursor (into a composite neighbour, out of a node at its ends); ↑ selects the object it is attached to (↓ does nothing at a caret); Enter opens an empty field; Esc removes it |
 | LaTeX shortcuts in the field | | `\theta` becomes `θ` as you type (Greek letters, `\infty`, `\sin`, `\cdot`, `\le`...); Greek letters are SymPy's names (`θ` is `theta`, `λ` is `lamda`, `∞` is `oo`) |
 | Edit selection's existing text | double-click / **Edit** | Enter |
 | Apply / cancel an edit | click elsewhere applies | Enter / Esc |
@@ -102,8 +103,9 @@ edited, deleted and transformed like a single node: typing replaces it, Del
 removes its terms, an operation picked in a menu transforms just those terms.
 
 On phones and tablets: tap to select, **tap the selected node again to edit
-it**, tap a gap for a caret and tap it again to insert, drag to select a
-range; the toolbar (one strip that scrolls sideways on a narrow screen) has ↑
+it**, tap a gap for a caret and tap it again to insert, tap an operator to
+change it from its palette, drag to select a
+range; the toolbar has ↑
 for the parent and a ⌨ button that opens the keyboard for the selection, the
 caret or the whole expression; the menus apply an operation as soon as it is
 picked.  Two fingers zoom the formula, a drag on its empty space scrolls it
@@ -278,8 +280,13 @@ what went in red, then this one with what came in green - and clicking a
 row goes back (or forward) to that step.  Tapping a session's row opens
 it.  Available on Pyodide-backed pages.
 
-On a narrow screen the toolbar buttons wrap onto as many rows as they need,
-and so does the action bar under a selection: every button stays reachable.
+The toolbar is organised in three rows of related blocks: the session and
+its timeline (sessions, undo/redo, History, Done) with the zoom; the
+selection (navigation arrows, then Edit/Unwrap/Delete/Isolate and the
+clipboard); and what to apply (the Transform and type menus, the function
+box, the unevaluated toggle).  On a narrow screen each row wraps onto as
+many lines as it needs, and so does the action bar under a selection:
+every button stays reachable.
 
 ## How it works
 

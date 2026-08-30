@@ -119,6 +119,13 @@ var SympyEditor = (function () {
   // denominator of what is shown as a fraction, "/neg" the product after a
   // leading minus (see printer.view_parts).
   var PART_ORDER = { neg: 0, n: 0, d: 1 };
+  // What KaTeX shows for the operator between two arguments, and the key
+  // (SymPy operator) each stands for.  A glyph is selectable: typing another
+  // operator over it changes how the two arguments are combined.
+  var OPERATOR_GLYPHS = { "+": "+", "\u2212": "-", "-": "-", "\u22c5": "*", "\u00b7": "*", "\u00d7": "*",
+                          "=": "=", "<": "<", ">": ">", "\u2264": "<", "\u2265": ">", "\u2260": "=",
+                          "\u2227": "&", "\u2228": "|" };
+  var OPERATOR_KEYS = "+-*/^=<>&|";
   function parentPath(p) {
     if (!p || p === "/") return null;
     var i = p.lastIndexOf("/");
@@ -350,21 +357,49 @@ var SympyEditor = (function () {
         return b;
       };
       var sep = function () { self.tools.appendChild(h("span", { class: "se-sep" })); };
+      var brk = function () { self.tools.appendChild(h("span", { class: "se-break" })); };
 
+      // The tools come in three rows of related blocks (a `sep` divides the
+      // blocks of a row, a `brk` starts the next row):
+      //   1. the session and its timeline - sessions drawer, undo/redo,
+      //      history view, Done - and the zoom;
+      //   2. the selection - navigation, then what to do with it;
+      //   3. what to apply - the transform menus and the function box.
       if (o.sessions && !o.readOnly) btn("drawer", "\u2630", "Sessions and history");
       if (!o.readOnly) {
         btn("undo", "↶", "Undo (Ctrl+Z)");
         btn("redo", "↷", "Redo (Ctrl+Shift+Z, Ctrl+Y)");
         sep();
-        btn("edit", "Edit", "Edit the selection in place (Enter, double-click, or just start typing)");
-        btn("unwrap", "Unwrap", "Remove the selected node but keep its argument: cos(θ) → θ (Backspace)");
-        btn("delete", "Delete", "Remove the selection entirely (Del)");
-        btn("isolate", "Isolate", "Keep only the selection: it becomes the whole expression (Ctrl+Shift+I)");
+        btn("history", "History", "View the history of this session: every step, what changed and what produced it - and save it as a web page or a Python script");
+        if (o.finishButton) btn("finish", "Done", "Finish editing and hand the expression back to Python");
+        sep();
+      }
+      // Zoom: the formula's size (also Ctrl+wheel, Ctrl+plus/minus/0, pinch);
+      // the three buttons form one block that wraps as a unit.
+      var zoomBlock = h("span", { class: "se-zoom" });
+      this.tools.appendChild(zoomBlock);
+      var zoomBtn = function (cmd, label, title) { var b = btn(cmd, label, title); zoomBlock.appendChild(b); return b; };
+      zoomBtn("zoomout", "\u2212", "Zoom out (Ctrl+minus, Ctrl+wheel, pinch)");
+      zoomBtn("zoomreset", "100%", "Reset the zoom (Ctrl+0)");
+      zoomBtn("zoomin", "+", "Zoom in (Ctrl+plus, Ctrl+wheel, pinch)");
+      if (!o.readOnly) {
+        brk();
         btn("parent", "↑", "Select the enclosing expression (↑)");
         btn("child", "↓", "Select inside: the sub-expression you came from, or the first one; on an atom, a caret after it (↓)");
         btn("left", "←", "Select the previous sibling, or move the caret left (←)");
         btn("right", "→", "Select the next sibling, or move the caret right (→)");
         sep();
+        btn("edit", "Edit", "Edit the selection in place (Enter, double-click, or just start typing)");
+        btn("unwrap", "Unwrap", "Remove the selected node but keep its argument: cos(θ) → θ (Backspace)");
+        btn("delete", "Delete", "Remove the selection entirely (Del)");
+        btn("isolate", "Isolate", "Keep only the selection: it becomes the whole expression (Ctrl+Shift+I)");
+        sep();
+        btn("keyboard", "⌨", "Open the keyboard: edit the selection, insert at the caret, or edit the whole expression");
+      }
+      btn("copy", "Copy", "Copy the SymPy source of the selection, or of the whole expression (Ctrl+C / Ctrl+X / Ctrl+V work on selections and carets)");
+      if (!o.readOnly) {
+        btn("paste", "Paste", "Paste the clipboard over the selection, or at the caret (Ctrl+V)");
+        brk();
         // General menu: picking an operation applies it to the selection (or
         // the whole expression) at once.
         this.opsSelect = h("select", { class: "se-ops", title: "Transform the selection (or the whole expression)" });
@@ -373,12 +408,6 @@ var SympyEditor = (function () {
         // Integral, Equation...); picking one applies it at once.
         this.typeMenu = h("select", { class: "se-typemenu", hidden: "", title: "Operations specific to the selected type" });
         this.tools.appendChild(this.typeMenu);
-        sep();
-      }
-      if (!o.readOnly) btn("keyboard", "⌨", "Open the keyboard: edit the selection, insert at the caret, or edit the whole expression");
-      btn("copy", "Copy", "Copy the SymPy source of the selection, or of the whole expression (Ctrl+C / Ctrl+X / Ctrl+V work on selections and carets)");
-      if (!o.readOnly) {
-        btn("paste", "Paste", "Paste the clipboard over the selection, or at the caret (Ctrl+V)");
         sep();
         // Function box: search SymPy's functions; a picked function that needs
         // parameters asks for them (see _showFnForm).
@@ -403,19 +432,6 @@ var SympyEditor = (function () {
         this._fnSigs = {};
         this._fnActive = -1;
       }
-      if (o.finishButton && !o.readOnly) {
-        btn("finish", "Done", "Finish editing and hand the expression back to Python");
-      }
-      if (!o.readOnly) btn("history", "History", "View the history of this session: every step, what changed and what produced it - and save it as a web page or a Python script");
-      sep();
-      // Zoom: the formula's size (also Ctrl+wheel, Ctrl+plus/minus/0, pinch);
-      // the three buttons form one block that wraps as a unit.
-      var zoomBlock = h("span", { class: "se-zoom" });
-      this.tools.appendChild(zoomBlock);
-      var zoomBtn = function (cmd, label, title) { var b = btn(cmd, label, title); zoomBlock.appendChild(b); return b; };
-      zoomBtn("zoomout", "\u2212", "Zoom out (Ctrl+minus, Ctrl+wheel, pinch)");
-      zoomBtn("zoomreset", "100%", "Reset the zoom (Ctrl+0)");
-      zoomBtn("zoomin", "+", "Zoom in (Ctrl+plus, Ctrl+wheel, pinch)");
       this.status = h("span", { class: "se-status", "aria-live": "polite" });
       this.toolbar.appendChild(this.status);
       if (o.toolbar) root.appendChild(this.toolbar);
@@ -505,6 +521,20 @@ var SympyEditor = (function () {
           abtn("paste", "Paste", "Paste the clipboard over the selection (Ctrl+V)")
         ]);
         root.appendChild(this.actions);
+        // The palette shown under a selected operator: what it can become.
+        var obtn = function (op, label, title) { return h("button", { type: "button", "data-op": op, title: title }, [label]); };
+        this.opBar = h("div", { class: "se-opbar", hidden: "", role: "toolbar", "aria-label": "Operator" }, [
+          obtn("+", "+", "Add (+)"), obtn("-", "\u2212", "Subtract (-)"), obtn("*", "\u00d7", "Multiply (*)"),
+          obtn("/", "\u00f7", "Divide (/)"), obtn("^", "^", "Power (^)"), obtn("=", "=", "Equation (=)"),
+          obtn("", "Delete", "Remove the operator: side by side, the two multiply (Del)")
+        ]);
+        this.opBar.addEventListener("click", function (ev) {
+          var b = ev.target.closest("button[data-op]");
+          if (!b || !self.junction) return;
+          self.setOperator(b.getAttribute("data-op"));
+          self.view.focus({ preventScroll: true });
+        });
+        root.appendChild(this.opBar);
         // Asked before unwrapping a node that has more than one argument to
         // choose from: x**2 can leave the base or the exponent (see _askKeep).
         this.keepMenu = h("div", { class: "se-keep", hidden: "", role: "toolbar",
@@ -531,6 +561,9 @@ var SympyEditor = (function () {
       // (see _gapsOf); typing there inserts a new argument.
       this.caretEl = h("span", { class: "se-caret", "aria-hidden": "true" });
       this.caret = null;      // {path, index, a, b, leftEl, rightEl, top, bottom, height}
+      // A selected operator glyph: {path, left, right, el, text} - the node
+      // whose arguments `left` and `right` it joins (see _operatorAt).
+      this.junction = null;
       this.inserting = null;  // the caret an open field is inserting at
       this._gapCache = null;
       // Range selection: adjacent arguments of a rangeable node (Add, Mul...),
@@ -1294,6 +1327,7 @@ var SympyEditor = (function () {
     select(path) {
       this._hideKeep();
       this.range = null;
+      this.junction = null;
       if (path) this._hideCaret();
       this.selected = (path && (path in this.tree)) ? path : null;
       this._fillOps();
@@ -1305,6 +1339,21 @@ var SympyEditor = (function () {
       var old = this.view.querySelectorAll(".se-selected");
       for (var i = 0; i < old.length; i++) old[i].classList.remove("se-selected");
       this._drawBoxes("hover", []);
+      var j = this.junction;
+      if (j && (!j.el.isConnected || !this.view.contains(j.el))) j = this.junction = null;   // re-rendered: gone
+      if (this.opBar) this.opBar.hidden = !j;
+      if (j) {
+        j.el.classList.add("se-selected");
+        var jr = this._visualRect(j.el);
+        this._drawBoxes("select", [jr]);
+        var jn = this.state.nodes[j.path];
+        this._setStatus("Operator " + j.text + " in " + jn.type + " " + jn.src
+                        + " (type + - * / ^ = to change it; Delete removes it, the two then multiply)");
+        this._markSource([]);
+        this._placeActions(null);
+        this._positionBar(this.opBar, jr);
+        return;
+      }
       var rangePaths = this._rangePaths();
       if (rangePaths.length) {
         var rects = [];
@@ -1346,6 +1395,13 @@ var SympyEditor = (function () {
       if (this.view.classList.contains("se-empty")) { this.beginEmptyInput(); return; }   // everything was deleted: type here
       var leaf = this._leafAt(ev);
       this._gapCache = null;
+      var junction = this.opts.readOnly ? null : this._operatorAt(ev);
+      if (junction) {
+        this.selectJunction(junction);
+        this.lastLeaf = null;
+        this.view.focus({ preventScroll: true });
+        return;
+      }
       // The edges of an object give a caret before/after it; its middle selects it.
       var edge = leaf && !this.opts.readOnly ? this._edgeCaretAt(leaf, ev.clientX) : null;
       var gap = edge ? edge.gap : (this.opts.readOnly ? null : this._gapAt(ev.clientX, ev.clientY, leaf));
@@ -1420,6 +1476,19 @@ var SympyEditor = (function () {
         this._extendRange(k === "ArrowRight" ? 1 : -1);          // grow / shrink a range
       } else if (k === "Tab" && (this.selected || this.range) && !ro) {
         if (!this.caretAtSelection(ev.shiftKey)) handled = false;
+      } else if (this.junction && k === "Escape") {
+        this.select(null);
+      } else if (this.junction && (k === "Delete" || k === "Backspace")) {
+        if (!ro) this.setOperator("");
+      } else if (this.junction && !mod && !ev.altKey && OPERATOR_KEYS.indexOf(k) >= 0) {
+        if (!ro) this.setOperator(k);
+      } else if (this.junction && k === "ArrowUp") {
+        this.select(this.junction.path);
+      } else if (this.junction && (k === "ArrowLeft" || k === "ArrowRight" || k === "ArrowDown")) {
+        var jj = this.junction, jkids = this.tree[jj.path].children;
+        this.select(jkids[k === "ArrowLeft" ? jj.leftIndex : jj.rightIndex]);
+      } else if (this.junction && k === "Enter") {
+        // nothing to edit in place: the palette (or a key) changes it
       } else if (this.range && k === "Escape") {
         this.range = null;
         this._applySelection();
@@ -1612,9 +1681,15 @@ var SympyEditor = (function () {
                             : false;
       }
       this.actions.hidden = false;
-      // Under the formula's line rather than right under the selection, so
-      // the bar never covers what is below it (the denominator under a
-      // selected numerator) - unless the formula goes on much further down.
+      this._positionBar(this.actions, rect);
+    }
+
+    /** Place a floating bar under `rect` (a selection) - under the formula's
+     *  line rather than right under the selection, so the bar never covers
+     *  what is below it (the denominator under a selected numerator) - unless
+     *  the formula goes on much further down. */
+    _positionBar(bar, rect) {
+      bar.hidden = false;
       var bottom = rect.bottom;
       var formula = this.view.querySelector(".katex");
       if (formula) {
@@ -1623,14 +1698,14 @@ var SympyEditor = (function () {
       }
       var rr = this.root.getBoundingClientRect();
       var left = rect.left - rr.left, top = bottom - rr.top + 6;
-      var maxLeft = Math.max(0, this.root.clientWidth - this.actions.offsetWidth - 4);
-      this.actions.style.left = Math.round(Math.max(0, Math.min(left, maxLeft))) + "px";
-      this.actions.style.top = Math.round(top) + "px";
+      var maxLeft = Math.max(0, this.root.clientWidth - bar.offsetWidth - 4);
+      bar.style.left = Math.round(Math.max(0, Math.min(left, maxLeft))) + "px";
+      bar.style.top = Math.round(top) + "px";
       // Keep the bar inside the formula area so it never covers the source line
       // (measured against the view's own padding, not the room added before).
       this.view.style.paddingBottom = "";
       var vr = this.view.getBoundingClientRect();
-      var overflow = (bottom + 6 + this.actions.offsetHeight + 4) - vr.bottom;
+      var overflow = (bottom + 6 + bar.offsetHeight + 4) - vr.bottom;
       if (overflow > 0) this.view.style.paddingBottom = (parseFloat(getComputedStyle(this.view).paddingBottom) + overflow) + "px";
     }
 
@@ -2251,6 +2326,7 @@ var SympyEditor = (function () {
     _showCaret(gap, x) {
       this._hideCaret();
       this.caret = gap;
+      this.junction = null;
       this._placeActions(null);
       // Vertical extent: the object the caret sits next to (measured now,
       // since the gap may have been computed before a scroll).
@@ -2280,6 +2356,77 @@ var SympyEditor = (function () {
     _hideCaret() {
       this.caret = null;
       if (this.caretEl.parentNode) this.caretEl.parentNode.removeChild(this.caretEl);
+    }
+
+    /** The operator glyph under the pointer - the "+" of a sum, the "\u22c5" of a
+     *  product, "=", "\u2227"... - as a junction {path, left, right, leftIndex,
+     *  rightIndex, el, text}: the node whose arguments (SymPy indices `left`,
+     *  `right`; display indices `leftIndex`, `rightIndex`) it joins.  The
+     *  "\u2212" shown before a negative term is the operator of the enclosing
+     *  sum.  Null when the pointer is not on an operator. */
+    _operatorAt(ev) {
+      if (!this.state || !this.state.nodes || typeof ev.clientX !== "number" || !document.elementsFromPoint) return null;
+      var stack = document.elementsFromPoint(ev.clientX, ev.clientY);
+      var glyph = null, text = "";
+      for (var i = 0; i < stack.length; i++) {
+        var el = stack[i];
+        if (!this.view.contains(el) || el === this.view || el.querySelector("[data-path]")) continue;
+        text = (el.textContent || "").trim();
+        if (!text) continue;                 // struts and spacing carry no glyph
+        // The topmost glyph under the pointer decides: an operator lower in
+        // the stack (its box can stretch over the neighbouring space) must
+        // not steal a click that lands on a letter.
+        if (Object.prototype.hasOwnProperty.call(OPERATOR_GLYPHS, text)) glyph = el;
+        break;
+      }
+      if (!glyph) return null;
+      var owner = glyph.closest("[data-path]");
+      if (!owner || !this.view.contains(owner)) return null;
+      var p = owner.getAttribute("data-path");
+      var gr = this._visualRect(glyph), cx = (gr.left + gr.right) / 2;
+      var rightPath = null;
+      if (OPERATOR_GLYPHS[text] === "-" && this.tree[p] && this.tree[p].parent
+          && Math.abs(gr.left - this._visualRect(owner).left) < 3
+          && /Add$/.test(this.state.nodes[this.tree[p].parent].type)) {
+        rightPath = p; p = this.tree[p].parent;               // the sign of a negative term
+      }
+      var self = this;
+      var kids = this._displayChildren(p);
+      var els = kids.map(function (c) { var e = self._els(c)[0]; return e ? { path: c, rect: self._visualRect(e) } : null; });
+      var left = -1, right = -1;
+      for (var k = 0; k < els.length; k++) {
+        if (!els[k]) continue;
+        var r = els[k].rect;
+        var sameLine = Math.min(r.bottom, gr.bottom) - Math.max(r.top, gr.top) > 0;
+        if (rightPath ? els[k].path === rightPath : (sameLine && r.left >= cx - 1)) { right = k; break; }
+        if (sameLine && r.right <= cx + 1) left = k;
+      }
+      if (left < 0 || right < 0) return null;
+      return { path: p, el: glyph, text: text, leftIndex: left, rightIndex: right,
+               left: this._argIndex(p, kids[left]), right: this._argIndex(p, kids[right]) };
+    }
+
+    selectJunction(j) {
+      this._hideKeep();
+      this._hideCaret();
+      this.selected = null;
+      this.range = null;
+      this.junction = j;
+      this._fillOps();
+      this._applySelection();
+      this._updateToolbar();
+    }
+
+    /** Change the selected operator (`op` is a key of OPERATOR_KEYS or ""
+     *  for none: the two arguments then multiply). */
+    setOperator(op) {
+      var j = this.junction;
+      if (!j || this.opts.readOnly) return;
+      var msg = { action: "operator", path: j.path, left: j.left, right: j.right, op: op };
+      if (this.lazy()) msg.lazy = true;
+      this.selected = j.path;                  // what the change leaves is selected afterwards
+      this.junction = null;
+      this.send(msg);
     }
 
     /** Children of `p` in reading order: left to right on a line, a higher
@@ -2330,16 +2477,26 @@ var SympyEditor = (function () {
           if (after) list.push(after);
         }
       };
+      // The formula's own ends: without them a root that has no argument
+      // gaps (a matrix) would offer no position outside itself, and the
+      // caret could neither start before it nor leave it leftwards.
+      var head = this._extendGap("/", "before"), tail = this._extendGap("/", "after");
+      if (head) list.push(head);
       walk("/");
+      if (tail) list.push(tail);
       // merge coinciding positions (the same gap is reached as "after the
-      // left argument" and "before the right one")
+      // left argument" and "before the right one") - only on the same line:
+      // the rows of a matrix may align vertically without being one place
       var sameGap = function (g, h) {
         return g.path === h.path && !!g.extend === !!h.extend && (g.extend ? g.extend === h.extend : g.index === h.index);
+      };
+      var sameLine = function (g, h) {
+        return Math.min(g.bottom, h.bottom) - Math.max(g.top, h.top) > 0;
       };
       var out = [];
       for (var i = 0; i < list.length; i++) {
         var pos = list[i], last = out[out.length - 1];
-        if (last && (sameGap(last.gap, pos.gap) || Math.abs(last.x - pos.x) < 1.5)) {
+        if (last && (sameGap(last.gap, pos.gap) || (Math.abs(last.x - pos.x) < 1.5 && sameLine(last.gap, pos.gap)))) {
           var better = (!pos.gap.extend && last.gap.extend) ||
             (!!pos.gap.extend === !!last.gap.extend && pos.gap.path.length > last.gap.path.length);
           if (better) out[out.length - 1] = pos;
@@ -2494,6 +2651,7 @@ var SympyEditor = (function () {
       if (anchor === focus) { this.select(kids[anchor]); return; }
       this.range = { parent: parent, anchor: anchor, focus: focus };
       this.selected = null;
+      this.junction = null;
       this._fillOps();
       this._applySelection();
       this._updateToolbar();
@@ -2696,6 +2854,7 @@ var SympyEditor = (function () {
         case "unwrap": return this.unwrapSelection();
         case "isolate": return this.isolateSelection();
         case "delete":
+          if (this.junction) return this.setOperator("");
           if (this.range) return this.send({ action: "delete", path: this.range.parent, children: this._rangeIndices() });
           if (this.selected === "/") return this.editSource("");
           if (this.selected) return this.send({ action: "delete", path: this.selected });
@@ -3428,7 +3587,7 @@ var SympyEditor = (function () {
       set("redo", dis || !s.can_redo);
       set("edit", dis);
       set("keyboard", dis);
-      set("delete", dis || !(range || this.selected));
+      set("delete", dis || !(range || this.selected || this.junction));
       set("unwrap", dis || range || !this.selected || !(s.nodes && s.nodes[this.selected] && (s.nodes[this.selected].nargs || s.nodes[this.selected].parts)));
       set("isolate", dis || !(range || (this.selected && this.selected !== "/")));
       set("parent", dis || !(range || (t && t.parent) || this.caret));

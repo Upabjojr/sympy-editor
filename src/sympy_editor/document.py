@@ -207,6 +207,10 @@ LAZY_FORMS: Dict[str, Callable] = {
 
 #: Functions of :mod:`sympy` that are constructors in disguise (they build
 #: a ``Pow``, a ``Mul``...): called with evaluation off when unevaluated.
+#: What can be typed for the operator between two arguments (see
+#: ``Document.operator``): nothing means juxtaposition, a product.
+OPERATORS = "+-*/^=<>&|"
+
 UNEVALUATED_CONSTRUCTORS = frozenset({"cbrt", "root", "real_root", "Rational", "Mul", "Add", "Pow"})
 
 
@@ -522,6 +526,8 @@ class Document:
         n = len(args)
         L = left if left is not None and 0 <= left < n else None
         R = right if right is not None and 0 <= right < n else None
+        if text in OPERATORS and L is not None and R is not None:
+            return self.operator(p, L, R, text)          # just an operator between two arguments: change it
         is_sum, is_prod = bool(parent.is_Add), bool(parent.is_Mul)
 
         if not (is_sum or is_prod) or (L is None and R is None):
@@ -588,6 +594,82 @@ class Document:
         if not consumed:
             return self._commit(self._insert_at(self.expr, p, int(index), new_expr))
         return self._commit(self._replace_range(self.expr, p, consumed, new_expr))
+
+    def operator(self, path: PathLike, left: int, right: int, op: str, lazy: bool = False) -> Basic:
+        """Change the operator shown between two neighbouring arguments
+        (``left`` and ``right`` are their indices) of the node at ``path``.
+
+        ``op`` is one of ``OPERATORS``; ``""`` (the operator deleted) means
+        juxtaposition, a product.  In a sum, ``*``/``/``/``^`` bind the two
+        terms (``x + y + z`` with ``*`` at the first ``+`` gives ``x*y + z``)
+        and ``-`` negates the right one; in a product, ``+``/``-`` split it at
+        the operator (``x*y*z`` at the first factor gives ``x + y*z``) since a
+        sum binds looser than the product it is typed into.  A relation or a
+        logical connective needs the two arguments to be the whole node.
+        The ``-`` shown before a negative term counts as the operator: with
+        ``*`` typed over it, ``x - y`` gives ``x*y``.  With ``lazy`` nothing
+        is evaluated (``2 + 3`` with ``*`` stays ``2*3``).  Unchanged when the
+        operator is already what is asked."""
+        p = self._path(path)
+        parent = self._get_at(self.expr, p)
+        args = parent.args
+        n = len(args)
+        try:
+            L, R = int(left), int(right)
+        except (TypeError, ValueError):
+            raise ValueError("No operator there") from None
+        if not (0 <= L < n and 0 <= R < n) or L == R:
+            raise ValueError("No operator there")
+        op = (op or "").strip() or "*"
+        if op not in OPERATORS:
+            raise ValueError(f"Not an operator: {op!r}")
+        is_sum = bool(parent.is_Add) or isinstance(parent, sympy.MatAdd)
+        is_prod = bool(parent.is_Mul) or isinstance(parent, sympy.MatMul)
+        a, b = args[L], args[R]
+        shown_minus = is_sum and b.could_extract_minus_sign()
+        if shown_minus:
+            b = -b
+        if op == "+" and is_sum and not shown_minus:
+            return self.expr
+        if op == "-" and is_sum and shown_minus:
+            return self.expr
+        if op == "*" and is_prod:
+            return self.expr
+        pair = {L, R}
+        whole = pair == set(range(n))
+
+        def build(cls, *items):
+            if lazy:
+                with sympy.evaluate(False):
+                    return cls(*items)
+            return cls(*items)
+
+        if is_prod and op in ("+", "-"):
+            split = max(L, R)
+            head = rebuild(parent, args[:split])
+            tail = rebuild(parent, args[split:])
+            new = build(Add, head, tail if op == "+" else build(Mul, -1, tail))
+            return self._commit(self._replace_at(self.expr, p, new))
+        if is_sum and op in ("+", "-"):
+            new = b if op == "+" else build(Mul, -1, b)
+            return self._commit(self._replace_at(self.expr, p + (R,), new))
+        first, second = (a, b) if L < R else (b, a)
+        if op in ("+", "-"):                     # a power, a relation...: the two become a sum
+            new = build(Add, first, second if op == "+" else build(Mul, -1, second))
+        elif op == "*":
+            new = build(Mul, first, second)
+        elif op == "/":
+            new = build(Mul, first, build(sympy.Pow, second, -1))
+        elif op == "^":
+            new = build(sympy.Pow, first, second)
+        else:
+            rel = {"=": sympy.Eq, "<": sympy.Lt, ">": sympy.Gt, "&": sympy.And, "|": sympy.Or}[op]
+            if not whole:
+                raise ValueError(f"{op!r} needs two sides: it can only replace the operator of a node with two arguments")
+            new = build(rel, first, second)
+        if whole:
+            return self._commit(self._replace_at(self.expr, p, new))
+        return self._commit(self._replace_range(self.expr, p, sorted(pair), new))
 
     def apply(self, path: PathLike, op: Union[str, Callable], children=None, args=None,
               lazy: bool = False) -> Basic:
@@ -1143,6 +1225,9 @@ class Document:
             elif action == "insert":
                 self.insert(path, int(message.get("index", 0)), str(message.get("src", "")),
                             left=message.get("left"), right=message.get("right"), attach=message.get("attach"))
+            elif action == "operator":
+                self.operator(path, message.get("left"), message.get("right"), str(message.get("op", "") or ""),
+                              lazy=bool(message.get("lazy")))
             elif action == "unwrap":
                 self.unwrap(path, message.get("keep"))
             elif action == "wrap":
@@ -1222,6 +1307,9 @@ class Document:
                 return f"SymPy: {short(message.get('func', ''))}{lazy}"
             if action == "insert":
                 return f"Insert \"{short(message.get('src', ''))}\" in {node()}"
+            if action == "operator":
+                sym = str(message.get("op", "") or "").strip() or "nothing (a product)"
+                return f"Operator {sym} in {node()}{lazy}"
             if action == "extend":
                 return f"Type \"{short(message.get('src', ''))}\" {'after' if message.get('side', 'after') == 'after' else 'before'} {node()}"
             if action == "delete":

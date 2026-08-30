@@ -167,7 +167,8 @@
 .se-typemenu[hidden] { display: none; }
 .se-typemenu:disabled { opacity: 0.4; cursor: default; }
 .se-toolbar button:disabled, .se-ops:disabled { opacity: 0.4; cursor: default; }
-.se-sep { width: 1px; height: 1.1rem; background: var(--se-border); margin: 0 0.2rem; }
+.se-sep { width: 1px; height: 1.1rem; background: var(--se-border); margin: 0 0.35rem; }
+.se-break { flex-basis: 100%; height: 0; }   /* the tools after it start a new row */
 .se-status {
   /* takes the remaining space and shrinks (never wraps the toolbar onto a
    * second line, which would move the formula under the pointer) */
@@ -440,7 +441,7 @@
 @media (any-pointer: coarse) { .se-toolbar button[data-cmd="keyboard"] { display: inline-block; font-size: 1.1em; } }
 
 /* floating action bar under the selection */
-.se-actions {
+.se-actions, .se-opbar {
   position: absolute;
   z-index: 20;
   display: flex;
@@ -453,7 +454,9 @@
   border-radius: 0.35rem;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
 }
-.se-actions[hidden] { display: none; }
+.se-actions[hidden], .se-opbar[hidden] { display: none; }
+.se-opbar button { min-width: 2em; font-weight: 600; }
+.se-view .se-selected:not([data-path]) { color: rgb(var(--se-accent)); }
 
 /* The "which argument to keep" chooser, shown above the selection when
    Unwrap has more than one candidate (x**2: the base or the exponent). */
@@ -488,7 +491,7 @@
 .se-keep button:focus-visible { box-shadow: 0 0 0 2px rgba(var(--se-accent), 0.45); }
 .se-keep .se-keep-cancel { border-color: transparent; opacity: 0.7; }
 
-.se-actions button {
+.se-actions button, .se-opbar button {
   font: inherit;
   font-size: 12px;
   line-height: 1.2;
@@ -499,11 +502,11 @@
   color: inherit;
   cursor: pointer;
 }
-.se-actions button:disabled { opacity: 0.35; cursor: default; }
+.se-actions button:disabled, .se-opbar button:disabled { opacity: 0.35; cursor: default; }
 
 /* touch screens: bigger targets, larger formula */
 @media (pointer: coarse) {
-  .se-toolbar button, .se-ops, .se-sym select, .se-sym input, .se-sym button, .se-actions button {
+  .se-toolbar button, .se-ops, .se-sym select, .se-sym input, .se-sym button, .se-actions button, .se-opbar button {
     font-size: 14px;
     padding: 0.45rem 0.7rem;
     min-height: 2.2rem;
@@ -526,7 +529,7 @@
  * sticks to the last tapped button, which then looks "active" */
 @media (hover: hover) {
   .se-toolbar button:hover:not(:disabled) { background: rgba(var(--se-accent), 0.12); }
-  .se-actions button:hover:not(:disabled) { background: rgba(var(--se-accent), 0.14); }
+  .se-actions button:hover:not(:disabled), .se-opbar button:hover:not(:disabled) { background: rgba(var(--se-accent), 0.14); }
   .se-sym button:hover:not(:disabled), .se-session button:hover:not(:disabled), .se-step:hover:not(:disabled) { background: rgba(var(--se-accent), 0.12); }
   .se-session[role="button"]:hover { background: rgba(var(--se-accent), 0.08); }
   .se-fn-item:hover { background: rgba(var(--se-accent), 0.14); }

@@ -88,8 +88,27 @@ def _click(page, path):
 
     ``force=True`` skips Playwright's actionability check, which otherwise
     refuses because KaTeX stacks an empty ``.vlist`` strut over glyphs in
-    fractions; the editor resolves the hit with ``elementsFromPoint``."""
-    page.locator(f'[data-path="{path}"]').click(force=True)
+    fractions; the editor resolves the hit with ``elementsFromPoint``.
+    ``position`` pins the click to the centre of the whole box: without it
+    Playwright aims at the first client rect, which for a node broken into
+    fragments ("-sin(x)") is its first glyph - the "-", an operator."""
+    el = page.locator(f'[data-path="{path}"]')
+    box = el.bounding_box()
+    el.click(force=True, position={"x": box["width"] / 2, "y": box["height"] / 2})
+    if page.locator(".se-caret").count() and not page.locator(".se-selected").count():
+        page.keyboard.press("ArrowUp")   # the centre fell between the node's own glyphs: select beside the caret
+
+
+def _select(page, path):
+    """Select exactly ``path``: click it, then walk up from whatever leaf,
+    caret or junction the click landed on."""
+    _click(page, path)
+    for _ in range(20):
+        sel = page.locator(".se-selected[data-path]")
+        if sel.count() and sel.first.get_attribute("data-path") == path:
+            return
+        page.keyboard.press("ArrowUp")
+    raise AssertionError(f"could not select {path}")
 
 
 def _open(browser, url):
@@ -218,12 +237,30 @@ def test_ndim_array_element_edit(browser, serve_expr):
 
 
 def _gap_between(page, left_path, right_path):
-    """Viewport point midway between two rendered nodes (on the same line)."""
+    """Viewport point in the gap between two rendered nodes (on the same line),
+    beside the operator glyph if one is there: clicking the glyph itself
+    selects the operator, the space next to it gives a caret."""
     return page.evaluate(
         """([l, r]) => {
             const a = document.querySelector(`[data-path="${l}"]`).getBoundingClientRect();
             const b = document.querySelector(`[data-path="${r}"]`).getBoundingClientRect();
-            return [(a.right + b.left) / 2, (a.top + a.bottom) / 2];
+            // Either can be displayed first: the printer reorders terms.
+            const [lo, hi] = a.right <= b.left ? [a.right, b.left] : [b.right, a.left];
+            // Whole pixels: the browser rounds click coordinates, so a
+            // fraction of a pixel beside the glyph would land back on it.
+            let x = Math.round((lo + hi) / 2);
+            const y = (a.top + a.bottom) / 2;
+            const onOp = (x) => (document.elementsFromPoint(x, y) || []).some(el => {
+                const t = (el.textContent || '').trim();
+                return t.length <= 1 && '+-\u2212\u22c5\u00b7\u00d7=<>\u2264\u2265\u2227\u2228'.includes(t) && t && !el.querySelector('[data-path]');
+            });
+            if (onOp(x)) {
+                let lx = x, rx = x;
+                while (onOp(lx) && lx - 1 > lo) lx -= 1;
+                while (onOp(rx) && rx + 1 < hi) rx += 1;
+                x = !onOp(rx) ? rx : lx;      // the glyph usually sits flush against the left node
+            }
+            return [x, y];
         }""",
         [left_path, right_path],
     )
@@ -557,18 +594,21 @@ class Scenario:
         return self
 
     def select(self, path):
-        """Select a node by path, walking up from a glyph if needed."""
+        """Select a node by path, walking up from a glyph (or from the caret
+        that a click landing between two glyphs leaves) if needed."""
         _click(self.page, path)
         for _ in range(20):
-            if self.page.locator(".se-selected").first.get_attribute("data-path") == path:
+            sel = self.page.locator(".se-selected[data-path]")
+            if sel.count() and sel.first.get_attribute("data-path") == path:
                 return self
             self.page.keyboard.press("ArrowUp")
         raise AssertionError(f"could not select {path}")
 
     def caret_after(self, path):
-        """A caret right after the rendering of `path` (a mouse click there)."""
+        """A caret right after the rendering of `path` (a mouse click there,
+        on the node's right edge so it cannot land on an operator glyph)."""
         r = self.page.locator(f'[data-path="{path}"]').bounding_box()
-        self.page.mouse.click(r["x"] + r["width"] + 2, r["y"] + r["height"] / 2)
+        self.page.mouse.click(r["x"] + r["width"] - 1, r["y"] + r["height"] / 2)
         assert self.page.locator(".se-caret").count() == 1, "no caret appeared"
         return self
 
@@ -708,7 +748,7 @@ def test_type_menu_shows_the_selection_type_operations(browser, serve_expr):
     assert not menu.is_visible()                          # the result is a scalar: no type menu
     srv2, doc2 = serve_expr(Integral(x**2, (x, 0, 1)) + y)
     page = _open(browser, srv2.url)
-    _click(page, next(k for k, v in doc2.snapshot()["nodes"].items() if v["type"] == "Integral"))
+    _select(page, next(k for k, v in doc2.snapshot()["nodes"].items() if v["type"] == "Integral"))
     menu = page.locator(".se-typemenu")
     assert menu.locator("option").first.inner_text().startswith("Integral")
     _next_state(page, lambda: menu.select_option("evaluate"))
@@ -1374,7 +1414,7 @@ def test_shown_parts_are_clickable_and_editable(browser, serve_expr):
     page.keyboard.type("3")
     _next_state(page, lambda: page.keyboard.press("Enter"))
     assert doc.expr == 1 / (3 * E)
-    _click(page, "/d")                                                # replacing the whole denominator
+    _select(page, "/d")                                               # replacing the whole denominator
     page.keyboard.type("y")
     _next_state(page, lambda: page.keyboard.press("Enter"))
     assert doc.expr == 1 / y
@@ -1392,7 +1432,7 @@ def test_shown_parts_are_clickable_and_editable(browser, serve_expr):
     page.keyboard.type("3")
     _next_state(page, lambda: page.keyboard.press("Enter"))
     assert doc.expr == x - 3 * y
-    _click(page, "/1/neg")
+    _select(page, "/1/neg")
     _next_state(page, lambda: page.keyboard.press("Delete"))          # the signed term goes with it
     assert doc.expr == x
     assert page.errors == []
@@ -1486,8 +1526,11 @@ def test_change_animation_red_to_green(browser, serve_expr):
     nodes = doc.snapshot()["nodes"]
     ps = next(k for k, v in nodes.items() if v["src"] == "sin(y)")
     _click(page, ps)
-    page.keyboard.press("ArrowUp")                                # sin(y) (the click lands on y)
-    assert page.locator(".se-selected").get_attribute("data-path") == ps
+    for _ in range(3):                                            # up from the glyph the click landed on
+        if page.locator(".se-selected[data-path]").first.get_attribute("data-path") == ps:
+            break
+        page.keyboard.press("ArrowUp")
+    assert page.locator(".se-selected[data-path]").first.get_attribute("data-path") == ps
     page.keyboard.type("cos(y)")
     _next_state(page, lambda: page.keyboard.press("Enter"))
     # right after the change: a red ghost of the old part, a green ghost of the new one, the real rendering hidden but present
@@ -1972,3 +2015,58 @@ def test_pyodide_worker_interrupt_and_sessions(browser, tmp_path):
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+ED = "document.querySelector('.sympy-editor').__sympyEditor"
+
+
+def test_clicking_an_operator_selects_it_and_a_key_changes_it(browser, serve_expr):
+    srv, doc = serve_expr(x + y)
+    page = _open(browser, srv.url)
+    view = page.locator(".se-view")
+    # Clicking the "+" glyph selects the operator (not a caret), with a palette.
+    view.locator(".katex :text-is('+')").last.click(force=True)
+    assert _wait(lambda: page.locator(".se-status").inner_text().startswith("Operator +"))
+    assert page.locator(".se-opbar").is_visible()
+    _next_state(page, lambda: page.keyboard.press("*"))
+    assert str(doc.expr) == "x*y"
+    # What the change left behind is selected, not an unrelated node.
+    assert page.evaluate(ED + ".selected") == "/"
+    # The "-" shown before a negative term is the sum's operator there.
+    _next_state(page, lambda: page.evaluate(ED + ".send({action: 'set', src: 'x - y'})"))
+    view.locator(".katex :text-is('\u2212')").last.click(force=True)
+    assert _wait(lambda: page.locator(".se-status").inner_text().startswith("Operator \u2212"))
+    # The palette's Delete removes the operator: side by side, the two multiply.
+    _next_state(page, lambda: page.locator(".se-opbar button[data-op='']").click())
+    assert str(doc.expr) == "x*y"
+    assert page.errors == []
+
+
+def test_caret_enters_and_leaves_a_matrix(browser, serve_expr):
+    from sympy import Matrix, cos, sin
+    t = Symbol("theta")
+    srv, doc = serve_expr(Matrix([[cos(t), -sin(t)], [sin(t), cos(t)]]) * Matrix([x, y]))
+    page = _open(browser, srv.url)
+    # A caret at the very start: before the whole matrix, outside of it.
+    page.locator(".se-view").click(position={"x": 4, "y": 4})
+    page.keyboard.press("Escape")
+    page.keyboard.press("ArrowLeft")
+    assert _wait(lambda: page.evaluate("!!" + ED + ".caret"))
+    assert page.evaluate(ED + ".caret.path") == "/"
+    assert page.evaluate(ED + ".caret.extend") == "before"
+    # -> goes to the left of x in "x cos(theta)", not between x and cos(theta).
+    page.keyboard.press("ArrowRight")
+    caret = page.evaluate(ED + ".caret")
+    node = page.evaluate(ED + ".state.nodes[" + ED + ".caret.path]")
+    assert not caret.get("extend")
+    assert node["type"] == "Mul" and caret["index"] == 0
+    # <- leaves the matrix again.
+    page.keyboard.press("ArrowLeft")
+    assert page.evaluate(ED + ".caret.path") == "/"
+    assert page.evaluate(ED + ".caret.extend") == "before"
+    # Walking right passes through both rows and comes out after the matrix.
+    for _ in range(60):
+        page.keyboard.press("ArrowRight")
+    assert page.evaluate(ED + ".caret.path") == "/"
+    assert page.evaluate(ED + ".caret.extend") == "after"
+    assert page.errors == []

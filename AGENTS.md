@@ -107,8 +107,7 @@ Two conventions between printer, document and front end:
 - **Insertion caret.**  `snapshot()` marks nodes whose argument list can
   grow (`insertable`, with `nargs`: Add, Mul, MatMul, function calls, sets...).
   The front end computes the gaps between the rendered arguments of such
-  nodes (`Editor._gapsOf`); a click in a gap (or on the operator glyph there,
-  which belongs to no argument) shows a caret, and typing sends
+  nodes (`Editor._gapsOf`); a click in a gap shows a caret, and typing sends
   `{"action": "insert", "path", "index", "src"}` (`Document.insert`, parsed
   in the context of the node so a new name in a `MatMul` is a matrix).
   Commutative nodes re-order, so the index only matters for `MatMul` and
@@ -121,8 +120,15 @@ Two conventions between printer, document and front end:
   into the parent).  Elsewhere one neighbour is combined; `,` inserts an
   argument.
   An edge-click caret remembers its side (`gap.attach`), so the left edge
-  of `y` attaches typed text to `y`, the right edge of `x` to `x`; a caret
-  on the operator attaches to the left neighbour.
+  of `y` attaches typed text to `y`, the right edge of `x` to `x`.
+  An operator typed at either end of the text takes the neighbour on that
+  side whichever one the caret is attached to ("*y*" between the factors
+  of `x*z` gives `x*y*z`); with one neighbour a far-side operator is dropped.
+  `_caretPositions` walks the formula in reading order for ←/→; it always
+  includes the two ends of the whole formula (a matrix root has no argument
+  gaps, yet the caret must be able to stand outside it), and coinciding
+  positions merge only when they overlap vertically (rows of a matrix can
+  align in x without being one place).
   Clicking within the edge zone (2-5 px, 20 % of the width) of an object
   gives a caret before/after it in the nearest insertable ancestor whose
   argument shares that edge (`_edgeCaretAt`); the middle selects.
@@ -131,6 +137,20 @@ Two conventions between printer, document and front end:
   `{"action": "extend", "path", "side", "src"}` -> `Document.extend`,
   which joins the text and the node with the typed operator, or `*` when
   there is none.
+- **Operators are selectable.**  `Editor._operatorAt` finds the operator
+  glyph under a click (`OPERATOR_GLYPHS`: `+ − ⋅ × = < > ≤ ≥ ∧ ∨`; the `−`
+  shown before a negative term counts, it is the sum's operator there) and
+  `selectJunction` selects it - `Editor.junction`, exclusive with selection,
+  caret and range.  Typing another operator (or the `.se-opbar` palette;
+  Del/Backspace mean "none": juxtaposition, a product) sends
+  `{"action": "operator", "path", "left", "right", "op"}` ->
+  `Document.operator`: in a sum `*`/`/`/`^` bind the two terms and `-`
+  negates the right one, in a product `+`/`-` split it at the operator, a
+  relation or connective (`= < > & |`) needs the two arguments to be the
+  whole node; honours the unevaluated toggle (`lazy`).  A lone operator
+  typed at a caret between two arguments is routed to `Document.operator`
+  by `Document.insert`.  The node the junction belonged to is selected
+  after the change.
 - **Ranges.**  Adjacent arguments of a *rangeable* node (`AssocOp`,
   `LatticeOp`: Add, Mul, MatAdd, MatMul, And, Or, Max...; snapshot flag
   `rangeable`) can be selected together: `Editor.range = {parent, anchor,
@@ -326,9 +346,12 @@ Two conventions between printer, document and front end:
   `.se-status` has `flex: 1 1 0; min-width: 0; min-height: 1.3em`: the
   status text must never change the container's width nor wrap the toolbar
   onto a second line, either of which moves the formula under the pointer
-  between two clicks.  The tools sit in `.se-tools`, which wraps onto as
-  many rows as needed (on screens up to 640 px the status gets its own line
-  under it); `.se-actions` wraps too (`max-width: calc(100% - 8px)`), so no
+  between two clicks.  The tools sit in `.se-tools` in three logical rows -
+  session/timeline + zoom, selection navigation + edits + clipboard, and
+  the transform menus + function box - forced by `.se-break` spans
+  (`flex-basis: 100%`), with `.se-sep` rules between the blocks of a row;
+  each row still wraps onto more lines when narrow (on screens up to 640 px
+  the status gets its own line under it); `.se-actions` wraps too (`max-width: calc(100% - 8px)`), so no
   button is ever off-screen.
 - **Zoom and sideways scrolling.**  `Editor.setZoom(zoom, anchorX)` sets the
   CSS variable `--se-zoom` on `.se-view` (`font-size: calc(base *
