@@ -205,6 +205,17 @@ Two conventions between printer, document and front end:
   (`_committedCapture`) and the commit animates from it; unchanged
   re-renders (a reverted preview included) and `prefers-reduced-motion`
   do not animate.
+- **Unevaluated results.**  `apply` and `call` messages carry `lazy: true`
+  when the toolbar's "unevaluated" toggle (`.se-lazy-box`, `Editor.lazy()`,
+  option `unevaluated`) is on.  An `Op` has an optional `lazy` callable
+  (`register_op(..., lazy=Determinant)`; `snapshot()["ops"][i]["lazy"]` says
+  whether there is one) used instead of `func`; `Document.call` uses
+  `LAZY_FORMS` (name → constructor: `diff` → `Derivative`, `det` →
+  `Determinant`, `subs` → `Subs`...), calls a SymPy class or a constructor
+  in disguise (`UNEVALUATED_CONSTRUCTORS`: `cbrt`, `root`...) under
+  `sympy.evaluate(False)`, and for anything else applies as usual with
+  `last_note` "… has no unevaluated form: applied" (shown in the status
+  line).  `_describe` appends " (unevaluated)" to the history label.
 - **History labels and the report.**  `Document.handle` describes each
   message (`_describe`: "Transform: Simplify", "SymPy: diff(x)", "Edit: a →
   b"...) and `_commit` records it per step (`_labels`, exported/restored

@@ -183,6 +183,33 @@ def sympy_functions() -> List[str]:
     return [n for n in COMMON_FUNCTIONS if n in names or n in ("subs", "evalf", "doit", "rewrite", "det", "inv", "T", "transpose", "trace", "rank", "eigenvals", "eigenvects", "nullspace", "rref", "norm", "degree", "LC")] + rest
 
 
+#: The unevaluated form of a SymPy function or method called from the
+#: function box, by name: ``Derivative(f, x)`` for ``diff(x)``... (see
+#: :meth:`Document.call`).
+LAZY_FORMS: Dict[str, Callable] = {
+    "diff": lambda e, *a: sympy.Derivative(e, *a),
+    "integrate": lambda e, *a: sympy.Integral(e, *a),
+    "limit": lambda e, *a: sympy.Limit(e, *a),
+    "summation": lambda e, *a: sympy.Sum(e, *a),
+    "product": lambda e, *a: sympy.Product(e, *a),
+    "subs": lambda e, *a: sympy.Subs(e, *a),
+    "det": lambda e: sympy.Determinant(e),
+    "inv": lambda e: sympy.Inverse(e),
+    "inverse": lambda e: sympy.Inverse(e),
+    "transpose": lambda e: sympy.Transpose(e),
+    "T": lambda e: sympy.Transpose(e),
+    "trace": lambda e: sympy.Trace(e),
+    "adjoint": lambda e: sympy.Adjoint(e),
+    "conjugate": lambda e: sympy.conjugate(e, evaluate=False),
+    "sqrt": lambda e: sympy.Pow(e, sympy.Rational(1, 2), evaluate=False),
+    "exp": lambda e: sympy.exp(e, evaluate=False),
+}
+
+#: Functions of :mod:`sympy` that are constructors in disguise (they build
+#: a ``Pow``, a ``Mul``...): called with evaluation off when unevaluated.
+UNEVALUATED_CONSTRUCTORS = frozenset({"cbrt", "root", "real_root", "Rational", "Mul", "Add", "Pow"})
+
+
 class Document:
     """An editable SymPy expression with undo history.
 
@@ -547,14 +574,19 @@ class Document:
             return self._commit(self._insert_at(self.expr, p, int(index), new_expr))
         return self._commit(self._replace_range(self.expr, p, consumed, new_expr))
 
-    def apply(self, path: PathLike, op: Union[str, Callable], children=None, args=None) -> Basic:
+    def apply(self, path: PathLike, op: Union[str, Callable], children=None, args=None,
+              lazy: bool = False) -> Basic:
         """Apply a registered op (by name) or a callable to the node at ``path``
         (or, with ``children``, to the range of those arguments of it).
 
         ``args`` are the values an op with ``params`` asks for - source strings
         (or SymPy objects), parsed in the expression's namespace and passed
         after the expression: ``apply(p, "permutedims", args=["(1, 0)"])``
-        calls the op as ``func(array, Tuple(1, 0))``."""
+        calls the op as ``func(array, Tuple(1, 0))``.
+
+        ``lazy`` asks for the op's unevaluated form (``Determinant(M)`` rather
+        than the determinant computed); an op without one is applied as
+        usual, and ``last_note`` says so."""
         spec = None
         if isinstance(op, str):
             try:
@@ -562,6 +594,11 @@ class Document:
             except KeyError:
                 raise ValueError(f"Unknown operation: {op!r}") from None
             func = spec.func
+            if lazy:
+                if spec.lazy is not None:
+                    func = spec.lazy
+                else:
+                    self.last_note = f"{spec.label} has no unevaluated form: applied"
         else:
             func = op
         p = self._path(path)
@@ -587,7 +624,7 @@ class Document:
             return self._commit(self._replace_range(self.expr, p, children, result))
         return self._commit(self._replace_at(self.expr, p, result))
 
-    def call(self, path: PathLike, func: str, children=None) -> Basic:
+    def call(self, path: PathLike, func: str, children=None, lazy: bool = False) -> Basic:
         """Apply a SymPy function or a method to the node at ``path`` (or to
         the range ``children`` of it): ``func`` is ``"diff(x)"``,
         ``"series(x, 0, 5)"``, ``"subs(x, 1)"``, ``"factor"``, ``".T"``,
@@ -595,6 +632,14 @@ class Document:
         ``name(node, *args)``; a name starting with ``.`` (or that is only an
         attribute of the node) is looked up on the node.  Extra arguments are
         parsed in the expression's namespace.
+
+        ``lazy`` asks for the unevaluated form: ``diff``/``integrate``/
+        ``det``... build ``Derivative``/``Integral``/``Determinant``...
+        (:data:`LAZY_FORMS`), a SymPy class - a function like ``sin``, a
+        constructor like ``sqrt`` - is called with evaluation off
+        (``sin(0)`` stays ``sin(0)``); anything else (``simplify``,
+        ``series``...) has no such form and runs as usual, and
+        ``last_note`` says so.
         """
         m = re.match(r"^\s*(\.?)([A-Za-z_][A-Za-z_0-9]*)\s*(?:\((.*)\))?\s*$", func or "", re.S)
         if not m:
@@ -604,10 +649,20 @@ class Document:
         target = self._extract_range(self.expr, p, children) if children is not None else self._get_at(self.expr, p)
         args = [self.parse(a, context=target) for a in _split_args(argsrc)] if argsrc else []
         fn = None
-        if not dotted and not name.startswith("_") and callable(getattr(sympy, name, None)):
+        if lazy and name in LAZY_FORMS and not name.startswith("_"):
+            result = LAZY_FORMS[name](target, *args)
+        elif not dotted and not name.startswith("_") and callable(getattr(sympy, name, None)):
             fn = getattr(sympy, name)
-            result = fn(target, *args)
+            if lazy and (isinstance(fn, type) or name in UNEVALUATED_CONSTRUCTORS):
+                with sympy.evaluate(False):
+                    result = fn(target, *args)
+            else:
+                if lazy:
+                    self.last_note = f"{name} has no unevaluated form: applied"
+                result = fn(target, *args)
         elif not name.startswith("_") and hasattr(target, name):
+            if lazy:
+                self.last_note = f"{name} has no unevaluated form: applied"
             attr = getattr(target, name)
             result = attr(*args) if callable(attr) else attr
         else:
@@ -974,7 +1029,7 @@ class Document:
             "can_undo": self.can_undo,
             "can_redo": self.can_redo,
             "ops": [{"name": op.name, "label": op.label, "kinds": list(op.kinds) if op.kinds else None,
-                     "params": [dict(prm) for prm in op.params], "doc": op.doc}
+                     "params": [dict(prm) for prm in op.params], "doc": op.doc, "lazy": op.lazy is not None}
                     for op in self.ops.values()],
             "kind_labels": dict(KIND_LABELS),
             "error": error,
@@ -1080,7 +1135,7 @@ class Document:
             elif action == "isolate":
                 self.isolate(path, children=children)
             elif action == "call":
-                self.call(path, str(message.get("func", "")), children=children)
+                self.call(path, str(message.get("func", "")), children=children, lazy=bool(message.get("lazy")))
             elif action == "functions":
                 snap = self.snapshot()
                 snap["functions"] = sympy_functions()
@@ -1101,7 +1156,8 @@ class Document:
             elif action == "set":
                 self.replace("/", str(message.get("src", "")))
             elif action == "apply":
-                self.apply(path, str(message.get("op", "")), children=children, args=message.get("args"))
+                self.apply(path, str(message.get("op", "")), children=children, args=message.get("args"),
+                           lazy=bool(message.get("lazy")))
             elif action == "delete":
                 self.delete(path, children=children)
             elif action == "undo":
@@ -1143,11 +1199,12 @@ class Document:
                 return f"Edit: {node()} → {short(message.get('src', ''))}"
             if action == "set":
                 return f"Type the whole expression: {short(message.get('src', ''))}"
+            lazy = " (unevaluated)" if message.get("lazy") else ""
             if action == "apply":
                 op = self.ops.get(str(message.get("op", "")))
-                return f"Transform: {op.label if op else message.get('op')}"
+                return f"Transform: {op.label if op else message.get('op')}{lazy}"
             if action == "call":
-                return f"SymPy: {short(message.get('func', ''))}"
+                return f"SymPy: {short(message.get('func', ''))}{lazy}"
             if action == "insert":
                 return f"Insert \"{short(message.get('src', ''))}\" in {node()}"
             if action == "extend":

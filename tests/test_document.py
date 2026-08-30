@@ -824,6 +824,53 @@ def test_rational_parts_are_editable():
     assert doc.handle({"action": "unwrap", "path": "/", "keep": "n"})["src"] == "3"
 
 
+def test_unevaluated_transformations_and_calls():
+    from sympy import (Derivative, Determinant, Integral, Inverse, Matrix, MatrixSymbol, Rational, Subs, Transpose,
+                       Trace, sin, symbols, sympify)
+    x, y = symbols("x y")
+    M = Matrix([[1, 2], [3, 4]])
+    doc = Document(M)
+    assert next(o for o in doc.snapshot()["ops"] if o["name"] == "determinant")["lazy"]
+    assert not next(o for o in doc.snapshot()["ops"] if o["name"] == "simplify")["lazy"]
+    assert doc.handle({"action": "apply", "path": "/", "op": "determinant", "lazy": True})["src"].startswith("Determinant(Matrix(")
+    assert isinstance(doc.expr, Determinant)
+    assert doc.handle({"action": "apply", "path": "/", "op": "doit"})["src"] == "-2"     # evaluated later
+    assert doc.export()["labels"][1] == "Transform: Determinant (unevaluated)"
+    doc.set(M)
+    assert doc.handle({"action": "apply", "path": "/", "op": "determinant"})["src"] == "-2"
+    for op, cls in (("inverse", Inverse), ("transpose", Transpose), ("trace", Trace)):
+        doc.set(M)
+        assert isinstance(doc.apply("/", op, lazy=True), cls)
+    A = MatrixSymbol("A", 2, 2)
+    doc = Document(A)
+    assert doc.call("/", "det()", lazy=True) == Determinant(A)
+    doc.set(A)
+    assert doc.call("/", ".T", lazy=True) == Transpose(A)
+    doc = Document(x**2 * sin(y))
+    assert doc.call("/", "diff(x)", lazy=True) == Derivative(x**2 * sin(y), x)
+    assert doc.call("/", "doit()") == 2 * x * sin(y)
+    doc.set(x**2)
+    assert doc.call("/", "integrate(x)", lazy=True) == Integral(x**2, x)
+    doc.set(x**2)
+    assert doc.call("/", "integrate(x)") == x**3 / 3
+    doc.set(x)
+    assert doc.call("/", "subs(x, 1)", lazy=True) == Subs(x, x, 1)
+    doc.set(sympify(0))
+    r = doc.call("/", "sin", lazy=True)
+    assert isinstance(r, sin) and r.args == (0,) and doc.call("/", "sin") == 0       # sin(0) stays sin(0)
+    doc.set(sympify(4))
+    r = doc.call("/", "sqrt", lazy=True)
+    assert r.is_Pow and r.args == (4, Rational(1, 2))
+    doc.set(sympify(4))
+    assert doc.call("/", "sqrt") == 2
+    doc.set((x + 1) ** 2)
+    snap = doc.handle({"action": "call", "path": "/", "func": "expand", "lazy": True})    # no unevaluated form: applied, and said so
+    assert snap["src"] == "x**2 + 2*x + 1" and "no unevaluated form" in snap["note"]
+    assert doc.export()["labels"][-1] == "SymPy: expand (unevaluated)"
+    snap = doc.handle({"action": "apply", "path": "/", "op": "factor", "lazy": True})
+    assert snap["src"] == "(x + 1)**2" and "no unevaluated form" in snap["note"]
+
+
 def test_python_script_rebuilds_the_history():
     from sympy import Function, MatrixSymbol, Rational, Symbol, sin, symbols
     x, y = symbols("x y")

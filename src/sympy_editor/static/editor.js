@@ -37,6 +37,7 @@ var SympyEditor = (function () {
     workingAfter: 400,   // ms a request may take before the spinner overlay appears
     interruptAfter: 2000, // ms after which the overlay offers to interrupt the computation
     sessions: false,     // a list of sessions (expressions with their own history) kept in localStorage
+    unevaluated: false,  // the "unevaluated" toggle starts on: transformations build Determinant(M), Integral(f, x)... rather than computing
     animate: true,       // animate a change: the old parts in red turn into the new ones in green
     animateDuration: 1600 // ms: a quarter to show what goes (red), the rest to move it and fade the new in (green)
   };
@@ -385,6 +386,17 @@ var SympyEditor = (function () {
           title: "Apply any SymPy function or method to the selection (or the whole expression): type to search, Enter to pick; functions with parameters ask for them",
           spellcheck: "false", autocomplete: "off" });
         this.tools.appendChild(this.fnInput);
+        // Unevaluated: a transformation or a function builds its symbolic
+        // form (Determinant(M), Derivative(f, x)...) instead of computing.
+        this.lazyBox = h("input", { type: "checkbox", class: "se-lazy-box" });
+        this.lazyBox.checked = !!this.opts.unevaluated;
+        var lazyLabel = h("label", { class: "se-lazy", title: "Keep the result unevaluated: the Determinant, Integral, Derivative, sin(0)... is built, not computed (Evaluate applies it later); a transformation without such a form is applied as usual" },
+          [this.lazyBox, "unevaluated"]);
+        this.lazyBox.addEventListener("change", function () {
+          self._setStatus(self.lazyBox.checked ? "Unevaluated: transformations and functions build their symbolic form (Determinant, Integral...) - Evaluate computes it later"
+                                               : "Transformations and functions compute their result");
+        });
+        this.tools.appendChild(lazyLabel);
         this.fnMenu = h("div", { class: "se-fn-menu", hidden: "", role: "listbox" });
         this.fnForm = h("div", { class: "se-fn-form", hidden: "" });
         this._fnNames = [];
@@ -707,6 +719,7 @@ var SympyEditor = (function () {
         var spec = (self.state.ops || []).filter(function (o) { return o.name === op; })[0];
         if (spec && spec.params && spec.params.length) return self._askOpParams(spec, path, menu);
         var msg = { action: "apply", path: path, op: op };
+        if (self.lazy()) msg.lazy = true;
         if (self.range) msg.children = self._rangeIndices();
         self.send(msg);
         self.view.focus({ preventScroll: true });
@@ -1786,6 +1799,7 @@ var SympyEditor = (function () {
                          callable: true, hinted: true },
         function (values) {
           var msg = { action: "apply", path: path, op: spec.name, args: values };
+          if (self.lazy()) msg.lazy = true;
           if (self.range) msg.children = self._rangeIndices();
           self.send(msg);
         }, anchor);
@@ -1863,11 +1877,17 @@ var SympyEditor = (function () {
       if (controls.length) controls[0].ctrl.focus();
     }
 
+    /** Whether results are wanted unevaluated (the toolbar's toggle). */
+    lazy() {
+      return !!(this.lazyBox && this.lazyBox.checked);
+    }
+
     /** Apply "name(args)" / ".method(args)" from the function box to the selection. */
     callFunction(text) {
       text = (text || "").trim();
       if (!text || this.opts.readOnly || this.closed) return;
       var msg = { action: "call", path: this._fnTarget(), func: text };
+      if (this.lazy()) msg.lazy = true;
       if (this.range) msg.children = this._rangeIndices();
       this.fnInput.value = "";
       this._hideFnMenu();

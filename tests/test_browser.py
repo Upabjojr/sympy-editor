@@ -1552,6 +1552,31 @@ def test_diff_colours_only_what_changed(browser, serve_expr):
     assert page.errors == []
 
 
+def test_unevaluated_toggle(browser, serve_expr):
+    """With "unevaluated" on, the Determinant of a matrix is built, not computed."""
+    from sympy import Determinant, Matrix
+    srv, doc = serve_expr(Matrix([[1, 2], [3, 4]]))
+    page = _open(browser, srv.url)
+    page.locator(".se-lazy-box").check()
+    page.locator(".se-view").focus()
+    page.keyboard.press("ArrowDown")                                          # the whole matrix
+    menu = page.locator(".se-typemenu")                                       # the matrix tools
+    _next_state(page, lambda: menu.select_option("determinant"))
+    assert isinstance(doc.expr, Determinant)
+    assert doc.snapshot()["latex_plain"].startswith("\\left|")                    # |M|, not -2
+    _next_state(page, lambda: page.select_option(".se-ops", "doit"))
+    assert doc.expr == -2
+    page.locator(".se-lazy-box").uncheck()
+    page.locator(".se-view").focus()
+    _next_state(page, lambda: page.keyboard.press("Control+z"))
+    _next_state(page, lambda: page.keyboard.press("Control+z"))
+    page.keyboard.press("Escape")                                             # (the selection followed the undo)
+    page.keyboard.press("ArrowDown")
+    _next_state(page, lambda: menu.select_option("determinant"))
+    assert doc.expr == -2
+    assert page.errors == []
+
+
 def test_selection_follows_the_change(browser, serve_expr):
     """After an operation the selection is what replaced the selected node,
     not whatever now sits at its old path (SymPy reorders arguments)."""

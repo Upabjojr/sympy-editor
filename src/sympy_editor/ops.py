@@ -26,7 +26,7 @@ import sympy
 from sympy import Derivative, Integral, Limit, Product, Sum
 from sympy.core.expr import Expr
 from sympy.core.relational import Relational
-from sympy.matrices.expressions import Determinant, Inverse, MatrixExpr, MatrixSymbol, Trace
+from sympy.matrices.expressions import Adjoint, Determinant, Inverse, MatrixExpr, MatrixSymbol, Trace, Transpose
 from sympy.matrices import MatrixBase
 from sympy.tensor.array import NDimArray
 from sympy.tensor.array.expressions import (ArraySymbol, Reshape, convert_array_to_matrix,
@@ -87,6 +87,10 @@ class Op(NamedTuple):
     params: Tuple[Dict[str, object], ...] = ()
     #: One line about what the op does, shown over the parameter form.
     doc: str = ""
+    #: The op's *unevaluated* form (``Determinant(M)`` for the determinant),
+    #: used when the front end's "unevaluated" toggle is on; None for an op
+    #: without one (a simplification), which is then applied as usual.
+    lazy: Optional[Callable] = None
 
 
 _REGISTRY: "OrderedDict[str, Op]" = OrderedDict()
@@ -94,12 +98,14 @@ _REGISTRY: "OrderedDict[str, Op]" = OrderedDict()
 
 def register_op(name: str, func: Optional[Callable] = None, *, label: Optional[str] = None,
                 kinds: Optional[Tuple[str, ...]] = None, params: Optional[Tuple] = None,
-                doc: str = ""):
+                doc: str = "", lazy: Optional[Callable] = None):
     """Register ``func`` under ``name``.  Usable as a decorator.  ``kinds``
     limits the op to selections of those kinds (see :data:`KINDS`); ``params``
     declares values to ask the user for - ``[("permutation", "text", False,
     None)]``, i.e. (label, kind, optional, default) - which are parsed and
-    passed to ``func`` after the expression."""
+    passed to ``func`` after the expression.  ``lazy`` is the op's unevaluated
+    form (``Determinant`` for a determinant), called instead of ``func`` when
+    the user asks for the result unevaluated."""
     if kinds is not None:
         unknown = [k for k in kinds if k not in KINDS]
         if unknown:
@@ -112,7 +118,7 @@ def register_op(name: str, func: Optional[Callable] = None, *, label: Optional[s
                    for p in (params or ()))
 
     def deco(f: Callable) -> Callable:
-        _REGISTRY[name] = Op(name, label or name, f, kinds, shaped, doc)
+        _REGISTRY[name] = Op(name, label or name, f, kinds, shaped, doc, lazy)
         return f
 
     return deco(func) if func is not None else deco
@@ -144,7 +150,7 @@ def _register_defaults() -> None:
     register_op("nsimplify", sympy.nsimplify, label="Nsimplify (find exact form)")
     register_op("doit", lambda e: e.doit(), label="Evaluate (doit)")
     register_op("evalf", lambda e: e.evalf(), label="Numeric (evalf)")
-    register_op("negate", lambda e: -e, label="Negate")
+    register_op("negate", lambda e: -e, label="Negate", lazy=lambda e: sympy.Mul(-1, e, evaluate=False))
     # Not tied to a kind: an expression, a matrix or an array can all be
     # differentiated by a list of symbols, and the result gains their axes.
     register_op("derive_by_array", _derive_by_array, label="Derive by array…",
@@ -166,12 +172,12 @@ def _explicit(e):
 
 def _register_matrix_ops() -> None:
     m = ("matrix",)
-    register_op("transpose", lambda e: e.T, label="Transpose", kinds=m)
-    register_op("adjoint", lambda e: e.adjoint(), label="Adjoint (conjugate transpose)", kinds=m)
-    register_op("inverse", lambda e: e.inv() if _explicit(e) else Inverse(e), label="Inverse", kinds=m)
-    register_op("trace", lambda e: e.trace() if _explicit(e) else Trace(e), label="Trace", kinds=m)
+    register_op("transpose", lambda e: e.T, label="Transpose", kinds=m, lazy=Transpose)
+    register_op("adjoint", lambda e: e.adjoint(), label="Adjoint (conjugate transpose)", kinds=m, lazy=Adjoint)
+    register_op("inverse", lambda e: e.inv() if _explicit(e) else Inverse(e), label="Inverse", kinds=m, lazy=Inverse)
+    register_op("trace", lambda e: e.trace() if _explicit(e) else Trace(e), label="Trace", kinds=m, lazy=Trace)
     register_op("determinant", lambda e: e.det() if _explicit(e) else Determinant(e),
-                label="Determinant", kinds=m)
+                label="Determinant", kinds=m, lazy=Determinant)
     register_op("as_explicit", lambda e: e if _explicit(e) else e.as_explicit(),
                 label="Explicit matrix (as_explicit)", kinds=m)
     register_op("transpose_conj", lambda e: e.conjugate(), label="Conjugate", kinds=m)

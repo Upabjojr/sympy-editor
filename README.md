@@ -217,6 +217,19 @@ again), and the parts that survive slide to their new places
 (`options={"animate": False}` turns it off; it is off under
 `prefers-reduced-motion`).
 
+### Evaluated or unevaluated
+
+The **unevaluated** toggle next to the function box decides what a
+transformation or a SymPy function produces: off, the result is computed
+(the determinant of a numeric matrix is a number); on, its symbolic form is
+built - `Determinant(M)`, `Inverse(A)`, `Transpose`, `Trace`, `Derivative(f,
+x)` for `diff(x)`, `Integral(f, x)` for `integrate(x)`, `Limit`, `Sum`,
+`Product`, `Subs`, and `sin(0)`, `sqrt(4)`, `exp(0)`... left as written - to
+be evaluated later with **Evaluate (doit)**.  A transformation that has no
+such form (Simplify, Expand, Factor...) is applied as usual and the status
+line says so.  The history records the choice ("Transform: Determinant
+(unevaluated)").
+
 ### History view, report and script
 
 **History** (toolbar, or **View…** in the drawer's History) shows the current

@@ -68,6 +68,8 @@
   cursor: pointer;
 }
 .se-ops { max-width: 12rem; }
+.se-lazy { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 12px; cursor: pointer; white-space: nowrap; user-select: none; }
+.se-lazy input { margin: 0; }
 .se-fn {
   font: inherit;
   font-size: 12px;
