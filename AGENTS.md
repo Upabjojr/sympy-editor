@@ -229,6 +229,14 @@ Two conventions between printer, document and front end:
   committed), a copy of the current expression, or an example
   (`sympy_editor.examples.EXAMPLES`, carried as `cfg.examples` →
   `options.examples` when `sessions` is on).  The mobile bundle turns it on.
+- **Wrap.**  `{"action": "wrap", "path", "func"[, "args", "children"]}` →
+  `Document.wrap` puts the node (or range) inside a function - the inverse of
+  unwrap: `cos`, `sqrt`, `Integral` with `args="x"` (or `func="Integral(x)"`).
+  An unknown name becomes an undefined `Function`, so `f` gives `f(x)`.  It
+  builds rather than computes: when the node would be evaluated away
+  (`sqrt` of `4`, `cos` of `0`) the application is rebuilt under
+  `sympy.evaluate(False)`, so the editor shows what was asked for; `call`
+  is the one that computes.
 - **Isolate.**  `{"action": "isolate", "path"[, "children"]}` → `Document.isolate`
   commits the node (or range) as the whole expression; undoable.
 - **Unwrap.**  `{"action": "unwrap", "path", "keep"}` → `Document.unwrap`

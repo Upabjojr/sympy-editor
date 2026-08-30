@@ -77,6 +77,7 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | Apply / cancel an edit | click elsewhere applies | Enter / Esc |
 | Remove the selection entirely (on the whole expression: the formula is emptied and stays so - clicking it puts the cursor in the empty source line - until you type the new one; Esc brings the old one back) | **Delete** | Del |
 | Remove the node but keep its argument (`cos(θ)` → `θ`, `∫f dx` → `f`) | **Unwrap** | Backspace — a node with several arguments (`x²`: the base or the exponent, a sum, a fraction) asks which one to leave, with the one ↑ came from ready to confirm |
+| Put the node inside a function (`x` → `cos(x)`, `f(x)`, `∫x dx`) | `Document.wrap(path, "cos")` / `{"action": "wrap"}` | — (the function box **calls** a function; wrap builds without computing) |
 | Keep only the selection (it becomes the whole expression) | **Isolate** | Ctrl+Shift+I |
 | Transform the selection | pick an operation in the **Transform ▾** menu (general) or the type menu ("Matrix ▾"...): it applies at once | |
 | Copy / cut / paste a part | **Copy** / **Paste** (toolbar or action bar) | Ctrl+C / Ctrl+X copy the selection's SymPy source; Ctrl+V pastes over a selection or at a caret |

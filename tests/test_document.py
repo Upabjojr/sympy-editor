@@ -514,6 +514,44 @@ def test_unwrap_keeps_an_argument():
 
 
 
+def test_wrap_puts_a_node_inside_a_function():
+    """wrap is the inverse of unwrap: the node becomes the argument."""
+    z = Symbol("z")
+    doc = Document(x + y)
+    assert str(doc.wrap("/0", "cos")) == "y + cos(x)"           # SymPy's own ordering
+    assert doc.expr == y + cos(x)
+    doc.undo()
+    assert doc.expr == x + y
+
+    # a function of the expression, an undefined one, one with more arguments
+    assert str(Document(x * y).wrap("/", "exp")) == "exp(x*y)"
+    assert str(Document(x).wrap("/", "f")) == "f(x)"             # unknown name: an undefined Function
+    assert str(Document(x * y).wrap("/", "Integral", "x")) == "Integral(x*y, x)"
+    assert str(Document(x * y).wrap("/", "Integral(x)")) == "Integral(x*y, x)"   # or written as a call
+    assert str(Document(x).wrap("/", "Sum", "(x, 1, 10)")) == "Sum(x, (x, 1, 10))"
+
+    # wrapping builds, it does not compute
+    assert str(Document(Integer(4)).wrap("/", "sqrt")) == "sqrt(4)"
+    assert str(Document(Integer(0)).wrap("/", "cos")) == "cos(0)"
+
+    # a range of a sum, like the other range operations
+    doc = Document(x + y + z)
+    doc.wrap("/", "cos", children=[0, 1])
+    assert doc.expr == cos(x + y) + z or doc.expr == cos(y + z) + x   # whichever two SymPy orders first
+
+    # wrap then unwrap is the identity
+    doc = Document(x + y)
+    doc.wrap("/1", "sin")
+    doc.unwrap(next(k for k, v in doc.snapshot()["nodes"].items() if v["src"].startswith("sin")))
+    assert doc.expr == x + y
+
+    # messages and errors
+    assert Document(x).handle({"action": "wrap", "path": "/", "func": "tan"})["src"] == "tan(x)"
+    assert "No function" in Document(x).handle({"action": "wrap", "path": "/", "func": ""})["error"]
+    assert "Not a function name" in Document(x).handle({"action": "wrap", "path": "/", "func": "2 +"})["error"]
+    assert "Cannot wrap" in Document(x).handle({"action": "wrap", "path": "/", "func": "atan2"})["error"]
+
+
 def test_unwrap_offers_the_arguments_to_keep():
     """A node with more than one argument that could stand alone publishes the
     choice, so the front end asks instead of keeping the first silently."""

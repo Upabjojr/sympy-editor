@@ -603,6 +603,49 @@ class Document:
             raise ValueError(f"Cannot keep {kept}: it is not an expression")
         return self._commit(self._replace_at(self.expr, p, kept))
 
+    def wrap(self, path: PathLike, func: str, args: str = "", children=None) -> Basic:
+        """Put the node at ``path`` (or the range ``children`` of it) inside a
+        function - the inverse of :meth:`unwrap`.  ``x`` wrapped in ``"cos"``
+        becomes ``cos(x)``, in ``"sqrt"`` ``sqrt(x)``; ``"Integral"`` with
+        ``args="x"`` gives ``Integral(x, x)``.  ``func`` is a SymPy function, a
+        function already in the expression or declared, or any other name - an
+        unknown one becomes an undefined ``Function``, so ``"f"`` gives
+        ``f(x)``.  ``args`` holds any further arguments, parsed in the
+        expression's namespace and placed after the node.
+
+        Nothing is evaluated: wrapping ``4`` in ``sqrt`` gives ``sqrt(4)``, not
+        ``2`` - this builds the expression, :meth:`call` computes with it.
+        """
+        if not (func or "").strip():
+            raise ValueError("No function to wrap in (cos, sqrt, Integral, f...)")
+        m = re.match(r"^\s*([A-Za-z_][A-Za-z_0-9]*)\s*(?:\((.*)\))?\s*$", func or "", re.S)
+        if not m:
+            raise ValueError(f"Not a function name: {func!r} (wrap in cos, sqrt, Integral, f...)")
+        name, in_call = m.group(1), m.group(2)
+        argsrc = ", ".join(a for a in ((args or "").strip(), (in_call or "").strip()) if a)
+        p = self._path(path)
+        target = self._extract_range(self.expr, p, children) if children is not None else self._get_at(self.expr, p)
+        extra = [self.parse(a, context=target) for a in _split_args(argsrc)] if argsrc else []
+        known = self.namespace().get(name)
+        fn = known if callable(known) else getattr(sympy, name, None)
+        if not callable(fn) or name.startswith("_"):
+            fn = Function(name)      # not a function anywhere: an undefined one, f(x)
+        try:
+            result = sympify(fn(target, *extra))
+            # Wrapping builds, it does not compute: when the node is no longer
+            # inside what came back (sqrt of 4 is 2, cos of 0 is 1), keep the
+            # application unevaluated so the editor shows what was asked for.
+            if target not in getattr(result, "args", ()):
+                with sympy.evaluate(False):
+                    result = sympify(fn(target, *extra))
+        except Exception as exc:     # noqa: BLE001 - a wrong number of arguments, mostly
+            raise ValueError(f"Cannot wrap in {name}: {exc}") from None
+        if not isinstance(result, Basic):
+            raise ValueError(f"{name} returned {type(result).__name__}, not an expression")
+        if children is not None:
+            return self._commit(self._replace_range(self.expr, p, children, result))
+        return self._commit(self._replace_at(self.expr, p, result))
+
     def extend(self, path: PathLike, side: str, src: str) -> Basic:
         """Type next to the node at ``path`` (an entry of a matrix, the base of a
         power...): ``src`` is combined with the node - after it for
@@ -906,6 +949,8 @@ class Document:
         ``{"action": "insert", "path": "/", "index": 2, "src": "y", "left": 1}``,
         ``{"action": "extend", "path": "/2/0", "side": "after", "src": "+ 1"}``,
         ``{"action": "unwrap", "path": "/1", "keep": 0}`` (keep an argument, drop the node),
+        ``{"action": "wrap", "path": "/1", "func": "cos"}`` (the node becomes the
+        argument of a function; ``"args"`` supplies any further ones),
         ``{"action": "isolate", "path": "/1"}`` (the node becomes the whole expression),
         ``{"action": "call", "path": "/", "func": "diff(x)"}`` (any SymPy function/method),
         ``{"action": "functions"}`` (a snapshot with the list of SymPy function names),
@@ -948,6 +993,8 @@ class Document:
                             left=message.get("left"), right=message.get("right"), attach=message.get("attach"))
             elif action == "unwrap":
                 self.unwrap(path, message.get("keep"))
+            elif action == "wrap":
+                self.wrap(path, str(message.get("func", "")), str(message.get("args", "") or ""), children=children)
             elif action == "isolate":
                 self.isolate(path, children=children)
             elif action == "call":
