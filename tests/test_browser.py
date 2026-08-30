@@ -1510,6 +1510,30 @@ def test_change_animation_red_to_green(browser, serve_expr):
     assert page.errors == []
 
 
+def test_diff_colours_only_what_changed(browser, serve_expr):
+    """Unwrapping cos(x)**2 in sin(x)**2 + cos(x)**2 = 1: cos(x)**2 goes red and cos(x)
+    comes green; sin(x)**2 and the sum around it are not coloured (animation, view, report)."""
+    from sympy import Eq, cos
+    srv, doc = serve_expr(Eq(sin(x)**2 + cos(x)**2, 1))
+    page = _open(browser, srv.url)
+    nodes = doc.snapshot()["nodes"]
+    pcos = next(k for k, v in nodes.items() if v["src"] == "cos(x)**2")
+    _next_state(page, lambda: page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.send({action: 'unwrap', path: '%s', keep: 0})" % pcos))
+    assert doc.expr == Eq(sin(x)**2 + cos(x), 1)
+    assert _wait(lambda: page.locator(".se-ghost").count() == 0, timeout=5)
+    green = [t.strip() for t in page.locator(".se-view .se-added").all_inner_texts()]
+    assert green and all("sin" not in t for t in green) and any("cos" in t for t in green), green
+    page.locator('.se-toolbar [data-cmd="history"]').click()
+    frame = page.frame_locator(".se-history-frame")
+    frame.locator(".step").nth(1).wait_for()
+    red = [t.strip() for t in frame.locator(".transition .before .rep-removed").all_inner_texts()]
+    assert red and all("sin" not in t for t in red) and any("cos" in t for t in red), red
+    assert any("sin" in t for t in frame.locator(".transition .before .rep-kept").all_inner_texts())
+    green = [t.strip() for t in frame.locator('.step[data-index="1"] .rep-added').all_inner_texts()]
+    assert green and all("sin" not in t for t in green) and any("cos" in t for t in green), green
+    assert page.errors == []
+
+
 def test_change_animation_term_typed_at_a_caret_merges_green(browser, serve_expr):
     srv, doc = serve_expr(2 * x + 3 * y)
     page = _open(browser, srv.url)
@@ -1522,15 +1546,16 @@ def test_change_animation_term_typed_at_a_caret_merges_green(browser, serve_expr
     page.keyboard.type("+x")
     _next_state(page, lambda: page.keyboard.press("Enter"))
     assert doc.expr == 3 * x + 3 * y
-    # the old 2x goes red as a whole and the new 3x comes green as a whole (not a red 2 beside a green 3)
+    # only what changed is coloured: the 2 of 2x goes red, the 3 of 3x comes green; x and 3y are untouched
     assert page.locator(".se-ghost").count() == 2
     red = [t.strip() for t in page.locator(".se-ghost-old .se-removed").all_inner_texts()]
     green = [t.strip() for t in page.locator(".se-ghost-new .se-added").all_inner_texts()]
-    assert any("2" in t and "x" in t for t in red), red
-    assert any("3" in t and "x" in t for t in green) and not any("3" in t and "y" in t for t in green), green
+    assert red == ["2"], red
+    assert green == ["3"], green
     assert _wait(lambda: page.locator(".se-ghost").count() == 0, timeout=5)
     p3x = next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "3*x")
-    assert "se-added" in page.locator(f'.se-view [data-path="{p3x}"]').first.get_attribute("class")
+    assert "se-added" in page.locator(f'.se-view [data-path="{p3x}/0"]').first.get_attribute("class")
+    assert "se-added" not in page.locator(f'.se-view [data-path="{p3x}"]').first.get_attribute("class")
     assert page.errors == []
 
 

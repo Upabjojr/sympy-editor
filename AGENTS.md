@@ -168,10 +168,15 @@ Two conventions between printer, document and front end:
   until something is typed.
 - **Change animation.**  `_captureRendering` (before a re-render of a
   committed change) keeps a clone of the old rendering and every node's
-  box; `_animateChange` diffs old and new nodes - kept when the same `src`
-  is still there (the root also when it stays a container of the same
-  `type`, so a sum's operators do not flash); otherwise removed / added as
-  a whole - and animates two ghosts (`.se-ghost`, no
+  box; `_animateChange` diffs old and new nodes with `diffNodes` - a node
+  is kept when the same `src` is in the other table at the same path or
+  among its siblings there (SymPy reorders terms), everything inside a
+  kept node with it, and a container when it stays one of the same `type`
+  with something kept inside (the root always), so unwrapping `cos(x)**2`
+  in `sin(x)**2 + cos(x)**2` colours `cos(x)**2` alone and `2x` typed into
+  `3x` colours the `2` and the `3`; kept nodes get `.se-kept` /
+  `.se-diff-kept` / `.rep-kept` (normal colour inside a coloured parent),
+  the rest is removed / added - and animates two ghosts (`.se-ghost`, no
   `data-path`, `pointer-events: none`) over the real rendering, which is
   `.se-changing` (opacity 0, still hit-testable) meanwhile: the old
   ghost's top-most removed parts (`.se-removed`, red) move to the new node

@@ -321,7 +321,7 @@
 .se-view .se-ghost-old .se-removed { color: var(--se-removed); }
 .se-view .se-ghost-old .se-removed .se-kept { color: transparent; }
 .se-view .se-ghost-new .se-added, .se-view .se-added { color: var(--se-added); }
-.se-view .se-ghost-new .se-added .se-kept { color: inherit; }
+.se-view .se-ghost-new .se-added .se-kept, .se-view .se-added .se-kept { color: var(--se-fg); }   /* kept inside new: normal */
 .se-view .se-changing { opacity: 0; }
 .se-view .se-ghost .frac-line, .se-view .se-ghost .overline-line, .se-view .se-ghost .underline-line { border-color: currentColor; }
 .se-view .se-ghost svg { fill: currentColor; }
@@ -404,6 +404,7 @@
 .se-history-frame { flex: 1; width: 100%; border: 0; background: transparent; }
 .se-history-report { font: inherit; font-size: 12px; padding: 0.15rem 0.5rem; border: 1px solid var(--se-border); border-radius: 0.3rem; background: transparent; color: inherit; cursor: pointer; }
 .se-step .se-diff-removed { color: var(--se-removed); }
+.se-step .se-diff-kept { color: var(--se-fg); }
 .se-step .se-diff-added { color: var(--se-added); }
 .se-step .se-diff-removed .se-diff-removed, .se-step .se-diff-added .se-diff-added { color: inherit; }
 .se-step-no { min-width: 1.6em; text-align: right; }

@@ -45,8 +45,8 @@ var SympyEditor = (function () {
   // The history report: a self-contained page (KaTeX pre-rendered, its CSS
   // and fonts inlined), see Editor.buildReport.
   var REPORT_CSS = [
-    "body { margin: 0; padding: 1.5rem; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; background: #ffffff; color: #1f2328; }",
-    "@media (prefers-color-scheme: dark) { body { background: #1e1e1e; color: #e6e6e6; } .step, .transition .before { border-color: #444; } .meta, .transition .what, .step code, footer { color: #a0a0a0; } }",
+    "body { --fg: #1f2328; margin: 0; padding: 1.5rem; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; background: #ffffff; color: var(--fg); }",
+    "@media (prefers-color-scheme: dark) { body { --fg: #e6e6e6; background: #1e1e1e; } .step, .transition .before { border-color: #444; } .meta, .transition .what, .step code, footer { color: #a0a0a0; } }",
     "main { max-width: 60rem; margin: 0 auto; }",
     "h1 { font-size: 1.3rem; margin: 0 0 0.3rem; } .meta { color: #656d76; font-size: 0.9rem; margin: 0 0 1.5rem; }",
     ".step { border: 1px solid #d0d7de; border-radius: 0.6rem; padding: 0.8rem 1rem; margin: 0; overflow-x: auto; }",
@@ -56,7 +56,7 @@ var SympyEditor = (function () {
     ".transition .arrow { grid-row: 1 / 3; font-size: 1.8rem; text-align: center; color: #3b82f6; }",
     ".transition .what { font-weight: 600; } .transition .before { font-size: 0.9em; padding: 0.3rem 0.6rem; border-left: 3px solid #d0d7de; overflow-x: auto; }",
     ".transition .before .label { display: block; font-size: 0.75rem; color: #656d76; margin-bottom: 0.2rem; }",
-    ".rep-added { color: #1a7f37; } .rep-removed { color: #d1242f; } .rep-added .rep-added, .rep-removed .rep-removed { color: inherit; }",
+    ".rep-added { color: #1a7f37; } .rep-removed { color: #d1242f; } .rep-kept { color: var(--fg); }",
     "@media (prefers-color-scheme: dark) { .rep-added { color: #3fb950; } .rep-removed { color: #ff7b72; } }",
     ".katex-display { margin: 0.3em 0; text-align: left; } .katex-display > .katex { text-align: left; }",
     "footer { margin-top: 2rem; font-size: 0.8rem; color: #656d76; }"
@@ -210,20 +210,36 @@ var SympyEditor = (function () {
   }
 
   /** What changed between two node tables (path -> {src, type, nargs}):
-   *  a node is kept when its expression is still there.  The root is also
-   *  kept when it stays a container of the same type (a sum stays a sum:
-   *  its operators do not flash on every edit); any other node whose
-   *  expression changed goes as a whole - 2x typed into 3x is a red 2x
-   *  turning into a green 3x, not a red 2 next to a green 3. */
+   *  what is kept is not coloured, the rest is (red on the old side, green
+   *  on the new).  A node is kept when the same expression is in the other
+   *  table at the same place or among its siblings there (terms reordered
+   *  by SymPy do not flash), and a container is kept when it stays a
+   *  container of the same type with something kept inside (unwrapping
+   *  cos(x)**2 in sin(x)**2 + cos(x)**2 colours cos(x)**2, not the sum;
+   *  the operators of a sum do not flash on every edit).  A kept node
+   *  inside a coloured one is drawn in the normal colour. */
   function diffNodes(oldNodes, newNodes) {
-    var oldSrc = {}, newSrc = {};
-    Object.keys(oldNodes).forEach(function (p) { oldSrc[oldNodes[p].src] = true; });
-    Object.keys(newNodes).forEach(function (p) { newSrc[newNodes[p].src] = true; });
-    var sameRoot = "/" in oldNodes && "/" in newNodes && oldNodes["/"].type === newNodes["/"].type && oldNodes["/"].nargs > 0;
-    var oldKept = {}, newKept = {};
-    Object.keys(oldNodes).forEach(function (p) { oldKept[p] = !!newSrc[oldNodes[p].src] || (p === "/" && sameRoot); });
-    Object.keys(newNodes).forEach(function (p) { newKept[p] = !!oldSrc[newNodes[p].src] || (p === "/" && sameRoot); });
-    return { oldKept: oldKept, newKept: newKept };
+    var key = function (p) { return parentPath(p) || ""; };
+    var kept = function (nodes, others) {
+      var siblings = {};
+      Object.keys(others).forEach(function (p) { (siblings[key(p)] = siblings[key(p)] || {})[others[p].src] = true; });
+      var matched = {}, out = {};
+      Object.keys(nodes).forEach(function (p) { matched[p] = !!(siblings[key(p)] && siblings[key(p)][nodes[p].src]); });
+      // everything inside a matched node is kept with it (a term that moved keeps its contents)
+      Object.keys(nodes).forEach(function (p) {
+        var q = p;
+        while (q !== null && !matched[q]) q = parentPath(q);
+        out[p] = q !== null;
+      });
+      // stable containers, innermost first
+      Object.keys(nodes).sort(function (a, b) { return b.length - a.length; }).forEach(function (p) {
+        if (out[p] || !nodes[p].nargs || !others[p] || others[p].type !== nodes[p].type) return;
+        var inside = Object.keys(out).some(function (q) { return out[q] && q !== p && isAncestorOrSelf(p, q); });
+        if (inside || p === "/") out[p] = true;
+      });
+      return out;
+    };
+    return { oldKept: kept(oldNodes, newNodes), newKept: kept(newNodes, oldNodes) };
   }
 
   function h(tag, attrs, children) {
@@ -892,6 +908,7 @@ var SympyEditor = (function () {
       newGhost.classList.add("se-ghost-new");
       this.view.appendChild(newGhost);
       var addedTop = added.filter(function (p) { var q = parentPath(p); while (q !== null) { if (!newKept[q]) return false; q = parentPath(q); } return true; });
+      newPaths.forEach(function (p) { var el = byGhost(newGhost, p); if (el && newKept[p]) el.classList.add("se-kept"); });
       addedTop.forEach(function (p) {
         var el = byGhost(newGhost, p);
         if (el) { el.classList.add("se-added"); run(el, [{ opacity: 0, offset: 0 }, { opacity: 0, offset: 0.45 }, { opacity: 1, offset: 1 }]); }
@@ -907,7 +924,7 @@ var SympyEditor = (function () {
       });
       // meanwhile the real rendering is invisible (but in place, so clicks work); at the end it shows its new parts green
       disp.classList.add("se-changing");
-      added.forEach(function (p) { var els = self._els(p); for (var i = 0; i < els.length; i++) els[i].classList.add("se-added"); });
+      newPaths.forEach(function (p) { var els = self._els(p); for (var i = 0; i < els.length; i++) els[i].classList.add(newKept[p] ? "se-kept" : "se-added"); });
       var done = false;
       var finish = function () {
         if (done) return;
@@ -2739,7 +2756,7 @@ var SympyEditor = (function () {
           var p = els[i].getAttribute("data-path");
           els[i].setAttribute("data-hpath", p);      // not a node of the formula being edited
           els[i].removeAttribute("data-path");
-          if (marks && !marks[p]) els[i].classList.add(cls);
+          if (marks) els[i].classList.add(marks[p] ? "se-diff-kept" : cls);
         }
       };
       for (var r = 0; r < rows.length; r++) {
@@ -2833,7 +2850,7 @@ var SympyEditor = (function () {
       var els = div.querySelectorAll("[data-path]");
       for (var i = 0; i < els.length; i++) {
         var p = els[i].getAttribute("data-path");
-        if (kept && !kept[p]) els[i].classList.add(cls);
+        if (kept) els[i].classList.add(kept[p] ? "rep-kept" : cls);
         els[i].removeAttribute("data-path");
       }
       return div.innerHTML;
