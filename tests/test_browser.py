@@ -1689,6 +1689,10 @@ def test_history_report_is_self_contained_and_works_offline(browser, serve_expr,
     assert doc.expr == x**2 + cos(y)
     html = page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.buildReport()")
     assert html.startswith("<!DOCTYPE html>") and "data:font/woff2;base64," in html and "<script" not in html
+    # Every KaTeX @font-face must survive the inlining: with only the first
+    # one left, \left[ fell back to a normal-height bracket (document.fonts
+    # .check() is true for an undeclared family, so count the rules).
+    assert html.count("@font-face") >= 15
     assert "Edit: sin(y) → cos(y)" in html and "Transform: Factor" in html
     assert html.count('<section class="step"') == 3 and 'rep-added' in html and 'rep-removed' in html
     assert "cdn.jsdelivr.net" not in html.split("</style>")[1]      # no external resource in the body either

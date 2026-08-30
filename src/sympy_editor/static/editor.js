@@ -3149,9 +3149,14 @@ var SympyEditor = (function () {
               r.readAsDataURL(blob);
             });
           }));
-          // keep the woff2 face only, as a data URI (the woff/ttf fallbacks would be dead links)
-          return css.replace(/src:\s*url\((?:"|')?(fonts\/[^)"']+\.woff2)(?:"|')?\)\s*format\((?:"|')woff2(?:"|')\)[^;]*;/g, function (all, rel) {
-            return "src: url(" + fonts[rel] + ") format(\"woff2\");";
+          // Keep the woff2 face only, as a data URI (the woff/ttf fallbacks
+          // would be dead links).  The src declaration is replaced up to the
+          // next ";" or "}" - never past it: in minified CSS the last
+          // declaration of a block has no ";", and running over the "}" would
+          // swallow the following @font-face rules whole (every face but the
+          // first was lost, and \left[ fell back to a normal-height bracket).
+          return css.replace(/src:\s*url\((?:"|')?(fonts\/[^)"']+\.woff2)(?:"|')?\)\s*format\((?:"|')?woff2(?:"|')?\)[^;}]*/g, function (all, rel) {
+            return "src:url(" + fonts[rel] + ") format(\"woff2\")";
           });
         })().catch(function (e) { delete cache[href]; throw e; });
       }
