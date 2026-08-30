@@ -343,15 +343,15 @@ Two conventions between printer, document and front end:
   be differentiated by `[x, y]` - and a kind-specific copy would put a type menu
   on every scalar, which the editor deliberately does not have.
 - **Layout stability.**  `.sympy-editor` is `display: block` and
-  `.se-status` has `flex: 1 1 0; min-width: 0; min-height: 1.3em`: the
-  status text must never change the container's width nor wrap the toolbar
-  onto a second line, either of which moves the formula under the pointer
-  between two clicks.  The tools sit in `.se-tools` in three logical rows -
+  `.se-status` has its own full line under the tool rows (`flex: 0 0 100%;
+  min-width: 0; min-height: 1.3em`): the status text must never change the
+  container's width nor move the tools, either of which moves the formula
+  under the pointer between two clicks.  The tools sit in `.se-tools` in three logical rows -
   session/timeline + zoom, selection navigation + edits + clipboard, and
   the transform menus + function box - forced by `.se-break` spans
   (`flex-basis: 100%`), with `.se-sep` rules between the blocks of a row;
-  each row still wraps onto more lines when narrow (on screens up to 640 px
-  the status gets its own line under it); `.se-actions` wraps too (`max-width: calc(100% - 8px)`), so no
+  each row still wraps onto more lines when narrow, and the status line sits
+  under them at every width; `.se-actions` wraps too (`max-width: calc(100% - 8px)`), so no
   button is ever off-screen.
 - **Zoom and sideways scrolling.**  `Editor.setZoom(zoom, anchorX)` sets the
   CSS variable `--se-zoom` on `.se-view` (`font-size: calc(base *

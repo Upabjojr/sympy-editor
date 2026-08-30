@@ -43,6 +43,7 @@
 
 .se-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.25rem;
   margin-bottom: 0.3rem;
@@ -170,20 +171,19 @@
 .se-sep { width: 1px; height: 1.1rem; background: var(--se-border); margin: 0 0.35rem; }
 .se-break { flex-basis: 100%; height: 0; }   /* the tools after it start a new row */
 .se-status {
-  /* takes the remaining space and shrinks (never wraps the toolbar onto a
-   * second line, which would move the formula under the pointer) */
-  flex: 1 1 0;
+  /* its own full line under the tool rows: it is always visible, and its
+   * text can never change the toolbar's width (which would move the
+   * formula under the pointer between two clicks) */
+  flex: 0 0 100%;
   min-width: 0;
   min-height: 1.3em;         /* one line, whether or not there is text */
-  margin-left: auto;
-  padding-left: 0.5rem;
+  padding-left: 0.2rem;
   color: var(--se-muted);
   font-family: var(--se-mono);
   font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  text-align: right;
 }
 
 .se-view {
@@ -519,10 +519,7 @@
 /* narrow screens (phones): the tools wrap onto as many rows as they need
  * (every button stays visible), and the status gets its own line */
 @media (max-width: 640px) {
-  .se-toolbar { flex-wrap: wrap; }
-  .se-tools { flex: 0 0 100%; }
   .se-fn { width: 11rem; }
-  .se-status { flex: 0 0 100%; text-align: left; padding-left: 0.2rem; margin-left: 0; }
 }
 
 /* hover feedback only where hovering exists: on a touch screen :hover
