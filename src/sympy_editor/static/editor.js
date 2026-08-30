@@ -58,10 +58,14 @@ var SympyEditor = (function () {
     ".transition .what { font-weight: 600; } .transition .before { font-size: 0.9em; padding: 0.3rem 0.6rem; border-left: 3px solid #d0d7de; overflow-x: auto; }",
     ".transition .before .label { display: block; font-size: 0.75rem; color: #656d76; margin-bottom: 0.2rem; }",
     ".rep-added, .rep-removed { font-weight: bold; border-radius: 0.15em; padding: 0 0.05em; }",
-    ".rep-added { color: #1a7f37; background: rgba(26, 127, 55, 0.1); } .rep-removed { color: #d1242f; background: rgba(209, 36, 47, 0.1); }",
+    /* Solid tints (the faint rgba mixed into the page background): an inline
+     * background only paints the line box, so a tall fraction or matrix
+     * sticks out of its container's band - but every changed child is marked
+     * too, and with solid colours their bands join up into full coverage
+     * instead of stacking darker where they overlap. */
+    ".rep-added { color: #1a7f37; background: #e8f2eb; } .rep-removed { color: #d1242f; background: #fae9ea; }",
     ".rep-kept { color: var(--fg); background: var(--bg); font-weight: normal; }",
-    ".rep-added .rep-added, .rep-removed .rep-removed { background: transparent; }",       /* one tint, not one per level */
-    "@media (prefers-color-scheme: dark) { .rep-added { color: #3fb950; background: rgba(63, 185, 80, 0.16); } .rep-removed { color: #ff7b72; background: rgba(255, 123, 114, 0.16); } }",
+    "@media (prefers-color-scheme: dark) { .rep-added { color: #3fb950; background: #233726; } .rep-removed { color: #ff7b72; background: #422d2b; } }",
     ".katex-display { margin: 0.3em 0; text-align: left; } .katex-display > .katex { text-align: left; }",
     "footer { margin-top: 2rem; font-size: 0.8rem; color: #656d76; }"
   ].join("\n");
