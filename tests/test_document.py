@@ -1,5 +1,8 @@
 import pytest
-from sympy import Function, Integer, Integral, Matrix, Symbol, atan2, cos, log, sin, symbols, sqrt
+from sympy import (Function, Integer, Integral, Matrix, MatrixSymbol, Symbol, atan2, cos, log,
+                   sin, symbols, sqrt)
+from sympy.matrices import MatrixBase
+from sympy.tensor.array import NDimArray
 
 from sympy_editor import Document, register_op
 
@@ -512,6 +515,49 @@ def test_unwrap_keeps_an_argument():
     doc = Document(Integral(x, (x, 0, 1)))
     assert "not an expression" in doc.handle({"action": "unwrap", "path": "/", "keep": 1})["error"]
 
+
+
+def test_matrix_and_array_conversions_and_array_tools():
+    """Matrices and arrays convert both ways, and an array has its own tools."""
+    from sympy import Array
+
+    doc = Document(Matrix([[1, 2], [3, 4]]))
+    assert [o for o in doc.snapshot()["ops"] if o["name"] == "to_array"][0]["kinds"] == ["matrix"]
+    doc.apply("/", "to_array")
+    assert isinstance(doc.expr, NDimArray) and doc.expr == Array([[1, 2], [3, 4]])
+    doc.apply("/", "tomatrix")
+    assert isinstance(doc.expr, MatrixBase) and doc.expr == Matrix([[1, 2], [3, 4]])
+    doc.undo(); doc.undo()
+    assert doc.expr == Matrix([[1, 2], [3, 4]])
+
+    # a MatrixSymbol has no entries of its own: it is made explicit first
+    A = MatrixSymbol("A", 2, 2)
+    assert Document(A).apply("/", "to_array") == Array(A.as_explicit())
+
+    # the tools that take axes
+    a = Array([[1, 2], [3, 4]])
+    assert Document(a).apply("/", "permutedims", args=["(1, 0)"]) == Array([[1, 3], [2, 4]])
+    assert Document(a).apply("/", "contraction", args=["(0, 1)"]) == Integer(5)
+    assert Document(a).apply("/", "diagonal", args=["(0, 1)"]) == Array([1, 4])
+    assert Document(a).apply("/", "array_rank") == Integer(2)
+
+    # a rank-3 array: permutations of three axes, and it is not a matrix
+    cube = Array([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])
+    assert Document(cube).apply("/", "permutedims", args=["(2, 0, 1)"]).shape == (2, 2, 2)
+    assert "rank-2" in Document(cube).handle({"action": "apply", "path": "/", "op": "tomatrix"})["error"]
+
+    # the parameters are declared, so a front end can ask for them
+    ops = {o["name"]: o for o in Document(a).snapshot()["ops"]}
+    assert [p["name"] for p in ops["permutedims"]["params"]] == ["permutation, e.g. (1, 0)"]
+    assert ops["contraction"]["kinds"] == ["array"] and ops["contraction"]["doc"]
+    assert ops["transpose"]["params"] == []
+
+    # and applying without them says what is missing, rather than failing obscurely
+    assert "needs permutation" in Document(a).handle({"action": "apply", "path": "/", "op": "permutedims"})["error"]
+    assert "not an index" in Document(a).handle(
+        {"action": "apply", "path": "/", "op": "contraction", "args": ["(x, 1)"]})["error"]
+    assert Document(a).handle(
+        {"action": "apply", "path": "/", "op": "permutedims", "args": ["(1,0)"]})["src"] == "[[1, 3], [2, 4]]"
 
 
 def test_wrap_puts_a_node_inside_a_function():

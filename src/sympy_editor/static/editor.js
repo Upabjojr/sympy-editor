@@ -635,7 +635,10 @@ var SympyEditor = (function () {
         var op = menu.value;
         menu.selectedIndex = 0;
         if (!op) return;
-        var msg = { action: "apply", path: self.range ? self.range.parent : (self.selected || "/"), op: op };
+        var path = self.range ? self.range.parent : (self.selected || "/");
+        var spec = (self.state.ops || []).filter(function (o) { return o.name === op; })[0];
+        if (spec && spec.params && spec.params.length) return self._askOpParams(spec, path, menu);
+        var msg = { action: "apply", path: path, op: op };
         if (self.range) msg.children = self._rangeIndices();
         self.send(msg);
         self.view.focus({ preventScroll: true });
@@ -1686,10 +1689,28 @@ var SympyEditor = (function () {
       this.send(msg);   // the answer (snapshot.signature) opens the form
     }
 
-    /** Ask for the parameters of `sig` (or apply at once when none is required). */
-    _showFnForm(sig) {
+    /** Ask an op for the values it declares (`params`), then apply it: the
+     *  array tools - permute, contract, diagonal - want axes. */
+    _askOpParams(spec, path, anchor) {
+      var self = this;
+      if (!this.fnForm) {   // no function box on this page: let the backend say what is missing
+        return this.send({ action: "apply", path: path, op: spec.name });
+      }
+      this._showFnForm({ name: spec.label.replace(/…\s*$/, ""), params: spec.params, doc: spec.doc || "",
+                         callable: true, hinted: true },
+        function (values) {
+          var msg = { action: "apply", path: path, op: spec.name, args: values };
+          if (self.range) msg.children = self._rangeIndices();
+          self.send(msg);
+        }, anchor);
+    }
+
+    /** Ask for the parameters of `sig` (or apply at once when none is required).
+     *  `onApply(values)` replaces the default "call the function"; `anchor` is
+     *  the element the form is placed under (the function box by default). */
+    _showFnForm(sig, onApply, anchor) {
       var needs = sig.callable && sig.params.some(function (p) { return !p.optional; });
-      if (!needs) { this._hideFnForm(); this.callFunction(sig.name); return; }
+      if (!needs) { this._hideFnForm(); if (onApply) onApply([]); else this.callFunction(sig.name); return; }
       var self = this;
       var node = this.state.nodes[this._fnTarget()] || {};
       var free = node.free || [];
@@ -1728,6 +1749,12 @@ var SympyEditor = (function () {
           if (gap && !sig.hinted && !prm.varargs) parts.push(prm.name + "=" + v);
           else parts.push(v);
         }
+        if (onApply) {
+          self._hideFnForm();
+          onApply(values);
+          self.view.focus({ preventScroll: true });
+          return;
+        }
         var base = sig.name.replace(/^\./, "");
         var call;
         if ((base === "integrate" || base === "summation") && values[0] && values[1] && values[2]) {
@@ -1746,7 +1773,7 @@ var SympyEditor = (function () {
       buttons.querySelector(".se-fn-cancel").addEventListener("click", function () { self._hideFnForm(); self.view.focus({ preventScroll: true }); });
       this.fnForm.appendChild(buttons);
       this.fnForm.hidden = false;
-      this._placeUnder(this.fnForm, this.fnInput);
+      this._placeUnder(this.fnForm, anchor || this.fnInput);
       if (controls.length) controls[0].ctrl.focus();
     }
 

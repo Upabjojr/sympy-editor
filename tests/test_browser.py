@@ -870,6 +870,35 @@ def test_backspace_unwraps_and_delete_removes(browser, serve_expr):
     assert page.errors == []
 
 
+def test_array_tools_ask_for_their_axes(browser, serve_expr):
+    """The array type menu offers the tools; the ones that take axes ask."""
+    from sympy import Array
+    srv, doc = serve_expr(Array([[1, 2], [3, 4]]))
+    page = _open(browser, srv.url)
+    _click(page, "/")
+    menu = page.locator(".se-typemenu")
+    menu.wait_for(state="visible")
+    labels = menu.locator("option").all_inner_texts()
+    assert any("Permute axes" in t for t in labels) and any("Contract axes" in t for t in labels)
+    assert any("As matrix" in t for t in labels)
+
+    menu.select_option("permutedims")               # asks before doing anything
+    form = page.locator(".se-fn-form")
+    form.wait_for(state="visible")
+    assert doc.expr == Array([[1, 2], [3, 4]])
+    form.locator("input").first.fill("(1, 0)")
+    _next_state(page, lambda: form.locator(".se-fn-apply").click())
+    assert doc.expr == Array([[1, 3], [2, 4]])
+
+    _click(page, "/")
+    _next_state(page, lambda: page.locator(".se-typemenu").select_option("tomatrix"))
+    assert doc.expr == Matrix([[1, 3], [2, 4]])
+    _click(page, "/")
+    _next_state(page, lambda: page.locator(".se-typemenu").select_option("to_array"))
+    assert doc.expr == Array([[1, 3], [2, 4]])
+    assert page.errors == []
+
+
 def test_unwrap_asks_which_argument_to_keep(browser, serve_expr):
     """x**2 has no natural argument to leave: the editor asks for the base or
     the exponent instead of silently keeping the base."""

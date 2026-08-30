@@ -70,23 +70,40 @@ class Op(NamedTuple):
     func: Callable
     #: Kinds of selection the op applies to; ``None`` for any.
     kinds: Optional[Tuple[str, ...]] = None
+    #: Values the op needs besides the expression, in the shape the front end
+    #: already uses for function parameters: ``{"name", "kind": "symbol"|"text",
+    #: "default", "optional"}``.  They are parsed in the expression's namespace
+    #: and passed to ``func`` after it (``func(expr, *values)``); an op without
+    #: parameters is ``func(expr)`` as before.
+    params: Tuple[Dict[str, object], ...] = ()
+    #: One line about what the op does, shown over the parameter form.
+    doc: str = ""
 
 
 _REGISTRY: "OrderedDict[str, Op]" = OrderedDict()
 
 
 def register_op(name: str, func: Optional[Callable] = None, *, label: Optional[str] = None,
-                kinds: Optional[Tuple[str, ...]] = None):
+                kinds: Optional[Tuple[str, ...]] = None, params: Optional[Tuple] = None,
+                doc: str = ""):
     """Register ``func`` under ``name``.  Usable as a decorator.  ``kinds``
-    limits the op to selections of those kinds (see :data:`KINDS`)."""
+    limits the op to selections of those kinds (see :data:`KINDS`); ``params``
+    declares values to ask the user for - ``[("permutation", "text", False,
+    None)]``, i.e. (label, kind, optional, default) - which are parsed and
+    passed to ``func`` after the expression."""
     if kinds is not None:
         unknown = [k for k in kinds if k not in KINDS]
         if unknown:
             raise ValueError(f"Unknown kinds {unknown}; known: {list(KINDS)}")
         kinds = tuple(kinds)
 
+    shaped = tuple({"name": p[0], "kind": p[1] if len(p) > 1 else "text",
+                    "optional": bool(p[2]) if len(p) > 2 else False,
+                    "default": p[3] if len(p) > 3 else None}
+                   for p in (params or ()))
+
     def deco(f: Callable) -> Callable:
-        _REGISTRY[name] = Op(name, label or name, f, kinds)
+        _REGISTRY[name] = Op(name, label or name, f, kinds, shaped, doc)
         return f
 
     return deco(func) if func is not None else deco
@@ -143,7 +160,53 @@ def _register_matrix_ops() -> None:
     register_op("as_explicit", lambda e: e if _explicit(e) else e.as_explicit(),
                 label="Explicit matrix (as_explicit)", kinds=m)
     register_op("transpose_conj", lambda e: e.conjugate(), label="Conjugate", kinds=m)
-    register_op("tomatrix", lambda e: e.tomatrix(), label="As matrix (rank 2)", kinds=("array",))
+    register_op("to_array", lambda e: sympy.Array(e.as_explicit() if not _explicit(e) else e),
+                label="As array (Array)", kinds=m,
+                doc="The same entries as an N-dimensional array, which can then be permuted, contracted or diagonalised.")
+    _register_array_ops()
+
+
+# Array ops: an NDimArray of any rank.  The three that take indices are the
+# array's own tools - a matrix has a transpose, an array has a permutation of
+# its axes, a contraction and a diagonal over any pair of them.
+
+def _array_indices(value) -> tuple:
+    """A parameter such as ``(1, 0)`` or ``0, 1`` as a tuple of plain ints."""
+    items = list(value) if isinstance(value, (tuple, list, sympy.Tuple)) else [value]
+    out = []
+    for it in items:
+        n = sympy.sympify(it)
+        if not (getattr(n, "is_Integer", False) or isinstance(n, int)):
+            raise ValueError(f"{it} is not an index (0, 1, 2...)")
+        out.append(int(n))
+    return tuple(out)
+
+
+def _to_matrix(e):
+    if len(e.shape) != 2:
+        raise ValueError(f"Only a rank-2 array is a matrix; this one has rank {len(e.shape)} "
+                         f"(shape {tuple(e.shape)}) - contract or diagonalise it first")
+    return e.tomatrix()
+
+
+def _register_array_ops() -> None:
+    a = ("array",)
+    register_op("tomatrix", _to_matrix, label="As matrix (rank 2)", kinds=a,
+                doc="A rank-2 array is the same thing as a matrix.")
+    register_op("permutedims", lambda e, perm: sympy.permutedims(e, _array_indices(perm)),
+                label="Permute axes (permutedims)…", kinds=a,
+                params=[("permutation, e.g. (1, 0)", "text", False, None)],
+                doc="Reorder the axes: (1, 0) transposes a rank-2 array, (2, 0, 1) rolls a rank-3 one.")
+    register_op("contraction", lambda e, axes: sympy.tensorcontraction(e, _array_indices(axes)),
+                label="Contract axes (tensorcontraction)…", kinds=a,
+                params=[("axes to sum over, e.g. (0, 1)", "text", False, None)],
+                doc="Sum over a pair of axes, as the trace sums a matrix over its two.")
+    register_op("diagonal", lambda e, axes: sympy.tensordiagonal(e, _array_indices(axes)),
+                label="Diagonal over axes (tensordiagonal)…", kinds=a,
+                params=[("axes to take the diagonal of, e.g. (0, 1)", "text", False, None)],
+                doc="Keep the entries whose indices on those axes are equal, as a matrix diagonal does.")
+    register_op("array_rank", lambda e: sympy.Integer(len(e.shape)), label="Rank (number of axes)", kinds=a,
+                doc="How many axes the array has.")
 
 
 def _with_function(e, f):

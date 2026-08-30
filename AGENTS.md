@@ -30,6 +30,12 @@ src/sympy_editor/
                 of the expression, JSON `snapshot()` and message `handle()`.
                 Single source of truth for all front ends.
   ops.py        Registry of transformations (simplify, expand, ...); register_op.
+                An op may declare `params` (label, kind, optional, default) -
+                values asked for before it runs, in the shape the function form
+                already uses: the array tools (permute axes, contract,
+                diagonal) want the axes.  `Document.apply(..., args=[...])`
+                parses them in the expression's namespace and passes them after
+                the expression.
                 KINDS maps kinds (integral, sum, derivative, limit, relational,
                 matrix, array, scalar) to SymPy types; node_kinds() lists all
                 kinds of a node, most specific first.  An op registered with
@@ -253,6 +259,13 @@ Two conventions between printer, document and front end:
   instead; Escape cancels, ←/→ move between the choices.  A node with a single
   candidate is unwrapped straight away.  Backspace/Unwrap button.  Delete
   removes.
+- **Matrices and arrays.**  A matrix converts to an `NDimArray` (`to_array`,
+  which makes a `MatrixSymbol` explicit first) and a rank-2 array back
+  (`tomatrix`; any other rank says so rather than raising SymPy's error).  An
+  array's own tools are `permutedims`, `contraction` (`tensorcontraction`) and
+  `diagonal` (`tensordiagonal`), each asking for the axes - `(1, 0)`, `(0, 1)` -
+  through the op `params` mechanism, plus `array_rank`.  Axes are read as plain
+  integers (`_array_indices`), so `(x, 1)` is refused with a clear message.
 - **Layout stability.**  `.sympy-editor` is `display: block` and
   `.se-status` has `flex: 1 1 0; min-width: 0; min-height: 1.3em`: the
   status text must never change the container's width nor wrap the toolbar

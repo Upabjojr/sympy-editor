@@ -495,21 +495,45 @@ class Document:
             return self._commit(self._insert_at(self.expr, p, int(index), new_expr))
         return self._commit(self._replace_range(self.expr, p, consumed, new_expr))
 
-    def apply(self, path: PathLike, op: Union[str, Callable], children=None) -> Basic:
+    def apply(self, path: PathLike, op: Union[str, Callable], children=None, args=None) -> Basic:
         """Apply a registered op (by name) or a callable to the node at ``path``
-        (or, with ``children``, to the range of those arguments of it)."""
+        (or, with ``children``, to the range of those arguments of it).
+
+        ``args`` are the values an op with ``params`` asks for - source strings
+        (or SymPy objects), parsed in the expression's namespace and passed
+        after the expression: ``apply(p, "permutedims", args=["(1, 0)"])``
+        calls the op as ``func(array, Tuple(1, 0))``."""
+        spec = None
         if isinstance(op, str):
             try:
-                func = self.ops[op].func
+                spec = self.ops[op]
             except KeyError:
                 raise ValueError(f"Unknown operation: {op!r}") from None
+            func = spec.func
         else:
             func = op
         p = self._path(path)
+        target = self._extract_range(self.expr, p, children) if children is not None else self._get_at(self.expr, p)
+        values = []
+        for i, raw in enumerate(args or []):
+            if isinstance(raw, Basic):
+                values.append(raw)
+                continue
+            text = str(raw).strip()
+            if not text:
+                if spec is not None and i < len(spec.params) and spec.params[i].get("optional"):
+                    continue
+                name = spec.params[i]["name"] if spec is not None and i < len(spec.params) else f"argument {i + 1}"
+                raise ValueError(f"{(spec.label if spec else op)} needs {name}")
+            values.append(self.parse(text, context=target))
+        if spec is not None:
+            missing = [prm["name"] for prm in spec.params[len(values):] if not prm.get("optional")]
+            if missing:
+                raise ValueError(f"{spec.label} needs {', '.join(missing)}")
+        result = sympify(func(target, *values))
         if children is not None:
-            result = sympify(func(self._extract_range(self.expr, p, children)))
             return self._commit(self._replace_range(self.expr, p, children, result))
-        return self._commit(self._replace_at(self.expr, p, sympify(func(self._get_at(self.expr, p)))))
+        return self._commit(self._replace_at(self.expr, p, result))
 
     def call(self, path: PathLike, func: str, children=None) -> Basic:
         """Apply a SymPy function or a method to the node at ``path`` (or to
@@ -897,7 +921,8 @@ class Document:
             "symbols": self.symbol_info(),
             "can_undo": self.can_undo,
             "can_redo": self.can_redo,
-            "ops": [{"name": op.name, "label": op.label, "kinds": list(op.kinds) if op.kinds else None}
+            "ops": [{"name": op.name, "label": op.label, "kinds": list(op.kinds) if op.kinds else None,
+                     "params": [dict(prm) for prm in op.params], "doc": op.doc}
                     for op in self.ops.values()],
             "kind_labels": dict(KIND_LABELS),
             "error": error,
@@ -944,7 +969,8 @@ class Document:
         Messages: ``{"action": "replace", "path": "/0", "src": "y**2"}``
         (``replace``, ``delete`` and ``apply`` take ``"children": [i, j]`` to
         act on the range of those arguments of the node at ``path``),
-        ``{"action": "apply", "path": "/", "op": "expand"}``,
+        ``{"action": "apply", "path": "/", "op": "expand"[, "args": ["(1, 0)"]]}``
+        (``args`` for an op that declares ``params``, such as the array tools),
         ``{"action": "delete", "path": "/1"}``, ``{"action": "set", "src": ...}``,
         ``{"action": "insert", "path": "/", "index": 2, "src": "y", "left": 1}``,
         ``{"action": "extend", "path": "/2/0", "side": "after", "src": "+ 1"}``,
@@ -1019,7 +1045,7 @@ class Document:
             elif action == "set":
                 self.replace("/", str(message.get("src", "")))
             elif action == "apply":
-                self.apply(path, str(message.get("op", "")), children=children)
+                self.apply(path, str(message.get("op", "")), children=children, args=message.get("args"))
             elif action == "delete":
                 self.delete(path, children=children)
             elif action == "undo":
