@@ -26,9 +26,18 @@ import sympy
 from sympy import Derivative, Integral, Limit, Product, Sum
 from sympy.core.expr import Expr
 from sympy.core.relational import Relational
-from sympy.matrices.expressions import Determinant, Inverse, MatrixExpr, Trace
+from sympy.matrices.expressions import Determinant, Inverse, MatrixExpr, MatrixSymbol, Trace
 from sympy.matrices import MatrixBase
 from sympy.tensor.array import NDimArray
+from sympy.tensor.array.expressions import (ArraySymbol, Reshape, convert_array_to_matrix,
+                                            convert_matrix_to_array)
+# Symbolic arrays - an ArraySymbol, or a PermuteDims/ArrayContraction/... over
+# one - have no public base class in common: _ArrayExpr covers the leaves and
+# _CodegenArrayAbstract the operations.  Both are Expr, so without them here an
+# array symbol would be classified "scalar" and offered none of its own tools.
+from sympy.tensor.array.expressions.array_expressions import _ArrayExpr, _CodegenArrayAbstract
+
+ARRAY_EXPR = (_ArrayExpr, _CodegenArrayAbstract)
 
 __all__ = ["Op", "register_op", "get_ops", "default_ops", "KINDS", "KIND_LABELS", "node_kind", "node_kinds"]
 
@@ -41,7 +50,7 @@ KINDS: "OrderedDict[str, Tuple[type, ...]]" = OrderedDict([
     ("limit", (Limit,)),
     ("relational", (Relational,)),
     ("matrix", (MatrixExpr, MatrixBase)),
-    ("array", (NDimArray,)),
+    ("array", (NDimArray,) + ARRAY_EXPR),
     ("scalar", (Expr,)),
 ])
 
@@ -136,6 +145,12 @@ def _register_defaults() -> None:
     register_op("doit", lambda e: e.doit(), label="Evaluate (doit)")
     register_op("evalf", lambda e: e.evalf(), label="Numeric (evalf)")
     register_op("negate", lambda e: -e, label="Negate")
+    # Not tied to a kind: an expression, a matrix or an array can all be
+    # differentiated by a list of symbols, and the result gains their axes.
+    register_op("derive_by_array", _derive_by_array, label="Derive by array…",
+                params=[("by, e.g. x or [x, y]", "text", False, None)],
+                doc="Differentiate by each of those, adding their axes to the result: "
+                    "an expression by [x, y] becomes its gradient, a matrix an array.")
     _register_matrix_ops()
     _register_calculus_ops()
 
@@ -160,9 +175,12 @@ def _register_matrix_ops() -> None:
     register_op("as_explicit", lambda e: e if _explicit(e) else e.as_explicit(),
                 label="Explicit matrix (as_explicit)", kinds=m)
     register_op("transpose_conj", lambda e: e.conjugate(), label="Conjugate", kinds=m)
-    register_op("to_array", lambda e: sympy.Array(e.as_explicit() if not _explicit(e) else e),
-                label="As array (Array)", kinds=m,
-                doc="The same entries as an N-dimensional array, which can then be permuted, contracted or diagonalised.")
+    register_op("to_array", _to_array, label="As array", kinds=m,
+                doc="The same thing as an array: a matrix symbol becomes an array symbol (its entries stay implicit), "
+                    "an explicit matrix an explicit array.")
+    register_op("reshape", _reshape, label="Reshape…", kinds=m,
+                params=[("new shape, e.g. (3, 2)", "text", False, None)],
+                doc="The same entries in another shape; a shape with other than two dimensions gives an array.")
     _register_array_ops()
 
 
@@ -182,11 +200,56 @@ def _array_indices(value) -> tuple:
     return tuple(out)
 
 
+def _symbolic_array(e) -> bool:
+    return isinstance(e, ARRAY_EXPR)
+
+
+def _to_array(e):
+    """A matrix as an array, keeping symbols symbolic: a ``MatrixSymbol``
+    becomes an ``ArraySymbol`` of the same name and shape rather than a grid
+    of its entries."""
+    if isinstance(e, MatrixSymbol):
+        return ArraySymbol(e.name, tuple(e.shape))
+    if isinstance(e, MatrixBase):
+        return sympy.Array(e)
+    return convert_matrix_to_array(e)
+
+
 def _to_matrix(e):
-    if len(e.shape) != 2:
-        raise ValueError(f"Only a rank-2 array is a matrix; this one has rank {len(e.shape)} "
-                         f"(shape {tuple(e.shape)}) - contract or diagonalise it first")
-    return e.tomatrix()
+    """A rank-2 array as a matrix, the inverse of :func:`_to_array`."""
+    shape = tuple(e.shape)
+    if len(shape) != 2:
+        raise ValueError(f"Only a rank-2 array is a matrix; this one has rank {len(shape)} "
+                         f"(shape {shape}) - contract, diagonalise or reshape it first")
+    if isinstance(e, ArraySymbol):
+        return MatrixSymbol(str(e.name), *shape)
+    if isinstance(e, NDimArray):
+        return e.tomatrix()
+    return convert_array_to_matrix(e)
+
+
+def _reshape(e, shape):
+    """The same entries in another shape.  A matrix reshaped to two dimensions
+    stays a matrix; anything else is an array, since only an array can have a
+    rank other than 2."""
+    dims = _array_indices(shape)
+    if not dims:
+        raise ValueError("A shape needs at least one dimension, e.g. (3, 2)")
+    try:
+        if isinstance(e, MatrixBase):
+            return e.reshape(*dims) if len(dims) == 2 else sympy.Array(e).reshape(*dims)
+        if isinstance(e, NDimArray):
+            return e.reshape(*dims)
+        return Reshape(_to_array(e) if isinstance(e, MatrixExpr) else e, dims)
+    except (ValueError, IndexError) as exc:
+        raise ValueError(f"Cannot reshape {tuple(e.shape)} into {dims}: {exc}") from None
+
+
+def _derive_by_array(e, wrt):
+    """Differentiate by one symbol, or by a list/array of them - the result
+    gains their axes (a matrix by [x, y] becomes a rank-3 array)."""
+    by = list(wrt) if isinstance(wrt, (sympy.Tuple, tuple, list, NDimArray)) else wrt
+    return sympy.derive_by_array(e, by)
 
 
 def _register_array_ops() -> None:
@@ -207,6 +270,12 @@ def _register_array_ops() -> None:
                 doc="Keep the entries whose indices on those axes are equal, as a matrix diagonal does.")
     register_op("array_rank", lambda e: sympy.Integer(len(e.shape)), label="Rank (number of axes)", kinds=a,
                 doc="How many axes the array has.")
+    register_op("reshape_array", _reshape, label="Reshape…", kinds=a,
+                params=[("new shape, e.g. (4, 1)", "text", False, None)],
+                doc="The same entries in another shape.")
+    register_op("array_as_explicit", lambda e: e.as_explicit() if _symbolic_array(e) else e,
+                label="Explicit entries (as_explicit)", kinds=a,
+                doc="An array symbol written out as the grid of its entries, S[0, 0], S[0, 1]...")
 
 
 def _with_function(e, f):

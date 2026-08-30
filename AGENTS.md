@@ -259,13 +259,28 @@ Two conventions between printer, document and front end:
   instead; Escape cancels, ←/→ move between the choices.  A node with a single
   candidate is unwrapped straight away.  Backspace/Unwrap button.  Delete
   removes.
-- **Matrices and arrays.**  A matrix converts to an `NDimArray` (`to_array`,
-  which makes a `MatrixSymbol` explicit first) and a rank-2 array back
-  (`tomatrix`; any other rank says so rather than raising SymPy's error).  An
-  array's own tools are `permutedims`, `contraction` (`tensorcontraction`) and
-  `diagonal` (`tensordiagonal`), each asking for the axes - `(1, 0)`, `(0, 1)` -
-  through the op `params` mechanism, plus `array_rank`.  Axes are read as plain
-  integers (`_array_indices`), so `(x, 1)` is refused with a clear message.
+- **Matrices and arrays.**  The "array" kind covers explicit `NDimArray`s *and*
+  symbolic ones: `_ArrayExpr` (an `ArraySymbol`) and `_CodegenArrayAbstract`
+  (`PermuteDims`, `ArrayContraction`, `ArrayDiagonal`, `Reshape`) have no public
+  base class in common and are both `Expr`, so without them in `KINDS` an array
+  symbol would be a "scalar" and get none of its own tools.
+  Conversions keep components implicit when they are: `to_array` turns a
+  `MatrixSymbol` into an `ArraySymbol` of the same name and shape (an explicit
+  matrix into an explicit `Array`, another matrix expression through
+  `convert_matrix_to_array`), and `tomatrix` inverts it - a rank other than 2
+  says so instead of raising from inside SymPy.  `array_as_explicit` writes an
+  array symbol out as its entries.
+  The array's own tools - `permutedims`, `contraction` (`tensorcontraction`),
+  `diagonal` (`tensordiagonal`), `reshape`, `derive_by_array` - are the plain
+  SymPy functions, which dispatch to the symbolic forms on their own, so each
+  works on both kinds of array; they ask for their axes/shape/variables through
+  the op `params` mechanism.  Axes and shapes are read as plain integers
+  (`_array_indices`), so `(x, 1)` is refused with a clear message.  `reshape` is
+  registered for matrices as well (reshaped to a rank other than 2 a matrix
+  becomes an array); `derive_by_array` is registered *without* kinds - it is in
+  the general Transform menu, since an expression, a matrix and an array can all
+  be differentiated by `[x, y]` - and a kind-specific copy would put a type menu
+  on every scalar, which the editor deliberately does not have.
 - **Layout stability.**  `.sympy-editor` is `display: block` and
   `.se-status` has `flex: 1 1 0; min-width: 0; min-height: 1.3em`: the
   status text must never change the container's width nor wrap the toolbar

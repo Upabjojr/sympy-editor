@@ -80,8 +80,10 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | Put the node inside a function (`x` → `cos(x)`, `f(x)`, `∫x dx`) | `Document.wrap(path, "cos")` / `{"action": "wrap"}` | — (the function box **calls** a function; wrap builds without computing) |
 | Keep only the selection (it becomes the whole expression) | **Isolate** | Ctrl+Shift+I |
 | Transform the selection | pick an operation in the **Transform ▾** menu (general) or the type menu ("Matrix ▾", "Array ▾"...): it applies at once, or asks for what it needs first (the array tools want their axes) | |
-| Matrix ↔ array | "Matrix ▾ → As array"; "Array ▾ → As matrix (rank 2)" | |
-| Array tools | "Array ▾": permute axes `(1, 0)`, contract axes `(0, 1)`, diagonal over axes, rank | |
+| Matrix ↔ array | "Matrix ▾ → As array"; "Array ▾ → As matrix (rank 2)" — a `MatrixSymbol` becomes an `ArraySymbol` (entries stay implicit), an explicit matrix an explicit array | |
+| Array tools | "Array ▾" (for explicit arrays *and* array symbols): permute axes `(1, 0)`, contract axes `(0, 1)`, diagonal over axes, reshape, rank, explicit entries | |
+| Reshape | "Matrix ▾" / "Array ▾" → Reshape… — a matrix reshaped to a rank other than 2 becomes an array | |
+| Derive by array | **Transform ▾** → Derive by array… — by `x` or `[x, y]`, for an expression (its gradient), a matrix or an array, symbolic or explicit | |
 | Copy / cut / paste a part | **Copy** / **Paste** (toolbar or action bar) | Ctrl+C / Ctrl+X copy the selection's SymPy source; Ctrl+V pastes over a selection or at a caret |
 | Apply any SymPy function | the **function box** in the toolbar: type to search SymPy's functions, pick one; a function that needs parameters asks for them (symbol parameters offer the selection's free symbols — `solve` on `sin(x)cos(y)` asks x or y); `diff(x)`, `.T`, `det()` typed in full apply as written | |
 | Undo / redo | ↶ / ↷ | Ctrl+Z / Ctrl+Shift+Z |

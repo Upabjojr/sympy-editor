@@ -3,6 +3,7 @@ from sympy import (Function, Integer, Integral, Matrix, MatrixSymbol, Symbol, at
                    sin, symbols, sqrt)
 from sympy.matrices import MatrixBase
 from sympy.tensor.array import NDimArray
+from sympy.tensor.array.expressions import ArraySymbol
 
 from sympy_editor import Document, register_op
 
@@ -530,9 +531,10 @@ def test_matrix_and_array_conversions_and_array_tools():
     doc.undo(); doc.undo()
     assert doc.expr == Matrix([[1, 2], [3, 4]])
 
-    # a MatrixSymbol has no entries of its own: it is made explicit first
-    A = MatrixSymbol("A", 2, 2)
-    assert Document(A).apply("/", "to_array") == Array(A.as_explicit())
+    # a MatrixSymbol keeps its entries implicit: it becomes an array symbol
+    A = MatrixSymbol("A", 2, 3)
+    assert Document(A).apply("/", "to_array") == ArraySymbol("A", (2, 3))
+    assert Document(ArraySymbol("A", (2, 3))).apply("/", "tomatrix") == A
 
     # the tools that take axes
     a = Array([[1, 2], [3, 4]])
@@ -558,6 +560,65 @@ def test_matrix_and_array_conversions_and_array_tools():
         {"action": "apply", "path": "/", "op": "contraction", "args": ["(x, 1)"]})["error"]
     assert Document(a).handle(
         {"action": "apply", "path": "/", "op": "permutedims", "args": ["(1,0)"]})["src"] == "[[1, 3], [2, 4]]"
+
+
+def test_array_symbols_have_the_array_tools():
+    """An ArraySymbol - and anything built from one - is an array to the editor,
+    with the same tools, and its results stay component-implicit."""
+    from sympy import Array
+    from sympy.tensor.array.expressions import (ArrayContraction, ArrayDiagonal, ArraySymbol,
+                                                PermuteDims, Reshape)
+
+    S = ArraySymbol("S", (2, 3, 4))
+    doc = Document(S)
+    assert doc.snapshot()["nodes"]["/"]["kind"] == "array"       # not "scalar"
+    offered = {o["name"] for o in doc.snapshot()["ops"] if o["kinds"] == ["array"]}
+    assert {"permutedims", "contraction", "diagonal", "reshape_array",
+            "tomatrix", "array_rank", "array_as_explicit"} <= offered
+
+    assert Document(S).apply("/", "permutedims", args=["(1, 0, 2)"]) == PermuteDims(S, (1, 0, 2))
+    assert Document(ArraySymbol("T", (3, 3))).apply("/", "contraction", args=["(0, 1)"]) \
+        == ArrayContraction(ArraySymbol("T", (3, 3)), (0, 1))
+    assert Document(ArraySymbol("T", (3, 3, 2))).apply("/", "diagonal", args=["(0, 1)"]) \
+        == ArrayDiagonal(ArraySymbol("T", (3, 3, 2)), (0, 1))
+    assert Document(S).apply("/", "array_rank") == Integer(3)
+
+    # the result of a tool is an array too, so they chain
+    doc = Document(S)
+    doc.apply("/", "permutedims", args=["(1, 0, 2)"])
+    assert doc.snapshot()["nodes"]["/"]["kind"] == "array"
+
+    # component-explicit when asked for
+    assert Document(ArraySymbol("S", (2, 2))).apply("/", "array_as_explicit") \
+        == ArraySymbol("S", (2, 2)).as_explicit()
+
+
+def test_reshape_and_derive_by_array():
+    from sympy import Array
+    from sympy.tensor.array.expressions import ArraySymbol, Reshape
+
+    # reshape: a matrix stays a matrix on two dimensions, becomes an array otherwise
+    assert Document(Matrix([[1, 2], [3, 4]])).apply("/", "reshape", args=["(1, 4)"]) == Matrix([[1, 2, 3, 4]])
+    assert Document(Matrix([[1, 2], [3, 4]])).apply("/", "reshape", args=["(4,)"]) == Array([1, 2, 3, 4])
+    assert Document(Array([[1, 2], [3, 4]])).apply("/", "reshape_array", args=["(4, 1)"]) == Array([[1], [2], [3], [4]])
+    assert Document(MatrixSymbol("A", 2, 3)).apply("/", "reshape", args=["(3, 2)"]) \
+        == Reshape(ArraySymbol("A", (2, 3)), (3, 2))
+    assert "Cannot reshape" in Document(Matrix([[1, 2], [3, 4]])).handle(
+        {"action": "apply", "path": "/", "op": "reshape", "args": ["(3, 3)"]})["error"]
+
+    # derive by array, for an expression, a matrix and an array - explicit
+    assert Document(x ** 2 * y).apply("/", "derive_by_array", args=["[x, y]"]) == Array([2 * x * y, x ** 2])
+    assert Document(Matrix([[x, x * y]])).apply("/", "derive_by_array", args=["x"]) == Array([[Integer(1), y]])
+    assert Document(Array([x * y, x])).apply("/", "derive_by_array", args=["[x, y]"]) == Array([[y, Integer(1)], [x, Integer(0)]])
+
+    # ... and component-implicit: differentiating a matrix symbol gives an array expression
+    A = MatrixSymbol("A", 2, 2)
+    result = Document(A).apply("/", "derive_by_array", args=["A"])
+    assert Document(result).snapshot()["nodes"]["/"]["kind"] == "array"
+
+    ops = {o["name"]: o for o in Document(Matrix([[1, 2], [3, 4]])).snapshot()["ops"]}
+    assert [p["name"] for p in ops["reshape"]["params"]] == ["new shape, e.g. (3, 2)"]
+    assert "needs by" in Document(x).handle({"action": "apply", "path": "/", "op": "derive_by_array"})["error"]
 
 
 def test_wrap_puts_a_node_inside_a_function():
