@@ -59,6 +59,7 @@ var SympyEditor = (function () {
     ".rep-added, .rep-removed { font-weight: bold; border-radius: 0.15em; padding: 0 0.05em; }",
     ".rep-added { color: #1a7f37; background: rgba(26, 127, 55, 0.1); } .rep-removed { color: #d1242f; background: rgba(209, 36, 47, 0.1); }",
     ".rep-kept { color: var(--fg); background: var(--bg); font-weight: normal; }",
+    ".rep-added .rep-added, .rep-removed .rep-removed { background: transparent; }",       /* one tint, not one per level */
     "@media (prefers-color-scheme: dark) { .rep-added { color: #3fb950; background: rgba(63, 185, 80, 0.16); } .rep-removed { color: #ff7b72; background: rgba(255, 123, 114, 0.16); } }",
     ".katex-display { margin: 0.3em 0; text-align: left; } .katex-display > .katex { text-align: left; }",
     "footer { margin-top: 2rem; font-size: 0.8rem; color: #656d76; }"
@@ -213,35 +214,44 @@ var SympyEditor = (function () {
 
   /** What changed between two node tables (path -> {src, type, nargs}):
    *  what is kept is not coloured, the rest is (red on the old side, green
-   *  on the new).  A node is kept when the same expression is in the other
-   *  table at the same place or among its siblings there (terms reordered
-   *  by SymPy do not flash), and a container is kept when it stays a
-   *  container of the same type with something kept inside (unwrapping
-   *  cos(x)**2 in sin(x)**2 + cos(x)**2 colours cos(x)**2, not the sum;
-   *  the operators of a sum do not flash on every edit).  A kept node
-   *  inside a coloured one is drawn in the normal colour. */
+   *  on the new).  The two trees are aligned from the root down: in two
+   *  corresponding containers, children with the same expression are
+   *  kept with everything inside them (in any order: SymPy reorders
+   *  terms), the remaining children that are containers of the same type
+   *  are paired up in order and aligned in turn, and the rest goes / comes
+   *  as a whole.  So unwrapping cos(x)**2 in sin(x)**2 + cos(x)**2 colours
+   *  cos(x)**2 (its exponent included) and cos(x), not the sum; 2x typed
+   *  into 3x colours the 2 and the 3.  A kept node inside a coloured one
+   *  is drawn in the normal colour. */
   function diffNodes(oldNodes, newNodes) {
-    var key = function (p) { return parentPath(p) || ""; };
-    var kept = function (nodes, others) {
-      var siblings = {};
-      Object.keys(others).forEach(function (p) { (siblings[key(p)] = siblings[key(p)] || {})[others[p].src] = true; });
-      var matched = {}, out = {};
-      Object.keys(nodes).forEach(function (p) { matched[p] = !!(siblings[key(p)] && siblings[key(p)][nodes[p].src]); });
-      // everything inside a matched node is kept with it (a term that moved keeps its contents)
-      Object.keys(nodes).forEach(function (p) {
-        var q = p;
-        while (q !== null && !matched[q]) q = parentPath(q);
-        out[p] = q !== null;
+    var ot = buildTree(oldNodes), nt = buildTree(newNodes);
+    var oldKept = {}, newKept = {};
+    Object.keys(oldNodes).forEach(function (p) { oldKept[p] = false; });
+    Object.keys(newNodes).forEach(function (p) { newKept[p] = false; });
+    var keepAll = function (tree, kept, p) { kept[p] = true; tree[p].children.forEach(function (c) { keepAll(tree, kept, c); }); };
+    var container = function (nodes, p) { return nodes[p].nargs > 0; };
+    var align = function (op, np) {
+      oldKept[op] = true;
+      newKept[np] = true;
+      var oc = ot[op].children, nc = nt[np].children, used = {}, restOld = [];
+      oc.forEach(function (c) {
+        for (var k = 0; k < nc.length; k++) {
+          if (!used[k] && newNodes[nc[k]].src === oldNodes[c].src) { used[k] = true; keepAll(ot, oldKept, c); keepAll(nt, newKept, nc[k]); return; }
+        }
+        restOld.push(c);
       });
-      // stable containers, innermost first
-      Object.keys(nodes).sort(function (a, b) { return b.length - a.length; }).forEach(function (p) {
-        if (out[p] || !nodes[p].nargs || !others[p] || others[p].type !== nodes[p].type) return;
-        var inside = Object.keys(out).some(function (q) { return out[q] && q !== p && isAncestorOrSelf(p, q); });
-        if (inside || p === "/") out[p] = true;
+      restOld.forEach(function (c) {
+        if (!container(oldNodes, c)) return;
+        for (var k = 0; k < nc.length; k++) {
+          if (!used[k] && container(newNodes, nc[k]) && newNodes[nc[k]].type === oldNodes[c].type) { used[k] = true; align(c, nc[k]); return; }
+        }
       });
-      return out;
     };
-    return { oldKept: kept(oldNodes, newNodes), newKept: kept(newNodes, oldNodes) };
+    if ("/" in oldNodes && "/" in newNodes) {
+      if (oldNodes["/"].src === newNodes["/"].src) { keepAll(ot, oldKept, "/"); keepAll(nt, newKept, "/"); }
+      else if (oldNodes["/"].type === newNodes["/"].type && container(oldNodes, "/") && container(newNodes, "/")) align("/", "/");
+    }
+    return { oldKept: oldKept, newKept: newKept };
   }
 
   function h(tag, attrs, children) {

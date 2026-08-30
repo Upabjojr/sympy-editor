@@ -168,13 +168,14 @@ Two conventions between printer, document and front end:
   until something is typed.
 - **Change animation.**  `_captureRendering` (before a re-render of a
   committed change) keeps a clone of the old rendering and every node's
-  box; `_animateChange` diffs old and new nodes with `diffNodes` - a node
-  is kept when the same `src` is in the other table at the same path or
-  among its siblings there (SymPy reorders terms), everything inside a
-  kept node with it, and a container when it stays one of the same `type`
-  with something kept inside (the root always), so unwrapping `cos(x)**2`
-  in `sin(x)**2 + cos(x)**2` colours `cos(x)**2` alone and `2x` typed into
-  `3x` colours the `2` and the `3`; kept nodes get `.se-kept` /
+  box; `_animateChange` diffs old and new nodes with `diffNodes`, which
+  aligns the two trees (`buildTree`) from the root down: in corresponding
+  containers, children with the same `src` are kept with everything inside
+  them (any order: SymPy reorders terms), remaining children that are
+  containers of the same `type` are paired in order and aligned in turn,
+  the rest goes / comes as a whole - so unwrapping `cos(x)**2` in
+  `sin(x)**2 + cos(x)**2` colours `cos(x)**2` (exponent included) and
+  `2x` typed into `3x` colours the `2` and the `3`; kept nodes get `.se-kept` /
   `.se-diff-kept` / `.rep-kept` (normal colour inside a coloured parent),
   the rest is removed / added - and animates two ghosts (`.se-ghost`, no
   `data-path`, `pointer-events: none`) over the real rendering, which is

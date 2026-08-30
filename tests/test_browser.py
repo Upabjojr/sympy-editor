@@ -1528,6 +1528,7 @@ def test_diff_colours_only_what_changed(browser, serve_expr):
     frame.locator(".step").nth(1).wait_for()
     red = [t.strip() for t in frame.locator(".transition .before .rep-removed").all_inner_texts()]
     assert red and all("sin" not in t for t in red) and any("cos" in t for t in red), red
+    assert "2" in red                                                     # the exponent went too
     assert any("sin" in t for t in frame.locator(".transition .before .rep-kept").all_inner_texts())
     green = [t.strip() for t in frame.locator('.step[data-index="1"] .rep-added').all_inner_texts()]
     assert green and all("sin" not in t for t in green) and any("cos" in t for t in green), green
