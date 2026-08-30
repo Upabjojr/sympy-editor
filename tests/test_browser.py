@@ -1535,6 +1535,37 @@ def test_diff_colours_only_what_changed(browser, serve_expr):
     assert page.errors == []
 
 
+def test_selection_follows_the_change(browser, serve_expr):
+    """After an operation the selection is what replaced the selected node,
+    not whatever now sits at its old path (SymPy reorders arguments)."""
+    from sympy import Eq, cos, expand
+    srv, doc = serve_expr(Eq(sin(x)**2 + cos(x)**2, 1))
+    page = _open(browser, srv.url)
+    nodes = doc.snapshot()["nodes"]
+    pcos = next(k for k, v in nodes.items() if v["src"] == "cos(x)**2")
+    _click(page, pcos + "/0/0")                                                       # the x of cos(x)
+    page.keyboard.press("ArrowUp")
+    page.keyboard.press("ArrowUp")
+    assert page.locator(".se-status").inner_text() == "Pow: cos(x)**2"
+    _next_state(page, lambda: page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.send({action: 'unwrap', path: '%s', keep: 0})" % pcos))
+    assert doc.expr == Eq(sin(x)**2 + cos(x), 1)
+    sel = page.locator(".se-selected").get_attribute("data-path")
+    assert doc.snapshot()["nodes"][sel]["src"] == "cos(x)"                           # not sin(x)**2, which took its path
+    _next_state(page, lambda: page.select_option(".se-ops", "expand_trig"))          # no change of cos(x): still selected
+    assert doc.snapshot()["nodes"][page.locator(".se-selected").get_attribute("data-path")]["src"] == "cos(x)"
+    # a replacement that SymPy moves elsewhere in the sum is followed
+    srv, doc = serve_expr(x + y)
+    page = _open(browser, srv.url)
+    nodes = doc.snapshot()["nodes"]
+    py = next(k for k, v in nodes.items() if v["src"] == "y")
+    _click(page, py)
+    page.keyboard.type("a")
+    _next_state(page, lambda: page.keyboard.press("Enter"))                          # y -> a: now the first term
+    sel = page.locator(".se-selected").get_attribute("data-path")
+    assert doc.snapshot()["nodes"][sel]["src"] == "a" and sel != py
+    assert page.errors == []
+
+
 def test_change_animation_term_typed_at_a_caret_merges_green(browser, serve_expr):
     srv, doc = serve_expr(2 * x + 3 * y)
     page = _open(browser, srv.url)

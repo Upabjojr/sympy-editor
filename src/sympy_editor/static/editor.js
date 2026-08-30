@@ -222,21 +222,32 @@ var SympyEditor = (function () {
    *  as a whole.  So unwrapping cos(x)**2 in sin(x)**2 + cos(x)**2 colours
    *  cos(x)**2 (its exponent included) and cos(x), not the sum; 2x typed
    *  into 3x colours the 2 and the 3.  A kept node inside a coloured one
-   *  is drawn in the normal colour. */
+   *  is drawn in the normal colour.  `map` gives, for every old path that
+   *  is kept or aligned, the corresponding new path (a term that moved is
+   *  found again). */
   function diffNodes(oldNodes, newNodes) {
     var ot = buildTree(oldNodes), nt = buildTree(newNodes);
-    var oldKept = {}, newKept = {};
+    var oldKept = {}, newKept = {}, map = {};
     Object.keys(oldNodes).forEach(function (p) { oldKept[p] = false; });
     Object.keys(newNodes).forEach(function (p) { newKept[p] = false; });
-    var keepAll = function (tree, kept, p) { kept[p] = true; tree[p].children.forEach(function (c) { keepAll(tree, kept, c); }); };
+    // two identical expressions: the same structure, node for node
+    var keepPair = function (op, np) {
+      oldKept[op] = true; newKept[np] = true; map[op] = np;
+      var oc = ot[op].children, nc = nt[np].children;
+      for (var i = 0; i < oc.length; i++) {
+        if (i < nc.length) keepPair(oc[i], nc[i]); else oldKept[oc[i]] = true;
+      }
+      for (var j = oc.length; j < nc.length; j++) newKept[nc[j]] = true;
+    };
     var container = function (nodes, p) { return nodes[p].nargs > 0; };
     var align = function (op, np) {
       oldKept[op] = true;
       newKept[np] = true;
+      map[op] = np;
       var oc = ot[op].children, nc = nt[np].children, used = {}, restOld = [];
       oc.forEach(function (c) {
         for (var k = 0; k < nc.length; k++) {
-          if (!used[k] && newNodes[nc[k]].src === oldNodes[c].src) { used[k] = true; keepAll(ot, oldKept, c); keepAll(nt, newKept, nc[k]); return; }
+          if (!used[k] && newNodes[nc[k]].src === oldNodes[c].src) { used[k] = true; keepPair(c, nc[k]); return; }
         }
         restOld.push(c);
       });
@@ -248,10 +259,39 @@ var SympyEditor = (function () {
       });
     };
     if ("/" in oldNodes && "/" in newNodes) {
-      if (oldNodes["/"].src === newNodes["/"].src) { keepAll(ot, oldKept, "/"); keepAll(nt, newKept, "/"); }
+      if (oldNodes["/"].src === newNodes["/"].src) keepPair("/", "/");
       else if (oldNodes["/"].type === newNodes["/"].type && container(oldNodes, "/") && container(newNodes, "/")) align("/", "/");
     }
-    return { oldKept: oldKept, newKept: newKept };
+    return { oldKept: oldKept, newKept: newKept, map: map };
+  }
+
+  /** Where the selection goes after a change: what replaced the selected
+   *  node (the result of the edit or transformation), the node itself
+   *  where it was kept (a term SymPy moved is followed), else the nearest
+   *  ancestor that survived.  Null when nothing was selected. */
+  function selectionAfter(selected, oldNodes, newNodes) {
+    if (!selected || !oldNodes || !newNodes) return null;
+    var diff = diffNodes(oldNodes, newNodes);
+    if (diff.oldKept[selected] && diff.map[selected]) return diff.map[selected];
+    var nt = buildTree(newNodes);
+    var addedTop = Object.keys(newNodes).filter(function (p) {
+      if (diff.newKept[p]) return false;
+      var q = nt[p].parent;
+      return q === null || diff.newKept[q];
+    });
+    // the ancestor that survived, and what is new under it
+    var anc = selected;
+    while (anc !== null && !(diff.oldKept[anc] && diff.map[anc])) anc = parentPath(anc);
+    var under = anc === null ? null : diff.map[anc];
+    var mine = under === null ? addedTop : addedTop.filter(function (p) { return nt[p].parent === under; });
+    if (!mine.length) mine = addedTop;
+    if (mine.length === 1) return mine[0];
+    if (mine.length > 1) {                    // several new pieces: what holds them all
+      var common = mine[0];
+      while (common !== null && !mine.every(function (p) { return isAncestorOrSelf(common, p); })) common = nt[common].parent;
+      return common !== null ? common : mine[0];
+    }
+    return under;
   }
 
   function h(tag, attrs, children) {
@@ -726,6 +766,7 @@ var SympyEditor = (function () {
         if (this._sessionsReady && !snap.error) this._scheduleSessionSave();
       }
       var same = snap === this.state;   // re-render of the current state (keeps the range)
+      var previous = this.state && !this.state.preview ? this.state : this.committed;
       this.state = snap;
       this._hideKeep();
       this.tree = buildTree(snap.nodes || {});
@@ -736,6 +777,10 @@ var SympyEditor = (function () {
       await this._render();
       if (this.state !== snap) return;  // superseded meanwhile
       var sel = this.selected;
+      if (sel && !same && !snap.preview && previous && previous.nodes && previous !== snap) {
+        // a change: paths move with SymPy's reordering, so follow the node, not its path
+        sel = selectionAfter(sel, previous.nodes, snap.nodes || {});
+      }
       while (sel && !(sel in this.tree)) sel = parentPath(sel);
       this.selected = sel;
       this._fillOps();

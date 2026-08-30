@@ -175,7 +175,13 @@ Two conventions between printer, document and front end:
   containers of the same `type` are paired in order and aligned in turn,
   the rest goes / comes as a whole - so unwrapping `cos(x)**2` in
   `sin(x)**2 + cos(x)**2` colours `cos(x)**2` (exponent included) and
-  `2x` typed into `3x` colours the `2` and the `3`; kept nodes get `.se-kept` /
+  `2x` typed into `3x` colours the `2` and the `3`.  `diffNodes` also
+  returns `map` (old path → new path for kept and aligned nodes), which
+  `selectionAfter` uses in `setState` to move the selection with a change:
+  to what replaced the selected node (the top-most new node under the
+  nearest surviving ancestor; their common holder when several), to the
+  node itself where it was kept (a term SymPy moved is followed), else to
+  that ancestor - never to whatever now sits at the old path.  Kept nodes get `.se-kept` /
   `.se-diff-kept` / `.rep-kept` (normal colour inside a coloured parent),
   the rest is removed / added - and animates two ghosts (`.se-ghost`, no
   `data-path`, `pointer-events: none`) over the real rendering, which is
