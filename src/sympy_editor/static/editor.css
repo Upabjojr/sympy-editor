@@ -166,6 +166,19 @@
   cursor: pointer;
 }
 .se-typemenu[hidden] { display: none; }
+.se-methods {
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 0.2rem 0.5rem;
+  max-width: 11rem;
+  border: 1px solid var(--se-border);
+  border-radius: 0.3rem;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.se-methods[hidden] { display: none; }
 .se-typemenu:disabled { opacity: 0.4; cursor: default; }
 .se-toolbar button:disabled, .se-ops:disabled { opacity: 0.4; cursor: default; }
 .se-sep { width: 1px; height: 1.1rem; background: var(--se-border); margin: 0 0.35rem; }

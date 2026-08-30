@@ -408,6 +408,14 @@ var SympyEditor = (function () {
         // Integral, Equation...); picking one applies it at once.
         this.typeMenu = h("select", { class: "se-typemenu", hidden: "", title: "Operations specific to the selected type" });
         this.tools.appendChild(this.typeMenu);
+        // Methods menu: what the selected object's class can do (the root
+        // expression when nothing is selected); picking one calls it, asking
+        // for parameters first when it needs any.  Each snapshot carries the
+        // lists of the types it introduces (see _fillMethods).
+        this.methodsMenu = h("select", { class: "se-methods", hidden: "",
+          title: "Methods of the selection's class (of the whole expression when nothing is selected): pick one to call it; a method with parameters asks for them" });
+        this.tools.appendChild(this.methodsMenu);
+        this._methodsCache = {};   // entries by type name, from the snapshots (Document piggybacks new types)
         sep();
         // Function box: search SymPy's functions; a picked function that needs
         // parameters asks for them (see _showFnForm).
@@ -794,6 +802,16 @@ var SympyEditor = (function () {
         menu.addEventListener("change", function () { applyFromMenu(menu); });
         menu.addEventListener("keydown", function (ev) { ev.stopPropagation(); });
       });
+      if (this.methodsMenu) {
+        this.methodsMenu.addEventListener("change", function () {
+          var name = self.methodsMenu.value;
+          self.methodsMenu.selectedIndex = 0;
+          if (!name) return;
+          delete self._fnSigs["." + name];   // a method's signature depends on the type: never reuse another's
+          self._pickFn("." + name);
+        });
+        this.methodsMenu.addEventListener("keydown", function (ev) { ev.stopPropagation(); });
+      }
     }
 
     /* ---- state ---- */
@@ -830,6 +848,9 @@ var SympyEditor = (function () {
       }
       while (sel && !(sel in this.tree)) sel = parentPath(sel);
       this.selected = sel;
+      if (snap.methods) {
+        for (var mt in snap.methods) this._methodsCache[mt] = snap.methods[mt] || [];
+      }
       this._fillOps();
       this._fillSymbols();
       if (snap.functions && this.fnInput && !this._functionsLoaded) {
@@ -1063,6 +1084,7 @@ var SympyEditor = (function () {
       if (!this.opsSelect || !this.state) return;
       var target = this.range ? this.range.parent : (this.selected || "/");
       var node = this.state.nodes ? this.state.nodes[target] : null;
+      this._fillMethods(target, node);
       var kinds = node ? (node.kinds || [node.kind]) : [];
       var ops = this.state.ops || [];
       var general = ops.filter(function (op) { return !op.kinds; });
@@ -1086,6 +1108,29 @@ var SympyEditor = (function () {
       specific.forEach(function (op) { self.typeMenu.appendChild(h("option", { value: op.name }, [op.label || op.name])); });
       this.typeMenu.selectedIndex = 0;
       this.typeMenu.hidden = false;
+    }
+
+    /** The methods menu: the public methods and properties of the class of
+     *  the node at `target` (fetched from the backend once per type name and
+     *  cached).  Picking one goes through the function box flow - signature,
+     *  parameter form when needed, then the call. */
+    _fillMethods(target, node) {
+      if (!this.methodsMenu) return;
+      var tname = node && !this.range ? node.type : null;
+      var entries = tname ? this._methodsCache[tname] : null;
+      if (!entries || !entries.length) { this.methodsMenu.hidden = true; this._methodsKey = null; return; }
+      if (this._methodsKey !== tname) {
+        this._methodsKey = tname;
+        this.methodsMenu.textContent = "";
+        this.methodsMenu.appendChild(h("option", { value: "", disabled: "", selected: "" }, ["Methods \u25BE"]));
+        for (var i = 0; i < entries.length; i++) {
+          var e = entries[i];
+          this.methodsMenu.appendChild(h("option", { value: e.name, title: e.doc || "" },
+            [e.property ? "." + e.name : "." + e.name + "()"]));
+        }
+        this.methodsMenu.selectedIndex = 0;
+      }
+      this.methodsMenu.hidden = false;
     }
 
     /** The symbols panel: one row per name (used in the expression or merely

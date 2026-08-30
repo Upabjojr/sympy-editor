@@ -183,6 +183,19 @@ Two conventions between printer, document and front end:
   picked function with a required parameter opens the form (`_showFnForm`:
   symbol params are a select over the node's `free` symbols), otherwise it
   is applied at once.
+- **Methods menu.**  `type_methods(cls)`: the public methods and
+  properties a class from sympy itself defines (`is_*` queries, dunders
+  and `METHOD_SKIP` plumbing left out), cached per class.  Every snapshot
+  carries `methods`: the lists of the view-tree types it introduces, once
+  per document (`Document._methods_sent`) - piggybacked so that no extra
+  request ever races an edit (`Editor.send` drops messages while busy).
+  The front end accumulates them (`_methodsCache` by type name) and
+  `_fillMethods` (from `_fillOps`) fills the `.se-methods` select for the
+  selection - the root when nothing is selected.  Picking an entry goes
+  through the function-box flow: `_pickFn("." + name)` - signature,
+  parameter form when required, then `call` (the per-type signature is
+  never reused across types).  `{"action": "methods", "path"}` returns a
+  snapshot with the target's list included regardless.
 - **Loading overlay.**  Backend progress messages go through
   `Editor._report`: texts mentioning loading/waiting show `.se-loading` (a
   blocking spinner overlay, keys and clicks ignored) until the message

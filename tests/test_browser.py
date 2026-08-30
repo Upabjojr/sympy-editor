@@ -2074,3 +2074,25 @@ def test_caret_enters_and_leaves_a_matrix(browser, serve_expr):
     assert page.evaluate(ED + ".caret.path") == "/"
     assert page.evaluate(ED + ".caret.extend") == "after"
     assert page.errors == []
+
+
+def test_methods_menu_lists_and_calls_class_methods(browser, serve_expr):
+    from sympy import Matrix
+    srv, doc = serve_expr(Matrix([[1, 2], [3, 4]]))
+    page = _open(browser, srv.url)
+    menu = page.locator(".se-methods")
+    # Nothing selected: the root expression's class, fetched once, then shown.
+    assert _wait(lambda: menu.is_visible())
+    assert menu.locator("option").first.inner_text().startswith("Methods")
+    opts = menu.locator("option").all_inner_texts()
+    assert ".det()" in opts and ".T" in opts and ".rank()" in opts
+    assert not any(o.startswith(".is_") for o in opts) and ".args" not in opts
+    # A method without required parameters is applied at once.
+    menu.select_option("det")
+    page.wait_for_function("document.querySelector('.se-source').textContent.trim() === '-2'")
+    assert str(doc.expr) == "-2"
+    # The result is another type: its list is fetched and shown in turn.
+    assert _wait(lambda: menu.is_visible())
+    opts = menu.locator("option").all_inner_texts()
+    assert ".det()" not in opts and ".round()" in opts       # the Integer's list, not the matrix's
+    assert page.errors == []

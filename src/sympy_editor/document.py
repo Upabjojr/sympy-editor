@@ -132,6 +132,53 @@ PARAM_HINTS: Dict[str, List] = {
 }
 SYMBOL_PARAM_NAMES = {"symbol", "symbols", "x", "var", "variable", "variables", "gen", "gens", "sym", "syms", "s", "dep", "wrt"}
 
+#: Structural plumbing left out of the methods menu: not mathematics, or
+#: nothing an expression could become (assumption queries are skipped by
+#: their ``is_`` prefix).
+METHOD_SKIP = {
+    "args", "func", "free_symbols", "expr_free_symbols", "bound_symbols",
+    "canonical_variables", "assumptions0", "default_assumptions",
+    "sort_key", "class_key", "compare", "dummy_eq", "match", "matches",
+    "has", "has_free", "has_xfree", "find", "count", "obj",
+    "rows", "cols", "shape", "kind", "copy", "copyin_list", "copyin_matrix",
+    "tolist", "todok", "todod", "table", "iter_items", "iter_values", "flat",
+    "could_extract_minus_sign", "fromiter", "zeros", "ones", "eye",
+}
+
+_TYPE_METHODS_CACHE: Dict[type, List[Dict[str, Any]]] = {}
+
+
+def type_methods(cls: type) -> List[Dict[str, Any]]:
+    """The public methods and properties of ``cls`` (a SymPy class), as
+    ``[{"name", "doc", "property"}]``, sorted by name - what the methods
+    menu offers.  Assumption queries (``is_*``), dunders and the structural
+    plumbing in ``METHOD_SKIP`` are left out; only what a class from
+    ``sympy`` itself defines counts."""
+    import functools
+    import inspect
+    cached = _TYPE_METHODS_CACHE.get(cls)
+    if cached is not None:
+        return cached
+    out = []
+    for name in dir(cls):
+        if name.startswith("_") or name.startswith("is_") or name in METHOD_SKIP:
+            continue
+        if not any(name in k.__dict__ for k in cls.__mro__ if (getattr(k, "__module__", "") or "").startswith("sympy")):
+            continue
+        try:
+            attr = getattr(cls, name)
+        except Exception:
+            continue
+        prop = isinstance(attr, (property, functools.cached_property))
+        if not prop and not callable(attr):
+            continue
+        fn = attr.fget if isinstance(attr, property) else attr.func if isinstance(attr, functools.cached_property) else attr
+        doc = (inspect.getdoc(fn) or "").strip().split("\n", 1)[0][:120]
+        out.append({"name": name, "doc": doc, "property": prop})
+    out.sort(key=lambda entry: entry["name"])
+    _TYPE_METHODS_CACHE[cls] = out
+    return out
+
 
 def function_signature(name: str, target: Optional[Basic] = None) -> Dict[str, Any]:
     """Parameter prompts for ``name`` (a sympy callable, or a method/attribute
@@ -260,6 +307,8 @@ class Document:
         self.parser = parser
         self.ops: Dict[str, Op] = dict(ops) if ops is not None else get_ops()
         self.max_history = max_history
+        #: Type names whose method lists snapshots have already carried.
+        self._methods_sent: set = set()
         self._history: List[Basic] = []
         #: What produced each step of the history (None for the start, or an
         #: edit made from Python): set by ``handle`` from the message.
@@ -1113,6 +1162,15 @@ class Document:
         if expr is None:
             expr = self.expr
         tex, nodes = annotate(expr, **self.printer_settings)
+        # The methods menu: each snapshot carries the method lists of the
+        # types it introduces (once per document - the front end caches them
+        # by type name), so no extra request ever races an edit.
+        methods = {}
+        for node in nodes.values():
+            cls = type(node)
+            if cls.__name__ not in self._methods_sent:
+                self._methods_sent.add(cls.__name__)
+                methods[cls.__name__] = type_methods(cls)
         return {
             "seq": self._seq,
             "latex": tex,
@@ -1129,6 +1187,7 @@ class Document:
                      "params": [dict(prm) for prm in op.params], "doc": op.doc, "lazy": op.lazy is not None}
                     for op in self.ops.values()],
             "kind_labels": dict(KIND_LABELS),
+            "methods": methods,
             "error": error,
         }
 
@@ -1205,6 +1264,12 @@ class Document:
                 snap = self.snapshot()
                 snap["export"] = self.export()
                 snap["history"] = self.history_labels()
+                return snap
+            if action == "methods":
+                target = self._get_at(self.expr, self._path(path))
+                snap = self.snapshot()
+                snap["methods"] = dict(snap.get("methods") or {})
+                snap["methods"][type(target).__name__] = type_methods(type(target))
                 return snap
             if action == "script":
                 snap = self.snapshot()

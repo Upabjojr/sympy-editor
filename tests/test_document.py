@@ -982,3 +982,30 @@ def test_the_operator_between_two_arguments_can_be_changed():
     d = Document(x * z)
     d.handle({"action": "insert", "path": "/", "index": 1, "src": "+", "left": 0, "right": 1})
     assert d.expr == x + z
+
+
+def test_methods_action_lists_the_type_methods():
+    from sympy import Matrix
+    d = Document(Matrix([[1, 2], [3, 4]]))
+    snap = d.handle({"action": "methods", "path": "/"})
+    entries = snap["methods"]["ImmutableDenseMatrix"]
+    names = [e["name"] for e in entries]
+    assert "det" in names and "transpose" in names and "rref" in names
+    assert next(e for e in entries if e["name"] == "T")["property"] is True
+    assert next(e for e in entries if e["name"] == "det")["property"] is False
+    # no assumption queries, dunders or structural plumbing
+    assert all(not n.startswith("is_") and not n.startswith("_") for n in names)
+    assert "args" not in names and "sort_key" not in names and "func" not in names
+    # a picked method goes through the existing call flow
+    d.handle({"action": "call", "path": "/", "func": ".det()"})
+    assert d.expr == -2
+    # scalar expressions have their own list
+    x, y = symbols("x y")
+    snap = Document(x**2 + y).handle({"action": "methods", "path": "/"})
+    names = [e["name"] for e in snap["methods"]["Add"]]
+    assert "diff" in names and "simplify" in names and "as_poly" in names
+    # snapshots piggyback the lists of the types they introduce, once each
+    d2 = Document(x**2 + y)
+    first = d2.snapshot()
+    assert "Add" in first["methods"] and "Symbol" in first["methods"] and "Pow" in first["methods"]
+    assert d2.snapshot()["methods"] == {}                     # nothing new the second time
