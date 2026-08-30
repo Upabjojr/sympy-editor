@@ -9,7 +9,7 @@ snapshot, so the same JavaScript works everywhere.
 from __future__ import annotations
 
 import re
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple as TypingTuple, Union
 
 import io
 import keyword
@@ -552,6 +552,19 @@ class Document:
         sub = self._extract_range(self.expr, p, children) if children is not None else self._get_at(self.expr, p)
         return self._commit(sub)
 
+    def _keep_candidates(self, node: Basic) -> List[TypingTuple[Union[int, str], Basic]]:
+        """What ``unwrap`` could leave in the node's place, as (``keep`` key,
+        value): the virtual parts of a node shown as a fraction or after a
+        minus sign, otherwise the arguments that are expressions (the limits
+        of an integral are a ``Tuple``, not something that can stand alone).
+        More than one means there is a real choice to offer - ``x**2`` can
+        leave the base or the exponent - rather than a natural default."""
+        parts = self._parts(node) or ()
+        source: Iterable[TypingTuple[Union[int, str], Any]] = (
+            [(name, value) for name, value in parts] if parts else list(enumerate(node.args)))
+        return [(key, value) for key, value in source
+                if isinstance(value, Basic) and not isinstance(value, Tuple)]
+
     def unwrap(self, path: PathLike, keep: Union[int, str, None] = None) -> Basic:
         """Remove the node at ``path`` but keep one of its arguments in its
         place: ``cos(x)`` becomes ``x``, ``Integral(f, (x, a, b))`` becomes
@@ -861,6 +874,11 @@ class Document:
                                 "free": sorted(str(s) for s in getattr(node, "free_symbols", ()))[:12]}
         if parts:
             info["parts"] = [name for name, _value in parts]
+        # What unwrap could keep, when there is more than one candidate: the
+        # front end asks which argument to leave instead of picking for the user.
+        choices = self._keep_candidates(node)
+        if len(choices) > 1:
+            info["keep_choices"] = [{"key": key, "src": str(value)} for key, value in choices]
         return info
 
     def preview(self, src: str) -> Dict[str, Any]:

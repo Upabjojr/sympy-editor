@@ -232,9 +232,19 @@ Two conventions between printer, document and front end:
 - **Isolate.**  `{"action": "isolate", "path"[, "children"]}` → `Document.isolate`
   commits the node (or range) as the whole expression; undoable.
 - **Unwrap.**  `{"action": "unwrap", "path", "keep"}` → `Document.unwrap`
-  replaces a node by one argument (`keep`, default the first; sums/products
-  with several terms require it).  The front end passes the child ↑ came
-  from (`_cameFrom`) as `keep`; Backspace/Unwrap button.  Delete removes.
+  replaces a node by one argument (`keep`, default the natural one - the
+  function body, the base, the first term; sums/products with several terms
+  and fractions require it).  When more than one argument (or virtual part)
+  could stand on its own, `snapshot()` lists them as the node's
+  `keep_choices` (`[{key, src}]`, the `keep` values `unwrap` accepts):
+  `x**2` gives the base and the exponent, a sum its terms, a fraction `n`
+  and `d`; `cos(x)` gives none, and an integral's limits are a `Tuple`, which
+  cannot be kept.  The front end then opens the `.se-keep` chooser instead of
+  deciding (`_askKeep`): the child ↑ came from (`_cameFrom`) is the focused
+  button, so ↑, Backspace, Enter keeps it and any other argument can be picked
+  instead; Escape cancels, ←/→ move between the choices.  A node with a single
+  candidate is unwrapped straight away.  Backspace/Unwrap button.  Delete
+  removes.
 - **Layout stability.**  `.sympy-editor` is `display: block` and
   `.se-status` has `flex: 1 1 0; min-width: 0; min-height: 1.3em`: the
   status text must never change the container's width nor wrap the toolbar

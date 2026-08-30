@@ -850,16 +850,47 @@ def test_backspace_unwraps_and_delete_removes(browser, serve_expr):
     assert page.locator('.se-toolbar [data-cmd="unwrap"]').is_enabled()
     _next_state(page, lambda: page.keyboard.press("Backspace"))   # keep theta, drop cos
     assert doc.expr == x * t + sqrt(y)
+    # sqrt(y) is Pow(y, 1/2): two arguments, so Unwrap asks which one to leave
     _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "sqrt(y)"))
-    _next_state(page, lambda: page.locator('.se-toolbar [data-cmd="unwrap"]').click())
+    page.locator('.se-toolbar [data-cmd="unwrap"]').click()
+    keep = page.locator(".se-keep")
+    keep.wait_for(state="visible")
+    assert [b.strip() for b in keep.locator("button").all_inner_texts()][:2] == ["y", "1/2"]
+    _next_state(page, lambda: keep.locator("button", has_text="y").first.click())
     assert doc.expr == x * t + y
     _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "x"))
     page.keyboard.press("ArrowUp")                        # x*theta
-    _next_state(page, lambda: page.keyboard.press("Backspace"))   # keeps x, the term ↑ came from
+    page.keyboard.press("Backspace")                      # two factors: which one to keep?
+    keep.wait_for(state="visible")
+    _next_state(page, lambda: page.keyboard.press("Enter"))       # x, the factor ↑ came from, is focused
     assert doc.expr == x + y
     _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "y"))
     _next_state(page, lambda: page.keyboard.press("Delete"))     # Delete removes entirely
     assert doc.expr == x
+    assert page.errors == []
+
+
+def test_unwrap_asks_which_argument_to_keep(browser, serve_expr):
+    """x**2 has no natural argument to leave: the editor asks for the base or
+    the exponent instead of silently keeping the base."""
+    srv, doc = serve_expr(x ** 2 + y)
+    page = _open(browser, srv.url)
+    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "x"))
+    page.keyboard.press("ArrowUp")                     # the power itself
+    assert page.locator(".se-status").inner_text() == "Pow: x**2"
+    keep = page.locator(".se-keep")
+    assert not keep.is_visible()
+    page.keyboard.press("Backspace")
+    keep.wait_for(state="visible")
+    assert [b.strip() for b in keep.locator("button").all_inner_texts()][:2] == ["x", "2"]
+    assert doc.expr == x ** 2 + y                      # nothing has happened yet
+    page.keyboard.press("Escape")                      # Escape leaves the expression alone
+    keep.wait_for(state="hidden")
+    assert doc.expr == x ** 2 + y
+    page.keyboard.press("Backspace")
+    keep.wait_for(state="visible")
+    _next_state(page, lambda: keep.locator("button", has_text="2").first.click())
+    assert doc.expr == 2 + y                           # the exponent, not the base
     assert page.errors == []
 
 
@@ -900,7 +931,9 @@ def test_floating_action_bar_click_and_tap(browser, serve_expr):
     tp.touchscreen.tap(cx, cy)
     tp.locator(".se-actions [data-cmd=\"parent\"]").tap()   # x*theta
     assert tp.locator(".se-status").inner_text().startswith("Mul")
-    tp.locator(".se-actions [data-cmd=\"unwrap\"]").tap()   # keeps theta: the factor ↑ came from
+    tp.locator(".se-actions [data-cmd=\"unwrap\"]").tap()   # two factors: the chooser asks
+    tp.locator(".se-keep").wait_for(state="visible")
+    tp.locator(".se-keep button", has_text="theta").first.tap()   # keep theta
     tp.wait_for_function("document.querySelector('.se-source').textContent === 'theta'")
     assert doc.expr == t
     ctx.close()

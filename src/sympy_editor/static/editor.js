@@ -425,6 +425,25 @@ var SympyEditor = (function () {
           abtn("paste", "Paste", "Paste the clipboard over the selection (Ctrl+V)")
         ]);
         root.appendChild(this.actions);
+        // Asked before unwrapping a node that has more than one argument to
+        // choose from: x**2 can leave the base or the exponent (see _askKeep).
+        this.keepMenu = h("div", { class: "se-keep", hidden: "", role: "toolbar",
+                                   "aria-label": "Which part to keep" });
+        this.keepMenu.addEventListener("keydown", function (ev) {
+          var buttons = self.keepMenu.querySelectorAll("button");
+          var at = Array.prototype.indexOf.call(buttons, document.activeElement);
+          if (ev.key === "Escape") {
+            ev.preventDefault(); ev.stopPropagation();
+            self._hideKeep(); self.view.focus({ preventScroll: true });
+          } else if ((ev.key === "Enter" || ev.key === " ") && document.activeElement && document.activeElement.tagName === "BUTTON") {
+            ev.stopPropagation();   // the button's own click handler applies it
+          } else if ((ev.key === "ArrowRight" || ev.key === "ArrowLeft") && buttons.length) {
+            ev.preventDefault(); ev.stopPropagation();
+            var next = (at + (ev.key === "ArrowRight" ? 1 : buttons.length - 1) + buttons.length) % buttons.length;
+            buttons[next].focus({ preventScroll: true });
+          }
+        });
+        root.appendChild(this.keepMenu);
       }
 
       this.input = null;  // the in-place <input> while editing
@@ -677,6 +696,7 @@ var SympyEditor = (function () {
       }
       var same = snap === this.state;   // re-render of the current state (keeps the range)
       this.state = snap;
+      this._hideKeep();
       this.tree = buildTree(snap.nodes || {});
       if (!same) { this.range = null; this._cameFrom = {}; }
       // An open field is dropped without cancelEdit(): that would re-render
@@ -1175,6 +1195,7 @@ var SympyEditor = (function () {
 
     /** Select a path (null to clear). */
     select(path) {
+      this._hideKeep();
       this.range = null;
       if (path) this._hideCaret();
       this.selected = (path && (path in this.tree)) ? path : null;
@@ -1407,8 +1428,67 @@ var SympyEditor = (function () {
       if (!this.selected || this.opts.readOnly) return;
       var msg = { action: "unwrap", path: this.selected };
       var back = this._cameFrom[this.selected];
-      if (back && isAncestorOrSelf(this.selected, back) && back !== this.selected) msg.keep = this._childKey(this.selected, back);
+      var from = (back && isAncestorOrSelf(this.selected, back) && back !== this.selected)
+        ? this._childKey(this.selected, back) : null;   // the child ↑ was pressed on
+      var node = this.state && this.state.nodes ? this.state.nodes[this.selected] : null;
+      var choices = (node && node.keep_choices) || [];
+      // Several arguments could stand alone: ask which one to leave rather
+      // than picking for the user.  The one ↑ came from starts focused, so
+      // ↑, Backspace, Enter keeps it - and any other can be chosen instead.
+      if (choices.length > 1) return this._askKeep(this.selected, choices, from);
+      if (from !== null) msg.keep = from;
       this.send(msg);
+    }
+
+    _hideKeep() {
+      if (this.keepMenu && !this.keepMenu.hidden) { this.keepMenu.hidden = true; this.keepMenu.textContent = ""; }
+      this._keepAsked = null;
+    }
+
+    /** Ask which argument to leave behind: a node with several of them - a
+     *  power (base or exponent), a sum, a fraction - has no natural one, so
+     *  the user picks instead of the editor guessing.  Escape, or the ✕,
+     *  leaves the expression alone. */
+    _askKeep(path, choices, focused) {
+      var self = this;
+      if (!this.keepMenu) return this.send({ action: "unwrap", path: path, keep: focused === null ? undefined : focused });
+      this._keepAsked = path;
+      this.keepMenu.textContent = "";
+      this.keepMenu.appendChild(h("span", { class: "se-keep-label" }, ["Keep"]));
+      choices.forEach(function (choice) {
+        var label = choice.src.length > 18 ? choice.src.slice(0, 17) + "…" : choice.src;
+        var b = h("button", { type: "button", title: "Unwrap, leaving " + choice.src }, [label]);
+        b.addEventListener("click", function () {
+          self._hideKeep();
+          self.send({ action: "unwrap", path: path, keep: choice.key });
+          self.view.focus({ preventScroll: true });
+        });
+        self.keepMenu.appendChild(b);
+      });
+      var cancel = h("button", { type: "button", class: "se-keep-cancel", title: "Keep the expression as it is (Escape)" }, ["\u2715"]);
+      cancel.addEventListener("click", function () { self._hideKeep(); self.view.focus({ preventScroll: true }); });
+      this.keepMenu.appendChild(cancel);
+      this.keepMenu.hidden = false;
+      this._placeKeep(path);
+      var buttons = this.keepMenu.querySelectorAll("button");
+      var at = 0;
+      if (focused !== null && focused !== undefined) {
+        for (var i = 0; i < choices.length; i++) if (String(choices[i].key) === String(focused)) at = i;
+      }
+      if (buttons[at]) buttons[at].focus({ preventScroll: true });
+    }
+
+    /** The chooser above the selection - the action bar is under it. */
+    _placeKeep(path) {
+      var el = this._els(path)[0];
+      if (!el || !this.keepMenu) { this._hideKeep(); return; }
+      var rect = el.getBoundingClientRect(), rr = this.root.getBoundingClientRect();
+      var left = rect.left - rr.left;
+      var maxLeft = Math.max(0, this.root.clientWidth - this.keepMenu.offsetWidth - 4);
+      var top = rect.top - rr.top - this.keepMenu.offsetHeight - 6;
+      if (top < 0) top = rect.bottom - rr.top + 6;   // no room above: under it, over the action bar
+      this.keepMenu.style.left = Math.round(Math.max(0, Math.min(left, maxLeft))) + "px";
+      this.keepMenu.style.top = Math.round(top) + "px";
     }
 
     /** Show the floating action bar under a viewport rectangle (null hides it). */

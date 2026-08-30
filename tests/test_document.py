@@ -1,5 +1,5 @@
 import pytest
-from sympy import Function, Integer, Matrix, Symbol, cos, sin, symbols, sqrt
+from sympy import Function, Integer, Integral, Matrix, Symbol, atan2, cos, log, sin, symbols, sqrt
 
 from sympy_editor import Document, register_op
 
@@ -512,6 +512,31 @@ def test_unwrap_keeps_an_argument():
     doc = Document(Integral(x, (x, 0, 1)))
     assert "not an expression" in doc.handle({"action": "unwrap", "path": "/", "keep": 1})["error"]
 
+
+
+def test_unwrap_offers_the_arguments_to_keep():
+    """A node with more than one argument that could stand alone publishes the
+    choice, so the front end asks instead of keeping the first silently."""
+    z = Symbol("z")
+
+    def choices(expr, path="/"):
+        info = Document(expr).snapshot()["nodes"][path]
+        return [(c["key"], c["src"]) for c in info.get("keep_choices", [])]
+
+    assert choices(x ** 2) == [(0, "x"), (1, "2")]          # the base or the exponent
+    assert choices(atan2(y, x)) == [(0, "y"), (1, "x")]
+    assert choices(log(x, 2)) == [("n", "log(x)"), ("d", "log(2)")]   # printed as a quotient
+    assert choices(x + y + z) == [(0, "x"), (1, "y"), (2, "z")]
+    assert choices(x / y) == [("n", "x"), ("d", "y")]        # the parts, not the arguments
+    assert choices(cos(x)) == []                       # one argument: no question
+    assert choices(Integral(cos(x), (x, 0, 1))) == []   # the limits are a Tuple
+    assert choices(Symbol("q")) == []
+
+    # every published choice is one unwrap accepts, and it keeps what it says
+    for expr in (x ** 2, x / y, x + y + z):
+        for key, src in choices(expr):
+            doc = Document(expr)
+            assert doc.handle({"action": "unwrap", "path": "/", "keep": key})["src"] == src
 
 def test_insert_splices_between_both_neighbours():
     from sympy import MatrixSymbol, cos, symbols

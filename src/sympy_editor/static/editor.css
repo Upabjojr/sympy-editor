@@ -428,6 +428,40 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
 }
 .se-actions[hidden] { display: none; }
+
+/* The "which argument to keep" chooser, shown above the selection when
+   Unwrap has more than one candidate (x**2: the base or the exponent). */
+.se-keep {
+  position: absolute;
+  z-index: 21;               /* above the action bar, which sits under the selection */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  max-width: calc(100% - 8px);
+  gap: 2px;
+  padding: 2px 4px;
+  background: var(--se-bg);
+  border: 1px solid var(--se-border);
+  border-radius: 0.35rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+.se-keep[hidden] { display: none; }
+.se-keep-label { font-size: 12px; opacity: 0.7; padding: 0 0.2rem; }
+.se-keep button {
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 0.15rem 0.45rem;
+  border: 1px solid var(--se-border);
+  border-radius: 0.25rem;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.se-keep button:hover, .se-keep button:focus { background: rgba(var(--se-accent), 0.14); outline: none; }
+.se-keep button:focus-visible { box-shadow: 0 0 0 2px rgba(var(--se-accent), 0.45); }
+.se-keep .se-keep-cancel { border-color: transparent; opacity: 0.7; }
+
 .se-actions button {
   font: inherit;
   font-size: 12px;
