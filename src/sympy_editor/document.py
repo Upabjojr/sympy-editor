@@ -536,6 +536,14 @@ class Document:
                 return self._commit(self._insert_at(self.expr, p, int(index), parse(text)))
             side, k = ("left", L) if (L is not None and attach != "right") else ("right", R if R is not None else L)
             nb = args[k]
+            # Only one neighbour takes part: an operator on the far side of
+            # the text would dangle ("x*y*" is "x*y").
+            if side == "left" and trail in ("*", "/", "^"):
+                text, trail = text[:-1].rstrip(), ""
+            elif side == "right" and lead in ("*", "/", "^"):
+                text, lead = text[1:].lstrip(), ""
+            if not text:
+                raise ValueError("Empty input")
             if lead == "*" and side == "left":
                 combined = f"({nb})*{text[1:].strip()}"
             elif trail == "*" and side == "right":
@@ -555,12 +563,19 @@ class Document:
             sub = args[indices[0]] if len(indices) == 1 else rebuild(parent, [args[i] for i in indices])
             return f"({sub})"
 
+        # An operator written at either end joins the neighbour on that side
+        # whichever one the caret is attached to ("*y*" between x and z is
+        # x*y*z); without one, the text joins the attached neighbour only.
         if lead in ("+", "-"):
             left_idx = (list(range(0, L + 1)) if is_prod else [L]) if L is not None else []
+        elif lead:
+            left_idx = [L] if L is not None else []
         else:
             left_idx = [L] if L is not None and attach != "right" else []
         if trail in ("+", "-"):
             right_idx = (list(range(R, n)) if is_prod else [R]) if R is not None else []
+        elif trail:
+            right_idx = [R] if R is not None else []
         else:
             right_idx = [R] if R is not None and (attach == "right" or not left_idx) else []
         combined = text

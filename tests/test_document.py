@@ -686,10 +686,21 @@ def test_unwrap_offers_the_arguments_to_keep():
 def test_insert_splices_between_both_neighbours():
     from sympy import MatrixSymbol, cos, symbols
     x, y, z, t = symbols("x y z t")
-    def ins(expr, src, **kw):
-        d = Document(expr); d.handle(dict({"action": "insert", "path": "/", "index": 1, "src": src}, **kw)); return d.expr
+    def ins(expr, src, path="/", **kw):
+        d = Document(expr); d.handle(dict({"action": "insert", "path": path, "index": 1, "src": src}, **kw)); return d.expr
     assert ins(x * z, "+y+", left=0, right=1) == x + y + z                     # a product split at the caret
     assert ins(x + z, "+y+", left=0, right=1) == x + y + z
+    # An operator at either end takes the neighbour on that side, whichever
+    # side the caret is attached to (a dangling "*" used to be a parse error).
+    assert ins(x * z, "*y*", left=0, right=1) == x * y * z
+    assert ins(x * z, "*y*", left=0, right=1, attach="right") == x * y * z
+    assert ins(x + z, "*y*", left=0, right=1) == x * y * z
+    assert ins(x * z, "y*", left=0, right=1) == x * y * z
+    assert ins(x * z, "*y", left=0, right=1, attach="right") == x * y * z
+    assert ins(x * z, "/y*", left=0, right=1) == x / y * z
+    assert ins(x + z, "+y*", left=0, right=1) == x + y * z
+    assert ins(cos(x + z), "*y*", path="/0", left=0, right=1) == cos(x * y * z)
+    assert ins(cos(x + z), "y", path="/0", left=0, right=1) == cos(x * y + z)   # no operator: only the attached side
     assert ins(x + z, "cos(t)", left=0, right=1, attach="left") == x * cos(t) + z
     assert ins(x + z, "cos(t)", left=0, right=1, attach="right") == x + cos(t) * z
     assert ins(x + z, "cos(t)", left=0, right=1) == x * cos(t) + z             # on the operator: the left neighbour
