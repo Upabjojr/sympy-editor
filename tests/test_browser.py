@@ -1567,10 +1567,30 @@ def test_history_report_is_self_contained_and_works_offline(browser, serve_expr,
     red = rp.evaluate("getComputedStyle(document.querySelector('.rep-removed')).color")
     assert green != red and errors == []
     ctx.close()
-    # the toolbar button downloads it
+    # the toolbar button shows it in the page: the steps, a click on one opens it
+    page.locator('.se-toolbar [data-cmd="history"]').click()
+    frame = page.frame_locator(".se-history-frame")
+    frame.locator(".step").nth(2).wait_for()
+    assert frame.locator(".step").count() == 3 and frame.locator(".transition .what").first.inner_text() == "Edit: sin(y) → cos(y)"
+    assert frame.locator('.step[data-current="1"] h2').inner_text().startswith("STEP 3")
+    # saved from there as the web page or as a Python script that rebuilds every step
     with page.expect_download() as dl:
-        page.locator('.se-toolbar [data-cmd="report"]').click()
+        page.locator('.se-history-head [data-save="html"]').click()
     assert dl.value.suggested_filename.startswith("sympy-editor-history-") and dl.value.suggested_filename.endswith(".html")
+    with page.expect_download() as dl:
+        page.locator('.se-history-head [data-save="py"]').click()
+    assert dl.value.suggested_filename.endswith(".py")
+    script = tmp_path / "history.py"
+    dl.value.save_as(script)
+    ns = {}
+    exec(script.read_text(encoding="utf-8"), ns)
+    assert ns["steps"] == [x**2 + sin(y), x**2 + cos(y), x**2 + cos(y)] and "Transform: Factor" in script.read_text(encoding="utf-8")
+    _next_state(page, lambda: frame.locator(".step").nth(0).click())
+    assert page.locator(".se-history-view").count() == 0 and doc.expr == x**2 + sin(y)
+    page.locator('.se-toolbar [data-cmd="history"]').click()
+    page.wait_for_selector(".se-history-view")
+    page.keyboard.press("Escape")
+    assert page.locator(".se-history-view").count() == 0
     assert page.errors == []
 
 

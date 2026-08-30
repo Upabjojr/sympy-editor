@@ -192,10 +192,18 @@ Two conventions between printer, document and front end:
   attributes turned into `rep-added` / `rep-removed` classes with
   `diffNodes`), the KaTeX stylesheet with its woff2 fonts inlined as data
   URIs (`_katexCssInline`, cached on `window`), `REPORT_CSS`, no script.
-  `exportReport()` hands it to `window.SympyEditorApp.shareHtml` (the
-  Android app's `@JavascriptInterface`: Downloads via MediaStore on API
-  29+, then a share sheet through the FileProvider), else the Web Share
-  API with a File, else a blob download.
+  `showHistory()` shows that page in an overlay (`.se-history-view`: a
+  header with the save buttons and an `iframe[srcdoc]`; the steps carry
+  `data-index`, a click calls `gotoStep`; Esc closes) and `exportReport()`
+  / `exportPython()` save it through `_exportFile(name, mime, text)`:
+  `window.SympyEditorApp.shareFile` (the Android app's
+  `@JavascriptInterface`: Downloads via MediaStore on API 29+, then a
+  share sheet through the FileProvider; `shareHtml` is the older
+  HTML-only entry), else the Web Share API with a File, else a blob
+  download.  The Python script comes from `Document.python_script(title)`
+  (action `script`): SymPy's `PythonPrinter` per step (`Rational(1, 2)`,
+  `Integer(3)`), declarations via `srepr` for symbols (assumptions kept),
+  `MatrixSymbol(name, rows, cols)`, `Function(name)`, `IndexedBase(name)`.
 - **Long computations.**  `Editor.send` shows the spinner overlay after
   `workingAfter` ms and the Interrupt button after `interruptAfter` ms when
   the backend has `interrupt()` (and `canInterrupt()` allows).  Backends:

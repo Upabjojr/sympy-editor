@@ -217,16 +217,27 @@ again), and the parts that survive slide to their new places
 (`options={"animate": False}` turns it off; it is off under
 `prefers-reduced-motion`).
 
-### History report
+### History view, report and script
 
-**Report** (toolbar, or in the drawer's History) builds a self-contained HTML
-page of the current history: every step rendered, what a step brought in
-green, and between two steps an arrow with what produced the change (a
-transformation from the menu, a SymPy function, an edit, typed text...) and
-the previous formula with what went in red.  KaTeX's rendering and fonts are
-inlined, so the file works offline and can be shared as it is.  Browsers
-download it (or offer the share sheet where the Web Share API takes files);
-the Android app saves it in Downloads and opens the share sheet.
+**History** (toolbar, or **View…** in the drawer's History) shows the current
+history in the page: every step rendered, what a step brought in green, and
+between two steps an arrow with what produced the change (a transformation
+from the menu, a SymPy function, an edit, typed text...) and the previous
+formula with what went in red.  Tapping a step opens it in the editor.  From
+there:
+
+- **Save as web page** downloads the same view as a self-contained HTML
+  file: KaTeX's rendering and fonts are inlined, so it works offline and can
+  be shared as it is.
+- **Save as Python** downloads a script that rebuilds every step with SymPy
+  alone (`from sympy import *`, the declarations of the names used -
+  assumptions, matrix shapes, functions -, then one `expr = ...` per step
+  with what produced it as a comment, all collected in `steps`); run it or
+  import it.
+
+Browsers download the files (or offer the share sheet where the Web Share
+API takes files); the Android app saves them in Downloads and opens the
+share sheet.
 
 ### Long computations
 

@@ -1,4 +1,4 @@
 <resources>
     <string name="app_name">SymPy editor</string>
-    <string name="share_report">Save or share the history report</string>
+    <string name="share_report">Save or share the history</string>
 </resources>

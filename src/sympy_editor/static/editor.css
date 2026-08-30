@@ -390,6 +390,18 @@
 .se-step-action { font-size: 11px; color: var(--se-muted); }
 .se-step-action::before { content: "\2190 "; }
 .se-history-tools { display: flex; justify-content: flex-end; margin-bottom: 0.2rem; }
+/* The history view: the report shown in the page, over everything. */
+.se-history-view {
+  position: fixed; inset: 0; z-index: 950; display: flex; flex-direction: column;
+  background: var(--se-bg); color: var(--se-fg, inherit);
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
+.se-history-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; padding: 0.5rem 0.7rem; border-bottom: 1px solid var(--se-border); }
+.se-history-title { font-weight: 600; margin-right: auto; display: flex; flex-direction: column; }
+.se-history-title small { font-weight: normal; font-size: 11px; opacity: 0.7; }
+.se-history-head button { font: inherit; font-size: 13px; padding: 0.3rem 0.6rem; border: 1px solid var(--se-border); border-radius: 0.3rem; background: transparent; color: inherit; cursor: pointer; }
+.se-history-head .se-history-close { font-size: 15px; line-height: 1; padding: 0.3rem 0.5rem; }
+.se-history-frame { flex: 1; width: 100%; border: 0; background: transparent; }
 .se-history-report { font: inherit; font-size: 12px; padding: 0.15rem 0.5rem; border: 1px solid var(--se-border); border-radius: 0.3rem; background: transparent; color: inherit; cursor: pointer; }
 .se-step .se-diff-removed { color: var(--se-removed); }
 .se-step .se-diff-added { color: var(--se-added); }

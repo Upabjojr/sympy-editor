@@ -824,6 +824,35 @@ def test_rational_parts_are_editable():
     assert doc.handle({"action": "unwrap", "path": "/", "keep": "n"})["src"] == "3"
 
 
+def test_python_script_rebuilds_the_history():
+    from sympy import Function, MatrixSymbol, Rational, Symbol, sin, symbols
+    x, y = symbols("x y")
+    p = Symbol("p", positive=True)
+    f = Function("f")
+    doc = Document(x + sin(y) + Rational(1, 2))
+    doc.handle({"action": "replace", "path": "/2", "src": "cos(y)"})
+    doc.handle({"action": "call", "path": "/", "func": "diff(y)"})
+    doc.set(f(p) ** 2 + 3)                                          # p is positive here
+    doc.handle({"action": "set", "src": "3"})
+    doc.undo()
+    script = doc.python_script("My session")
+    assert script.startswith('"""My session') and "from sympy import *" in script
+    assert "p = Symbol('p', positive=True)" in script and "f = Function('f')" in script and "x = Symbol('x')" in script
+    assert "Rational(1, 2)" in script and "1/2" not in script.replace("Rational(1, 2)", "")
+    assert "# Step 1: start\n" in script and "# Step 2: Edit: sin(y) → cos(y)\n" in script
+    assert "\n# Step 4: " in script and "  (current)\nexpr = f(p)**2 + 3\n" in script and "expr = Integer(3)" in script
+    ns = {}
+    exec(script, ns)                                                 # runs with SymPy alone
+    assert ns["steps"] == [Document(s).expr for s in doc.export()["history"]]
+    assert ns["steps"][3] == f(p) ** 2 + 3 and ns["steps"][0] == x + sin(y) + Rational(1, 2) and ns["p"].is_positive
+    assert doc.handle({"action": "script", "title": "T"})["script"].startswith('"""T')
+    A = MatrixSymbol("A", 2, 2)
+    doc = Document(A * A.T + 2 * A)
+    ns = {}
+    exec(doc.python_script(), ns)
+    assert ns["steps"][0] == A * A.T + 2 * A and "MatrixSymbol('A', 2, 2)" in doc.python_script()
+
+
 def test_history_records_what_produced_each_step():
     from sympy import symbols, sin
     x, y = symbols("x y")
