@@ -45,8 +45,8 @@ var SympyEditor = (function () {
   // The history report: a self-contained page (KaTeX pre-rendered, its CSS
   // and fonts inlined), see Editor.buildReport.
   var REPORT_CSS = [
-    "body { --fg: #1f2328; margin: 0; padding: 1.5rem; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; background: #ffffff; color: var(--fg); }",
-    "@media (prefers-color-scheme: dark) { body { --fg: #e6e6e6; background: #1e1e1e; } .step, .transition .before { border-color: #444; } .meta, .transition .what, .step code, footer { color: #a0a0a0; } }",
+    "body { --fg: #1f2328; --bg: #ffffff; margin: 0; padding: 1.5rem; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--fg); }",
+    "@media (prefers-color-scheme: dark) { body { --fg: #e6e6e6; --bg: #1e1e1e; } .step, .transition .before { border-color: #444; } .meta, .transition .what, .step code, footer { color: #a0a0a0; } }",
     "main { max-width: 60rem; margin: 0 auto; }",
     "h1 { font-size: 1.3rem; margin: 0 0 0.3rem; } .meta { color: #656d76; font-size: 0.9rem; margin: 0 0 1.5rem; }",
     ".step { border: 1px solid #d0d7de; border-radius: 0.6rem; padding: 0.8rem 1rem; margin: 0; overflow-x: auto; }",
@@ -56,8 +56,10 @@ var SympyEditor = (function () {
     ".transition .arrow { grid-row: 1 / 3; font-size: 1.8rem; text-align: center; color: #3b82f6; }",
     ".transition .what { font-weight: 600; } .transition .before { font-size: 0.9em; padding: 0.3rem 0.6rem; border-left: 3px solid #d0d7de; overflow-x: auto; }",
     ".transition .before .label { display: block; font-size: 0.75rem; color: #656d76; margin-bottom: 0.2rem; }",
-    ".rep-added { color: #1a7f37; } .rep-removed { color: #d1242f; } .rep-kept { color: var(--fg); }",
-    "@media (prefers-color-scheme: dark) { .rep-added { color: #3fb950; } .rep-removed { color: #ff7b72; } }",
+    ".rep-added, .rep-removed { font-weight: bold; border-radius: 0.15em; padding: 0 0.05em; }",
+    ".rep-added { color: #1a7f37; background: rgba(26, 127, 55, 0.1); } .rep-removed { color: #d1242f; background: rgba(209, 36, 47, 0.1); }",
+    ".rep-kept { color: var(--fg); background: var(--bg); font-weight: normal; }",
+    "@media (prefers-color-scheme: dark) { .rep-added { color: #3fb950; background: rgba(63, 185, 80, 0.16); } .rep-removed { color: #ff7b72; background: rgba(255, 123, 114, 0.16); } }",
     ".katex-display { margin: 0.3em 0; text-align: left; } .katex-display > .katex { text-align: left; }",
     "footer { margin-top: 2rem; font-size: 0.8rem; color: #656d76; }"
   ].join("\n");

@@ -11,6 +11,8 @@
   --se-error: #b42318;
   --se-removed: #d1242f;     /* change animation: what disappears */
   --se-added: #1a7f37;       /* change animation: what is new (stays until the formula is touched) */
+  --se-removed-rgb: 209, 36, 47;   /* the same, for faint backgrounds */
+  --se-added-rgb: 26, 127, 55;
   --se-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   position: relative;
   display: block;            /* block, not shrink-to-fit: the status text must not shift the formula */
@@ -33,6 +35,8 @@
     --se-error: #ff8a80;
     --se-removed: #ff7b72;
     --se-added: #3fb950;
+    --se-removed-rgb: 255, 123, 114;
+    --se-added-rgb: 63, 185, 80;
   }
 }
 .sympy-editor * { box-sizing: border-box; }
@@ -321,7 +325,9 @@
 .se-view .se-ghost-old .se-removed { color: var(--se-removed); }
 .se-view .se-ghost-old .se-removed .se-kept { color: transparent; }
 .se-view .se-ghost-new .se-added, .se-view .se-added { color: var(--se-added); }
+.se-view .se-added { background: rgba(var(--se-added-rgb), 0.1); border-radius: 0.15em; }       /* the modified area, faintly */
 .se-view .se-ghost-new .se-added .se-kept, .se-view .se-added .se-kept { color: var(--se-fg); }   /* kept inside new: normal */
+.se-view .se-added .se-kept { background: var(--se-bg); }
 .se-view .se-changing { opacity: 0; }
 .se-view .se-ghost .frac-line, .se-view .se-ghost .overline-line, .se-view .se-ghost .underline-line { border-color: currentColor; }
 .se-view .se-ghost svg { fill: currentColor; }
@@ -403,10 +409,10 @@
 .se-history-head .se-history-close { font-size: 15px; line-height: 1; padding: 0.3rem 0.5rem; }
 .se-history-frame { flex: 1; width: 100%; border: 0; background: transparent; }
 .se-history-report { font: inherit; font-size: 12px; padding: 0.15rem 0.5rem; border: 1px solid var(--se-border); border-radius: 0.3rem; background: transparent; color: inherit; cursor: pointer; }
-.se-step .se-diff-removed { color: var(--se-removed); }
-.se-step .se-diff-kept { color: var(--se-fg); }
-.se-step .se-diff-added { color: var(--se-added); }
-.se-step .se-diff-removed .se-diff-removed, .se-step .se-diff-added .se-diff-added { color: inherit; }
+.se-step .se-diff-removed, .se-step .se-diff-added { font-weight: bold; border-radius: 0.15em; padding: 0 0.05em; }
+.se-step .se-diff-removed { color: var(--se-removed); background: rgba(var(--se-removed-rgb), 0.1); }
+.se-step .se-diff-added { color: var(--se-added); background: rgba(var(--se-added-rgb), 0.1); }
+.se-step .se-diff-kept { color: var(--se-fg); background: var(--se-bg); font-weight: normal; }
 .se-step-no { min-width: 1.6em; text-align: right; }
 .se-step-current { border-color: rgba(var(--se-accent), 0.8); background: rgba(var(--se-accent), 0.12); cursor: default; }
 .se-step-current code { font-weight: 600; }
