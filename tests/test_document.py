@@ -130,19 +130,53 @@ def test_rejects_non_sympy():
 
 # -- denominators, matrix context, symbol types, op kinds ---------------------
 
-def test_denominator_power_is_selectable_and_edits_as_denominator():
+def test_denominator_is_a_view_part_and_edits_as_denominator():
     from sympy import symbols
     x, y = symbols("x y")
     doc = Document(x / (x + 1) ** 2)
     nodes = doc.snapshot()["nodes"]
-    assert {k: nodes["/1"][k] for k in ("src", "type", "kind", "reciprocal")} == {
-        "src": "(x + 1)**2", "type": "Pow", "kind": "scalar", "reciprocal": True}
-    assert "reciprocal" not in nodes["/1/0"]              # the base is a real node
-    doc.handle({"action": "replace", "path": "/1", "src": "y**3", "reciprocal": True})
+    assert nodes["/"]["parts"] == ["n", "d"] and not nodes["/"]["insertable"] and not nodes["/"]["rangeable"]
+    assert {k: nodes["/d"][k] for k in ("src", "type", "kind")} == {"src": "(x + 1)**2", "type": "Pow", "kind": "scalar"}
+    assert "parts" not in nodes["/d"] and "/1" not in nodes  # the tree's Pow(x + 1, -2) is not what is shown
+    doc.handle({"action": "replace", "path": "/d", "src": "y**3"})
     assert doc.expr == x / y ** 3
     doc.undo()
-    doc.replace("/1/0", "y")                              # editing the base still works
+    doc.replace("/d/0", "y")                              # the base
     assert doc.expr == x / y ** 2
+    doc.undo()
+    doc.replace("/d/1", "3")                              # the exponent, as shown (the tree's is -2)
+    assert doc.expr == x / (x + 1) ** 3
+
+
+def test_view_parts_are_editable():
+    from sympy import E, symbols
+    x, y, z, n = symbols("x y z n")
+    doc = Document(1 / n)
+    nodes = doc.snapshot()["nodes"]
+    assert nodes["/n"]["src"] == "1" and nodes["/d"]["src"] == "n" and nodes["/"]["parts"] == ["n", "d"]
+    assert doc.handle({"action": "replace", "path": "/n", "src": "x"})["src"] == "x/n"
+    doc.set(1 / (2 * E))
+    nodes = doc.snapshot()["nodes"]
+    assert nodes["/d"]["src"] == "2*E" and nodes["/d"]["insertable"] and nodes["/d/0"]["src"] == "2" and nodes["/d/1"]["src"] == "E"
+    assert doc.handle({"action": "replace", "path": "/d/0", "src": "3"})["src"] == "exp(-1)/3"
+    assert doc.handle({"action": "replace", "path": "/n", "src": "x"})["src"] == "x*exp(-1)/3"
+    assert doc.handle({"action": "insert", "path": "/d", "index": 2, "src": "*y"})["src"] == "x*exp(-1)/(3*y)"
+    doc.set(x - 2 * y)
+    nodes = doc.snapshot()["nodes"]
+    assert nodes["/1"]["parts"] == ["neg"] and nodes["/1/neg"]["src"] == "2*y" and nodes["/1/neg/0"]["src"] == "2"
+    assert doc.handle({"action": "replace", "path": "/1/neg/0", "src": "3"})["src"] == "x - 3*y"
+    assert doc.handle({"action": "delete", "path": "/1/neg/1"})["src"] == "x - 3"
+    assert "Invalid path" in doc.handle({"action": "delete", "path": "/1/neg"})["error"]    # x has no sign part
+    doc.undo()
+    assert doc.handle({"action": "delete", "path": "/1/neg"})["src"] == "x"      # the signed term goes
+    doc.set(-2 * x * y)
+    assert doc.handle({"action": "replace", "path": "/neg/0", "src": "5"})["src"] == "-5*x*y"
+    assert doc.handle({"action": "unwrap", "path": "/"})["src"] == "5*x*y"        # the natural part to keep
+    doc.set(x * y / z)
+    assert doc.handle({"action": "delete", "path": "/n/0"})["src"] == "y/z"
+    assert "select the numerator" in doc.handle({"action": "unwrap", "path": "/"})["error"]
+    assert doc.handle({"action": "unwrap", "path": "/", "keep": "d"})["src"] == "z"
+    assert doc.handle({"action": "unwrap", "path": "/", "keep": "n"})["error"]     # z has no parts
 
 
 def test_new_names_in_a_matrix_slot_are_matrix_symbols():
@@ -608,13 +642,16 @@ def test_rational_parts_are_editable():
     x, y = symbols("x y")
     doc = Document(x - Rational(1, 2))
     nodes = doc.snapshot()["nodes"]
-    assert nodes["/0/n"]["src"] == "-1" and nodes["/0/d"]["src"] == "2" and not nodes["/0/n"]["insertable"]
+    assert nodes["/0/n"]["src"] == "1" and nodes["/0/d"]["src"] == "2" and not nodes["/0/n"]["insertable"]
     assert doc.handle({"action": "replace", "path": "/0/d", "src": "3"})["src"] == "x - 1/3"
-    assert doc.handle({"action": "replace", "path": "/0/n", "src": "y"})["src"] == "x + y/3"   # the numerator node is -1: y replaces it, sign included
+    assert doc.handle({"action": "replace", "path": "/0/n", "src": "y"})["src"] == "x - y/3"   # the shown 1 is replaced; the sign stays
     doc.set(Rational(1, 2))
     assert doc.handle({"action": "extend", "path": "/n", "side": "after", "src": "+ 2"})["src"] == "3/2"
-    assert "cannot be removed" in doc.handle({"action": "delete", "path": "/n"})["error"]
+    assert doc.handle({"action": "delete", "path": "/n"})["src"] == "1/2"            # a removed numerator leaves 1
+    assert doc.handle({"action": "delete", "path": "/d"})["src"] == "1"
+    doc.set(Rational(3, 2))
     assert "nothing inside" in doc.handle({"action": "unwrap", "path": "/n"})["error"]
+    assert doc.handle({"action": "unwrap", "path": "/", "keep": "n"})["src"] == "3"
 
 
 def test_history_records_what_produced_each_step():

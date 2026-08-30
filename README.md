@@ -124,9 +124,13 @@ once in the panel and wins from then on; for a one-off, write it in backticks
 taken as SymPy's function or constant, the status line says so and points at
 these two options.
 
-A denominator raised to a power (`(x+1)**2` in `x/(x+1)**2`) is selectable as
-a whole even though the tree holds `Pow(x + 1, -2)`: editing it replaces the
-denominator (typing `y**3` gives `x/y**3`).
+What you select and edit is what you see, even where SymPy's tree differs
+from the rendering: the `1` of `1/n` (the tree holds `Pow(n, -1)`) is a node
+of its own and typing `x` there gives `x/n`; in `1/(2e)` (the tree's
+`exp(-1)/2`) the `2` and the `e` of the denominator are editable, and so is
+the denominator `2e` as a whole; a denominator raised to a power (`(x+1)**2`
+in `x/(x+1)**2`, the tree's `Pow(x + 1, -2)`) is edited as shown, exponent
+included; in `x - 2y` the `2` is the `2` you see.
 
 The **Symbols** panel under the formula lists every name with what it stands
 for (`Symbol` with its assumptions, `MatrixSymbol` with its shape, `Function`,

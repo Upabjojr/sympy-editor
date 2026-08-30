@@ -49,7 +49,7 @@ examples/       demo.py generates demo.html / runs the server.
 ```
 
 Data flow: Python `Document.snapshot()` → JSON (`latex`, `latex_plain`,
-`nodes` {path → {src, type, kind[, reciprocal]}}, `symbols`, `ops`,
+`nodes` {path → {src, type, kind[, parts]}}, `symbols`, `ops`,
 `can_undo`...) → `editor.js` renders
 `latex` with KaTeX (`trust` enabled for `\htmlData` only) → user acts →
 message `{action, path, src|op}` → `Document.handle()` → new snapshot.
@@ -62,20 +62,32 @@ re-running `editor.js` when `window.SympyEditor` already exists.
 
 Two conventions between printer, document and front end:
 
-- **Rational parts.**  A `Rational` is an atom, but it prints as a
-  fraction: the annotated printers give its numerator and denominator the
-  virtual paths `.../n` and `.../d` (`_rational_parts`; `get_at` returns
-  `Integer(p)` / `Integer(q)`, `replace_at` rebuilds the number as `new/q`
-  or `p/new`, `delete_at` refuses).  `_print_Add` prints a negative term as
-  `- p/q`; the parts then belong to the tree's negative number (`n` is
-  `-1` for `- 1/2`), and the str printer strips the sign inside nested
-  wrappers (`_strip_minus`).
-- **Reciprocal nodes.**  SymPy prints `x/(x+1)**2` by synthesising
-  `Pow(x+1, 2)` for the denominator; the printer annotates it with the path of
-  the tree's `Pow(x+1, -2)`, `snapshot()` flags the node `reciprocal: true`,
-  and the front end sends that flag back with a `replace`, which then stores
-  `1/new` at the path.  Deleting or applying an op to the node acts on the real
-  `Pow`.
+- **The view tree.**  Paths address what is *shown*, not the SymPy tree:
+  wherever the printer shows something else than a node's arguments, the
+  node has *virtual parts* in place of them (`printer.view_parts(node,
+  settings)`, a pure function of the value and the printer settings):
+  `n`/`d` for anything shown as a fraction (a `Rational` - `|p|` and `q`,
+  the sign is printed in front -, a `Mul` with negative powers or a rational
+  coefficient, a `Pow` with a negative exponent; the split is the printer's,
+  `fraction(node, exact=True)`), `neg` for a `Mul`/`MatMul` shown after a
+  leading minus (the negated product, whose own parts or arguments are what
+  follows the sign).  So `1/n` is `/n` = `1`, `/d` = `n`; `1/(2e)` is
+  `/n` = `1`, `/d` = `2*E` with `/d/0`, `/d/1`; `x - 2y` has `/1` = `-2y`,
+  `/1/neg` = `2y`, `/1/neg/0` = `2`.  `get_at` reads parts, `replace_at`
+  rebuilds the node around a new part (`new/denom`, `numer/new`, `-new`,
+  the sign kept for a `Rational`), `delete_at` leaves `1` for a removed
+  numerator/denominator and removes the signed product for `neg`.  The
+  printers search a frame's virtual parts before its real arguments (the
+  real ones stay reachable for printers that do print them: `str` shows
+  `exp(-1)/2` for `1/(2e)`).  `snapshot()` lists a node's `parts` and marks
+  it neither `insertable` nor `rangeable` (its parts may be); `unwrap` takes a
+  part name as `keep`.  `AnnotatedLatexPrinter._print_Pow` routes a power
+  shown as `1/…` through `_print_Mul` (as SymPy 1.14 does; 1.15 prints the
+  `1` literally) so the numerator gets its part, and `_patch_number_separator`
+  makes SymPy 1.15's "two numbers side by side" check (`2 \cdot 3`) see
+  through the annotation wrappers.  `_print_Add` prints a negative term as
+  `- (negated term)` inside the term's span, and the str printer strips the
+  sign inside nested wrappers (`_strip_minus`).
 - **Insertion caret.**  `snapshot()` marks nodes whose argument list can
   grow (`insertable`, with `nargs`: Add, Mul, MatMul, function calls, sets...).
   The front end computes the gaps between the rendered arguments of such
@@ -427,9 +439,10 @@ builds a `--cdn` copy and checks the worker installs and caches in Chromium;
 
 ## Known limitations / ideas
 
-- Sub-expressions synthesised by the printer (e.g. the `y**2` denominator of
-  `x/y**2`, coefficients split off by `Mul`) have no annotation; their
-  children do.  Selecting them requires walking up to the parent.
+- The view tree covers fractions, signs and rationals; other synthesised
+  pieces (the literal `1` of `1/√x`, the `1` of a long fraction split as
+  `\frac{1}{d} · numer`) have no annotation, and a numerator that is a
+  product has no span of its own (its factors do).
 - Parentheses added by the printer are outside the annotated span.
 - Identical sub-expressions are disambiguated by print order, which is
   correct for SymPy's printer today but heuristic; a wrong mapping would

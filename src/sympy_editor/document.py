@@ -16,8 +16,8 @@ import keyword
 import tokenize
 
 import sympy
-from sympy import Add, Basic, Dummy, Function, IndexedBase, MatrixSymbol, Mul, Pow, S, Symbol, Tuple, sympify, srepr
-from sympy.core.function import AppliedUndef, UndefinedFunction
+from sympy import Add, Basic, Dummy, Function, IndexedBase, MatrixSymbol, Mul, Symbol, Tuple, sympify, srepr
+from sympy.core.function import AppliedUndef
 from sympy.core.symbol import Str
 from sympy.matrices.expressions import MatrixExpr
 from sympy.matrices import MatrixBase
@@ -46,6 +46,7 @@ from .printer import (
     plain_latex,
     rebuild,
     replace_at,
+    view_parts,
 )
 
 __all__ = ["Document", "SYMBOL_TYPES", "Interrupted", "interrupt_thread"]
@@ -339,49 +340,72 @@ class Document:
         self._listeners.append(callback)
         return callback
 
+    # -- the view tree ------------------------------------------------------
+    # The path functions of ``printer`` bound to the printer settings, which
+    # decide the virtual parts of the view tree (``root_notation``...).
+
+    def _get_at(self, expr, path):
+        return get_at(expr, path, self.printer_settings)
+
+    def _replace_at(self, expr, path, new):
+        return replace_at(expr, path, new, self.printer_settings)
+
+    def _delete_at(self, expr, path):
+        return delete_at(expr, path, self.printer_settings)
+
+    def _insert_at(self, expr, path, index, new):
+        return insert_at(expr, path, index, new, self.printer_settings)
+
+    def _extract_range(self, expr, path, indices):
+        return extract_range(expr, path, indices, self.printer_settings)
+
+    def _replace_range(self, expr, path, indices, new):
+        return replace_range(expr, path, indices, new, self.printer_settings)
+
+    def _delete_range(self, expr, path, indices):
+        return delete_range(expr, path, indices, self.printer_settings)
+
+    def _parts(self, node) -> Optional[List[Tuple[str, Basic]]]:
+        return view_parts(node, self.printer_settings)
+
     # -- editing ------------------------------------------------------------
 
     def get(self, path: PathLike) -> Basic:
-        return get_at(self.expr, self._path(path))
+        return self._get_at(self.expr, self._path(path))
 
-    def replace(self, path: PathLike, new: Union[Basic, str], reciprocal: bool = False,
-                children=None) -> Basic:
+    def replace(self, path: PathLike, new: Union[Basic, str], children=None) -> Basic:
         """Replace the node at ``path`` with ``new`` (parsed if a string, in the
         context of the node being replaced: new names in a matrix slot become
         ``MatrixSymbol``s of its shape).
 
-        A path ending in ``n`` or ``d`` is the numerator or denominator of a
-        ``Rational`` (an atom printed as a fraction): the number is rebuilt.
-
-        ``reciprocal``: ``new`` is the printed form of a denominator - the
-        node at ``path`` is the tree's ``Pow(b, -n)`` shown as ``b**n`` under
-        the fraction bar (``snapshot()`` flags such nodes) - so the node
-        becomes ``1/new``.
+        A path may address a virtual part of the view tree (the ``1`` of
+        ``1/n`` is ``/n``, the denominator ``2 e`` of ``1/(2e)`` is ``/d``, the
+        product after the minus of ``- 2 x`` is ``/neg``; see
+        :func:`~sympy_editor.printer.view_parts`): the node is rebuilt around
+        the new part.
 
         ``children``: argument indices of the node at ``path`` (an ``Add``,
         ``Mul``...) - the *range* of arguments they form is replaced by
         ``new`` instead of the node itself.
         """
         p = self._path(path)
-        context = get_at(self.expr, p)
+        context = self._get_at(self.expr, p)
         if children is not None:
-            context = extract_range(self.expr, p, children)
+            context = self._extract_range(self.expr, p, children)
         if isinstance(new, str):
             new_expr = self.parse(new, context=context)
         else:
             new_expr = sympify(new)
-        if reciprocal and children is None:
-            new_expr = S.One / new_expr
         if children is not None:
-            return self._commit(replace_range(self.expr, p, children, new_expr))
-        return self._commit(replace_at(self.expr, p, new_expr))
+            return self._commit(self._replace_range(self.expr, p, children, new_expr))
+        return self._commit(self._replace_at(self.expr, p, new_expr))
 
     def delete(self, path: PathLike, children=None) -> Basic:
         """Remove the node at ``path`` from its parent's arguments (or, with
         ``children``, those arguments of the node at ``path``)."""
         if children is not None:
-            return self._commit(delete_range(self.expr, self._path(path), children))
-        return self._commit(delete_at(self.expr, self._path(path)))
+            return self._commit(self._delete_range(self.expr, self._path(path), children))
+        return self._commit(self._delete_at(self.expr, self._path(path)))
 
     def insert(self, path: PathLike, index: int, new: Union[Basic, str],
                left: Optional[int] = None, right: Optional[int] = None,
@@ -400,10 +424,10 @@ class Document:
         ``,`` makes a new argument.  A SymPy object is inserted as is.
         """
         p = self._path(path)
-        parent = get_at(self.expr, p)
+        parent = self._get_at(self.expr, p)
         args = parent.args
         if not isinstance(new, str):
-            return self._commit(insert_at(self.expr, p, int(index), sympify(new)))
+            return self._commit(self._insert_at(self.expr, p, int(index), sympify(new)))
         text = new.strip()
         if not text:
             raise ValueError("Empty input")
@@ -415,7 +439,7 @@ class Document:
             return self.parse(src, context=context if context is not None else parent)
 
         if lead == "," or trail == ",":
-            return self._commit(insert_at(self.expr, p, int(index), parse(text.strip(",").strip())))
+            return self._commit(self._insert_at(self.expr, p, int(index), parse(text.strip(",").strip())))
         n = len(args)
         L = left if left is not None and 0 <= left < n else None
         R = right if right is not None and 0 <= right < n else None
@@ -425,12 +449,12 @@ class Document:
             # Function arguments, sets, or no neighbours: one neighbour at most.
             if lead in ("+", "-") and L is None and R is None:
                 if is_sum:
-                    return self._commit(insert_at(self.expr, p, int(index), parse(text)))
-                return self._commit(replace_at(self.expr, p, parent + parse(text)))
+                    return self._commit(self._insert_at(self.expr, p, int(index), parse(text)))
+                return self._commit(self._replace_at(self.expr, p, parent + parse(text)))
             if L is None and R is None:
                 if lead == "*":                     # "* c" with nothing next to the caret: multiply the node
-                    return self._commit(replace_at(self.expr, p, parent * parse(text[1:].strip())))
-                return self._commit(insert_at(self.expr, p, int(index), parse(text)))
+                    return self._commit(self._replace_at(self.expr, p, parent * parse(text[1:].strip())))
+                return self._commit(self._insert_at(self.expr, p, int(index), parse(text)))
             side, k = ("left", L) if (L is not None and attach != "right") else ("right", R if R is not None else L)
             nb = args[k]
             if lead == "*" and side == "left":
@@ -445,7 +469,7 @@ class Document:
                 combined = f"{text}({nb})"
             else:
                 combined = f"({nb})*({text})" if side == "left" else f"({text})*({nb})"
-            return self._commit(replace_at(self.expr, p + (k,), parse(combined, nb)))
+            return self._commit(self._replace_at(self.expr, p + (k,), parse(combined, nb)))
 
         # Sums and products: splice the text between its neighbours.
         def piece(indices):
@@ -468,8 +492,8 @@ class Document:
         new_expr = parse(combined)
         consumed = sorted(set(left_idx + right_idx))
         if not consumed:
-            return self._commit(insert_at(self.expr, p, int(index), new_expr))
-        return self._commit(replace_range(self.expr, p, consumed, new_expr))
+            return self._commit(self._insert_at(self.expr, p, int(index), new_expr))
+        return self._commit(self._replace_range(self.expr, p, consumed, new_expr))
 
     def apply(self, path: PathLike, op: Union[str, Callable], children=None) -> Basic:
         """Apply a registered op (by name) or a callable to the node at ``path``
@@ -483,9 +507,9 @@ class Document:
             func = op
         p = self._path(path)
         if children is not None:
-            result = sympify(func(extract_range(self.expr, p, children)))
-            return self._commit(replace_range(self.expr, p, children, result))
-        return self._commit(replace_at(self.expr, p, sympify(func(get_at(self.expr, p)))))
+            result = sympify(func(self._extract_range(self.expr, p, children)))
+            return self._commit(self._replace_range(self.expr, p, children, result))
+        return self._commit(self._replace_at(self.expr, p, sympify(func(self._get_at(self.expr, p)))))
 
     def call(self, path: PathLike, func: str, children=None) -> Basic:
         """Apply a SymPy function or a method to the node at ``path`` (or to
@@ -501,7 +525,7 @@ class Document:
             raise ValueError(f"Not a function call: {func!r} (try diff(x), series(x, 0, 5) or .T)")
         dotted, name, argsrc = m.group(1), m.group(2), m.group(3)
         p = self._path(path)
-        target = extract_range(self.expr, p, children) if children is not None else get_at(self.expr, p)
+        target = self._extract_range(self.expr, p, children) if children is not None else self._get_at(self.expr, p)
         args = [self.parse(a, context=target) for a in _split_args(argsrc)] if argsrc else []
         fn = None
         if not dotted and not name.startswith("_") and callable(getattr(sympy, name, None)):
@@ -518,39 +542,53 @@ class Document:
         if not isinstance(result, Basic):
             raise ValueError(f"{name} returned {type(result).__name__}, not an expression")
         if children is not None:
-            return self._commit(replace_range(self.expr, p, children, result))
-        return self._commit(replace_at(self.expr, p, result))
+            return self._commit(self._replace_range(self.expr, p, children, result))
+        return self._commit(self._replace_at(self.expr, p, result))
 
     def isolate(self, path: PathLike, children=None) -> Basic:
         """Make the node at ``path`` (or the range ``children`` of it) the
         whole expression, dropping everything around it."""
         p = self._path(path)
-        sub = extract_range(self.expr, p, children) if children is not None else get_at(self.expr, p)
+        sub = self._extract_range(self.expr, p, children) if children is not None else self._get_at(self.expr, p)
         return self._commit(sub)
 
-    def unwrap(self, path: PathLike, keep: Optional[int] = None) -> Basic:
+    def unwrap(self, path: PathLike, keep: Union[int, str, None] = None) -> Basic:
         """Remove the node at ``path`` but keep one of its arguments in its
         place: ``cos(x)`` becomes ``x``, ``Integral(f, (x, a, b))`` becomes
         ``f``, ``x**2`` becomes ``x``.  ``keep`` is the index of the argument
-        to keep; by default the natural one (the function body, the base, the
-        first argument).  A sum or product with several terms needs ``keep``.
+        to keep - or the name of a virtual part (``"n"``, ``"d"``, ``"neg"``)
+        for a node shown as a fraction or after a minus sign; by default the
+        natural one (the function body, the base, the first argument, the
+        product after the sign).  A sum, a product with several terms or a
+        fraction needs ``keep``.
         """
         p = self._path(path)
-        node = get_at(self.expr, p)
+        node = self._get_at(self.expr, p)
+        parts = dict(self._parts(node) or ())
         args = node.args
-        if not args:
+        if not args and not parts:
             raise ValueError(f"{node} has nothing inside to keep")
         if keep is None:
-            if isinstance(node, (Add, Mul)) and len(args) > 1:   # MatAdd/MatMul are Add/Mul too
+            if parts and "neg" in parts:
+                keep = "neg"
+            elif parts:
+                raise ValueError(f"{node} is a fraction: select the numerator or denominator to keep, press ↑, then Backspace")
+            elif isinstance(node, (Add, Mul)) and len(args) > 1:   # MatAdd/MatMul are Add/Mul too
                 raise ValueError(f"{type(node).__name__} has {len(args)} terms: select the one to keep, press ↑, then Backspace "
                                  "(or Delete the others)")
-            keep = 0
-        if not 0 <= int(keep) < len(args):
-            raise ValueError(f"Invalid argument {keep} for {node}")
-        kept = args[int(keep)]
+            else:
+                keep = 0
+        if isinstance(keep, str) and not keep.lstrip("-").isdigit():
+            if keep not in parts:
+                raise ValueError(f"Invalid part {keep!r} for {node}")
+            kept = parts[keep]
+        else:
+            if not 0 <= int(keep) < len(args):
+                raise ValueError(f"Invalid argument {keep} for {node}")
+            kept = args[int(keep)]
         if isinstance(kept, Tuple):
             raise ValueError(f"Cannot keep {kept}: it is not an expression")
-        return self._commit(replace_at(self.expr, p, kept))
+        return self._commit(self._replace_at(self.expr, p, kept))
 
     def extend(self, path: PathLike, side: str, src: str) -> Basic:
         """Type next to the node at ``path`` (an entry of a matrix, the base of a
@@ -559,7 +597,7 @@ class Document:
         junction is used (``"+ 1"`` gives ``node + 1``); without one the two
         are multiplied (``"y"`` after ``x`` gives ``x*y``)."""
         p = self._path(path)
-        node = get_at(self.expr, p)
+        node = self._get_at(self.expr, p)
         text = (src or "").strip()
         if not text:
             raise ValueError("Empty input")
@@ -570,7 +608,7 @@ class Document:
         else:
             joiner = " " if text[-1] in "+-*/^(" else "*"
             combined = text + joiner + node_src
-        return self._commit(replace_at(self.expr, p, self.parse(combined, context=node)))
+        return self._commit(self._replace_at(self.expr, p, self.parse(combined, context=node)))
 
     def used_symbols(self) -> Dict[str, Any]:
         """Symbols, matrix symbols, indexed bases and undefined functions
@@ -810,22 +848,19 @@ class Document:
         }
 
     def _node_info(self, path: Path, node: Basic, expr: Optional[Basic] = None) -> Dict[str, Any]:
-        """A node's entry in the snapshot.  ``node`` is what the printer
-        printed at ``path``; for a denominator raised to a power that is the
-        reciprocal of the tree's node, flagged so that an edit replaces the
-        denominator rather than the whole ``Pow``."""
+        """A node's entry in the snapshot.  ``node`` is the view-tree node
+        printed at ``path``.  ``parts`` lists the names of its virtual parts
+        when it is shown as a fraction or after a minus sign; such a node is
+        neither ``insertable`` nor ``rangeable`` (its arguments are not what
+        is shown - the parts are, and they may be)."""
+        parts = self._parts(node)
         info: Dict[str, Any] = {"src": str(node), "type": type(node).__name__, "kind": node_kind(node),
                                 "kinds": node_kinds(node),
-                                "nargs": len(node.args), "insertable": is_insertable(node),
-                                "rangeable": is_rangeable(node),
+                                "nargs": len(node.args), "insertable": is_insertable(node) and not parts,
+                                "rangeable": is_rangeable(node) and not parts,
                                 "free": sorted(str(s) for s in getattr(node, "free_symbols", ()))[:12]}
-        try:
-            actual = get_at(self.expr if expr is None else expr, path)
-        except (IndexError, AttributeError):
-            return info
-        if actual is not node and isinstance(actual, Pow) and isinstance(node, Pow) \
-                and actual.base == node.base and actual.exp == -node.exp:
-            info["reciprocal"] = True
+        if parts:
+            info["parts"] = [name for name, _value in parts]
         return info
 
     def preview(self, src: str) -> Dict[str, Any]:
@@ -845,10 +880,9 @@ class Document:
     def handle(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """Process a front-end message and return a snapshot.
 
-        Messages: ``{"action": "replace", "path": "/0", "src": "y**2"}`` (with
-        ``"reciprocal": true`` for a node the snapshot flagged so; ``replace``,
-        ``delete`` and ``apply`` take ``"children": [i, j]`` to act on the
-        range of those arguments of the node at ``path``),
+        Messages: ``{"action": "replace", "path": "/0", "src": "y**2"}``
+        (``replace``, ``delete`` and ``apply`` take ``"children": [i, j]`` to
+        act on the range of those arguments of the node at ``path``),
         ``{"action": "apply", "path": "/", "op": "expand"}``,
         ``{"action": "delete", "path": "/1"}``, ``{"action": "set", "src": ...}``,
         ``{"action": "insert", "path": "/", "index": 2, "src": "y", "left": 1}``,
@@ -882,8 +916,7 @@ class Document:
             if action == "goto":
                 self.goto(message.get("index", 0))
             if action == "replace":
-                self.replace(path, str(message.get("src", "")), reciprocal=bool(message.get("reciprocal")),
-                             children=children)
+                self.replace(path, str(message.get("src", "")), children=children)
             elif action == "retype":
                 self.retype(str(message.get("name", "")), str(message.get("type", "")),
                             message.get("rows"), message.get("cols"), message.get("assumptions"))
@@ -912,7 +945,7 @@ class Document:
                         pass
                 return snap
             elif action == "signature":
-                target = extract_range(self.expr, self._path(path), children) if children is not None else get_at(self.expr, self._path(path))
+                target = self._extract_range(self.expr, self._path(path), children) if children is not None else self._get_at(self.expr, self._path(path))
                 snap = self.snapshot()
                 snap["signature"] = function_signature(str(message.get("name", "")), target)
                 return snap
@@ -952,8 +985,8 @@ class Document:
             try:
                 p = self._path(message.get("path", "/"))
                 if message.get("children") is not None:
-                    return short(extract_range(self.expr, p, message["children"]))
-                return short(get_at(self.expr, p))
+                    return short(self._extract_range(self.expr, p, message["children"]))
+                return short(self._get_at(self.expr, p))
             except Exception:
                 return "…"
 

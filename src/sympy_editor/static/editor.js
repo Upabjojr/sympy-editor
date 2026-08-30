@@ -110,14 +110,21 @@ var SympyEditor = (function () {
   /* Paths and tree                                                      */
   /* ------------------------------------------------------------------ */
 
-  // Paths: "/" is the root, "/1/0" is expr.args[1].args[0].
+  // Paths: "/" is the root, "/1/0" is expr.args[1].args[0].  A named step is
+  // a virtual part of the view tree: "/n" and "/d" the numerator and
+  // denominator of what is shown as a fraction, "/neg" the product after a
+  // leading minus (see printer.view_parts).
+  var PART_ORDER = { neg: 0, n: 0, d: 1 };
   function parentPath(p) {
     if (!p || p === "/") return null;
     var i = p.lastIndexOf("/");
     return i === 0 ? "/" : p.slice(0, i);
   }
+  /** The last step of a path as a sort key: an argument index, or the
+   *  display order of a part. */
   function lastIndex(p) {
-    return parseInt(p.slice(p.lastIndexOf("/") + 1), 10);
+    var step = p.slice(p.lastIndexOf("/") + 1);
+    return step in PART_ORDER ? PART_ORDER[step] : parseInt(step, 10);
   }
   function isAncestorOrSelf(a, b) {
     return a === b || a === "/" || b.indexOf(a + "/") === 0;
@@ -1200,7 +1207,7 @@ var SympyEditor = (function () {
         var srects = [];
         for (var j = 0; j < els.length; j++) { els[j].classList.add("se-selected"); srects.push(this._visualRect(els[j])); }
         this._drawBoxes("select", els.length && !els[0].classList.contains("se-editing") ? srects : []);
-        this._setStatus(node.type + ": " + node.src + (node.reciprocal ? "  (denominator: the node is 1 over this)" : ""));
+        this._setStatus(node.type + ": " + node.src);
         this._markSource([this.selected]);
         this._placeActions(els.length && !els[0].classList.contains("se-editing") ? this._unionRect(srects) : null);
       } else {
@@ -1400,7 +1407,7 @@ var SympyEditor = (function () {
       if (!this.selected || this.opts.readOnly) return;
       var msg = { action: "unwrap", path: this.selected };
       var back = this._cameFrom[this.selected];
-      if (back && isAncestorOrSelf(this.selected, back) && back !== this.selected) msg.keep = this._argIndex(this.selected, back);
+      if (back && isAncestorOrSelf(this.selected, back) && back !== this.selected) msg.keep = this._childKey(this.selected, back);
       this.send(msg);
     }
 
@@ -1409,7 +1416,8 @@ var SympyEditor = (function () {
       if (!this.actions) return;
       if (!rect || this.input || this.closed) { this.actions.hidden = true; this.view.style.paddingBottom = ""; return; }
       var t = this.selected ? this.tree[this.selected] : null;
-      var unwrapOk = !!(this.selected && !this.range && this.state.nodes[this.selected] && this.state.nodes[this.selected].nargs);
+      var selNode = this.selected && !this.range ? this.state.nodes[this.selected] : null;
+      var unwrapOk = !!(selNode && (selNode.nargs || selNode.parts));
       var buttons = this.actions.querySelectorAll("button");
       for (var i = 0; i < buttons.length; i++) {
         var cmd = buttons[i].getAttribute("data-cmd");
@@ -1422,8 +1430,17 @@ var SympyEditor = (function () {
                             : false;
       }
       this.actions.hidden = false;
+      // Under the formula's line rather than right under the selection, so
+      // the bar never covers what is below it (the denominator under a
+      // selected numerator) - unless the formula goes on much further down.
+      var bottom = rect.bottom;
+      var formula = this.view.querySelector(".katex");
+      if (formula) {
+        var fb = formula.getBoundingClientRect().bottom;
+        if (fb > bottom && fb - bottom < 160) bottom = fb;
+      }
       var rr = this.root.getBoundingClientRect();
-      var left = rect.left - rr.left, top = rect.bottom - rr.top + 6;
+      var left = rect.left - rr.left, top = bottom - rr.top + 6;
       var maxLeft = Math.max(0, this.root.clientWidth - this.actions.offsetWidth - 4);
       this.actions.style.left = Math.round(Math.max(0, Math.min(left, maxLeft))) + "px";
       this.actions.style.top = Math.round(top) + "px";
@@ -1431,7 +1448,7 @@ var SympyEditor = (function () {
       // (measured against the view's own padding, not the room added before).
       this.view.style.paddingBottom = "";
       var vr = this.view.getBoundingClientRect();
-      var overflow = (rect.bottom + 6 + this.actions.offsetHeight + 4) - vr.bottom;
+      var overflow = (bottom + 6 + this.actions.offsetHeight + 4) - vr.bottom;
       if (overflow > 0) this.view.style.paddingBottom = (parseFloat(getComputedStyle(this.view).paddingBottom) + overflow) + "px";
     }
 
@@ -1815,6 +1832,14 @@ var SympyEditor = (function () {
     _argIndex(parent, child) {
       var rest = parent === "/" ? child.slice(1) : child.slice(parent.length + 1);
       return parseInt(rest.split("/")[0], 10);
+    }
+
+    /** The step from `parent` to `child`: an argument index, or the name of
+     *  a virtual part ("n", "d", "neg"). */
+    _childKey(parent, child) {
+      var rest = parent === "/" ? child.slice(1) : child.slice(parent.length + 1);
+      var step = rest.split("/")[0];
+      return step in PART_ORDER ? step : parseInt(step, 10);
     }
 
     /** The insertion points of an insertable node, in display order: before
@@ -2363,8 +2388,6 @@ var SympyEditor = (function () {
       }
       if (!src || src === original) return;
       var msg = { action: path === "/" ? "set" : "replace", path: path, src: src };
-      var node = this.state && this.state.nodes ? this.state.nodes[path] : null;
-      if (node && node.reciprocal) msg.reciprocal = true;
       this.send(msg);
     }
 
@@ -3028,7 +3051,7 @@ var SympyEditor = (function () {
       set("edit", dis);
       set("keyboard", dis);
       set("delete", dis || !(range || this.selected));
-      set("unwrap", dis || range || !this.selected || !(s.nodes && s.nodes[this.selected] && s.nodes[this.selected].nargs));
+      set("unwrap", dis || range || !this.selected || !(s.nodes && s.nodes[this.selected] && (s.nodes[this.selected].nargs || s.nodes[this.selected].parts)));
       set("isolate", dis || !(range || (this.selected && this.selected !== "/")));
       set("parent", dis || !(range || (t && t.parent) || this.caret));
       set("child", dis || !!this.caret);

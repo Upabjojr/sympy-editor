@@ -3,7 +3,7 @@ import re
 import subprocess
 import sys
 
-from sympy import symbols
+from sympy import srepr, symbols
 
 from sympy_editor import Document, to_html, save_html
 from sympy_editor.html import build_config, python_sources
@@ -95,7 +95,8 @@ def test_examples_are_valid_and_reach_pages_with_sessions():
     records = examples()
     assert len(records) == len(EXAMPLES) >= 8 and all(r["name"] and r["src"] and r["srepr"] for r in records)
     for (name, expr), r in zip(EXAMPLES, records):
-        assert Document(r["srepr"]).expr == expr, name                 # rebuilds in a Pyodide document
+        rebuilt = Document(r["srepr"]).expr                            # rebuilds in a Pyodide document
+        assert rebuilt == expr or srepr(rebuilt) == srepr(expr), name  # (SymPy 1.14 orders a rebuilt MatAdd differently)
         tex, nodes = annotate(expr)
         assert strip_annotations(tex) == latex(expr) and () in nodes, name
     cfg = build_config(Document(x), options={"sessions": True})

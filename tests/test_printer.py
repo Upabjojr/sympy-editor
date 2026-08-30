@@ -57,19 +57,54 @@ def test_paths_point_to_the_printed_nodes(expr):
     tex, nodes = annotate(expr)
     assert () in nodes and nodes[()] == expr
     for path, node in nodes.items():
-        actual = get_at(expr, path)
-        # A denominator raised to a power is printed as the reciprocal of the
-        # tree's node (Pow(b, -n) shown as b**n under the fraction bar).
-        reciprocal = (isinstance(actual, Pow) and isinstance(node, Pow)
-                      and actual.base == node.base and actual.exp == -node.exp)
-        assert actual == node or reciprocal
+        assert get_at(expr, path) == node
         assert r"\htmlData{path=%s}{" % format_path(path) in tex
 
 
 def test_negative_add_term_is_annotated_with_sign():
     tex, nodes = annotate(x - y)
-    assert r"\htmlData{path=/1}{- \htmlData{path=/1/1}{y}}" in tex
-    assert nodes[(1,)] == -y
+    assert r"\htmlData{path=/1}{- \htmlData{path=/1/neg}{y}}" in tex
+    assert nodes[(1,)] == -y and nodes[(1, "neg")] == y
+
+
+def test_view_parts_follow_what_is_shown():
+    """Paths address the view tree: what the printer shows, not the args."""
+    from sympy import E, Integer, Rational, exp
+    from sympy_editor.printer import delete_at, replace_at, view_parts
+    n = symbols("n")
+    paths = lambda e: {format_path(p): str(v) for p, v in annotate(e)[1].items()}
+    # 1/n is Pow(n, -1): the 1 exists nowhere in the tree
+    assert paths(1 / n) == {"/": "1/n", "/n": "1", "/d": "n"}
+    assert replace_at(1 / n, ("n",), x) == x / n and replace_at(1 / n, ("d",), x + 1) == 1 / (x + 1)
+    # 1/(2e) is Mul(1/2, exp(-1)): shown as 1 over 2e
+    e = 1 / (2 * E)
+    assert paths(e) == {"/": "exp(-1)/2", "/n": "1", "/d": "2*E", "/d/0": "2", "/d/1": "E"}
+    assert get_at(e, ("d",)) == 2 * E and replace_at(e, ("d", 0), 3) == 1 / (3 * E) and replace_at(e, ("d", 1), x) == 1 / (2 * x)
+    # a product with a leading minus: the coefficient is shown positive
+    assert paths(-2 * x * y) == {"/": "-2*x*y", "/neg": "2*x*y", "/neg/0": "2", "/neg/1": "x", "/neg/2": "y"}
+    assert replace_at(-2 * x * y, ("neg", 0), 3) == -3 * x * y and delete_at(-2 * x * y, ("neg", 0)) == -x * y
+    # a term of a sum: sign, then the product, then the fraction inside it
+    e = x - y / 2
+    assert paths(e) == {"/": "x - y/2", "/0": "x", "/1": "-y/2", "/1/neg": "y/2", "/1/neg/n": "y", "/1/neg/d": "2"}
+    assert replace_at(e, (1, "neg", "d"), 3) == x - y / 3 and delete_at(e, (1, "neg")) == x
+    # a product with numerator and denominator: the numerator is a product of its own
+    e = x * y / z
+    assert paths(e) == {"/": "x*y/z", "/n": "x*y", "/n/0": "x", "/n/1": "y", "/d": "z"}
+    assert view_parts(e) == [("n", get_at(e, ("n",))), ("d", z)] and get_at(e, ("n",)) == x * y
+    assert delete_at(e, ("n",)) == 1 / z and delete_at(e, ("d",)) == x * y and delete_at(e, ("n", 0)) == y / z
+    # a denominator raised to a power: the tree's Pow(x + 1, -2)
+    e = x / (x + 1) ** 2
+    assert paths(e)["/d"] == "(x + 1)**2" and paths(e)["/d/1"] == "2" and replace_at(e, ("d", 1), 3) == x / (x + 1) ** 3
+    # nodes printed as they are have no parts
+    assert view_parts(x * y) is None and view_parts(Integer(3)) is None and view_parts(exp(-x)) is None
+    assert view_parts(x ** -Rational(1, 2)) is None                         # 1 over a root: the base is printed as is
+    assert view_parts(x ** -Rational(1, 2), {"root_notation": False}) is not None
+    tex, nodes = annotate(x ** -Rational(1, 2), root_notation=False)
+    assert strip_annotations(tex) == latex(x ** -Rational(1, 2), root_notation=False) and ("d",) in nodes
+    # the source line prints 1/(2e) as exp(-1)/2: real arguments are still found
+    from sympy_editor.printer import annotate_str
+    text, spans = annotate_str(1 / (2 * E))
+    assert text[slice(*spans["/1"])] == "exp(-1)" and text[slice(*spans["/d/0"])] == "2"
 
 
 def test_bound_variables_map_to_limits_not_body():
@@ -89,7 +124,7 @@ def test_matrix_elements_are_not_confused_with_shape():
 
 def test_denominator_base_is_reachable():
     tex, nodes = annotate(x / y**2)
-    assert nodes[(1, 0)] == y
+    assert nodes[("d", 0)] == y and nodes[("d",)] == y**2 and (1,) not in nodes
 
 
 def test_settings_are_forwarded():
@@ -172,17 +207,16 @@ def test_rational_numerator_and_denominator_have_paths():
         for path, node in nodes.items():
             assert get_at(expr, path) == node
     tex, nodes = annotate(x - Rational(1, 2))
-    assert nodes[(0, "n")] == -1 and nodes[(0, "d")] == 2       # the tree's number is -1/2, printed as - 1/2
+    assert nodes[(0, "n")] == 1 and nodes[(0, "d")] == 2        # the tree's number is -1/2, printed as - 1/2
+    assert replace_at(x - Rational(1, 2), (0, "n"), 3) == x - Rational(3, 2)     # the sign stays in front
     assert r"\htmlData{path=/0/n}{1}" in tex and r"\htmlData{path=/0/d}{2}" in tex
     text, spans = annotate_str(x - Rational(1, 2))
     assert text[slice(*spans["/0/n"])] == "1" and text[slice(*spans["/0/d"])] == "2"
     assert parse_path("/0/n") == (0, "n")
-    assert replace_at(x - Rational(1, 2), (0, "n"), 3) == x + Rational(3, 2)
     assert replace_at(Rational(1, 2), ("d",), x) == 1 / x
-    with pytest.raises(ValueError):
-        delete_at(Rational(1, 2), ("n",))
+    assert delete_at(Rational(3, 2), ("n",)) == Rational(1, 2) and delete_at(Rational(3, 2), ("d",)) == 3
     with pytest.raises(ValueError):
         get_at(x, ("n",))
-    # a coefficient is printed as a fraction of the product, not as a number: no parts
+    # a coefficient is printed as a fraction of the product: the parts are the product's, not the number's
     tex, nodes = annotate(Rational(1, 2) * x)
-    assert not any("n" in p or "d" in p for p in nodes)
+    assert nodes[("n",)] == x and nodes[("d",)] == 2 and (0, "d") not in nodes and (0,) not in nodes

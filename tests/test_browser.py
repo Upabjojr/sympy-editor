@@ -107,10 +107,10 @@ def test_render_select_and_walk_up(browser, served):
     page = _open(browser, srv.url)
     assert page.locator(".se-source").inner_text() == "x**2/y - sin(x)"
     assert page.locator(".se-status").inner_text().startswith("Click")
-    _click(page, "/1/1/0")                            # y in the denominator
+    _click(page, "/1/d")                              # y, the denominator (the tree's Pow(y, -1))
     assert page.locator(".se-status").inner_text() == "Symbol: y"
-    assert page.locator(".se-selected").get_attribute("data-path") == "/1/1/0"
-    _click(page, "/1/1/0")                            # same spot again -> parent
+    assert page.locator(".se-selected").get_attribute("data-path") == "/1/d"
+    _click(page, "/1/d")                              # same spot again -> parent
     assert page.locator(".se-status").inner_text().startswith("Mul:")
     page.keyboard.press("ArrowUp")
     assert page.locator(".se-status").inner_text().startswith("Add:")
@@ -122,21 +122,21 @@ def test_render_select_and_walk_up(browser, served):
 def test_in_place_edit_commits_to_python(browser, served):
     srv, doc = served
     page = _open(browser, srv.url)
-    _click(page, '/1/1/0')
+    _click(page, '/1/d')
     page.keyboard.type("z")                           # typing starts an in-place edit
     field = page.locator(".se-inline")
     assert field.count() == 1
-    assert field.evaluate("e => e.parentNode.getAttribute('data-path')") == "/1/1/0"
+    assert field.evaluate("e => e.parentNode.getAttribute('data-path')") == "/1/d"
     assert field.input_value() == "z"
     page.keyboard.type("**2")
     page.keyboard.press("Enter")
     page.wait_for_function("document.querySelector('.se-source').textContent.includes('z**2')")
     assert doc.expr == x**2 / z**2 - sin(x)
     assert page.locator(".se-inline").count() == 0
-    assert page.locator(".se-selected").get_attribute("data-path") == "/1/1/0"
+    assert page.locator(".se-selected").get_attribute("data-path") == "/1/d"    # the denominator, now z**2
     # Escape restores the rendering without changes
     page.keyboard.press("Enter")
-    assert page.locator(".se-inline").input_value() == "z"
+    assert page.locator(".se-inline").input_value() == "z**2"
     page.keyboard.press("Escape")
     assert page.locator(".se-inline").count() == 0
     assert page.locator(".se-view .katex:not(.se-ghost *)").count() == 1
@@ -1279,6 +1279,56 @@ def test_caret_walks_through_atoms_across_levels(browser, serve_expr):
     assert page.evaluate(caret)["extend"] == "before"
     page.locator('.se-toolbar [data-cmd="parent"]').click()
     assert page.locator(".se-selected").get_attribute("data-path") == pb and page.locator(".se-caret").count() == 0
+    assert page.errors == []
+
+
+def test_shown_parts_are_clickable_and_editable(browser, serve_expr):
+    """What is shown is what is selected, where SymPy's tree differs from the
+    rendering: the 1 of 1/n (the tree's Pow(n, -1)); the 2, the e and the
+    whole 2e under the bar of 1/(2e) (the tree's exp(-1)/2); the 2 of x - 2y."""
+    from sympy import E
+    n = symbols("n")
+    srv, doc = serve_expr(1 / n)
+    page = _open(browser, srv.url)
+    _click(page, "/n")
+    assert page.locator(".se-status").inner_text() == "One: 1"
+    page.keyboard.type("x")
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    assert doc.expr == x / n
+    page.keyboard.press("Escape")
+    srv, doc = serve_expr(1 / (2 * E))
+    page = _open(browser, srv.url)
+    _click(page, "/d/0")
+    assert page.locator(".se-status").inner_text() == "Integer: 2"
+    page.keyboard.press("ArrowUp")                                    # the denominator as a whole
+    assert page.locator(".se-selected").get_attribute("data-path") == "/d" and page.locator(".se-status").inner_text() == "Mul: 2*E"
+    page.keyboard.press("ArrowUp")                                    # the fraction
+    assert page.locator(".se-selected").get_attribute("data-path") == "/"
+    _click(page, "/d/0")
+    page.keyboard.type("3")
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    assert doc.expr == 1 / (3 * E)
+    _click(page, "/d")                                                # replacing the whole denominator
+    page.keyboard.type("y")
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    assert doc.expr == 1 / y
+    page.keyboard.press("Escape")
+    srv, doc = serve_expr(x - 2 * y)
+    page = _open(browser, srv.url)
+    _click(page, "/1/neg/0")
+    assert page.locator(".se-status").inner_text() == "Integer: 2"
+    page.keyboard.press("ArrowUp")
+    assert page.locator(".se-status").inner_text() == "Mul: 2*y"     # the product after the sign
+    page.keyboard.press("ArrowUp")
+    assert page.locator(".se-status").inner_text() == "Mul: -2*y"    # the signed term
+    page.keyboard.press("Escape")                                     # (a click inside the selection walks up)
+    _click(page, "/1/neg/0")
+    page.keyboard.type("3")
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    assert doc.expr == x - 3 * y
+    _click(page, "/1/neg")
+    _next_state(page, lambda: page.keyboard.press("Delete"))          # the signed term goes with it
+    assert doc.expr == x
     assert page.errors == []
 
 
