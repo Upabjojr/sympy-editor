@@ -1,6 +1,6 @@
 """Standalone HTML output: a full page or an embeddable fragment.
 
-Editing in the generated HTML is powered by one of three backends (see
+Editing in the generated HTML is powered by one of four backends (see
 ``static/editor.js``):
 
 ``pyodide`` (default)
@@ -9,6 +9,11 @@ Editing in the generated HTML is powered by one of three backends (see
     the first edit), so no server is needed.
 ``http``
     Edits are sent to :func:`sympy_editor.serve`'s local server.
+``native``
+    The host application runs Python itself and answers through the object it
+    injects in the page (``window.SympyEditorPy``): the Android app ships
+    CPython and SymPy, so nothing is downloaded and no WebAssembly is needed
+    (see ``mobile/android``).
 ``readonly``
     Rendering and structural selection only.
 """
@@ -101,7 +106,7 @@ def build_config(
     token: Optional[str] = None,
 ) -> Dict[str, Any]:
     """The JSON config consumed by ``SympyEditor.mount`` in editor.js."""
-    if backend not in ("pyodide", "http", "readonly"):
+    if backend not in ("pyodide", "http", "readonly", "native"):
         raise ValueError(f"Unknown backend {backend!r}")
     all_urls = default_urls()
     all_urls.update(urls or {})
@@ -116,6 +121,18 @@ def build_config(
             pyodideIndex=all_urls["pyodideIndex"],
             sympyWheel=all_urls.get("sympyWheel", ""),
             sources=python_sources(),
+            srepr=srepr(doc.expr),
+            document={
+                "printer_settings": doc.printer_settings,
+                "parser": doc.parser,
+                "symbols": [srepr(obj) for obj in doc.declared.values()],
+            },
+        )
+    elif backend == "native":
+        # The host application runs Python itself (the Android app ships
+        # CPython and SymPy); it only needs to know which expression to start
+        # from - the sources and the runtime are its own.
+        cfg.update(
             srepr=srepr(doc.expr),
             document={
                 "printer_settings": doc.printer_settings,
@@ -206,7 +223,9 @@ def to_html(
         Use the Pyodide backend (in-browser Python) so the page can be edited
         without a server; ``False`` gives a read-only (but selectable) view.
     backend
-        Explicit backend name; overrides ``editable``.
+        Explicit backend name (``"pyodide"``, ``"http"``, ``"native"`` - the
+        host application's own Python, see mobile/android -, ``"readonly"``);
+        overrides ``editable``.
     options
         Front-end options (``displayMode``, ``toolbar``, ``showSource``,
         ``readOnly``...), see ``DEFAULTS`` in editor.js.

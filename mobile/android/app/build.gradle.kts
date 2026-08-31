@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("com.chaquo.python")
 }
 
 android {
@@ -9,10 +10,13 @@ android {
 
     defaultConfig {
         applicationId = "org.sympy.editor"
-        minSdk = 21
+        minSdk = 24          // the app's CPython (Chaquopy 16) needs Android 7.0
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
+        // Chaquopy ships a CPython runtime per ABI: these two cover phones,
+        // tablets and the emulator (every other ABI is long obsolete).
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
 
     // Release signing from the environment (see mobile/README.md); without a
@@ -40,6 +44,19 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     androidResources { noCompress += listOf("wasm", "whl", "zip", "woff2") }
+    packaging { resources { excludes += listOf("META-INF/*.kotlin_module") } }
+}
+
+// The app's Python: CPython plus SymPy, installed at build time from PyPI.
+// src/main/python holds the app's own module (sympy_editor_app.py) and the
+// copy of the sympy_editor package that mobile/build.py puts there.
+chaquopy {
+    defaultConfig {
+        version = "3.12"
+        pip {
+            install("sympy==1.14.0")
+        }
+    }
 }
 
 dependencies {

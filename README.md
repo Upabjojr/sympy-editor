@@ -188,7 +188,14 @@ def gram(m):
 `mobile/` packages the same editor page as a minimal Android (Kotlin WebView)
 and iOS (SwiftUI `WKWebView`) app: `python mobile/build_www.py` produces the
 shared, offline-capable bundle, and each platform folder is a few files that
-just display it.  See `mobile/README.md`.
+just display it.
+
+The **Android app runs Python itself**: CPython 3.12 and SymPy are packaged in
+the APK (Chaquopy) and the page edits through the app's own interpreter (the
+`native` backend), so there is no WebAssembly runtime to start and no Pyodide
+in the bundle - faster to open, and the same SymPy as on the desktop.  It
+needs Android 7.0 (API 24).  The iOS app and the web app still run Python in
+the page with Pyodide.  See `mobile/README.md`.
 
 ### Web app
 

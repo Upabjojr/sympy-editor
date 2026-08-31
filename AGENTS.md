@@ -371,6 +371,23 @@ Two conventions between printer, document and front end:
   other and the buttons beside them on every platform.  As text glyphs they
   came from whichever installed font had them - the horizontal pair twice
   as wide as the vertical one, often another weight and baseline.
+- **Backends.**  `Editor` only needs `{send(msg, report) -> snapshot}`, plus
+  the optional `warmup`, `openDocument`, `interrupt`/`canInterrupt`.
+  `http` (the local server), `pyodide` (a worker in the page), `readonly`,
+  and `native`: the *host application* runs Python.  The native backend
+  hands JSON to `window.SympyEditorPy` (injected by the host) with a
+  request id and is answered through `window.__sympyEditorNative(id, ok,
+  payload)`; `build_config(backend="native")` carries only the `srepr` and
+  the Document keyword arguments, since the sources and the runtime belong
+  to the host.  The Android app is such a host: Chaquopy packages CPython
+  and SymPy in the APK, `MainActivity.PythonBridge` runs
+  `sympy_editor_app.py` (new_doc/handle/close/version) on a single Python
+  thread and posts the answer back on the UI thread.  `mobile/build.py`
+  copies `src/sympy_editor` into the app's Python source set, so the app is
+  never built against a stale copy, and `build_www.py --native` leaves
+  Pyodide out of the bundle (~1 MB instead of ~24 MB).  A debug build turns
+  on WebView debugging: `adb forward tcp:9222 localabstract:webview_devtools_remote_<pid>`
+  and Playwright's `connect_over_cdp` then drive the app on the device.
 - **Help view.**  The toolbar's "?" (`showHelp`/`closeHelp`) overlays
   `HELP_HTML` - the whole gesture/key/tool guide, static content in
   `.se-help-body` (multi-column via `column-width`), dressed as the

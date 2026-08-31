@@ -6,8 +6,10 @@
     python mobile/build_www.py --android       # also copy the bundle into the Android assets
 
 The bundle is the same editor page ``sympy_editor.to_html`` produces for the
-desktop, with KaTeX and the part of Pyodide that SymPy needs vendored under
-``www/vendor/`` so that the app works without a network.  Downloads are cached
+desktop, with KaTeX vendored under ``www/vendor/`` so that it works without a
+network.  Where the host application has no Python of its own (iOS, the web
+app) the part of Pyodide that SymPy needs is vendored as well; ``--android``
+(``--native``) leaves it out, because the Android app ships CPython and SymPy.  Downloads are cached
 in ``~/.cache/sympy-editor/`` (override with ``--cache``).
 
 Nothing here is specific to a platform: Android and iOS each wrap ``www/`` in
@@ -65,14 +67,22 @@ def fetch(url: str, dest: Path, cache: Path) -> Path:
     return dest
 
 
-def vendor(out: Path, cache: Path) -> dict:
-    """Vendor KaTeX and the Pyodide subset; return the relative URLs to use."""
+def vendor(out: Path, cache: Path, pyodide: bool = True) -> dict:
+    """Vendor KaTeX and (unless the host runs Python itself) the Pyodide
+    subset; return the relative URLs to use."""
     katex_base = f"https://cdn.jsdelivr.net/npm/katex@{KATEX_VERSION}/dist/"
     kdir = out / "vendor" / "katex"
     fetch(katex_base + "katex.min.js", kdir / "katex.min.js", cache)
     css = fetch(katex_base + "katex.min.css", kdir / "katex.min.css", cache).read_text(encoding="utf-8")
     for font in sorted(set(re.findall(r"url\(fonts/([^)]+?\.woff2)\)", css))):
         fetch(katex_base + "fonts/" + font, kdir / "fonts" / font, cache)
+
+    if not pyodide:
+        shutil.rmtree(out / "vendor" / "pyodide", ignore_errors=True)     # a leftover from an earlier build
+        (out / "vendor" / "NOTICE.txt").write_text(
+            NOTICE.format(katex=KATEX_VERSION, pyodide=PYODIDE_VERSION, sympy=SYMPY_VERSION)
+            .replace("Pyodide", "(not vendored here) Pyodide"), encoding="utf-8")
+        return {"katexJs": "vendor/katex/katex.min.js", "katexCss": "vendor/katex/katex.min.css"}
 
     pyodide_base = default_urls()["pyodideIndex"]
     pdir = out / "vendor" / "pyodide"
@@ -102,12 +112,18 @@ def vendor(out: Path, cache: Path) -> dict:
 
 
 def build(out: Path, *, cdn: bool = False, cache: Path | None = None, expr=None, title: str = "SymPy editor",
-          head: str = "") -> Path:
+          head: str = "", native: bool = False) -> Path:
     """Write the bundle to ``out``; ``head`` is extra ``<head>`` markup (the
-    web app's manifest and service worker, see ``webapp/build.py``)."""
+    web app's manifest and service worker, see ``webapp/build.py``).
+
+    With ``native``, the page edits through the host application's own Python
+    (``window.SympyEditorPy``) instead of Pyodide: that is what the Android
+    app uses, which ships CPython and SymPy itself, so nothing of Pyodide is
+    vendored into the bundle."""
     out.mkdir(parents=True, exist_ok=True)
-    urls = None if cdn else vendor(out, cache or Path.home() / ".cache" / "sympy-editor")
+    urls = None if cdn else vendor(out, cache or Path.home() / ".cache" / "sympy-editor", pyodide=not native)
     page = to_html(expr if expr is not None else demo_expression(), urls=urls, title=title, head=head,
+                   backend="native" if native else None,
                    element_id="sympy-editor-app",                         # reproducible: the web app's cache is keyed by content
                    options={"rememberZoom": True, "sessions": True})   # an app keeps its zoom and sessions between launches
     (out / "index.html").write_text(page, encoding="utf-8")
@@ -128,8 +144,10 @@ def main(argv=None) -> int:
     ap.add_argument("--cdn", action="store_true", help="do not vendor; load KaTeX and Pyodide from the CDNs")
     ap.add_argument("--cache", type=Path, default=None, help="download cache directory")
     ap.add_argument("--android", action="store_true", help="also copy the bundle to mobile/android/app/src/main/assets/www")
+    ap.add_argument("--native", action="store_true",
+                    help="the host application runs Python (the Android app): no Pyodide in the bundle")
     args = ap.parse_args(argv)
-    out = build(args.out, cdn=args.cdn, cache=args.cache)
+    out = build(args.out, cdn=args.cdn, cache=args.cache, native=args.native or args.android)
     size = sum(p.stat().st_size for p in out.rglob("*") if p.is_file())
     print(f"Wrote {out} ({size / 1e6:.1f} MB)")
     if args.android:

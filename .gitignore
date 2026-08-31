@@ -10,6 +10,7 @@ examples/*.html
 # mobile packaging: generated bundle and native build products
 mobile/www/
 mobile/android/app/src/main/assets/
+mobile/android/app/src/main/python/sympy_editor/
 mobile/android/.gradle/
 mobile/android/**/build/
 mobile/android/local.properties

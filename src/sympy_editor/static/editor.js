@@ -10,7 +10,7 @@
  * Public API (global `SympyEditor`):
  *   new SympyEditor.Editor(hostElement, backend, options)
  *   SympyEditor.mount(hostElement, config)      // config built by html.py
- *   SympyEditor.backends.{http, pyodide, readonly}
+ *   SympyEditor.backends.{http, pyodide, native, readonly}
  *   SympyEditor.loadKatex(options)
  *
  * A backend is `{ send(message, report) -> Promise<snapshot|null> }`.  The
@@ -4059,13 +4059,75 @@ var SympyEditor = (function () {
     };
   }
 
+  /** The host application's own Python: the page hands JSON messages to the
+   *  object it injected (`window.SympyEditorPy`) and gets snapshots back
+   *  through `window.__sympyEditorNative`.  The Android app runs CPython and
+   *  SymPy natively (mobile/android, Chaquopy) - nothing to download, no
+   *  WebAssembly, and the same Document code as everywhere else. */
+  function nativeBackend(cfg) {
+    var pending = {}, seq = 0, docId = null, started = null;
+    window.__sympyEditorNative = function (req, ok, payload) {
+      var p = pending[req];
+      if (!p) return;
+      delete pending[req];
+      if (!ok) { p.reject(new Error(payload)); return; }
+      try { p.resolve(JSON.parse(payload)); } catch (e) { p.reject(e); }
+    };
+    function call(method, args) {
+      return new Promise(function (resolve, reject) {
+        var host = window.SympyEditorPy;
+        if (!host || typeof host[method] !== "function") {
+          reject(new Error("This page needs the app's Python (window.SympyEditorPy)"));
+          return;
+        }
+        var req = "r" + (++seq);
+        pending[req] = { resolve: resolve, reject: reject };
+        try {
+          host[method].apply(host, [req].concat(args));
+        } catch (e) {
+          delete pending[req];
+          reject(e);
+        }
+      });
+    }
+    function newDoc(srepr, state) {
+      docId = "doc" + (++seq);
+      return call("newDoc", [docId, srepr, JSON.stringify(Object.assign({}, cfg.document || {}, state || {}))]);
+    }
+    function start(report) {
+      if (!started) {
+        report("Starting Python\u2026");
+        started = newDoc(cfg.srepr, null).then(function (snap) { report(""); return snap; },
+                                               function (e) { started = null; throw e; });
+      }
+      return started;
+    }
+    return {
+      send: async function (msg, report) {
+        await start(report || function () {});
+        return call("handle", [docId, JSON.stringify(msg)]);
+      },
+      /** Switch to a document built from `state` (a session), as Pyodide does. */
+      openDocument: async function (state, report) {
+        await start(report || function () {});
+        var history = state && state.history;
+        var srepr = history && history.length ? history[Math.min(state.index || 0, history.length - 1)] : cfg.srepr;
+        return newDoc(srepr, state);
+      },
+      warmup: function (report) {
+        return start(report).then(function () { report(""); },
+                                  function (e) { report("Python failed to start: " + e.message); });
+      }
+    };
+  }
+
   function readonlyBackend() {
     return {
       send: async function () { throw new Error("This view is read-only."); }
     };
   }
 
-  var backends = { http: httpBackend, pyodide: pyodideBackend, readonly: readonlyBackend };
+  var backends = { http: httpBackend, pyodide: pyodideBackend, native: nativeBackend, readonly: readonlyBackend };
 
   /** Create an editor from a config object produced by html.py. */
   function mount(host, cfg) {

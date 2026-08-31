@@ -42,6 +42,22 @@ def build_www(cdn: bool, android: bool) -> None:
     run(cmd)
 
 
+def copy_python_sources() -> Path:
+    """Put the current ``sympy_editor`` package where Chaquopy picks it up.
+
+    The Android app runs the editor's own Python (see
+    ``android/app/src/main/python/sympy_editor_app.py``); SymPy comes from
+    PyPI at build time, this package comes from the checkout, so the app is
+    never built against a stale copy."""
+    src = HERE.parent / "src" / "sympy_editor"
+    dest = ANDROID / "app" / "src" / "main" / "python" / "sympy_editor"
+    if dest.exists():
+        shutil.rmtree(dest)
+    shutil.copytree(src, dest, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    print(f"+ copied {src} -> {dest}")
+    return dest
+
+
 #: JDK majors the pinned Gradle/AGP/Kotlin accept (a newer default `java`,
 #: e.g. 25, fails with a bare "IllegalArgumentException: 25.0.4").
 JDK_MAJORS = (17, 21)
@@ -90,6 +106,7 @@ def android_env() -> dict:
 
 def android_build(release: bool, cdn: bool) -> list[Path]:
     build_www(cdn, android=True)
+    copy_python_sources()
     gradlew = ANDROID / ("gradlew.bat" if platform.system() == "Windows" else "gradlew")
     tasks = ["assembleRelease", "bundleRelease"] if release else ["assembleDebug"]
     run([str(gradlew), "--no-daemon", *tasks], cwd=ANDROID, env=android_env())

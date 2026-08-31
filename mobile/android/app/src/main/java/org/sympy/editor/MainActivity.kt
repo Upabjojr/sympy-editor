@@ -22,16 +22,35 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewClientCompat
+import com.chaquo.python.PyObject
+import com.chaquo.python.Python
+import com.chaquo.python.android.AndroidPlatform
+import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.Executors
 
 /**
  * The whole app: a WebView showing the shared bundle (assets/www, built by
- * mobile/build_www.py).  The bundle is served through WebViewAssetLoader on an
- * https origin, because fetch() and WebAssembly - which Pyodide needs - are
- * not available to file:// pages.
+ * mobile/build_www.py), and the Python the page edits with.
+ *
+ * The editing itself happens in the app's own CPython (Chaquopy: the runtime
+ * and SymPy are packaged in the APK, see app/build.gradle.kts), not in the
+ * browser - the page uses the "native" backend of editor.js and talks to
+ * [PythonBridge] below.  The bundle is served through WebViewAssetLoader on
+ * an https origin, because fetch() is not available to file:// pages.
  */
 class MainActivity : AppCompatActivity() {
     private lateinit var web: WebView
+
+    /** Python runs on one thread of its own: a long computation must not
+     *  block the interface, and CPython objects belong to their thread. */
+    private val pythonThread = Executors.newSingleThreadExecutor()
+
+    /** The app's Python module (sympy_editor_app.py), started on first use. */
+    private val pythonApp: PyObject by lazy {
+        if (!Python.isStarted()) Python.start(AndroidPlatform(applicationContext))
+        Python.getInstance().getModule("sympy_editor_app")
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -56,12 +75,21 @@ class MainActivity : AppCompatActivity() {
             view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
             WindowInsetsCompat.CONSUMED
         }
+        // A debug build can be inspected from the desktop (chrome://inspect, or
+        // adb forward + CDP): the page and its Python bridge, on the device.
+        if ((applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+            WebView.setWebContentsDebuggingEnabled(true)
+        }
         web.settings.javaScriptEnabled = true
         web.settings.domStorageEnabled = true
         web.settings.allowFileAccess = false
         // The page hands files (the history report) to the app: a WebView
         // cannot download a blob, so they go to Downloads and the share sheet.
         web.addJavascriptInterface(ReportBridge(), "SympyEditorApp")
+        web.addJavascriptInterface(PythonBridge(), "SympyEditorPy")
+        // Start Python (unpacking its assets on the first launch) while the
+        // page loads, so the first edit does not wait for it.
+        pythonThread.execute { pythonApp }
         // Without focus on the WebView itself, input.focus() from the page
         // does not bring up the soft keyboard.
         web.isFocusable = true
@@ -82,9 +110,49 @@ class MainActivity : AppCompatActivity() {
         else web.loadUrl("https://appassets.androidplatform.net/assets/www/index.html")
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        pythonThread.shutdown()
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         web.saveState(outState)
+    }
+
+    /** ``window.SympyEditorPy`` in the page: the native backend of editor.js
+     *  hands it JSON messages, each with a request id, and gets the answer
+     *  back through ``window.__sympyEditorNative(id, ok, payload)``.  Every
+     *  call returns at once and is answered from the Python thread. */
+    inner class PythonBridge {
+        /** Create the document `id` from `srepr` (`settings` are Document
+         *  keyword arguments as JSON); answers with its first snapshot. */
+        @JavascriptInterface
+        fun newDoc(req: String, id: String, srepr: String, settings: String) =
+            answer(req) { pythonApp.callAttr("new_doc", id, srepr, settings).toString() }
+
+        /** Process one front-end message for the document `id`. */
+        @JavascriptInterface
+        fun handle(req: String, id: String, message: String) =
+            answer(req) { pythonApp.callAttr("handle", id, message).toString() }
+
+        /** What the app is running, as JSON (Python and SymPy versions). */
+        @JavascriptInterface
+        fun version(req: String) = answer(req) { pythonApp.callAttr("version").toString() }
+
+        private fun answer(req: String, work: () -> String) {
+            pythonThread.execute {
+                var ok = true
+                val payload = try {
+                    work()
+                } catch (e: Throwable) {
+                    ok = false
+                    e.message ?: e.toString()
+                }
+                val js = "window.__sympyEditorNative(${JSONObject.quote(req)}, $ok, ${JSONObject.quote(payload)});"
+                runOnUiThread { web.evaluateJavascript(js, null) }
+            }
+        }
     }
 
     /** ``window.SympyEditorApp`` in the page. */

@@ -81,6 +81,18 @@ as artifacts; with the secrets `ANDROID_KEYSTORE_BASE64` + passwords and
 
 ## Notes
 
+- **Android runs Python natively.**  The APK ships CPython 3.12 and SymPy
+  (Chaquopy, configured in `android/app/build.gradle.kts`); the page uses the
+  `native` backend of editor.js and talks to `MainActivity.PythonBridge`
+  through `window.SympyEditorPy`, which calls
+  `android/app/src/main/python/sympy_editor_app.py` on a Python thread of its
+  own.  `mobile/build.py android` copies `src/sympy_editor` there first, so
+  the app always runs the current code.  Nothing is downloaded at run time,
+  and the app needs Android 7.0 (API 24, what Chaquopy requires).
+  A debug build can be inspected from the desktop:
+  `adb forward tcp:9222 localabstract:$(adb shell cat /proc/net/unix | grep -o webview_devtools_remote_[0-9]* | head -1)`,
+  then open `http://localhost:9222` (or drive it with Playwright's
+  `connect_over_cdp`).
 - The page renders instantly and starts Pyodide (Python in WebAssembly) in
   the background; the status line says "Loading Python runtime" for a few
   seconds after launch, then edits are immediate.

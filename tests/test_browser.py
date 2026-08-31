@@ -2354,3 +2354,56 @@ def test_caret_enters_and_leaves_an_ndim_array(browser, serve_expr):
         page.keyboard.press("ArrowRight")
     assert page.evaluate(ED + ".caret.path") == "/" and page.evaluate(ED + ".caret.extend") == "after"
     assert page.errors == []
+
+
+def test_native_backend_talks_to_the_host_application(browser, serve_expr):
+    """The backend the mobile app uses: Python runs in the host, not the page.
+
+    The app injects `window.SympyEditorPy` (MainActivity.PythonBridge, which
+    calls CPython through Chaquopy); here a stub with the same three methods
+    answers from a real Document over HTTP, so the page's half of the bridge
+    - request ids, `window.__sympyEditorNative`, warmup, and an error coming
+    back from the host - is exercised exactly as it is on the device.
+    """
+    from sympy_editor.html import build_config
+    srv, doc = serve_expr(x + y)
+    cfg = build_config(doc, backend="native",
+                       options={"katexJs": default_urls()["katexJs"], "katexCss": default_urls()["katexCss"]})
+    page = _open(browser, srv.url)                 # the same origin, for the stub's fetch()
+    page.evaluate("""([api, token]) => {
+        const host = document.createElement('div');
+        host.id = 'native-host';
+        document.body.appendChild(host);
+        const post = (body) => fetch(api, {method: 'POST', body: JSON.stringify(body),
+                                           headers: {'Content-Type': 'application/json', 'X-SymPy-Editor-Token': token}
+                                          }).then(r => r.text());
+        window.__nativeCalls = [];
+        window.SympyEditorPy = {
+            newDoc(req, id, srepr, settings) {
+                window.__nativeCalls.push(['newDoc', id]);
+                post({action: 'snapshot'}).then(t => window.__sympyEditorNative(req, true, t),
+                                                e => window.__sympyEditorNative(req, false, String(e)));
+            },
+            handle(req, id, message) {
+                window.__nativeCalls.push(['handle', JSON.parse(message).action]);
+                post(JSON.parse(message)).then(t => window.__sympyEditorNative(req, true, t),
+                                               e => window.__sympyEditorNative(req, false, String(e)));
+            },
+            version(req) { window.__sympyEditorNative(req, true, '{"python": "3.12.7", "sympy": "1.14.0"}'); }
+        };
+    }""", [srv.url.rstrip("/") + "/api", srv.token])
+    page.evaluate("(cfg) => { window.__nativeEditor = SympyEditor.mount(document.getElementById('native-host'), cfg); }", cfg)
+    page.wait_for_selector("#native-host .se-view .katex [data-path]", timeout=30000)
+    ed = "window.__nativeEditor"
+    assert page.evaluate(ed + ".state.src") == "x + y"
+    assert page.evaluate("window.__nativeCalls[0][0]") == "newDoc"       # started through the host
+    seq = page.evaluate(ed + ".state.seq")
+    page.evaluate(ed + ".send({action: 'replace', path: '/0', src: 'z**2'})")
+    page.wait_for_function("s => %s.state.seq > s" % ed, arg=seq, timeout=30000)
+    assert str(doc.expr) == "y + z**2"                                   # the host's Document did the edit
+    assert page.evaluate("window.__nativeCalls.some(c => c[0] === 'handle' && c[1] === 'replace')")
+    # An error from the host reaches the page instead of hanging it
+    page.evaluate("window.SympyEditorPy.handle = (req) => window.__sympyEditorNative(req, false, 'Python is gone');")
+    page.evaluate(ed + ".send({action: 'undo'})")
+    assert _wait(lambda: "Python is gone" in page.locator("#native-host .se-error").inner_text())
+    assert page.errors == []
