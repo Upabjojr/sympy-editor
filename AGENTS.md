@@ -376,7 +376,9 @@ Two conventions between printer, document and front end:
   hair lighter than the panel, darker in dark mode) inside `--se-rule`, a
   faint 1px border.  The change tint mixes into `--se-surface`, not
   `--se-bg`, so it matches the ground it sits on.
-- **Tool rows.**  `.se-tools` wraps and `justify-content: center` applies
+- **Tool rows.**  The sessions button (`☰`) ends the first row because the
+  drawer it opens slides in from the right.  `.se-tools` wraps and
+  `justify-content: center` applies
   per flex line, so every row of tools is centred on its own (the `.se-break`
   spans are full-width and zero-high, so they never join a row).
   `test_tool_rows_are_centred_in_the_strip` measures the margins.
@@ -393,6 +395,16 @@ Two conventions between printer, document and front end:
   viewer in a page or a fragment.  Keep the payload shape identical on both
   sides: one viewer serves the editor's sessions and any list of
   expressions.
+- **What "changed" means in a diff.**  `diffNodes` aligns two node tables;
+  `folded(tree, nodes, p) = nargs - children.length` is how many arguments
+  the printer draws inside the node itself instead of giving them a place of
+  their own (sqrt(x) is `Pow(x, 1/2)` with the exponent inside the radical;
+  the leading minus of a product is the same).  When that count changes the
+  node draws itself differently, so `align` marks the node even though its
+  arguments still line up - the radical goes red while the radicand stays
+  black through `rep-kept` / `se-diff-kept`.  Do not make `align` keep a node
+  unconditionally again: that is exactly the bug where a vanished sqrt sign
+  was drawn as unchanged.
 - **Full screen.**  `.se-view` lives on a `.se-stage` (`position:
   relative`) beside `.se-fullbtn`, not inside it: within the view a wide
   formula would scroll the button out of sight.  `Editor.setFullscreen`
@@ -406,8 +418,12 @@ Two conventions between printer, document and front end:
   `fullscreenchange` so leaving through the browser leaves here too, while
   `_nativeFullscreen` calls `window.SympyEditorApp.setFullscreen(on)`, which
   the Android app answers by hiding the system bars
-  (`WindowInsetsControllerCompat`, `MainActivity.ReportBridge`).  The button
-  re-measures the overlay boxes after the size change.
+  (`WindowInsetsControllerCompat`, `MainActivity.ReportBridge`).  Android
+  ignores `hide()` from an unfocused window and undoes it when focus comes
+  back, so the activity remembers `wantsFullscreen` and applies it again in
+  `onWindowFocusChanged`.  The button is 44x44 on a coarse pointer - a
+  target, not a glyph - and re-measures the overlay boxes after the size
+  change.
 - **Touch keyboards.**  `noAutoCaps` (applied by `h()` to every text input,
   and by hand to the contenteditable source line) turns off
   `autocapitalize`, `autocorrect`, `autocomplete` and `spellcheck`: what is

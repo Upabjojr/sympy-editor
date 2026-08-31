@@ -313,7 +313,11 @@
 }
 .se-fullbtn:hover, .se-fullbtn:focus-visible { opacity: 1; background: var(--se-btn); border-color: var(--se-border); }
 .se-fullbtn:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(var(--se-accent), 0.45); }
-@media (any-pointer: coarse) { .se-fullbtn { opacity: 0.5; padding: 5px; } }
+/* a finger needs a target, not a glyph: the icon keeps its size, the button
+ * grows around it */
+@media (any-pointer: coarse) {
+  .se-fullbtn { opacity: 0.5; padding: 0; min-width: 44px; min-height: 44px; top: 2px; right: 2px; }
+}
 @media (prefers-reduced-motion: reduce) { .se-fullbtn { transition: none; } }
 
 /* Full screen: the editor covers the page, and the editing area takes every

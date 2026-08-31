@@ -307,9 +307,20 @@ var SympyEditor = (function () {
       for (var j = oc.length; j < nc.length; j++) newKept[nc[j]] = true;
     };
     var container = function (nodes, p) { return nodes[p].nargs > 0; };
+    // How many of its arguments a node folds into its own drawing: sqrt(x)
+    // is Pow(x, 1/2) printed as a radical, so the exponent has no place of
+    // its own in the view and the node hides one argument; x**(3/2) hides
+    // none.  When that count changes, the node draws itself differently -
+    // the radical sign disappears - so its own ink has changed even though
+    // it is still the same Pow over the same radicand, and it must be
+    // marked.  (Its arguments are aligned as usual and stay unmarked: the
+    // "kept" class paints them normally inside the marked node.)  The
+    // leading minus of a product is the same story.
+    var folded = function (tree, nodes, p) { return nodes[p].nargs - tree[p].children.length; };
     var align = function (op, np) {
-      oldKept[op] = true;
-      newKept[np] = true;
+      var sameInk = folded(ot, oldNodes, op) === folded(nt, newNodes, np);
+      oldKept[op] = sameInk;
+      newKept[np] = sameInk;
       map[op] = np;
       var oc = ot[op].children, nc = nt[np].children, used = {}, restOld = [];
       oc.forEach(function (c) {
@@ -648,7 +659,6 @@ var SympyEditor = (function () {
       //      history view, Done - and the zoom;
       //   2. the selection - navigation, then what to do with it;
       //   3. what to apply - the transform menus and the function box.
-      if (o.sessions && !o.readOnly) btn("drawer", "\u2630", "Sessions and history");
       if (!o.readOnly) {
         btn("undo", "↶", "Undo (Ctrl+Z)");
         btn("redo", "↷", "Redo (Ctrl+Shift+Z, Ctrl+Y)");
@@ -666,6 +676,9 @@ var SympyEditor = (function () {
       zoomBtn("zoomout", "\u2212", "Zoom out (Ctrl+minus, Ctrl+wheel, pinch)");
       zoomBtn("zoomreset", "100%", "Reset the zoom (Ctrl+0)");
       zoomBtn("zoomin", "+", "Zoom in (Ctrl+plus, Ctrl+wheel, pinch)");
+      // The sessions drawer slides in from the right, so its button sits at
+      // the right end of the row: the tap and what it opens are on one side.
+      if (o.sessions && !o.readOnly) { sep(); btn("drawer", "\u2630", "Sessions and history"); }
       if (!o.readOnly) {
         brk();
         arrowBtn("parent", "up", "Select the enclosing expression (↑)");

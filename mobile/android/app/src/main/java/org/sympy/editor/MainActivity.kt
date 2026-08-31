@@ -47,6 +47,12 @@ class MainActivity : AppCompatActivity() {
      *  block the interface, and CPython objects belong to their thread. */
     private val pythonThread = Executors.newSingleThreadExecutor()
 
+    /** Whether the page asked for full screen.  Android brings the system
+     *  bars back whenever the window loses and regains focus (the
+     *  notification shade, a dialog, the recents screen), so the wish has to
+     *  be remembered and applied again - see [onWindowFocusChanged]. */
+    private var wantsFullscreen = false
+
     /** The app's Python module (sympy_editor_app.py), started on first use. */
     private val pythonApp: PyObject by lazy {
         if (!Python.isStarted()) Python.start(AndroidPlatform(applicationContext))
@@ -156,6 +162,24 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** Hide or show the system bars, following [wantsFullscreen]. */
+    private fun applyFullscreen() {
+        val controller = WindowCompat.getInsetsController(window, web)
+        if (wantsFullscreen) {
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // The system ignores a hide() from a window without focus and undoes
+        // it when focus comes back: ask again every time it does.
+        if (hasFocus && wantsFullscreen) applyFullscreen()
+    }
+
     /** ``window.SympyEditorApp`` in the page. */
     inner class ReportBridge {
         /** Full screen for real: the page's own full-screen button asks the
@@ -165,15 +189,8 @@ class MainActivity : AppCompatActivity() {
          *  only mean the page hiding its own furniture. */
         @JavascriptInterface
         fun setFullscreen(on: Boolean) {
-            runOnUiThread {
-                val controller = WindowCompat.getInsetsController(window, web)
-                if (on) {
-                    controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                    controller.hide(WindowInsetsCompat.Type.systemBars())
-                } else {
-                    controller.show(WindowInsetsCompat.Type.systemBars())
-                }
-            }
+            wantsFullscreen = on
+            runOnUiThread { applyFullscreen() }
         }
 
         /** Save `html` as `name` in Downloads (Android 10+) and offer to share it. */

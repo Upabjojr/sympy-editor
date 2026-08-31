@@ -2576,3 +2576,85 @@ def test_the_history_viewer_runs_without_any_editor(browser, tmp_path):
     assert page.locator(".se-history-head button").inner_text() == "Save as web page"
     assert errors == []
     page.close()
+
+
+def test_a_radical_that_disappears_is_marked(browser, tmp_path):
+    """sqrt(x) is Pow(x, 1/2) drawn as a radical: the exponent has no place
+    of its own in the view, so the node hides one argument.  Turned into
+    x**(3/2) it hides none - the radical sign is gone - and that has to show
+    in red, even though it is still the same Pow over the same radicand,
+    which the diff used to call unchanged."""
+    from sympy import Rational, sqrt
+    from sympy_editor import History, to_history_html
+
+    hist = History([sqrt(x), (x ** Rational(3, 2), "the exponent becomes 3/2")], title="sqrt")
+    path = tmp_path / "sqrt.html"
+    path.write_text(to_history_html(hist), encoding="utf-8")
+    page = browser.new_page(viewport={"width": 900, "height": 700})
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(path.as_uri())
+    page.wait_for_selector(".se-history-frame", timeout=30000)
+    frame = page.frame_locator(".se-history-frame")
+    frame.locator(".step").first.wait_for(timeout=30000)
+    removed = frame.locator(".transition .before .rep-removed")
+    assert removed.count() == 1                       # the Pow itself: the radical
+    colours = page.frames[1].evaluate("""() => {
+        const out = {};
+        const red = document.querySelector('.transition .before .rep-removed');
+        const surd = red.querySelector('svg path');            // the radical is drawn, not typed
+        const rad = red.querySelector('.rep-kept');            // the x under it, unchanged
+        out.mark = getComputedStyle(red).color;
+        out.surd = surd ? getComputedStyle(surd).fill : null;
+        out.radicand = rad ? getComputedStyle(rad).color : null;
+        out.kept = !!rad;
+        return out;
+    }""")
+    assert colours["mark"] == colours["surd"] != colours["radicand"], colours
+    assert colours["kept"] is True                    # the radicand stays as it was, in black
+    # and on the new side the exponent it grew is green
+    assert frame.locator('.step[data-index="1"] .rep-added').count() > 0
+    assert errors == []
+    page.close()
+
+
+def test_the_sessions_button_sits_on_the_side_the_drawer_opens(browser, tmp_path):
+    """The drawer slides in from the right, so its ☰ belongs at the right
+    end of its row - not at the far left, across the toolbar from it."""
+    path = tmp_path / "sessions.html"
+    path.write_text(to_html(x + y, options={"sessions": True}), encoding="utf-8")
+    page = browser.new_page(viewport={"width": 1100, "height": 800})
+    page.goto(path.as_uri())
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    row = page.evaluate("""() => {
+        const drawer = document.querySelector('.se-tools [data-cmd="drawer"]').getBoundingClientRect();
+        const mine = [], mid = (drawer.top + drawer.bottom) / 2;
+        for (const el of document.querySelectorAll('.se-tools > *, .se-tools .se-zoom > *')) {
+            const r = el.getBoundingClientRect();
+            if (r.height && r.width && Math.abs((r.top + r.bottom) / 2 - mid) < 9) mine.push(r.right);
+        }
+        return {drawer: drawer.right, rightmost: Math.max(...mine), n: mine.length};
+    }""")
+    assert row["n"] > 3                                        # the row it shares with undo/redo/zoom
+    assert row["drawer"] == row["rightmost"], row              # and it ends that row
+    # the drawer really does come from the right
+    assert page.evaluate("getComputedStyle(document.querySelector('.se-drawer')).right") == "0px"
+    page.close()
+
+
+def test_the_full_screen_button_is_a_finger_sized_target(browser, serve_expr):
+    """On a touch screen the corner button must be a target, not a glyph:
+    a 27px icon in the corner of the formula is easy to miss, and missing it
+    selects whatever is under it instead."""
+    srv, doc = serve_expr(x + y)
+    page = browser.new_page(viewport={"width": 420, "height": 780},
+                            has_touch=True, is_mobile=True)
+    page.goto(srv.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    box = page.locator(".se-fullbtn").bounding_box()
+    assert box["width"] >= 44 and box["height"] >= 44, box
+    icon = page.locator(".se-fullbtn svg").bounding_box()
+    assert icon["width"] < 25, icon                       # the drawing itself stays small
+    page.locator(".se-fullbtn").tap()
+    assert "se-full" in page.locator(".sympy-editor").get_attribute("class")
+    page.close()
