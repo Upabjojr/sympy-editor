@@ -125,6 +125,12 @@ background colour, the iOS asset catalogue, and the two the stores ask for:
 Needs `rsvg-convert` (`apt install librsvg2-bin`), and Pillow to flatten the
 iOS icon.
 
+**No image is committed.**  The SVGs are the source and every PNG is drawn
+from them, so `python mobile/build.py android` (and the iOS build) calls
+`make_icons.py` first when the icons are not there - a fresh checkout builds
+without a thought.  `*.png` is in `.gitignore` and a test refuses any image
+that finds its way into the index.
+
 The mark's author, Fredrik Johansson, permits its free use on SymPy's own
 terms (the note travels in the file).  That is a copyright licence, not a
 trademark one: an app that is not part of the SymPy project should not

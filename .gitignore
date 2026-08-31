@@ -8,6 +8,10 @@ dist/
 examples/*.html
 examples/derivations/*.html
 
+# Images are built, never committed: mobile/make_icons.py draws the app's
+# icons from mobile/icon/*.svg, and the builds regenerate them.
+*.png
+
 # mobile packaging: generated bundle and native build products
 mobile/www/
 mobile/android/app/src/main/assets/

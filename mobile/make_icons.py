@@ -90,13 +90,13 @@ def pencil(cx: float, cy: float, length: float, angle: float = -38, indent: str 
 def foreground_svg() -> str:
     """The art alone, in the 108dp box: everything that must be seen lives in
     the central 72dp, since a launcher may mask away the rest."""
-    art = mark_group((22.0, 26.0, 64.0, 40.0), indent="  ")
+    art = mark_group((19.0, 23.0, 70.0, 46.0), indent="  ")
     return ('<?xml version="1.0" encoding="UTF-8"?>\n'
             '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
             'width="108" height="108" viewBox="0 0 108 108">\n'
             "  <title>SymPy editor</title>\n"
             f"{art}\n"
-            f"{pencil(62.0, 64.0, 62.0)}"
+            f"{pencil(57.0, 61.0, 68.0)}"
             "</svg>\n")
 
 
@@ -105,7 +105,7 @@ def master_svg(size: int = 512, round_shape: bool = False) -> str:
     for launchers that do not do adaptive icons.  `round_shape` draws the
     background as a circle, for the round variant those launchers ask for."""
     s = size
-    art = mark_group((0.16 * s, 0.20 * s, 0.68 * s, 0.42 * s), indent="  ")
+    art = mark_group((0.08 * s, 0.14 * s, 0.84 * s, 0.54 * s), indent="  ")
     shape = (f'  <circle cx="{s / 2:.1f}" cy="{s / 2:.1f}" r="{s / 2:.1f}" fill="url(#bg)"/>' if round_shape
              else f'  <rect width="{s}" height="{s}" rx="{s * 0.22:.1f}" fill="url(#bg)"/>')
     return ('<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -117,7 +117,7 @@ def master_svg(size: int = 512, round_shape: bool = False) -> str:
             f'<stop offset="1" stop-color="{BACKGROUND_EDGE}"/></linearGradient></defs>\n'
             f"{shape}\n"
             f"{art}\n"
-            f"{pencil(0.60 * s, 0.62 * s, 0.60 * s)}"
+            f"{pencil(0.58 * s, 0.64 * s, 0.78 * s)}"
             "</svg>\n")
 
 

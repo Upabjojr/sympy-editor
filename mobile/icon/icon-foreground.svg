@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="108" height="108" viewBox="0 0 108 108">
   <title>SymPy editor</title>
-  <g transform="translate(20.418,20.732) scale(0.08780)">
+  <g transform="translate(15.408,16.963) scale(0.10089)">
     <title>SymPy logo, the mark alone</title><desc>SymPy's own logo (doc/src/logo/sympy.svg in sympy/sympy) with the wordmark removed: an icon has no room for text.  Its author, Fredrik Johansson, wrote in the original file: "I created this logo and permit its free use on the same terms as the rest of Sympy's code and documentation."</desc><defs id="defs3252">
     <linearGradient id="linearGradient51087">
     <stop id="stop51089" style="stop-color:#ffffff;stop-opacity:1" offset="0" />
@@ -113,12 +113,12 @@
     </g>
     </g>
   </g>
-  <g transform="translate(62.00,64.00) rotate(-38) translate(-31.00,0)" stroke="#ffffff" stroke-width="2.14" stroke-linejoin="round">
-    <path d="M6.82,-7.13 H3.07 a3.75,7.13 0 0 0 0,14.26 H6.82 Z" fill="#f28b82"/>
-    <rect x="6.82" y="-7.13" width="6.20" height="14.26" fill="#b9bec7"/>
-    <rect x="13.02" y="-7.13" width="35.34" height="14.26" fill="#f4b53f"/>
-    <rect x="13.02" y="1.07" width="35.34" height="6.06" fill="#d9932b" stroke="none"/>
-    <path d="M48.36,-7.13 L62.00,0 L48.36,7.13 Z" fill="#e8c79a"/>
-    <path d="M57.36,-2.42 L62.00,0 L57.36,2.42 Z" fill="#3a3f45" stroke="none"/>
+  <g transform="translate(57.00,61.00) rotate(-38) translate(-34.00,0)" stroke="#ffffff" stroke-width="2.35" stroke-linejoin="round">
+    <path d="M7.48,-7.82 H3.37 a4.11,7.82 0 0 0 0,15.64 H7.48 Z" fill="#f28b82"/>
+    <rect x="7.48" y="-7.82" width="6.80" height="15.64" fill="#b9bec7"/>
+    <rect x="14.28" y="-7.82" width="38.76" height="15.64" fill="#f4b53f"/>
+    <rect x="14.28" y="1.17" width="38.76" height="6.65" fill="#d9932b" stroke="none"/>
+    <path d="M53.04,-7.82 L68.00,0 L53.04,7.82 Z" fill="#e8c79a"/>
+    <path d="M62.91,-2.66 L68.00,0 L62.91,2.66 Z" fill="#3a3f45" stroke="none"/>
   </g>
 </svg>

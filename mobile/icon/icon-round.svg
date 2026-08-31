@@ -3,7 +3,7 @@
   <title>SymPy editor</title>
   <defs><linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f7f3e6"/><stop offset="1" stop-color="#efe8d3"/></linearGradient></defs>
   <circle cx="256.0" cy="256.0" r="256.0" fill="url(#bg)"/>
-  <g transform="translate(75.463,74.080) scale(0.47199)">
+  <g transform="translate(23.881,35.269) scale(0.60685)">
     <title>SymPy logo, the mark alone</title><desc>SymPy's own logo (doc/src/logo/sympy.svg in sympy/sympy) with the wordmark removed: an icon has no room for text.  Its author, Fredrik Johansson, wrote in the original file: "I created this logo and permit its free use on the same terms as the rest of Sympy's code and documentation."</desc><defs id="defs3252">
     <linearGradient id="linearGradient51087">
     <stop id="stop51089" style="stop-color:#ffffff;stop-opacity:1" offset="0" />
@@ -115,12 +115,12 @@
     </g>
     </g>
   </g>
-  <g transform="translate(307.20,317.44) rotate(-38) translate(-153.60,0)" stroke="#ffffff" stroke-width="10.60" stroke-linejoin="round">
-    <path d="M33.79,-35.33 H15.21 a18.59,35.33 0 0 0 0,70.66 H33.79 Z" fill="#f28b82"/>
-    <rect x="33.79" y="-35.33" width="30.72" height="70.66" fill="#b9bec7"/>
-    <rect x="64.51" y="-35.33" width="175.10" height="70.66" fill="#f4b53f"/>
-    <rect x="64.51" y="5.30" width="175.10" height="30.03" fill="#d9932b" stroke="none"/>
-    <path d="M239.62,-35.33 L307.20,0 L239.62,35.33 Z" fill="#e8c79a"/>
-    <path d="M284.22,-12.01 L307.20,0 L284.22,12.01 Z" fill="#3a3f45" stroke="none"/>
+  <g transform="translate(296.96,327.68) rotate(-38) translate(-199.68,0)" stroke="#ffffff" stroke-width="13.78" stroke-linejoin="round">
+    <path d="M43.93,-45.93 H19.77 a24.16,45.93 0 0 0 0,91.85 H43.93 Z" fill="#f28b82"/>
+    <rect x="43.93" y="-45.93" width="39.94" height="91.85" fill="#b9bec7"/>
+    <rect x="83.87" y="-45.93" width="227.64" height="91.85" fill="#f4b53f"/>
+    <rect x="83.87" y="6.89" width="227.64" height="39.04" fill="#d9932b" stroke="none"/>
+    <path d="M311.50,-45.93 L399.36,0 L311.50,45.93 Z" fill="#e8c79a"/>
+    <path d="M369.49,-15.61 L399.36,0 L369.49,15.61 Z" fill="#3a3f45" stroke="none"/>
   </g>
 </svg>

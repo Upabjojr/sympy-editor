@@ -104,9 +104,26 @@ def android_env() -> dict:
     return env
 
 
+def make_icons() -> None:
+    """Draw the app's icons, unless they are already there.
+
+    They are build products - no PNG is committed - so a fresh checkout has
+    the SVGs and this makes the rest.  Without them the manifest points at a
+    `@mipmap/ic_launcher` that does not exist and the build stops.
+    """
+    launcher = ANDROID / "app/src/main/res/mipmap-mdpi/ic_launcher.png"
+    if launcher.is_file():
+        return
+    if not shutil.which("rsvg-convert"):
+        sys.exit("the icons are missing and rsvg-convert is not installed "
+                 "(apt install librsvg2-bin), so mobile/make_icons.py cannot draw them")
+    run([sys.executable, str(HERE / "make_icons.py")])
+
+
 def android_build(release: bool, cdn: bool) -> list[Path]:
     build_www(cdn, android=True)
     copy_python_sources()
+    make_icons()
     gradlew = ANDROID / ("gradlew.bat" if platform.system() == "Windows" else "gradlew")
     tasks = ["assembleRelease", "bundleRelease"] if release else ["assembleDebug"]
     run([str(gradlew), "--no-daemon", *tasks], cwd=ANDROID, env=android_env())
@@ -122,6 +139,7 @@ def ios_build(simulator: bool, cdn: bool, method: str) -> list[Path]:
     if platform.system() != "Darwin":
         sys.exit("iOS builds need macOS with Xcode (or the mobile.yml GitHub workflow).")
     build_www(cdn, android=False)
+    make_icons()
     if not shutil.which("xcodegen"):
         sys.exit("xcodegen not found: brew install xcodegen (or create the project by hand, see mobile/README.md)")
     env = dict(os.environ, IOS_TEAM_ID=os.environ.get("IOS_TEAM_ID", ""))

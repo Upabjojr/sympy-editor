@@ -15,6 +15,7 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: "17" }
       - uses: android-actions/setup-android@v3
+      - run: sudo apt-get update && sudo apt-get install -y librsvg2-bin   # the icons are drawn, not committed
       - run: pip install -e .
       - name: Build debug APK and release APK/AAB
         env:
@@ -43,7 +44,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - run: pip install -e .
-      - run: brew install xcodegen
+      - run: brew install xcodegen librsvg     # librsvg draws the icons, which are not committed
       - name: Build simulator .app (no signing) and, with IOS_TEAM_ID, a signed .ipa
         env:
           IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}

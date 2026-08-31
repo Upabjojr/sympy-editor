@@ -2,6 +2,8 @@
 
 import http.server
 import importlib.util
+import shutil
+import sys
 import os
 import socketserver
 import threading
@@ -155,11 +157,10 @@ def test_the_android_app_is_configured_for_its_own_python():
 
 def test_the_app_has_an_icon_of_its_own():
     """Without one Android shows the default robot, and a store listing has
-    nothing to put on its card."""
+    nothing to put on its card.  The PNGs are drawn by mobile/make_icons.py
+    and never committed, so what is checked here is the wiring around them -
+    and the files themselves when a build has made them."""
     res = ROOT / "mobile/android/app/src/main/res"
-    for density in ("mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi"):
-        for name in ("ic_launcher.png", "ic_launcher_round.png", "ic_launcher_foreground.png"):
-            assert (res / f"mipmap-{density}" / name).is_file(), (density, name)
     # adaptive icons (API 26+): a masked foreground over a flat background
     adaptive = (res / "mipmap-anydpi-v26/ic_launcher.xml").read_text(encoding="utf-8")
     assert "<adaptive-icon" in adaptive and "@mipmap/ic_launcher_foreground" in adaptive
@@ -170,14 +171,48 @@ def test_the_app_has_an_icon_of_its_own():
     # the art is built from SymPy's own mark, which travels with the repo
     mark = (ROOT / "mobile/icon/sympy-mark.svg").read_text(encoding="utf-8")
     assert "Fredrik Johansson" in mark and "SymPy_text" not in mark      # the wordmark is off
-    # what the two stores ask for: 512 for Google Play, 1024 for the App Store
-    from PIL import Image
-    for name, size in (("icon-512.png", 512), ("icon-1024.png", 1024)):
-        with Image.open(ROOT / "mobile/icon" / name) as image:
-            assert image.size == (size, size), name
     ios = ROOT / "mobile/ios/SymPyEditor/Assets.xcassets/AppIcon.appiconset"
-    with Image.open(ios / "icon-1024.png") as image:
-        assert image.size == (1024, 1024)
-        assert image.mode == "RGB"          # the App Store refuses an icon with alpha
     assert '"size" : "1024x1024"' in (ios / "Contents.json").read_text(encoding="utf-8")
     assert "ASSETCATALOG_COMPILER_APPICON_NAME" in (ROOT / "mobile/ios/project.yml").read_text(encoding="utf-8")
+    # the art itself: SymPy's mark, wordmark off, with the note that lets us use it
+    mark = (ROOT / "mobile/icon/sympy-mark.svg").read_text(encoding="utf-8")
+    assert "Fredrik Johansson" in mark and "SymPy_text" not in mark
+    assert (ROOT / "mobile/make_icons.py").is_file()
+
+
+def test_no_image_is_committed():
+    """Images are drawn, not kept: `mobile/make_icons.py` makes every one of
+    them from the SVGs, and a build calls it."""
+    import subprocess
+
+    tracked = subprocess.run(["git", "ls-files", "*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp"],
+                             cwd=ROOT, capture_output=True, text=True, check=True).stdout.split()
+    assert tracked == [], tracked
+    build = (ROOT / "mobile/build.py").read_text(encoding="utf-8")
+    assert "make_icons()" in build          # ...and a build draws them when they are missing
+
+
+@pytest.mark.skipif(not shutil.which("rsvg-convert"), reason="needs librsvg (rsvg-convert)")
+def test_make_icons_draws_every_size(tmp_path):
+    """What the two stores ask for, and what the launchers do."""
+    import subprocess
+
+    from PIL import Image
+
+    subprocess.run([sys.executable, str(ROOT / "mobile/make_icons.py")], cwd=ROOT, check=True,
+                   capture_output=True)
+    res = ROOT / "mobile/android/app/src/main/res"
+    for density in ("mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi"):
+        for name in ("ic_launcher.png", "ic_launcher_round.png", "ic_launcher_foreground.png"):
+            assert (res / f"mipmap-{density}" / name).is_file(), (density, name)
+    for name, size in (("icon-512.png", 512), ("icon-1024.png", 1024)):     # Google Play, the App Store
+        with Image.open(ROOT / "mobile/icon" / name) as image:
+            assert image.size == (size, size), name
+    ios = ROOT / "mobile/ios/SymPyEditor/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
+    with Image.open(ios) as image:
+        assert image.size == (1024, 1024) and image.mode == "RGB"   # the App Store refuses alpha
+    # the adaptive foreground keeps its art inside the 72dp a launcher must show
+    with Image.open(res / "mipmap-xxhdpi/ic_launcher_foreground.png") as image:
+        side = image.size[0]
+        box = [v * 108 / side for v in image.split()[-1].getbbox()]
+    assert box[0] >= 18 and box[1] >= 18 and box[2] <= 90 and box[3] <= 90, box

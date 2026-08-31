@@ -515,6 +515,11 @@ Two conventions between printer, document and front end:
   black through `rep-kept` / `se-diff-kept`.  Do not make `align` keep a node
   unconditionally again: that is exactly the bug where a vanished sqrt sign
   was drawn as unchanged.
+- **No image is committed.**  `*.png` is ignored; `mobile/make_icons.py`
+  draws every icon from `mobile/icon/*.svg`, and `mobile/build.py` calls it
+  when they are missing (the manifest points at `@mipmap/ic_launcher`, so a
+  build without them stops).  The workflows install librsvg for that.  If a
+  size or a shape needs changing, change the script, never a PNG.
 - **Full screen.**  `.se-view` lives on a `.se-stage` (`position:
   relative`) beside `.se-fullbtn`, not inside it: within the view a wide
   formula would scroll the button out of sight.  `Editor.setFullscreen`
