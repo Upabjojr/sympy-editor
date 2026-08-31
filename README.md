@@ -255,6 +255,9 @@ there:
 - **Play** runs the history as a slideshow: one slide per step, with the
   change that produced it - what it was in red, what it became in green -
   on the same screen, large and centred, advancing on its own.
+- **◀ ▶** step through the slideshow while it is paused, and walk the whole
+  history when it is not playing at all: each press scrolls to the next step
+  and marks it, and **Play** carries on from there.
 - **− / +** in the same strip set the size of the formulas, in the listing
   and in the slideshow alike; Ctrl+wheel and two fingers do the same.  On a
   page of its own the whole panel can be dragged taller or shorter.  Its controls sit in the

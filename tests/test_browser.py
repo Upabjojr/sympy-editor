@@ -111,6 +111,18 @@ def _select(page, path):
     raise AssertionError(f"could not select {path}")
 
 
+def _settled(read, tries=40):
+    """The value of `read()` once it stops changing (a smooth scroll)."""
+    last = read()
+    for _ in range(tries):
+        time.sleep(0.05)
+        now = read()
+        if now == last:
+            return now
+        last = now
+    return last
+
+
 def _open(browser, url):
     page = browser.new_page()
     errors = []
@@ -3002,4 +3014,55 @@ def test_nothing_in_the_history_strip_moves(browser, tmp_path):
     assert page.evaluate(WHERE) == at_rest
     page.locator(".se-play-all").click()                    # back to the listing
     assert page.evaluate(WHERE) == at_rest
+    page.close()
+
+
+def test_the_arrows_walk_the_listing_when_nothing_is_playing(browser, tmp_path):
+    """With everything shown, the two arrows are not slideshow controls with
+    nothing to do: they walk the steps of the listing, scrolling to each and
+    marking it, and Play then starts from where they left off."""
+    from sympy import Integral, cos
+    from sympy_editor import History, to_history_html
+
+    hist = History([
+        Integral(x * sin(x), x),
+        (-x * cos(x) + Integral(cos(x), x), "by parts"),
+        (-x * cos(x) + sin(x), "the last integral"),
+        ((-x * cos(x) + sin(x)).expand(), "expand"),
+    ], title="By parts")
+    path = tmp_path / "walk.html"
+    path.write_text(to_history_html(hist), encoding="utf-8")
+    page = browser.new_page(viewport={"width": 900, "height": 520})
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(path.as_uri())
+    page.wait_for_selector(".se-history-frame", timeout=30000)
+    assert _wait(lambda: page.locator(".se-play").is_visible())
+    doc = page.frames[1]
+    scroll = lambda: doc.evaluate("document.scrollingElement.scrollTop")
+    playing = lambda: doc.evaluate("document.body.classList.contains('slides')")
+    prev, next_ = page.locator(".se-play-step").first, page.locator(".se-play-step").last
+
+    assert page.locator(".se-play-count").inner_text() == "1 / 4" and scroll() == 0
+    next_.click()
+    assert not playing()                                     # still the whole history, not a slideshow
+    assert page.locator(".se-play-count").inner_text() == "2 / 4"
+    assert _wait(lambda: scroll() > 0)                       # it moved to the step
+    assert doc.evaluate("document.querySelectorAll('.slide-here').length") == 2   # the change and its result
+    assert _wait(lambda: scroll() > 0)
+    next_.click()
+    assert _wait(lambda: page.locator(".se-play-count").inner_text() == "3 / 4")
+    at3 = _settled(scroll)
+    prev.click()                                             # and back up the listing
+    assert _wait(lambda: page.locator(".se-play-count").inner_text() == "2 / 4")
+    assert _wait(lambda: scroll() < at3)
+    assert not playing()
+
+    page.locator(".se-play").click()                         # Play carries on from there
+    assert playing() and page.locator(".se-play-count").inner_text() == "2 / 4"
+    page.locator(".se-play-all").click()                     # and Show all lands on the step it was on
+    assert not playing()
+    assert doc.evaluate("document.querySelectorAll('.slide-here').length") == 2
+    assert page.locator(".se-play-count").inner_text() == "2 / 4"
+    assert errors == []
     page.close()

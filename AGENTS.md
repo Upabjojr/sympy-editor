@@ -416,6 +416,12 @@ Two conventions between printer, document and front end:
   shove every button beside it the moment Play was pressed.
   `test_nothing_in_the_history_strip_moves` compares the geometry of every
   control before, during and after playing.
+- **Walking versus playing.**  The player's `prev`/`next` go through
+  `stepBy`, which plays a slide under `body.slides` and otherwise `locate`s
+  the step in the listing - scrolling to it and outlining it with
+  `.slide-here`.  `exit()` locates the step it was showing instead of
+  clearing, so "Show all" lands where the slideshow was.  Keep the two
+  arrows useful in both modes.
 - **The history's zoom.**  `--se-report-zoom` on the report's root scales
   `.step` and `.transition`; the slideshow's own size multiplies it
   (`calc(1.35em * var(--se-report-zoom, 1))`), so do not give `.slide-on` a
