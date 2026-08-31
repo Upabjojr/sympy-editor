@@ -265,10 +265,11 @@ there:
   same keys work (space pauses, ← → step, Esc shows the whole history
   again).  The player travels with the page, so a saved report plays on its
   own too.
-- **Save as web page** downloads the same view as a self-contained HTML
+- **Save ▾** offers the two ways out.  *As a web page* downloads the same
+  view as a self-contained HTML
   file: KaTeX's rendering and fonts are inlined, so it works offline and can
   be shared as it is.
-- **Save as Python** downloads a script that rebuilds every step with SymPy
+- *As a Python script* downloads a script that rebuilds every step with SymPy
   alone (`from sympy import *`, the declarations of the names used -
   assumptions, matrix shapes, functions -, then one `expr = ...` per step
   with what produced it as a comment, all collected in `steps`); run it or

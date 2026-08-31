@@ -1738,11 +1738,14 @@ def test_history_report_is_self_contained_and_works_offline(browser, serve_expr,
     assert frame.locator(".step").count() == 3 and frame.locator(".transition .what").first.inner_text() == "Edit: sin(y) → cos(y)"
     assert frame.locator('.step[data-current="1"] h2').inner_text().startswith("STEP 3")
     # saved from there as the web page or as a Python script that rebuilds every step
+    save = page.locator(".se-history-head .se-head-save")      # one control, both ways out
+    assert save.locator("option").all_inner_texts() == ["Save \u25be", "as a web page", "as a Python script"]
     with page.expect_download() as dl:
-        page.locator('.se-history-head [data-save="html"]').click()
+        save.select_option("html")
     assert dl.value.suggested_filename.startswith("sympy-editor-history-") and dl.value.suggested_filename.endswith(".html")
+    assert save.input_value() == ""                            # and it goes back to "Save"
     with page.expect_download() as dl:
-        page.locator('.se-history-head [data-save="py"]').click()
+        save.select_option("py")
     assert dl.value.suggested_filename.endswith(".py")
     script = tmp_path / "history.py"
     dl.value.save_as(script)
@@ -2837,6 +2840,11 @@ def test_the_history_can_be_resized(browser, tmp_path):
     assert listed < size() < grown and level.inner_text() == "120%"
     level.click()                                           # the readout is the way back
     assert level.inner_text() == "100%" and size() == listed
+    for _ in range(10):
+        smaller.click()                                     # and it goes well below half
+    assert int(level.inner_text().rstrip("%")) <= 30, level.inner_text()
+    assert size() < listed / 2
+    level.click()
 
     # the slideshow scales with it, instead of pinning its own size
     page.locator(".se-play").click()
@@ -3064,5 +3072,114 @@ def test_the_arrows_walk_the_listing_when_nothing_is_playing(browser, tmp_path):
     assert not playing()
     assert doc.evaluate("document.querySelectorAll('.slide-here').length") == 2
     assert page.locator(".se-play-count").inner_text() == "2 / 4"
+    assert errors == []
+    page.close()
+
+
+def test_a_caret_in_the_source_line_is_a_caret_in_the_formula(browser, serve_expr):
+    """Putting the text cursor in the source line drops whatever was selected
+    and puts the formula's caret in the same place - the two lines are one
+    document seen twice, not two."""
+    srv, doc = serve_expr(x**2 / y - sin(x))
+    page = _open(browser, srv.url)
+    text = page.locator(".se-source").inner_text()
+    assert text == "x**2/y - sin(x)"
+    _select(page, "/1/n/0")                                  # something selected in the formula
+    assert page.locator(".se-view .se-selected").count() >= 1
+
+    def caret_at(offset):
+        page.evaluate("""(off) => {
+            const src = document.querySelector('.se-source');
+            src.focus();
+            const r = document.createRange();
+            r.setStart(src.firstChild, off);
+            r.collapse(true);
+            const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+        }""", offset)
+        return page.evaluate("""() => {
+            const e = document.querySelector('.sympy-editor').__sympyEditor;
+            return {selected: e.selected, range: !!e.range,
+                    caret: e.caret ? [e.caret.path, e.caret.extend || null] : null};
+        }""")
+
+    at = caret_at(text.index("y"))                            # right before the denominator
+    assert at["selected"] is None and not at["range"]         # the selection is lifted...
+    assert page.locator(".se-caret").count() == 1             # ...and the formula has a caret
+    assert at["caret"] == ["/1/d", "before"]                  # exactly where the text cursor is
+    assert page.locator(".se-status").inner_text().startswith("Type before Symbol y")
+
+    assert caret_at(text.index("y") + 1)["caret"] == ["/1/d", "after"]
+    assert caret_at(0)["caret"][0] == "/"                     # the head of the formula
+    assert caret_at(len(text))["caret"][0] == "/"             # and its tail
+    assert page.evaluate("(() => { const e = document.querySelector('.sympy-editor').__sympyEditor; return e.caret.index; })()") == 2
+    assert page.errors == []
+
+
+def test_the_history_close_button_sits_in_the_corner(browser, serve_expr):
+    """However the strip wraps, closing is in the top right corner."""
+    srv, doc = serve_expr((x + y) ** 2)
+    page = browser.new_page(viewport={"width": 420, "height": 700})
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(srv.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    _next_state(page, lambda: page.select_option(".se-ops", "expand"))   # a second step, so there is a player
+    page.locator('.se-toolbar [data-cmd="history"]').click()
+    page.wait_for_selector(".se-history-view")
+    assert _wait(lambda: page.locator(".se-history-head .se-play").is_visible())
+    where = page.evaluate("""() => {
+        const head = document.querySelector('.se-history-head').getBoundingClientRect();
+        const close = document.querySelector('.se-history-close').getBoundingClientRect();
+        const rows = new Set([...document.querySelectorAll('.se-history-head .se-head-group')]
+            .map(g => Math.round(g.getBoundingClientRect().top)));
+        return {fromRight: head.right - close.right, fromTop: close.top - head.top, rows: rows.size};
+    }""")
+    assert where["rows"] > 1, where                       # the strip really does wrap here
+    assert where["fromRight"] < 16 and where["fromTop"] < 12, where
+    assert errors == []
+    page.close()
+
+
+def test_a_session_can_be_given_a_name(browser, tmp_path):
+    """A session was labelled with its formula, which is no help once there
+    are several: the name can be the user's own, and then nothing overwrites
+    it - not even editing the formula."""
+    path = tmp_path / "sessions.html"
+    path.write_text(to_html(x + y, options={"sessions": True}), encoding="utf-8")
+    page = browser.new_page(viewport={"width": 1000, "height": 800})
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(path.as_uri())
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    page.locator('[data-cmd="drawer"]').click()
+    row = page.locator(".se-session").first
+    assert _wait(lambda: row.locator(".se-session-row > code").inner_text() == "x + y")
+
+    row.locator(".se-session-rename").click()
+    field = row.locator("input.se-session-name")
+    field.wait_for()
+    field.fill("Simplifying the Hamiltonian")
+    field.press("Enter")
+    assert _wait(lambda: row.locator(".se-session-row > code").inner_text() == "Simplifying the Hamiltonian")
+
+    # the formula changes; the name the user gave stays
+    page.keyboard.press("Escape")                            # close the drawer (its backdrop covers the tools)
+    assert _wait(lambda: page.locator(".se-drawer").is_hidden())
+    _next_state(page, lambda: page.select_option(".se-ops", "expand"))
+    page.locator('[data-cmd="drawer"]').click()
+    assert _wait(lambda: page.locator(".se-session").first.locator(".se-session-row > code").inner_text() == "Simplifying the Hamiltonian")
+    # it survives a reload, like the sessions themselves
+    page.reload()
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    page.locator('[data-cmd="drawer"]').click()
+    assert _wait(lambda: page.locator(".se-session").first.locator(".se-session-row > code").inner_text() == "Simplifying the Hamiltonian")
+
+    # emptying the name hands the session back to its formula
+    page.locator(".se-session").first.locator(".se-session-rename").click()
+    field = page.locator(".se-session").first.locator("input.se-session-name")
+    field.wait_for()
+    field.fill("")
+    field.press("Enter")
+    assert _wait(lambda: page.locator(".se-session").first.locator(".se-session-row > code").inner_text() != "Simplifying the Hamiltonian")
     assert errors == []
     page.close()

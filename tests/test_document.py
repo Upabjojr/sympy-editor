@@ -1039,3 +1039,31 @@ def test_a_lambda_is_applied_to_its_arguments():
         Document(x + 1).call("/", "(3)")
     with pytest.raises(ValueError, match="Not a function call"):
         Document(x + 1).call("/", "3 +")
+
+
+def test_wrapping_in_a_container_builds_the_container():
+    """Matrix(x) is an error in SymPy - a matrix wants its contents, not an
+    argument - so wrapping an expression in Matrix did nothing at all.  It
+    builds the 1x1 matrix holding it."""
+    from sympy import Array, FiniteSet, Matrix, Tuple, cos
+
+    x, y = symbols("x y")
+    d = Document(x + y)
+    d.wrap("/", "Matrix")
+    assert d.expr == Matrix([[x + y]]) and d.expr.shape == (1, 1)
+    d = Document(x + y)
+    d.handle({"action": "wrap", "path": "/", "func": "ImmutableMatrix"})
+    assert d.expr == Matrix([[x + y]])
+    # the other containers, and the ordinary functions, are untouched
+    d = Document(x + y)
+    d.wrap("/", "FiniteSet")
+    assert d.expr == FiniteSet(x + y)
+    d = Document(x + y)
+    d.wrap("/", "Tuple")
+    assert d.expr == Tuple(x + y)
+    d = Document(x + y)
+    d.wrap("/", "cos")
+    assert d.expr == cos(x + y)
+    # and what really cannot be wrapped still says so
+    with pytest.raises(ValueError, match="Cannot wrap in Integral"):
+        Document(x + y).wrap("/", "Integral")

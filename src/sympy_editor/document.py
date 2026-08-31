@@ -950,7 +950,16 @@ class Document:
                 with sympy.evaluate(False):
                     result = sympify(fn(target, *extra))
         except Exception as exc:     # noqa: BLE001 - a wrong number of arguments, mostly
-            raise ValueError(f"Cannot wrap in {name}: {exc}") from None
+            # A container wants its contents, not an argument: Matrix(x) is an
+            # error, Matrix([[x]]) is the 1x1 matrix holding x.  Wrapping in
+            # Matrix, Array... means exactly that, so try it before giving up.
+            try:
+                result = sympify(fn([[target]], *extra))
+            except Exception:
+                try:
+                    result = sympify(fn([target], *extra))
+                except Exception:
+                    raise ValueError(f"Cannot wrap in {name}: {exc}") from None
         if not isinstance(result, Basic):
             raise ValueError(f"{name} returned {type(result).__name__}, not an expression")
         if children is not None:

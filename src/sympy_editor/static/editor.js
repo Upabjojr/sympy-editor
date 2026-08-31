@@ -30,7 +30,7 @@ var SympyEditor = (function () {
     finishButton: false, // "Done" button (used by the HTTP server backend)
     preload: true,       // Pyodide pages: start loading Python at page load, not at the first edit
     zoom: 1,             // initial magnification of the formula (1 = the CSS size)
-    minZoom: 0.4,
+    minZoom: 0.25,
     maxZoom: 4,
     rememberZoom: false, // keep the zoom in localStorage across page loads (the mobile app does)
     previewDelay: 250,   // ms after the last keystroke in the source line before it is previewed
@@ -603,7 +603,7 @@ var SympyEditor = (function () {
     "  // The formulas are the point: they must be as big or as small as the",
     "  // reader wants, in the listing as much as in the slideshow.",
     "  function setZoom(z) {",
-    "    zoom = Math.max(0.5, Math.min(4, Math.round(z * 100) / 100));",
+    "    zoom = Math.max(0.25, Math.min(4, Math.round(z * 100) / 100));",
     "    document.documentElement.style.setProperty('--se-report-zoom', zoom);",
     "    level.textContent = Math.round(zoom * 100) + '%';",
     "    if (typeof announce === 'function') announce();",
@@ -2638,10 +2638,39 @@ var SympyEditor = (function () {
           this._applySelection();
           this._updateToolbar();
         }
-      } else if (best) {
-        var el = this._els(best)[0];
-        this._drawBoxes("hover", el ? [this._visualRect(el)] : []);   // a caret in the source: a hover hint
+      } else {
+        // A caret in the source line is a caret in the formula: the selection
+        // is lifted and the cursor goes where the text cursor stands.
+        var pos = this._caretNear(start);
+        if (pos) this._showCaret(pos.gap, pos.x);
+        else if (this.selected || this.range) this.select(null);
       }
+    }
+
+    /** The caret position of the formula nearest to character offset `off` of
+     *  the source line.  Every position sits beside an annotated element, and
+     *  the snapshot gives each path its span in the source, so the two line
+     *  up: the gap after `x` is where `x` ends in the text. */
+    _caretNear(off) {
+      var spans = (this.state && this.state.spans) || {};
+      var pathOf = function (el) {
+        var node = el && el.closest ? el.closest("[data-path]") : null;
+        return node ? node.getAttribute("data-path") : null;
+      };
+      var list = this._caretPositions();
+      var best = null, bestDist = Infinity;
+      for (var i = 0; i < list.length; i++) {
+        var g = list[i].gap, where = null, p;
+        if (g.extend === "before" && spans[g.path]) where = spans[g.path][0];
+        else if (g.extend === "after" && spans[g.path]) where = spans[g.path][1];
+        else if ((p = pathOf(g.rightEl)) && spans[p]) where = spans[p][0];
+        else if ((p = pathOf(g.leftEl)) && spans[p]) where = spans[p][1];
+        else if (spans[g.path]) where = spans[g.path][0];
+        if (where === null) continue;
+        var d = Math.abs(where - off);
+        if (d < bestDist) { bestDist = d; best = list[i]; }
+      }
+      return best;
     }
 
     /** Apply the edited source line as the whole expression. */
@@ -3654,11 +3683,50 @@ var SympyEditor = (function () {
       if (!cur) return;
       cur.state = snap.export;
       if (cur.empty && snap.export && snap.export.history.length > 1) cur.empty = false;   // something was typed
-      cur.name = cur.empty ? "(empty)" : (snap.src || "").slice(0, 60);
+      // The name follows the formula until the user gives the session one of
+      // their own ("Simplifying the Hamiltonian"), which nothing overwrites.
+      if (!cur.title) cur.name = cur.empty ? "(empty)" : (snap.src || "").slice(0, 60);
       cur.updated = Date.now();
       if (snap.history) this._history = snap.history;
       this._saveSessions(store);
       this._fillSessions();
+    }
+
+    /** Rename a session: the name becomes a field, Enter (or leaving it)
+     *  keeps what was typed, Esc gives up.  A name typed here is the user's
+     *  and is never replaced by the formula (see _storeSession); emptying it
+     *  hands the session back to the formula. */
+    _renameSession(sess, label) {
+      var self = this;
+      if (label.querySelector("input")) return;
+      var input = h("input", { type: "text", class: "se-session-name", value: sess.title ? sess.name : "",
+                               placeholder: sess.name || "a name for this session", "aria-label": "Session name" });
+      label.textContent = "";
+      label.appendChild(input);
+      input.focus();
+      input.select();
+      var done = function (keep) {
+        if (input._done) return;
+        input._done = true;
+        if (keep) {
+          var store = self._sessionStore || self._loadSessions();
+          var row = store.list.filter(function (s) { return s.id === sess.id; })[0];
+          if (row) {
+            var typed = input.value.trim().slice(0, 60);
+            row.title = !!typed;
+            row.name = typed || (row.empty ? "(empty)" : ((self.state && self.state.src) || row.name || ""));
+            self._saveSessions(store);
+          }
+        }
+        self._fillSessions();
+      };
+      input.addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter") { ev.preventDefault(); done(true); }
+        else if (ev.key === "Escape") { ev.preventDefault(); done(false); }
+        ev.stopPropagation();
+      });
+      input.addEventListener("click", function (ev) { ev.stopPropagation(); });
+      input.addEventListener("blur", function () { done(true); });
     }
 
     toggleDrawer() {
@@ -3832,17 +3900,26 @@ var SympyEditor = (function () {
       this.closeHistory();
       this.closeHelp();
       var frame = h("iframe", { class: "se-history-frame", title: "History" });
-      var saveHtml = h("button", { type: "button", "data-save": "html", title: "A self-contained web page: works offline, KaTeX rendering and fonts included" }, ["Save as web page"]);
-      var savePy = h("button", { type: "button", "data-save": "py", title: "A Python script rebuilding every step with SymPy" }, ["Save as Python"]);
+      // One control, two ways out: a web page or a script.  Two buttons of
+      // their own crowded the strip, and only one is ever wanted at a time.
+      var save = h("select", { class: "se-head-save", title: "Save this history" }, [
+        h("option", { value: "", disabled: "", selected: "" }, ["Save \u25be"]),
+        h("option", { value: "html", title: "A self-contained web page: works offline, KaTeX rendering and fonts included" }, ["as a web page"]),
+        h("option", { value: "py", title: "A Python script rebuilding every step with SymPy" }, ["as a Python script"])
+      ]);
       var close = h("button", { type: "button", class: "se-history-close", title: "Close (Esc)", "aria-label": "Close" }, ["\u2715"]);
       var head = h("div", { class: "se-history-head" },
         [h("span", { class: "se-history-title" }, ["History", h("small", {}, ["tap a step to open it"])])]
           .concat(playerControls(frame),
-                  [h("span", { class: "se-head-group" }, [saveHtml, savePy]),
-                   h("span", { class: "se-head-group" }, [close])]));
+                  [h("span", { class: "se-head-group" }, [save]),
+                   h("span", { class: "se-head-group se-head-close" }, [close])]));
       var view = h("div", { class: "se-history-view", role: "dialog", "aria-label": "History" }, [head, frame]);
-      saveHtml.addEventListener("click", function () { self.exportReport(html); });
-      savePy.addEventListener("click", function () { self.exportPython(); });
+      save.addEventListener("change", function () {
+        var how = save.value;
+        save.selectedIndex = 0;
+        if (how === "html") self.exportReport(html);
+        else if (how === "py") self.exportPython();
+      });
       close.addEventListener("click", function () { self.closeHistory(); });
       frame.addEventListener("load", function () {
         var d = frame.contentDocument;
@@ -4021,7 +4098,13 @@ var SympyEditor = (function () {
         var row = h("div", { class: "se-session" + (current ? " se-session-current" : ""), "data-id": sess.id });
         var head = h("div", { class: "se-session-row" });
         row.appendChild(head);
-        head.appendChild(h("code", { title: sess.name }, [sess.name || "(new)"]));
+        var label = h("code", { title: sess.title ? sess.name : "Rename this session" }, [sess.name || "(new)"]);
+        head.appendChild(label);
+        var rename = h("button", { type: "button", class: "se-session-rename", title: "Give this session a name of your own",
+                                   "aria-label": "Rename this session" }, ["\u270e"]);
+        rename.addEventListener("click", function (ev) { ev.stopPropagation(); self._renameSession(sess, label); });
+        label.addEventListener("dblclick", function (ev) { ev.stopPropagation(); self._renameSession(sess, label); });
+        head.appendChild(rename);
         head.appendChild(h("span", { class: "se-session-when" }, [when.toLocaleDateString() + " " + when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })]));
         var open = h("button", { type: "button", "data-open": sess.id, title: "Open this session" }, [current ? "Current" : "Open"]);
         open.disabled = current || !self._sessionsReady;

@@ -376,6 +376,14 @@ Two conventions between printer, document and front end:
   hair lighter than the panel, darker in dark mode) inside `--se-rule`, a
   faint 1px border.  The change tint mixes into `--se-surface`, not
   `--se-bg`, so it matches the ground it sits on.
+- **Sessions.**  A session's `name` follows its formula until the user types
+  one (`_renameSession`), which sets `title: true` on the stored row;
+  `_storeSession` then leaves the name alone.  Emptying the field clears
+  `title` and hands the session back to its formula.
+- **Wrapping in a container.**  `Document.wrap` calls `fn(node)`, and a
+  container refuses that - `Matrix(x)` is an error, `Matrix([[x]])` is the
+  1x1 matrix.  On failure it retries `fn([[node]])` then `fn([node])` before
+  reporting, which is what makes wrapping in Matrix, Array or a set work.
 - **Tool blocks and columns.**  Every tool lives in a `.se-block`
   (`data-block`: session, zoom, sessions, nav, edit, clip, apply) built by
   the `block()` helper, and a block never breaks apart.  Under 44rem the
@@ -443,6 +451,11 @@ Two conventions between printer, document and front end:
   viewer in a page or a fragment.  Keep the payload shape identical on both
   sides: one viewer serves the editor's sessions and any list of
   expressions.
+- **The source line's caret.**  A collapsed selection there is a caret in
+  the formula: `_caretNear(offset)` matches every position of
+  `_caretPositions()` to a character offset (the span of the node beside it,
+  from `state.spans`) and `_showCaret` lifts the selection and places it.
+  The two views are one document; a caret in one is a caret in the other.
 - **The source line's selection.**  Selecting text there selects in the
   formula (`_onSourceSelection`, `selectionchange`).  Two things used to
   break it and both are easy to reintroduce: `contenteditable` must be
