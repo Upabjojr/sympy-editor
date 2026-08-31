@@ -1721,9 +1721,22 @@ def test_history_report_is_self_contained_and_works_offline(browser, serve_expr,
     rp.goto(path.as_uri())
     assert rp.locator(".step .katex").count() == 3 and rp.locator(".transition").count() == 2
     # ...and it plays there too, offline
+    where = """() => {
+        const r = document.querySelector('.player .play').getBoundingClientRect();
+        const m = document.querySelector('main').getBoundingClientRect();
+        return [Math.round(r.x), Math.round(m.x), Math.round(m.width)];
+    }"""
+    at_rest = rp.evaluate(where)
     rp.locator(".player .play").click()
     assert rp.evaluate("document.body.classList.contains('slides')")
     assert rp.locator(".slide-on").count() == 1
+    # the bar holds its place from slide to slide: the slides are of very
+    # different widths, and "main" used to shrink to whichever was on show
+    seen = {tuple(rp.evaluate(where))}
+    for _ in range(4):
+        rp.locator(".player .next").click()
+        seen.add(tuple(rp.evaluate(where)))
+    assert seen == {tuple(at_rest)}, seen
     assert rp.evaluate("document.fonts.ready.then(() => document.fonts.check('12px KaTeX_Main'))")
     assert rp.locator(".transition .what").first.inner_text() == "Edit: sin(y) → cos(y)"
     assert rp.locator('.step[data-current="1"] h2').inner_text().startswith("STEP 3") or "current" in rp.locator('.step[data-current="1"] h2').inner_text().lower()

@@ -90,7 +90,10 @@ var SympyEditor = (function () {
     "body.hosted .player { display: none; }",   /* the host shows the controls in its own fixed strip */
     "@media (prefers-color-scheme: dark) { .player button { background: #2a2d31; border-color: #444; } }",
     "body.slides { display: flex; flex-direction: column; min-height: 100vh; box-sizing: border-box; }",
-    "body.slides main { flex: 1; display: flex; flex-direction: column; }",
+    /* width: 100% - as a flex item, "margin: 0 auto" would otherwise stop it
+     * stretching and let it shrink to the slide on show, so the player's bar
+     * drifted left and right as the formulas changed width */
+    "body.slides main { flex: 1; display: flex; flex-direction: column; width: 100%; }",
     "body.slides h1, body.slides .meta, body.slides footer { display: none; }",
 
     "body.slides .step, body.slides .transition { display: none; }",

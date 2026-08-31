@@ -423,7 +423,12 @@ Two conventions between printer, document and front end:
   toggles `visibility` (a `se-on` class), never `hidden` - which used to
   shove every button beside it the moment Play was pressed.
   `test_nothing_in_the_history_strip_moves` compares the geometry of every
-  control before, during and after playing.  The same goes for opening the
+  control before, during and after playing.  A saved report's own bar has
+  the same rule, and one trap of its own: under `body.slides` the body is a
+  flex column, where `main`'s `margin: 0 auto` stops it stretching and lets
+  it shrink to the slide on show - which walked the bar left and right as
+  the formulas changed width.  `body.slides main` carries `width: 100%` for
+  that reason; keep it.  The same goes for opening the
   view: `playerControls(frame, total)` takes the number of steps up front,
   builds the controls in their final shape (the counter already reads
   `1 / n`) merely disabled, and returns nothing at all below two steps -
