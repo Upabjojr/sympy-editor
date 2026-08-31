@@ -355,6 +355,22 @@ Two conventions between printer, document and front end:
   the general Transform menu, since an expression, a matrix and an array can all
   be differentiated by `[x, y]` - and a kind-specific copy would put a type menu
   on every scalar, which the editor deliberately does not have.
+- **Change tint.**  One box per changed region: `markBoxes(root, cls, boxCls)`
+  gives the box class to the marks with no marked ancestor (report:
+  `rep-box`, drawer steps: `se-diff-box`; the editor uses `addedTop` -
+  the outermost new paths - for `se-added-box`).  The box is
+  `display: inline-block`, because a background on an inline element paints
+  its *line box*: a tall fraction or matrix kept a band across the middle
+  and poked out above and below, and a tint per level made a patchwork of
+  overlapping rectangles.  The box is the node's whole visual extent and
+  moves nothing else (measured in
+  `test_change_tint_covers_the_whole_changed_area`); the tint is opaque, so
+  nothing can stack darker.
+- **Icons.**  The four navigation arrows are `arrowSvg(dir)`: one drawing
+  rotated, sized to the text line box (`.se-icon`), so they match each
+  other and the buttons beside them on every platform.  As text glyphs they
+  came from whichever installed font had them - the horizontal pair twice
+  as wide as the vertical one, often another weight and baseline.
 - **Help view.**  The toolbar's "?" (`showHelp`/`closeHelp`) overlays
   `HELP_HTML` - the whole gesture/key/tool guide, static content in
   `.se-help-body` (multi-column via `column-width`), dressed as the

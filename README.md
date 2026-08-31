@@ -218,7 +218,9 @@ turn **red** and slide towards their replacements while fading out, the new
 parts fade in in **green** (and stay green until you touch the formula
 again), and the parts that survive slide to their new places
 (`options={"animate": False}` turns it off; it is off under
-`prefers-reduced-motion`).
+`prefers-reduced-motion`).  What changed also keeps a very faint tinted box
+behind it - one box per changed sub-expression, covering it whole, however
+tall it is (a fraction, a matrix with its brackets).
 
 ### Evaluated or unevaluated
 
@@ -239,7 +241,8 @@ line says so.  The history records the choice ("Transform: Determinant
 history in the page: every step rendered, what a step brought in green, and
 between two steps an arrow with what produced the change (a transformation
 from the menu, a SymPy function, an edit, typed text...) and the previous
-formula with what went in red.  Tapping a step opens it in the editor.  From
+formula with what went in red.  Bold colour and a faint box mark exactly
+what the step touched, nothing around it.  Tapping a step opens it in the editor.  From
 there:
 
 - **Save as web page** downloads the same view as a self-contained HTML
@@ -301,7 +304,8 @@ every printed sub-expression is wrapped in KaTeX's `\htmlData{path=/1/0}{...}`
 keyed by the same paths).
 KaTeX turns that into `<span data-path="/1/0">`, so the DOM knows which node
 of the expression tree each glyph belongs to.  Editing operations
-(`Document.replace/delete/apply/undo/redo`) rebuild the tree and re-render.
+(`Document.replace/delete/insert/operator/apply/call/undo/redo`) rebuild the
+tree and re-render.
 See `AGENTS.md` for the architecture and design notes.
 
 ## Dependencies and licences

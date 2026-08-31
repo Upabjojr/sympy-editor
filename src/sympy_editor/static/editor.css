@@ -56,6 +56,24 @@
   min-width: 0;
 }
 .se-toolbar button[data-cmd^="zoom"] { padding-left: 0.35rem; padding-right: 0.35rem; min-width: 1.9em; font-variant-numeric: tabular-nums; }
+/* The four navigation arrows are one drawing rotated (arrowSvg), so they are
+ * identical on every platform - as text glyphs they came from whichever font
+ * had them: the horizontal pair twice as wide as the vertical one, and often
+ * another weight and baseline entirely.  The buttons are equal in size and
+ * centre their icon; the icon takes the text line box, so an arrow button is
+ * exactly as tall as "Edit" beside it. */
+.se-toolbar button[data-cmd="parent"], .se-toolbar button[data-cmd="child"],
+.se-toolbar button[data-cmd="left"], .se-toolbar button[data-cmd="right"],
+.se-actions button[data-cmd="parent"], .se-actions button[data-cmd="child"],
+.se-actions button[data-cmd="left"], .se-actions button[data-cmd="right"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.4em;
+  padding-left: 0.3rem;
+  padding-right: 0.3rem;
+}
+.se-icon { display: block; width: 1.2em; height: 1.2em; }
 .se-zoom { display: inline-flex; align-items: center; gap: 0.25rem; white-space: nowrap; }   /* one block: wraps as a unit */
 .se-toolbar button, .se-ops {
   font: inherit;
@@ -341,15 +359,15 @@
 .se-view .se-ghost-old .se-removed { color: var(--se-removed); }
 .se-view .se-ghost-old .se-removed .se-kept { color: transparent; }
 .se-view .se-ghost-new .se-added, .se-view .se-added { color: var(--se-added); }
-/* A solid tint (the faint rgba mixed into the background): an inline
- * background only paints the line box, so a tall fraction or matrix sticks
- * out of its container's band - but every changed child is marked too, and
- * with a solid colour their bands join up into full coverage instead of
- * stacking darker where they overlap. */
-.se-view .se-added { background: color-mix(in srgb, rgb(var(--se-added-rgb)) 8%, var(--se-bg)); border-radius: 0.15em; }
-.se-view .se-ghost .se-added { background: transparent; }    /* the animation overlays sit on the real formula: no second paint */
+/* One tinted box per changed region, carried by the outermost new node
+ * (se-added-box).  An inline background paints the line box only - a tall
+ * fraction or matrix then keeps a band across its middle and pokes out above
+ * and below - so the box is inline-block, whose box is the node's whole
+ * visual extent.  It changes no other position: the surrounding formula does
+ * not move when the marks appear or go. */
+.se-view .se-added-box { display: inline-block; border-radius: 0.15em; background: color-mix(in srgb, rgb(var(--se-added-rgb)) 8%, var(--se-bg)); }
+.se-view .se-ghost .se-added-box { background: transparent; }    /* the animation overlays sit on the real formula: no second paint */
 .se-view .se-ghost-new .se-added .se-kept, .se-view .se-added .se-kept { color: var(--se-fg); }   /* kept inside new: normal */
-.se-view .se-added .se-kept { background: var(--se-bg); }
 .se-view .se-changing { opacity: 0; }
 .se-view .se-ghost .frac-line, .se-view .se-ghost .overline-line, .se-view .se-ghost .underline-line { border-color: currentColor; }
 .se-view .se-ghost svg { fill: currentColor; }
@@ -441,11 +459,13 @@
 .se-help-body kbd { font-family: var(--se-mono); font-size: 0.85em; border: 1px solid var(--se-border); border-bottom-width: 2px; border-radius: 0.25rem; padding: 0 0.3em; background: rgba(127, 127, 127, 0.08); }
 .se-history-frame { flex: 1; width: 100%; border: 0; background: transparent; }
 .se-history-report { font: inherit; font-size: 12px; padding: 0.15rem 0.5rem; border: 1px solid var(--se-border); border-radius: 0.3rem; background: transparent; color: inherit; cursor: pointer; }
-.se-step .se-diff-removed, .se-step .se-diff-added { font-weight: bold; border-radius: 0.15em; padding: 0 0.05em; }
-.se-step .se-diff-removed { color: var(--se-removed); background: color-mix(in srgb, var(--se-removed) 10%, var(--se-bg)); }
-.se-step .se-diff-added { color: var(--se-added); background: color-mix(in srgb, var(--se-added) 10%, var(--se-bg)); }
-.se-step .se-diff-kept { color: var(--se-fg); background: var(--se-bg); font-weight: normal; }
-.se-step .se-diff-removed .se-diff-removed, .se-step .se-diff-added .se-diff-added { background: transparent; }
+.se-step .se-diff-removed, .se-step .se-diff-added { font-weight: bold; }
+.se-step .se-diff-removed { color: var(--se-removed); }
+.se-step .se-diff-added { color: var(--se-added); }
+.se-step .se-diff-box { display: inline-block; border-radius: 0.15em; padding: 0 0.05em; }   /* one box per change, see markBoxes */
+.se-step .se-diff-removed.se-diff-box { background: color-mix(in srgb, var(--se-removed) 10%, var(--se-bg)); }
+.se-step .se-diff-added.se-diff-box { background: color-mix(in srgb, var(--se-added) 10%, var(--se-bg)); }
+.se-step .se-diff-kept { color: var(--se-fg); font-weight: normal; }
 .se-step-no { min-width: 1.6em; text-align: right; }
 .se-step-current { border-color: rgba(var(--se-accent), 0.8); background: rgba(var(--se-accent), 0.12); cursor: default; }
 .se-step-current code { font-weight: 600; }

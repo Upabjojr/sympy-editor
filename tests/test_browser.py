@@ -2113,3 +2113,244 @@ def test_help_button_shows_the_guide(browser, serve_expr):
     page.locator(".se-help-view .se-history-close").click()   # so does the X
     assert page.locator(".se-help-view").count() == 0
     assert page.errors == []
+
+
+# --- graphical regressions ----------------------------------------------
+# One test per visual defect reported against the editor, each measuring the
+# rendering itself (geometry or pixels), since none of them broke a feature.
+
+INK_BOX = """(sel) => {
+    // The visual extent of a KaTeX sub-tree: the union of its glyph spans.
+    // (An inline element's own rect is its line box, which says nothing
+    // about how tall the fraction or matrix inside it is.)
+    const node = document.querySelector(sel);
+    let top = Infinity, bot = -Infinity, left = Infinity, right = -Infinity;
+    (function walk(el) {
+        if (!el.children.length && (el.textContent || '').trim()) {
+            const r = el.getBoundingClientRect();
+            if (r.width && r.height) {
+                top = Math.min(top, r.top); bot = Math.max(bot, r.bottom);
+                left = Math.min(left, r.left); right = Math.max(right, r.right);
+            }
+        }
+        for (const c of el.children) walk(c);
+    })(node);
+    const own = node.getBoundingClientRect();
+    return {ink: {x: left, y: top, width: right - left, height: bot - top},
+            box: {x: own.x, y: own.y, width: own.width, height: own.height},
+            bg: getComputedStyle(node).backgroundColor};
+}"""
+
+
+def _white_share(page, rect, pad=1):
+    """The share of page-background (white) pixels inside `rect` of the page."""
+    from io import BytesIO
+    from PIL import Image
+    clip = {"x": rect["x"] + pad, "y": rect["y"] + pad,
+            "width": max(1, rect["width"] - 2 * pad), "height": max(1, rect["height"] - 2 * pad)}
+    img = Image.open(BytesIO(page.screenshot(clip=clip))).convert("RGB")
+    px = list(img.getdata())
+    white = sum(1 for r, g, b in px if r > 250 and g > 250 and b > 250)
+    return white / len(px)
+
+
+def test_change_tint_covers_the_whole_changed_area(browser, serve_expr):
+    """The red/green background must cover the changed sub-expression whole.
+
+    A background on an inline element paints its *line box*: a tall fraction
+    or matrix kept a band across the middle and poked out above and below
+    (and the per-level tints made a patchwork of overlapping rectangles).
+    The outermost mark now carries one inline-block box - the node's whole
+    visual extent - so the tint is a single rectangle, and no other part of
+    the formula moves because of it.
+    """
+    srv, doc = serve_expr(x + y)
+    page = _open(browser, srv.url)
+    ed = "document.querySelector('.sympy-editor').__sympyEditor"
+    before = page.evaluate(INK_BOX, ".se-view .katex")["ink"]
+    _next_state(page, lambda: page.evaluate(ed + ".send({action: 'set', src: 'Matrix([[1/(x+1), y], [y**2, x*y]])'})"))
+    assert _wait(lambda: page.locator(".se-ghost").count() == 0, timeout=8)   # the animation is over
+    # In the editor: one box, as tall as the matrix, and an opaque tint (a
+    # translucent one would stack darker where two marks overlap).
+    m = page.evaluate(INK_BOX, ".se-view .se-added-box")
+    assert m["box"]["height"] >= 0.9 * m["ink"]["height"], m
+    assert "rgba(" not in m["bg"] and "/" not in m["bg"], m["bg"]    # opaque: "rgb(...)" / "color(srgb ...)"
+    assert _white_share(page, m["box"]) < 0.08
+    # The formula around a mark does not move: the same matrix, unmarked,
+    # has the same ink box (the marks are cleared by touching the formula).
+    page.keyboard.press("Escape")
+    page.evaluate(ed + "._clearChangeMarks()")
+    page.wait_for_timeout(100)
+    plain = page.evaluate(INK_BOX, ".se-view .katex")["ink"]
+    marked_ink = m["ink"]
+    assert abs(plain["height"] - marked_ink["height"]) < 1.5 and abs(plain["y"] - marked_ink["y"]) < 1.5
+    assert plain["width"] > before["width"]      # (the expression really did change)
+    # The same in the saved history report.
+    html = page.evaluate(ed + ".buildReport()")
+    import tempfile, pathlib
+    path = pathlib.Path(tempfile.mkdtemp()) / "report.html"
+    path.write_text(html, encoding="utf-8")
+    rp = browser.new_page()
+    rp.goto(path.as_uri())
+    rp.wait_for_timeout(500)
+    r = rp.evaluate(INK_BOX, ".step[data-current] .rep-box")
+    assert r["box"]["height"] >= 0.9 * r["ink"]["height"], r
+    assert _white_share(rp, r["box"]) < 0.08
+    rp.close()
+    assert page.errors == []
+
+
+def test_history_report_brackets_keep_their_full_height(browser, serve_expr):
+    """A matrix's [ ] in the report must be as tall as the matrix.
+
+    Inlining the KaTeX stylesheet once dropped every @font-face rule but the
+    first, and without KaTeX_Size* the sized delimiters fell back to a
+    normal-height bracket beside a two-row matrix.
+    """
+    from sympy import Matrix
+    import tempfile, pathlib
+    srv, doc = serve_expr(Matrix([[x, y], [1, x * y]]))
+    page = _open(browser, srv.url)
+    ed = "document.querySelector('.sympy-editor').__sympyEditor"
+    _next_state(page, lambda: page.evaluate(ed + ".send({action: 'replace', path: '/2/0', src: 'x**2'})"))
+    html = page.evaluate(ed + ".buildReport()")
+    assert html.count("@font-face") >= 15                      # every face survived the inlining
+    path = pathlib.Path(tempfile.mkdtemp()) / "report.html"
+    path.write_text(html, encoding="utf-8")
+    rp = browser.new_page()
+    rp.goto(path.as_uri())
+    rp.wait_for_timeout(500)
+    ink = rp.evaluate(INK_BOX, ".step[data-current] .formula")["ink"]
+    tallest = rp.evaluate("""() => Math.max(...[...document.querySelectorAll('.step[data-current] .delimsizing')]
+        .map(e => e.getBoundingClientRect().height), 0)""")
+    assert tallest >= 0.75 * ink["height"], (tallest, ink)     # a fallback bracket is ~40% of it
+    rp.close()
+    assert page.errors == []
+
+
+def test_status_line_names_the_selection_on_its_own_line(browser, serve_expr):
+    """The label naming the selection must stay visible at every width.
+
+    It shared the row with the tools; once those were grouped into three
+    full-width rows there was no room left and it collapsed to nothing on a
+    wide screen (it had its own line only on a phone).
+    """
+    srv, doc = serve_expr(x**2 / y - sin(x))
+    path = next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "y")
+    for width in (1100, 400):
+        page = browser.new_page(viewport={"width": width, "height": 800})
+        page.goto(srv.url)
+        page.wait_for_selector(".se-view .katex [data-path]")
+        _select(page, path)
+        status = page.locator(".se-status")
+        assert status.is_visible()
+        assert status.inner_text() == "Symbol: y"
+        box = status.bounding_box()
+        assert box["width"] > 120 and box["height"] >= 12, (width, box)
+        # its own line: under every tool, so their text can never squeeze it
+        below = page.evaluate("""() => {
+            const s = document.querySelector('.se-status').getBoundingClientRect();
+            const tools = [...document.querySelectorAll('.se-tools > *')].map(e => e.getBoundingClientRect());
+            return tools.every(t => !t.height || s.top >= t.bottom - 1);
+        }""")
+        assert below, width
+        page.close()
+
+
+def test_toolbar_groups_the_tools_in_rows(browser, serve_expr):
+    """The tools sit in three rows of related blocks, not one long strip."""
+    srv, doc = serve_expr(x + y)
+    page = browser.new_page(viewport={"width": 1100, "height": 800})
+    page.goto(srv.url)
+    page.wait_for_selector(".se-view .katex [data-path]")
+    # Row index per tool: the tools of a row are centred on the same line,
+    # whatever their own height (a select is taller than a button).
+    rows = page.evaluate("""() => {
+        const items = [];
+        for (const b of document.querySelectorAll('.se-tools [data-cmd]')) items.push([b.getAttribute('data-cmd'), b]);
+        for (const [k, sel] of [['ops', '.se-ops'], ['fn', '.se-fn'], ['lazy', '.se-lazy']]) {
+            const el = document.querySelector(sel);
+            if (el) items.push([k, el]);
+        }
+        const mid = el => { const r = el.getBoundingClientRect(); return r.height ? (r.top + r.bottom) / 2 : null; };
+        const bands = [];
+        for (const [, el] of items) {
+            const m = mid(el);
+            if (m !== null && !bands.some(b => Math.abs(b - m) < 9)) bands.push(m);
+        }
+        bands.sort((a, b) => a - b);
+        const out = {};
+        for (const [name, el] of items) {
+            const m = mid(el);                      // hidden tools (the touch keyboard button) have no row
+            if (m !== null) out[name] = bands.findIndex(b => Math.abs(b - m) < 9);
+        }
+        return out;
+    }""")
+    # 1: the session and its timeline, with the zoom
+    assert rows["undo"] == rows["redo"] == rows["history"] == rows["help"] == rows["zoomin"]
+    # 2: the selection - navigation, what to do with it, the clipboard
+    assert rows["parent"] == rows["child"] == rows["left"] == rows["right"]
+    assert rows["parent"] == rows["edit"] == rows["delete"] == rows["copy"] == rows["paste"]
+    # 3: what to apply
+    assert rows["ops"] == rows["fn"] == rows["lazy"]
+    assert rows["undo"] < rows["parent"] < rows["ops"], rows
+    assert len(set(rows.values())) == 3, rows
+    assert page.locator(".se-tools .se-sep").count() >= 3          # blocks divided within a row
+    page.close()
+
+
+def test_navigation_arrows_are_one_uniform_set(browser, serve_expr):
+    """The four arrows are one drawing rotated, so they match everywhere.
+
+    As text glyphs they came from whichever installed font had them: the
+    horizontal pair is twice as wide as the vertical one in most UI fonts,
+    which made those two buttons wider than the others (and a fallback font
+    gives them another weight and baseline as well).
+    """
+    srv, doc = serve_expr(x + y)
+    page = _open(browser, srv.url)
+    MEASURE = """(root) => {
+        const out = {};
+        for (const cmd of ['parent', 'child', 'left', 'right', 'edit']) {
+            const b = document.querySelector(root + ' [data-cmd="' + cmd + '"]');
+            if (!b) continue;
+            const r = b.getBoundingClientRect(), svg = b.querySelector('svg.se-icon');
+            const s = svg && svg.getBoundingClientRect();
+            out[cmd] = {w: Math.round(r.width * 10) / 10, h: Math.round(r.height * 10) / 10,
+                        icon: s ? [Math.round(s.width * 10) / 10, Math.round(s.height * 10) / 10] : null,
+                        pad: s ? Math.round((s.top - r.top) * 10) / 10 - Math.round((r.bottom - s.bottom) * 10) / 10 : null};
+        }
+        return out;
+    }"""
+    for root in (".se-toolbar", ".se-actions"):
+        if root == ".se-actions":
+            _select(page, "/0")                                   # the floating bar needs a selection
+        m = page.evaluate(MEASURE, root)
+        arrows = [m[c] for c in ("parent", "child", "left", "right")]
+        assert all(a["icon"] for a in arrows), (root, m)          # drawn, not typed
+        assert len({a["w"] for a in arrows}) == 1, (root, m)      # one width
+        assert len({a["h"] for a in arrows}) == 1, (root, m)
+        assert len({tuple(a["icon"]) for a in arrows}) == 1, (root, m)
+        assert all(abs(a["pad"]) <= 0.6 for a in arrows), (root, m)   # centred in the button
+        assert arrows[0]["h"] == m["edit"]["h"], (root, m)        # as tall as the text buttons beside them
+    assert page.errors == []
+
+
+def test_caret_enters_and_leaves_an_ndim_array(browser, serve_expr):
+    """Like a matrix, an N-dim array must not trap the caret."""
+    arr = Array([[[x, 1], [y, 2]], [[z, 3], [1, 4]]])
+    srv, doc = serve_expr(arr)
+    page = _open(browser, srv.url)
+    page.locator(".se-view").click(position={"x": 4, "y": 4})
+    page.keyboard.press("Escape")
+    page.keyboard.press("ArrowLeft")
+    assert _wait(lambda: page.evaluate("!!" + ED + ".caret"))
+    assert page.evaluate(ED + ".caret.path") == "/" and page.evaluate(ED + ".caret.extend") == "before"
+    page.keyboard.press("ArrowRight")                     # into the array
+    assert page.evaluate(ED + ".caret.path") != "/" or not page.evaluate(ED + ".caret.extend")
+    page.keyboard.press("ArrowLeft")                      # and out again
+    assert page.evaluate(ED + ".caret.path") == "/" and page.evaluate(ED + ".caret.extend") == "before"
+    for _ in range(120):                                  # right through every element, and out
+        page.keyboard.press("ArrowRight")
+    assert page.evaluate(ED + ".caret.path") == "/" and page.evaluate(ED + ".caret.extend") == "after"
+    assert page.errors == []

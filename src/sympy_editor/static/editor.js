@@ -57,15 +57,19 @@ var SympyEditor = (function () {
     ".transition .arrow { grid-row: 1 / 3; font-size: 1.8rem; text-align: center; color: #3b82f6; }",
     ".transition .what { font-weight: 600; } .transition .before { font-size: 0.9em; padding: 0.3rem 0.6rem; border-left: 3px solid #d0d7de; overflow-x: auto; }",
     ".transition .before .label { display: block; font-size: 0.75rem; color: #656d76; margin-bottom: 0.2rem; }",
-    ".rep-added, .rep-removed { font-weight: bold; border-radius: 0.15em; padding: 0 0.05em; }",
-    /* Solid tints (the faint rgba mixed into the page background): an inline
-     * background only paints the line box, so a tall fraction or matrix
-     * sticks out of its container's band - but every changed child is marked
-     * too, and with solid colours their bands join up into full coverage
-     * instead of stacking darker where they overlap. */
-    ".rep-added { color: #1a7f37; background: #e8f2eb; } .rep-removed { color: #d1242f; background: #fae9ea; }",
-    ".rep-kept { color: var(--fg); background: var(--bg); font-weight: normal; }",
-    "@media (prefers-color-scheme: dark) { .rep-added { color: #3fb950; background: #233726; } .rep-removed { color: #ff7b72; background: #422d2b; } }",
+    ".rep-added, .rep-removed { font-weight: bold; }",
+    ".rep-added { color: #1a7f37; } .rep-removed { color: #d1242f; }",
+    /* One tinted box per changed region, carried by the outermost mark
+     * (rep-box, see _renderMarked).  An inline background paints the line
+     * box only - a tall fraction or matrix then keeps a band across its
+     * middle and pokes out above and below - so the box is inline-block,
+     * whose box is the node's whole visual extent.  The tint is solid: with
+     * one box per region nothing overlaps, and nothing stacks darker. */
+    ".rep-box { display: inline-block; border-radius: 0.15em; padding: 0 0.05em; }",
+    ".rep-added.rep-box { background: #e8f2eb; } .rep-removed.rep-box { background: #fae9ea; }",
+    ".rep-kept { color: var(--fg); font-weight: normal; }",
+    "@media (prefers-color-scheme: dark) { .rep-added { color: #3fb950; } .rep-removed { color: #ff7b72; }",
+    "  .rep-added.rep-box { background: #233726; } .rep-removed.rep-box { background: #422d2b; } }",
     ".katex-display { margin: 0.3em 0; text-align: left; } .katex-display > .katex { text-align: left; }",
     "footer { margin-top: 2rem; font-size: 0.8rem; color: #656d76; }"
   ].join("\n");
@@ -356,6 +360,30 @@ var SympyEditor = (function () {
     return under;
   }
 
+  // The navigation arrows as one drawing, rotated.  As text glyphs they come
+  // from whichever installed font happens to have them, which differs per
+  // platform: in most UI fonts the horizontal pair is twice as wide as the
+  // vertical one, and a fallback font gives them another weight and baseline
+  // as well - the four buttons then look like two different sets.
+  function arrowSvg(dir) {
+    var deg = { up: 0, right: 90, down: 180, left: 270 }[dir];
+    return '<svg class="se-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
+      '<g transform="rotate(' + deg + ' 8 8)" fill="none" stroke="currentColor" stroke-width="1.7" ' +
+      'stroke-linecap="round" stroke-linejoin="round"><path d="M8 13.2V3.2"/><path d="M3.9 7.3 8 3.2l4.1 4.1"/></g></svg>';
+  }
+
+  /** Give `boxCls` to the marked elements (`cls`) that have no marked
+   *  ancestor: one tinted box per changed region, over the node's whole
+   *  visual extent, instead of an inline background per level (which paints
+   *  the line box only - a fraction or matrix is then half covered). */
+  function markBoxes(root, cls, boxCls) {
+    var marked = root.querySelectorAll("." + cls);
+    for (var i = 0; i < marked.length; i++) {
+      var parent = marked[i].parentNode;
+      if (!parent || !parent.closest || !parent.closest("." + cls)) marked[i].classList.add(boxCls);
+    }
+  }
+
   function h(tag, attrs, children) {
     var el = document.createElement(tag);
     if (attrs) {
@@ -411,6 +439,13 @@ var SympyEditor = (function () {
         return b;
       };
       var sep = function () { self.tools.appendChild(h("span", { class: "se-sep" })); };
+      // The arrows are drawn, not typed: one icon rotated four ways (arrowSvg).
+      var arrowBtn = function (cmd, dir, title) {
+        var b = btn(cmd, "", title);
+        b.innerHTML = arrowSvg(dir);
+        b.setAttribute("aria-label", title);
+        return b;
+      };
       var brk = function () { self.tools.appendChild(h("span", { class: "se-break" })); };
 
       // The tools come in three rows of related blocks (a `sep` divides the
@@ -439,10 +474,10 @@ var SympyEditor = (function () {
       zoomBtn("zoomin", "+", "Zoom in (Ctrl+plus, Ctrl+wheel, pinch)");
       if (!o.readOnly) {
         brk();
-        btn("parent", "↑", "Select the enclosing expression (↑)");
-        btn("child", "↓", "Select inside: the sub-expression you came from, or the first one; on an atom, a caret after it (↓)");
-        btn("left", "←", "Select the previous sibling, or move the caret left (←)");
-        btn("right", "→", "Select the next sibling, or move the caret right (→)");
+        arrowBtn("parent", "up", "Select the enclosing expression (↑)");
+        arrowBtn("child", "down", "Select inside: the sub-expression you came from, or the first one; on an atom, a caret after it (↓)");
+        arrowBtn("left", "left", "Select the previous sibling, or move the caret left (←)");
+        arrowBtn("right", "right", "Select the next sibling, or move the caret right (→)");
         sep();
         btn("edit", "Edit", "Edit the selection in place (Enter, double-click, or just start typing)");
         btn("unwrap", "Unwrap", "Remove the selected node but keep its argument: cos(θ) → θ (Backspace)");
@@ -571,11 +606,17 @@ var SympyEditor = (function () {
       this.actions = null;
       if (!o.readOnly) {
         var abtn = function (cmd, label, title) { return h("button", { type: "button", "data-cmd": cmd, title: title }, [label]); };
+        var aArrow = function (cmd, dir, title) {
+          var b = abtn(cmd, "", title);
+          b.innerHTML = arrowSvg(dir);
+          b.setAttribute("aria-label", title);
+          return b;
+        };
         this.actions = h("div", { class: "se-actions", hidden: "", role: "toolbar" }, [
-          abtn("left", "←", "Select the previous sibling"),
-          abtn("right", "→", "Select the next sibling"),
-          abtn("parent", "↑", "Select the enclosing expression"),
-          abtn("child", "↓", "Select inside (the sub-expression you came from, or the first one)"),
+          aArrow("left", "left", "Select the previous sibling"),
+          aArrow("right", "right", "Select the next sibling"),
+          aArrow("parent", "up", "Select the enclosing expression"),
+          aArrow("child", "down", "Select inside (the sub-expression you came from, or the first one)"),
           abtn("edit", "Edit", "Edit in place"),
           abtn("unwrap", "Unwrap", "Remove this node but keep its argument: cos(θ) → θ"),
           abtn("delete", "Delete", "Remove entirely"),
@@ -1063,7 +1104,7 @@ var SympyEditor = (function () {
         g.style.width = Math.round(width) + "px";
         var all = g.querySelectorAll("*");
         for (var i = 0; i < all.length; i++) {
-          all[i].classList.remove("se-selected", "se-hover", "se-editing", "se-added");
+          all[i].classList.remove("se-selected", "se-hover", "se-editing", "se-added", "se-added-box");
           if (all[i].hasAttribute("data-path")) { all[i].setAttribute("data-ghost", all[i].getAttribute("data-path")); all[i].removeAttribute("data-path"); }
           if (all[i].classList.contains("se-inline")) all[i].parentNode.removeChild(all[i]);
         }
@@ -1111,6 +1152,8 @@ var SympyEditor = (function () {
       // meanwhile the real rendering is invisible (but in place, so clicks work); at the end it shows its new parts green
       disp.classList.add("se-changing");
       newPaths.forEach(function (p) { var els = self._els(p); for (var i = 0; i < els.length; i++) els[i].classList.add(newKept[p] ? "se-kept" : "se-added"); });
+      // The outermost new nodes carry the tint, as one box each (se-added-box).
+      addedTop.forEach(function (p) { var els = self._els(p); for (var i = 0; i < els.length; i++) els[i].classList.add("se-added-box"); });
       var done = false;
       var finish = function () {
         if (done) return;
@@ -1127,8 +1170,8 @@ var SympyEditor = (function () {
     /** The green marks of the last change go when the formula is touched. */
     _clearChangeMarks() {
       if (this._finishAnimation) { this._finishAnimation(); this._finishAnimation = null; }
-      var marked = this.view.querySelectorAll(".se-added");
-      for (var i = 0; i < marked.length; i++) marked[i].classList.remove("se-added");
+      var marked = this.view.querySelectorAll(".se-added, .se-added-box");
+      for (var i = 0; i < marked.length; i++) marked[i].classList.remove("se-added", "se-added-box");
     }
 
     /** The general dropdown lists the ops that apply everywhere; the type
@@ -3178,6 +3221,7 @@ var SympyEditor = (function () {
           els[i].removeAttribute("data-path");
           if (marks) els[i].classList.add(marks[p] ? "se-diff-kept" : cls);
         }
+        if (marks) markBoxes(holder, cls, "se-diff-box");
       };
       for (var r = 0; r < rows.length; r++) {
         var row = rows[r];
@@ -3278,6 +3322,7 @@ var SympyEditor = (function () {
         if (kept) els[i].classList.add(kept[p] ? "rep-kept" : cls);
         els[i].removeAttribute("data-path");
       }
+      markBoxes(div, cls, "rep-box");
       return div.innerHTML;
     }
 
