@@ -68,5 +68,7 @@ def test_the_manualintegrate_example_still_runs(tmp_path, monkeypatch):
     assert len(hist) > 2
     assert hist[0] == ns["Integral"](x * sin(x), x)
     assert hist[-1] == (x * sin(x)).integrate(x)     # the chain really ends at the antiderivative
-    assert hist.actions[1] == "Parts"
+    # the rules are named in words, with their own parameters after them
+    assert hist.actions[1] == "Parts rule: u = x, dv = sin(x)"
+    assert all(a is None or "rule" in a.lower() or a.startswith("Substitute back") for a in hist.actions), hist.actions
     assert (tmp_path / "integration_steps.html").is_file()
