@@ -2922,3 +2922,42 @@ def test_every_control_is_finger_sized_on_a_touch_screen(browser, serve_expr):
     assert len({v[0] for v in sizes.values()}) == 1, sizes          # one type size for all of them
     assert all(v[1] >= 32 for v in sizes.values()), sizes           # and a target a finger can hit
     page.close()
+
+
+def test_the_history_strip_wraps_by_groups(browser, tmp_path):
+    """The strip's controls come in groups - playing, the size, saving - and
+    a group wraps as a whole.  A "- 100% +" split over two lines stops being
+    a control."""
+    from sympy import Integral, cos
+    from sympy_editor import History, to_history_html
+
+    hist = History([
+        Integral(x * sin(x), x),
+        (-x * cos(x) + Integral(cos(x), x), "by parts"),
+        (-x * cos(x) + sin(x), "the last integral"),
+    ], title="By parts")
+    path = tmp_path / "groups.html"
+    path.write_text(to_history_html(hist), encoding="utf-8")
+    page = browser.new_page(viewport={"width": 1000, "height": 640})
+    page.goto(path.as_uri())
+    page.wait_for_selector(".se-history-frame", timeout=30000)
+    assert _wait(lambda: page.locator(".se-play").is_visible())
+    page.locator(".se-play").click()                       # every control visible
+    MEASURE = """() => [...document.querySelectorAll('.se-history-head .se-head-group')].map(g => {
+        const kids = [...g.children].filter(c => !c.hidden).map(c => c.getBoundingClientRect());
+        const mids = new Set(kids.map(r => Math.round((r.top + r.bottom) / 2)));
+        return {label: g.textContent.replace(/\\s+/g, ' ').trim().slice(0, 16),
+                lines: mids.size, height: Math.round(g.getBoundingClientRect().height),
+                tallest: Math.round(Math.max(...kids.map(r => r.height)))};
+    })"""
+    for width in (1000, 640, 420, 360, 320):
+        page.set_viewport_size({"width": width, "height": 640})
+        page.wait_for_timeout(60)
+        groups = page.evaluate(MEASURE)
+        assert len(groups) >= 3, (width, groups)
+        for g in groups:
+            assert g["lines"] == 1, (width, g)                   # every child on the same line...
+            assert g["height"] <= g["tallest"] + 2, (width, g)   # ...so the group is one row high
+        zoom = next(g for g in groups if "100%" in g["label"])
+        assert zoom["lines"] == 1, (width, zoom)
+    page.close()

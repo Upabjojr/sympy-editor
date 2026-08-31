@@ -82,6 +82,7 @@ var SympyEditor = (function () {
     ".player button:hover { border-color: #3b82f6; }",
     ".player .count { font-size: 0.85rem; color: #656d76; font-variant-numeric: tabular-nums; }",
     ".player .zoom-level { font-variant-numeric: tabular-nums; min-width: 4em; }",
+    ".player .group { display: inline-flex; align-items: center; gap: 0.4rem; }",   /* wraps as a unit */
     ".player .exit { display: none; }",
     "body.hosted .player { display: none; }",   /* the host shows the controls in its own fixed strip */
     "@media (prefers-color-scheme: dark) { .player button { background: #2a2d31; border-color: #444; } }",
@@ -551,14 +552,16 @@ var SympyEditor = (function () {
     var when = new Date();
     var player = hist.steps.length < 2 ? "" :
       '<div class="player">' +
+      '<span class="group">' +
       '<button type="button" class="play" title="Watch the steps one at a time">\u25b6 Play</button>' +
-      '<button type="button" class="zoom-out" title="Smaller (Ctrl+wheel)">\u2212</button>' +
-      '<button type="button" class="zoom-level" title="Back to the normal size">100%</button>' +
-      '<button type="button" class="zoom-in" title="Larger (Ctrl+wheel)">+</button>' +
       '<button type="button" class="step-btn prev" title="Previous (\u2190)">\u25c0</button>' +
       '<button type="button" class="step-btn next" title="Next (\u2192)">\u25b6</button>' +
       '<span class="count"></span>' +
-      '<button type="button" class="exit" title="Back to the whole history (Esc)">Show all</button></div>';
+      '<button type="button" class="exit" title="Back to the whole history (Esc)">Show all</button></span>' +
+      '<span class="group">' +
+      '<button type="button" class="zoom-out" title="Smaller (Ctrl+wheel)">\u2212</button>' +
+      '<button type="button" class="zoom-level" title="Back to the normal size">100%</button>' +
+      '<button type="button" class="zoom-in" title="Larger (Ctrl+wheel)">+</button></span></div>';
     return "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
       "<title>" + escHtml(title) + "</title><style>\n" + css + "\n" + REPORT_CSS + "\n</style></head><body><main>" +
       "<h1>" + escHtml(title) + "</h1><p class=\"meta\">" + escHtml(when.toLocaleString()) + " · " + hist.steps.length + " step" + (hist.steps.length === 1 ? "" : "s") +
@@ -697,6 +700,11 @@ var SympyEditor = (function () {
     var out = h("button", { type: "button", class: "se-play-zoom", title: "Smaller formulas (Ctrl+wheel, pinch)", "aria-label": "Smaller" }, ["\u2212"]);
     var level = h("button", { type: "button", class: "se-play-level", title: "Back to the normal size" }, ["100%"]);
     var into = h("button", { type: "button", class: "se-play-zoom", title: "Larger formulas (Ctrl+wheel, pinch)", "aria-label": "Larger" }, ["+"]);
+    // Two groups, each of which wraps as a unit: playing the history, and
+    // the size of it.  A "- 100% +" split across two lines is nobody's idea
+    // of a control.
+    var playing = h("span", { class: "se-head-group" }, [play, prev, next, count, all]);
+    var zooming = h("span", { class: "se-head-group" }, [out, level, into]);
     var els = [play, prev, next, count, all, out, level, into];
     var api = null;
     els.forEach(function (el) { el.hidden = true; });
@@ -719,7 +727,7 @@ var SympyEditor = (function () {
     out.addEventListener("click", function () { if (api) api.zoomOut(); });
     into.addEventListener("click", function () { if (api) api.zoomIn(); });
     level.addEventListener("click", function () { if (api) api.setZoom(1); });
-    return els;
+    return [playing, zooming];
   }
 
   /** Offer `text` as a file: the host app, the share sheet, or a download. */
@@ -763,7 +771,8 @@ var SympyEditor = (function () {
     var save = h("button", { type: "button", title: "A self-contained web page: works offline, KaTeX rendering and fonts included" }, ["Save as web page"]);
     var note = h("small", {}, [cfg.hint || (cfg.onStep ? "tap a step to open it" : "")]);
     var head = h("div", { class: "se-history-head" },
-      [h("span", { class: "se-history-title" }, [heading, note])].concat(playerControls(frame), [save]));
+      [h("span", { class: "se-history-title" }, [heading, note])]
+        .concat(playerControls(frame), [h("span", { class: "se-head-group" }, [save])]));
     var view = h("div", { class: "sympy-editor se-history-page" }, [head, frame]);
     if (host) host.appendChild(view);
     var ready = loadKatex(opts)
@@ -3803,7 +3812,9 @@ var SympyEditor = (function () {
       var close = h("button", { type: "button", class: "se-history-close", title: "Close (Esc)", "aria-label": "Close" }, ["\u2715"]);
       var head = h("div", { class: "se-history-head" },
         [h("span", { class: "se-history-title" }, ["History", h("small", {}, ["tap a step to open it"])])]
-          .concat(playerControls(frame), [saveHtml, savePy, close]));
+          .concat(playerControls(frame),
+                  [h("span", { class: "se-head-group" }, [saveHtml, savePy]),
+                   h("span", { class: "se-head-group" }, [close])]));
       var view = h("div", { class: "se-history-view", role: "dialog", "aria-label": "History" }, [head, frame]);
       saveHtml.addEventListener("click", function () { self.exportReport(html); });
       savePy.addEventListener("click", function () { self.exportPython(); });

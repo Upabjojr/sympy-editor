@@ -621,6 +621,10 @@
   padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
 }
 .se-history-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; padding: 0.5rem 0.7rem; border-bottom: 1px solid var(--se-border); }
+/* the strip's controls come in groups - playing, the size, saving, closing -
+ * and a group wraps as a whole: "- 100% +" split over two lines is not a
+ * control any more */
+.se-history-head .se-head-group { display: inline-flex; align-items: center; gap: 0.4rem; flex: 0 0 auto; }
 .se-history-title { font-weight: 600; margin-right: auto; display: flex; flex-direction: column; }
 .se-history-title small { font-weight: normal; font-size: 11px; opacity: 0.7; }
 .se-history-head button {

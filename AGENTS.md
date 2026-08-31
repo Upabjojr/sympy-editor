@@ -404,6 +404,12 @@ Two conventions between printer, document and front end:
   builds the buttons for `.se-history-head`, and `body.hosted` hides the
   report's own bar - the controls must not scroll away with the steps.  The
   saved file keeps its bar, since it has no host.
+- **The history strip.**  `.se-history-head` wraps, so its controls come in
+  `.se-head-group` spans - playing, the size, saving, closing - and a group
+  is `inline-flex` with `flex: 0 0 auto`, which wraps as a whole.  Put a new
+  control in a group, never loose in the strip: a `- 100% +` broken across
+  two lines is not a control.  The report's own bar does the same with
+  `.player .group`.
 - **The history's zoom.**  `--se-report-zoom` on the report's root scales
   `.step` and `.transition`; the slideshow's own size multiplies it
   (`calc(1.35em * var(--se-report-zoom, 1))`), so do not give `.slide-on` a
