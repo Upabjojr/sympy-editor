@@ -14,7 +14,7 @@ writes one page per derivation and an index.
 from __future__ import annotations
 
 from sympy import (Derivative, Determinant, Eq, Function, I, Integral, Inverse, Limit, Matrix,
-                   Integer, MatrixSymbol, Rational, Sum, Symbol, cos, exp, eye, factorial, log, oo, pi,
+                   Integer, MatrixSymbol, Rational, Sum, Symbol, ZeroMatrix, cos, exp, eye, factorial, log, oo, pi,
                    sin, sqrt, symbols)
 
 x, y, r, t, h, n, k = symbols("x y r t h n k", real=True)
@@ -98,11 +98,13 @@ def derivative_from_first_principles():
     """What a derivative is, before any rule for computing one."""
     from sympy_editor import History
 
+    # dir="+-": the limit is two-sided, as a derivative's is - SymPy's default
+    # is the one from the right, and it says so with a "+" in the rendering.
     return History([
         Derivative(x**3, x),
-        (Limit(((x + h)**3 - x**3) / h, h, 0), "the definition: the slope of a chord, as it closes"),
-        (Limit((3 * x**2 * h + 3 * x * h**2 + h**3) / h, h, 0), "expand the cube; the x³ cancels"),
-        (Limit(3 * x**2 + 3 * x * h + h**2, h, 0), "divide through by h - legal, h is not yet 0"),
+        (Limit(((x + h)**3 - x**3) / h, h, 0, dir="+-"), "the definition: the slope of a chord, as it closes"),
+        (Limit((3 * x**2 * h + 3 * x * h**2 + h**3) / h, h, 0, dir="+-"), "expand the cube; the x³ cancels"),
+        (Limit(3 * x**2 + 3 * x * h + h**2, h, 0, dir="+-"), "divide through by h - legal, h is not yet 0"),
         (3 * x**2, "now let h go: what is left is the derivative"),
     ], title="The derivative of x³ from first principles")
 
@@ -190,10 +192,13 @@ def least_squares():
         (A * xx - bb).T * (A * xx - bb),
         (xx.T * A.T * A * xx - 2 * xx.T * A.T * bb + bb.T * bb,
          "expand: the two cross terms are equal, being one number each"),
-        (Eq(2 * A.T * A * xx - 2 * A.T * bb, Matrix([0])),
+        # `evaluate=False`: SymPy can see the two sides are not the same
+        # expression and answers "False" - which is not what an equation to
+        # be solved means.
+        (Eq(2 * A.T * A * xx - 2 * A.T * bb, ZeroMatrix(cols, 1), evaluate=False),
          "at the minimum the gradient in x vanishes"),
-        (Eq(A.T * A * xx, A.T * bb), "the normal equations"),
-        (Eq(xx, Inverse(A.T * A) * A.T * bb), "and the least-squares solution"),
+        (Eq(A.T * A * xx, A.T * bb, evaluate=False), "the normal equations"),
+        (Eq(xx, Inverse(A.T * A) * A.T * bb, evaluate=False), "and the least-squares solution"),
     ], title="Least squares and the normal equations")
 
 

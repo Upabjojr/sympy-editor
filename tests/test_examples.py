@@ -105,7 +105,14 @@ def test_every_derivation_is_a_history_that_can_be_shown():
         actions = history.actions
         assert actions[0] is None, slug                   # nothing produced the first step
         assert all(a for a in actions[1:]), slug          # every other step says what it was
+        from sympy.logic.boolalg import BooleanAtom
+
         steps = history.steps
+        # An Eq whose sides SymPy can compare answers True or False the
+        # moment it is built, and the reader is shown the word instead of
+        # the equation.  `evaluate=False` is the fix; this is the alarm.
+        decided = [i for i, step in enumerate(steps) if isinstance(step, BooleanAtom)]
+        assert not decided, (slug, decided)
         repeated = [i for i in range(1, len(steps)) if steps[i] == steps[i - 1]]
         # SymPy answers some questions the moment they are built - exp(I*pi)
         # is -1, and x**3 - x**3 is gone - which turns a step into the one

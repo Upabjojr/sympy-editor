@@ -48,7 +48,12 @@ EXPRS = [
 @pytest.mark.parametrize("expr", EXPRS, ids=str)
 def test_annotations_are_transparent(expr):
     tex, nodes = annotate(expr)
-    assert strip_annotations(tex) == latex(expr)
+    plain = strip_annotations(tex)
+    # One deliberate difference: a one-sided limit's direction is braced -
+    # "0^{+}" where SymPy writes "0^+" - because the annotated direction is
+    # more than one token and a bare superscript would take only the first
+    # of them (see AnnotatedLatexPrinter._print_Limit).
+    assert plain.replace("^{+}", "^+").replace("^{-}", "^-") == latex(expr)
 
 
 @pytest.mark.parametrize("expr", EXPRS, ids=str)
@@ -252,3 +257,23 @@ def test_a_determinant_annotates_the_matrix_it_encloses():
     tex, nodes = annotate(y + Determinant(Matrix([[x]])))
     paths = {format_path(p): n for p, n in nodes.items()}
     assert paths["/1/0"] == Matrix([[x]]) and paths["/1/0/2/0"] == x
+
+
+def test_a_one_sided_limit_braces_its_direction():
+    """LatexPrinter writes "0^+" with no braces around the sign - fine while
+    it is one character, but the annotation makes it \\htmlData{...}{+}, and
+    a superscript then takes only the first token of that."""
+    from sympy import Limit, oo
+
+    tex, nodes = annotate(Limit(x / y, y, 0))
+    assert r"^{\htmlData{path=/3}{+}}" in tex, tex
+    assert "^\\htmlData" not in tex
+    tex, _ = annotate(Limit(x / y, y, 0, dir="-"))
+    assert r"^{\htmlData{path=/3}{-}}" in tex
+    # a two-sided limit, and one to infinity, say nothing about a direction
+    for expr in (Limit(x / y, y, 0, dir="+-"), Limit(x / y, y, oo)):
+        assert "^{" not in annotate(expr)[0].split(r"\right")[0].split("}}")[0], expr
+    # and the limit still carries its parts: the variable, the point, the body
+    _, nodes = annotate(Limit(x / y, y, 0))
+    paths = {format_path(p) for p in nodes}
+    assert {"/", "/0", "/1", "/2", "/3"} <= paths

@@ -526,6 +526,22 @@ class AnnotatedLatexPrinter(_AnnotatingMixin, LatexPrinter):
     """LaTeX printer that annotates every printed sub-expression with its
     path (KaTeX ``\\htmlData``)."""
 
+    def _print_Limit(self, expr):
+        # LatexPrinter writes the direction of a one-sided limit as "0^+",
+        # with no braces: fine while "+" is one character, but the annotation
+        # makes it \htmlData{path=/3}{+}, and a superscript then takes only
+        # the first token of it.  The braces are all that is missing.
+        e, z, z0, direction = expr.args
+        tex = r"\lim_{%s \to " % self._print(z)
+        if str(direction) == "+-" or z0 in (S.Infinity, S.NegativeInfinity):
+            tex += r"%s}" % self._print(z0)
+        else:
+            tex += r"%s^{%s}}" % (self._print(z0), self._print(direction))
+        from sympy.core.operations import AssocOp
+        if isinstance(e, AssocOp):
+            return r"%s\left(%s\right)" % (tex, self._print(e))
+        return r"%s %s" % (tex, self._print(e))
+
     def _print_Determinant(self, expr):
         # LatexPrinter prints the determinant of an explicit matrix by
         # reaching for its contents (``_print_matrix_contents``) instead of
