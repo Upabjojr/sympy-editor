@@ -182,7 +182,11 @@
 @media (prefers-reduced-motion: reduce) {
   .se-toolbar button, .se-ops, .se-actions button, .se-opbar button { transition: none; }
 }
-.se-ops { max-width: 10rem; }
+/* The three menus are one set of controls, so they are one size: a select
+ * otherwise takes the width of its widest option, which made Transform,
+ * the type menu and Methods three different widths side by side.  Two of
+ * them fit across a phone at this width. */
+.se-ops, .se-typemenu, .se-methods { width: 10rem; max-width: 100%; }
 .se-lazy { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 12px; cursor: pointer; white-space: nowrap; user-select: none; }
 .se-lazy input { margin: 0; }
 .se-fn {
@@ -274,7 +278,6 @@
   font-size: 12px;
   line-height: 1.2;
   padding: 0.2rem 0.5rem;
-  max-width: 11rem;
   border: 1px solid rgba(var(--se-accent), 0.9);
   border-radius: 0.3rem;
   background: linear-gradient(180deg, rgba(var(--se-accent), 0.16) 0%, rgba(var(--se-accent), 0.08) 100%);
@@ -290,7 +293,6 @@
   font-size: 12px;
   line-height: 1.2;
   padding: 0.2rem 0.5rem;
-  max-width: 9.5rem;
   border: 1px solid var(--se-border);
   border-radius: 0.3rem;
   background: var(--se-btn);

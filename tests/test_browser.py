@@ -2728,3 +2728,19 @@ def test_a_history_plays_as_a_slideshow(browser, tmp_path):
     assert frame.locator("h1").is_visible()
     assert errors == []
     page.close()
+
+
+def test_the_three_menus_are_one_size(browser, serve_expr):
+    """Transform, the type menu and Methods are one set of controls, so they
+    are one size.  A select takes the width of its widest option, which made
+    the three of them three different widths sitting side by side."""
+    from sympy import Matrix
+
+    srv, doc = serve_expr(Matrix([[1, 2], [3, 4]]))       # a type with a menu of its own
+    page = _open(browser, srv.url)
+    assert _wait(lambda: page.locator(".se-methods").is_visible() and page.locator(".se-typemenu").is_visible())
+    widths = page.evaluate("""() => ['.se-ops', '.se-typemenu', '.se-methods']
+        .map(s => Math.round(document.querySelector(s).getBoundingClientRect().width))""")
+    assert len(set(widths)) == 1, widths
+    assert widths[0] > 100, widths                        # and wide enough to read
+    assert page.errors == []
