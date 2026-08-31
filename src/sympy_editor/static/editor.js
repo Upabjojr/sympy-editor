@@ -81,6 +81,7 @@ var SympyEditor = (function () {
     ".player button { font: inherit; font-size: 0.85rem; padding: 0.25rem 0.7rem; border: 1px solid #d0d7de; border-radius: 0.35rem; background: #f6f8fa; color: inherit; cursor: pointer; }",
     ".player button:hover { border-color: #3b82f6; }",
     ".player .count { font-size: 0.85rem; color: #656d76; font-variant-numeric: tabular-nums; }",
+    ".player .zoom-level { font-variant-numeric: tabular-nums; min-width: 4em; }",
     ".player .exit { display: none; }",
     "body.hosted .player { display: none; }",   /* the host shows the controls in its own fixed strip */
     "@media (prefers-color-scheme: dark) { .player button { background: #2a2d31; border-color: #444; } }",
@@ -552,6 +553,7 @@ var SympyEditor = (function () {
       '<div class="player">' +
       '<button type="button" class="play" title="Watch the steps one at a time">\u25b6 Play</button>' +
       '<button type="button" class="zoom-out" title="Smaller (Ctrl+wheel)">\u2212</button>' +
+      '<button type="button" class="zoom-level" title="Back to the normal size">100%</button>' +
       '<button type="button" class="zoom-in" title="Larger (Ctrl+wheel)">+</button>' +
       '<button type="button" class="step-btn prev" title="Previous (\u2190)">\u25c0</button>' +
       '<button type="button" class="step-btn next" title="Next (\u2192)">\u25b6</button>' +
@@ -586,12 +588,13 @@ var SympyEditor = (function () {
     "  if (pending) slides.push([pending]);",
     "  var body = document.body, count = bar.querySelector('.count');",
     "  var play = bar.querySelector('.play'), i = 0, timer = null;",
-    "  var STEP_MS = 2200, zoom = 1;",
+    "  var STEP_MS = 2200, zoom = 1, level = bar.querySelector('.zoom-level');",
     "  // The formulas are the point: they must be as big or as small as the",
     "  // reader wants, in the listing as much as in the slideshow.",
     "  function setZoom(z) {",
     "    zoom = Math.max(0.5, Math.min(4, Math.round(z * 100) / 100));",
     "    document.documentElement.style.setProperty('--se-report-zoom', zoom);",
+    "    level.textContent = Math.round(zoom * 100) + '%';",
     "    if (typeof announce === 'function') announce();",
     "  }",
     "  function clear() {",
@@ -623,6 +626,7 @@ var SympyEditor = (function () {
     "  bar.querySelector('.exit').addEventListener('click', exit);",
     "  bar.querySelector('.zoom-out').addEventListener('click', function () { setZoom(zoom / 1.2); });",
     "  bar.querySelector('.zoom-in').addEventListener('click', function () { setZoom(zoom * 1.2); });",
+    "  level.addEventListener('click', function () { setZoom(1); });",
     "  // two fingers pinch the formulas, as everywhere else in the editor",
     "  var pinch = null;",
     "  function spread(t) {",
@@ -691,8 +695,9 @@ var SympyEditor = (function () {
     // The formulas have a size of their own here: the buttons, Ctrl+wheel and
     // two fingers all drive the same zoom inside the report.
     var out = h("button", { type: "button", class: "se-play-zoom", title: "Smaller formulas (Ctrl+wheel, pinch)", "aria-label": "Smaller" }, ["\u2212"]);
+    var level = h("button", { type: "button", class: "se-play-level", title: "Back to the normal size" }, ["100%"]);
     var into = h("button", { type: "button", class: "se-play-zoom", title: "Larger formulas (Ctrl+wheel, pinch)", "aria-label": "Larger" }, ["+"]);
-    var els = [play, prev, next, count, all, out, into];
+    var els = [play, prev, next, count, all, out, level, into];
     var api = null;
     els.forEach(function (el) { el.hidden = true; });
     frame.addEventListener("load", function () {
@@ -703,6 +708,7 @@ var SympyEditor = (function () {
       api.subscribe(function (st) {
         play.textContent = st.playing ? "\u23f8 Pause" : "\u25b6 Play";
         count.textContent = (st.index + 1) + " / " + st.total;
+        level.textContent = Math.round(st.zoom * 100) + "%";
         all.hidden = !st.on;
       });
     });
@@ -712,6 +718,7 @@ var SympyEditor = (function () {
     all.addEventListener("click", function () { if (api) api.exit(); });
     out.addEventListener("click", function () { if (api) api.zoomOut(); });
     into.addEventListener("click", function () { if (api) api.zoomIn(); });
+    level.addEventListener("click", function () { if (api) api.setZoom(1); });
     return els;
   }
 

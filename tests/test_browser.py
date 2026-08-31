@@ -2813,13 +2813,18 @@ def test_the_history_can_be_resized(browser, tmp_path):
 
     assert _wait(lambda: page.locator(".se-play-zoom").count() == 2)
     smaller, larger = page.locator(".se-play-zoom").first, page.locator(".se-play-zoom").last
+    level = page.locator(".se-play-level")
     listed = size()
+    assert level.inner_text() == "100%"                     # and it says where it stands
     larger.click()
     larger.click()
     assert size() > listed * 1.3, (listed, size())
+    assert level.inner_text() == "144%"
     grown = size()
     smaller.click()
-    assert listed < size() < grown
+    assert listed < size() < grown and level.inner_text() == "120%"
+    level.click()                                           # the readout is the way back
+    assert level.inner_text() == "100%" and size() == listed
 
     # the slideshow scales with it, instead of pinning its own size
     page.locator(".se-play").click()
@@ -2853,6 +2858,7 @@ def test_the_history_can_be_resized(browser, tmp_path):
     }""")
     assert _wait(lambda: size() > at)
 
+    assert level.inner_text() != "100%"                      # the wheel and the fingers move it too
     # the panel itself is resizable where it sits in a page
     assert page.evaluate("getComputedStyle(document.querySelector('.se-history-page')).resize") == "vertical"
     assert errors == []
