@@ -751,7 +751,7 @@ var SympyEditor = (function () {
       this.stage = h("div", { class: "se-stage" }, [this.view]);
       root.appendChild(this.stage);
       this.fullBtn = h("button", { type: "button", class: "se-fullbtn",
-        title: "Full screen: the formula alone, as large as the window (F, or Esc to come back)",
+        title: "Full screen: the formula alone, as large as the screen (Esc, or this button, comes back)",
         "aria-label": "Full screen" });
       this.fullBtn.innerHTML = expandSvg(false);
       this.fullBtn.addEventListener("click", function (ev) {
@@ -3852,7 +3852,7 @@ var SympyEditor = (function () {
       if (this.fullBtn) {
         this.fullBtn.innerHTML = expandSvg(on);
         var title = on ? "Leave full screen (Esc)"
-                       : "Full screen: the formula alone, as large as the window";
+                       : "Full screen: the formula alone, as large as the screen";
         this.fullBtn.setAttribute("title", title);
         this.fullBtn.setAttribute("aria-label", title);
       }
