@@ -176,6 +176,12 @@ def type_methods(cls: type) -> List[Dict[str, Any]]:
         doc = (inspect.getdoc(fn) or "").strip().split("\n", 1)[0][:120]
         out.append({"name": name, "doc": doc, "property": prop})
     out.sort(key=lambda entry: entry["name"])
+    # A class that is itself callable - Lambda - is applied to arguments, and
+    # nothing in `dir` says so (`__call__` is a dunder): offer it first.
+    if any("__call__" in k.__dict__ for k in cls.__mro__
+           if (getattr(k, "__module__", "") or "").startswith("sympy")):
+        out.insert(0, {"name": "__call__", "label": "( ) apply", "property": False,
+                       "doc": f"Apply this {cls.__name__} to arguments: f(2)"})
     _TYPE_METHODS_CACHE[cls] = out
     return out
 
@@ -190,13 +196,20 @@ def function_signature(name: str, target: Optional[Basic] = None) -> Dict[str, A
     if not dotted and callable(getattr(sympy, bare, None)):
         fn = getattr(sympy, bare)
         skip = 1
-    elif target is not None and not bare.startswith("_") and hasattr(target, bare):
+    elif target is not None and (not bare.startswith("_") or bare == "__call__") and hasattr(target, bare):
         fn = getattr(target, bare)
         skip = 0
         if not callable(fn):
             return {"name": name, "params": [], "doc": f"attribute of {type(target).__name__}", "callable": False}
     else:
         raise ValueError(f"Unknown SymPy function or method: {bare!r}")
+    if bare == "__call__":
+        # applying the node itself (a Lambda): `inspect` only sees *args, and
+        # an optional parameter would apply it to nothing at all
+        return {"name": name, "params": [{"name": "arguments", "kind": "text", "default": None,
+                                          "optional": False, "varargs": True}],
+                "doc": f"Apply this {type(target).__name__} to arguments",
+                "callable": True, "hinted": True}
     doc = (inspect.getdoc(fn) or "").strip().split("\n", 1)[0][:160]
     if bare in PARAM_HINTS:
         params = [{"name": label, "kind": kind, "default": fill, "optional": optional}
@@ -774,7 +787,8 @@ class Document:
         """Apply a SymPy function or a method to the node at ``path`` (or to
         the range ``children`` of it): ``func`` is ``"diff(x)"``,
         ``"series(x, 0, 5)"``, ``"subs(x, 1)"``, ``"factor"``, ``".T"``,
-        ``".det()"``...  A name that is a SymPy function is called as
+        ``".det()"``...  ``"(2)"`` (or ``".__call__(2)"``) applies the node
+        itself, which is how a ``Lambda`` is evaluated at a point.  A name that is a SymPy function is called as
         ``name(node, *args)``; a name starting with ``.`` (or that is only an
         attribute of the node) is looked up on the node.  Extra arguments are
         parsed in the expression's namespace.
@@ -787,15 +801,25 @@ class Document:
         ``series``...) has no such form and runs as usual, and
         ``last_note`` says so.
         """
-        m = re.match(r"^\s*(\.?)([A-Za-z_][A-Za-z_0-9]*)\s*(?:\((.*)\))?\s*$", func or "", re.S)
-        if not m:
-            raise ValueError(f"Not a function call: {func!r} (try diff(x), series(x, 0, 5) or .T)")
-        dotted, name, argsrc = m.group(1), m.group(2), m.group(3)
+        m = re.match(r"^\s*(\.?)([A-Za-z_][A-Za-z_0-9]*)?\s*(?:\((.*)\))?\s*$", func or "", re.S)
+        if not m or (not m.group(2) and m.group(3) is None):
+            raise ValueError(f"Not a function call: {func!r} (try diff(x), series(x, 0, 5), .T or (2) on a Lambda)")
+        dotted, name, argsrc = m.group(1), m.group(2) or "", m.group(3)
         p = self._path(path)
         target = self._extract_range(self.expr, p, children) if children is not None else self._get_at(self.expr, p)
         args = [self.parse(a, context=target) for a in _split_args(argsrc)] if argsrc else []
         fn = None
-        if lazy and name in LAZY_FORMS and not name.startswith("_"):
+        if not name or name == "__call__":
+            # "(2)" or the "( ) apply" entry of the methods menu: the node is
+            # itself the function - a Lambda applied to its arguments.
+            if not callable(target):
+                raise ValueError(f"{type(target).__name__} is not a function: it cannot be called")
+            if lazy:
+                with sympy.evaluate(False):
+                    result = target(*args)
+            else:
+                result = target(*args)
+        elif lazy and name in LAZY_FORMS and not name.startswith("_"):
             result = LAZY_FORMS[name](target, *args)
         elif not dotted and not name.startswith("_") and callable(getattr(sympy, name, None)):
             fn = getattr(sympy, name)

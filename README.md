@@ -87,7 +87,7 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | Derive by array | **Transform ▾** → Derive by array… — by `x` or `[x, y]`, for an expression (its gradient), a matrix or an array, symbolic or explicit | |
 | Copy / cut / paste a part | **Copy** / **Paste** (toolbar or action bar) | Ctrl+C / Ctrl+X copy the selection's SymPy source; Ctrl+V pastes over a selection or at a caret |
 | Apply any SymPy function | the **function box** in the toolbar: type to search SymPy's functions, pick one; a function that needs parameters asks for them (symbol parameters offer the selection's free symbols — `solve` on `sin(x)cos(y)` asks x or y); `diff(x)`, `.T`, `det()` typed in full apply as written | |
-| Call a method of the selection's class | the **Methods** menu lists the public methods and properties of the selected object's class (of the whole expression when nothing is selected) — `.det()`, `.T`, `.rref()` on a matrix, `.diff()`, `.as_poly()` on an expression; picking one calls it, and a method that needs parameters asks for them | |
+| Call a method of the selection's class | the **Methods** menu lists the public methods and properties of the selected object's class (of the whole expression when nothing is selected) — `.det()`, `.T`, `.rref()` on a matrix, `.diff()`, `.as_poly()` on an expression; picking one calls it, and a method that needs parameters asks for them.  A `Lambda` is itself a function: its menu starts with **( ) apply**, which asks for the arguments and evaluates it there (`(3)` in the function box does the same) | |
 | Undo / redo | ↶ / ↷ | Ctrl+Z / Ctrl+Shift+Z |
 | Zoom the formula | **−** / **100%** (reset) / **+**, Ctrl+mouse wheel, pinch with two fingers | Ctrl+plus / Ctrl+minus / Ctrl+0 |
 | Scroll a formula wider than the view | the scrollbar, the mouse wheel over the formula, or drag its empty space (one finger on a phone) | |
@@ -292,7 +292,11 @@ row goes back (or forward) to that step.  Tapping a session's row opens
 it.  Available on Pyodide-backed pages.
 
 The formula sits on its own faintly outlined canvas, with the SymPy source
-of the whole expression under it and the tools above.
+of the whole expression under it and the tools above.  A quasi-transparent
+button in the canvas's top-right corner gives the formula the **whole
+window**: the editor covers the page, the editing area takes every pixel the
+tools leave, and the formula is drawn larger.  The same button - or Esc, when
+nothing is selected - comes back.
 
 The toolbar's **?** opens this whole guide inside the editor - every
 gesture, key and tool in one box (Esc closes it).
@@ -301,7 +305,9 @@ The toolbar is organised in three rows of related blocks: the session and
 its timeline (sessions, undo/redo, History, ?, Done) with the zoom; the
 selection (navigation arrows, then Edit/Unwrap/Delete/Isolate and the
 clipboard); and what to apply (the Transform, type and Methods menus, the
-function box, the unevaluated toggle).  On a narrow screen each row wraps onto as
+function box, the unevaluated toggle).  Each row is centred on its own, so a
+short row sits in the middle of the strip instead of hanging off the left
+edge.  On a narrow screen each row wraps onto as
 many lines as it needs, and so does the action bar under a selection:
 every button stays reachable.
 

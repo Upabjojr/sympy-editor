@@ -1009,3 +1009,33 @@ def test_methods_action_lists_the_type_methods():
     first = d2.snapshot()
     assert "Add" in first["methods"] and "Symbol" in first["methods"] and "Pow" in first["methods"]
     assert d2.snapshot()["methods"] == {}                     # nothing new the second time
+
+
+def test_a_lambda_is_applied_to_its_arguments():
+    """Lambda is itself a function.  `__call__` is a dunder, so it appears in
+    no listing of methods and there was no way to evaluate one at a point."""
+    from sympy import Lambda
+    from sympy_editor.document import function_signature, type_methods
+    x, y = symbols("x y")
+    d = Document(Lambda(x, x**2))
+    assert d.call("/", "(3)") == 9
+    d = Document(Lambda(x, x**2))
+    assert d.call("/", ".__call__(y + 1)") == (y + 1) ** 2
+    # inside a larger expression, on the node that is the Lambda
+    d = Document(Lambda(x, x**2) + y)
+    i = [isinstance(a, Lambda) for a in d.expr.args].index(True)
+    d.handle({"action": "call", "path": f"/{i}", "func": "(2)"})
+    assert d.expr == y + 4
+    # the methods menu offers it, first and under a readable label
+    entry = type_methods(Lambda)[0]
+    assert entry["name"] == "__call__" and entry["label"] == "( ) apply"
+    assert [e["name"] for e in type_methods((x + 1).func) if e["name"].startswith("_")] == []
+    # ... and asks for the arguments rather than applying it to none
+    sig = function_signature(".__call__", Lambda(x, x**2))
+    assert [p["name"] for p in sig["params"]] == ["arguments"]
+    assert sig["params"][0]["optional"] is False
+    # anything else says so plainly
+    with pytest.raises(ValueError, match="not a function"):
+        Document(x + 1).call("/", "(3)")
+    with pytest.raises(ValueError, match="Not a function call"):
+        Document(x + 1).call("/", "3 +")

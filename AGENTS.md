@@ -183,6 +183,12 @@ Two conventions between printer, document and front end:
   picked function with a required parameter opens the form (`_showFnForm`:
   symbol params are a select over the node's `free` symbols), otherwise it
   is applied at once.
+- **Applying a callable node.**  `Document.call` accepts `"(2)"` (and
+  `".__call__(2)"`): the node is the function - a `Lambda` evaluated at a
+  point.  `type_methods` puts a `{"name": "__call__", "label": "( ) apply"}`
+  entry first for a class that defines `__call__` in sympy (only `Lambda`
+  does), `function_signature` lets that one dunder through and asks for the
+  arguments, and the menu shows `entry.label` when there is one.
 - **Methods menu.**  `type_methods(cls)`: the public methods and
   properties a class from sympy itself defines (`is_*` queries, dunders
   and `METHOD_SKIP` plumbing left out), cached per class.  Every snapshot
@@ -370,6 +376,23 @@ Two conventions between printer, document and front end:
   hair lighter than the panel, darker in dark mode) inside `--se-rule`, a
   faint 1px border.  The change tint mixes into `--se-surface`, not
   `--se-bg`, so it matches the ground it sits on.
+- **Tool rows.**  `.se-tools` wraps and `justify-content: center` applies
+  per flex line, so every row of tools is centred on its own (the `.se-break`
+  spans are full-width and zero-high, so they never join a row).
+  `test_tool_rows_are_centred_in_the_strip` measures the margins.
+- **Full screen.**  `.se-view` lives on a `.se-stage` (`position:
+  relative`) beside `.se-fullbtn`, not inside it: within the view a wide
+  formula would scroll the button out of sight.  `Editor.setFullscreen`
+  toggles `.se-full` on the root - `position: fixed`, a column flex box, the
+  stage and the view taking the leftover height, the formula centred and
+  drawn at 1.9em - and Esc leaves it when nothing is selected (the last
+  `Escape` branch of `_onKey`).  The button re-measures the overlay boxes
+  after the size change.
+- **Touch keyboards.**  `noAutoCaps` (applied by `h()` to every text input,
+  and by hand to the contenteditable source line) turns off
+  `autocapitalize`, `autocorrect`, `autocomplete` and `spellcheck`: what is
+  typed is code, so a phone keyboard must not come up shifted (`x`, not
+  `X`).  Anything new that takes typed expressions goes through it.
 - **Button surface.**  The tools are raised, not flat: a barely-there
   vertical gradient (`--se-btn`), a lit top edge and a soft drop shadow
   (`--se-btn-edge`, `--se-btn-shadow`), hover lifting it with an accent

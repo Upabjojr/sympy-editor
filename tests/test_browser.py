@@ -2407,3 +2407,121 @@ def test_native_backend_talks_to_the_host_application(browser, serve_expr):
     page.evaluate(ed + ".send({action: 'undo'})")
     assert _wait(lambda: "Python is gone" in page.locator("#native-host .se-error").inner_text())
     assert page.errors == []
+
+
+def test_full_screen_button_gives_the_formula_the_window(browser, serve_expr):
+    """A quasi-transparent button in the corner of the editing area makes the
+    formula fill the window; Esc (or the button) comes back."""
+    srv, doc = serve_expr(x**2 / y - sin(x))
+    page = browser.new_page(viewport={"width": 900, "height": 620})
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(srv.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+
+    btn = page.locator(".se-fullbtn")
+    assert btn.count() == 1
+    # barely there over the formula until the pointer asks for it
+    assert float(page.evaluate("getComputedStyle(document.querySelector('.se-fullbtn')).opacity")) <= 0.5
+    view = page.locator(".se-view").bounding_box()
+    box = btn.bounding_box()
+    assert box["y"] >= view["y"] - 1 and box["y"] < view["y"] + view["height"] / 2      # top...
+    assert view["x"] + view["width"] - (box["x"] + box["width"]) < 12                   # ...right corner
+    size = lambda: float(page.evaluate("parseFloat(getComputedStyle(document.querySelector('.se-view')).fontSize)"))
+    small, short = size(), view["height"]
+
+    btn.click()
+    assert "se-full" in page.locator(".sympy-editor").get_attribute("class")
+    root = page.locator(".sympy-editor").bounding_box()
+    assert (round(root["x"]), round(root["y"])) == (0, 0)                # the page behind is covered
+    assert (round(root["width"]), round(root["height"])) == (900, 620)
+    tall = page.locator(".se-view").bounding_box()["height"]
+    assert tall > short * 1.5, (short, tall)                            # the editing area took the room
+    assert size() > small                                               # and the formula is drawn larger
+
+    _select(page, "/1/d")                                               # selecting still works, and lands right
+    sel = page.locator(".se-view .se-selected[data-path]").bounding_box()
+    glyph = page.locator('.se-view [data-path="/1/d"]').bounding_box()
+    assert abs(sel["x"] - glyph["x"]) < 6 and abs(sel["y"] - glyph["y"]) < 12, (sel, glyph)
+
+    page.keyboard.press("Escape")                                       # first Esc drops the selection
+    assert "se-full" in page.locator(".sympy-editor").get_attribute("class")
+    page.keyboard.press("Escape")                                       # then leaves full screen
+    assert "se-full" not in page.locator(".sympy-editor").get_attribute("class")
+    assert round(page.locator(".se-view").bounding_box()["height"]) == round(short)
+    assert errors == []
+    page.close()
+
+
+def test_tool_rows_are_centred_in_the_strip(browser, serve_expr):
+    """Every row of tools is centred on its own line.  Left-aligned, a short
+    row (undo/redo, History, the zoom) hung off the left edge under a much
+    longer one, which read as a mistake."""
+    srv, doc = serve_expr(x + y)
+    page = browser.new_page(viewport={"width": 1100, "height": 800})
+    page.goto(srv.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    rows = page.evaluate("""() => {
+        const strip = document.querySelector('.se-tools').getBoundingClientRect();
+        const bands = [];
+        for (const el of document.querySelectorAll('.se-tools > *')) {
+            const r = el.getBoundingClientRect();
+            if (!r.height || !r.width) continue;          // the row breaks are zero-high
+            const mid = (r.top + r.bottom) / 2;
+            let band = bands.find(b => Math.abs(b.mid - mid) < 9);
+            if (!band) bands.push(band = {mid: mid, left: r.left, right: r.right});
+            band.left = Math.min(band.left, r.left);
+            band.right = Math.max(band.right, r.right);
+        }
+        bands.sort((a, b) => a.mid - b.mid);
+        return bands.map(b => ({before: b.left - strip.left, after: strip.right - b.right,
+                                width: b.right - b.left}));
+    }""")
+    assert len(rows) >= 3, rows
+    for row in rows:
+        assert abs(row["before"] - row["after"]) <= 2, rows      # as much room on the left as on the right
+    assert any(row["before"] > 20 for row in rows), rows         # a short row really is pulled in
+    page.close()
+
+
+def test_no_box_capitalises_what_is_typed(browser, serve_expr):
+    """Formula text is code: on a touch keyboard nothing comes up shifted
+    (x, not X), autocorrected or predicted - in every box of the editor."""
+    srv, doc = serve_expr(x + y)
+    page = _open(browser, srv.url)
+    page.locator(".se-symbols summary").click()          # the name / shape / assumption boxes
+    _select(page, "/0")
+    page.keyboard.press("Enter")                         # the in-place editor over the formula
+    page.wait_for_selector(".se-view input.se-inline")
+    page.locator(".se-fn").click()                       # the function box and its parameter form
+    boxes = page.evaluate("""() => {
+        const out = [];
+        for (const el of document.querySelectorAll('.sympy-editor input, .sympy-editor .se-source')) {
+            if (el.type && el.type !== 'text') continue;
+            out.push([el.className || el.tagName, el.getAttribute('autocapitalize'),
+                      el.getAttribute('autocorrect'), el.getAttribute('spellcheck')]);
+        }
+        return out;
+    }""")
+    assert len(boxes) >= 4, boxes
+    assert all(b[1] == "off" and b[2] == "off" and b[3] == "false" for b in boxes), boxes
+    assert page.errors == []
+
+
+def test_a_lambda_can_be_applied_to_arguments(browser, serve_expr):
+    """Lambda is the one SymPy object that is itself a function: the methods
+    menu offers to apply it, since `__call__` is a dunder and shows up in no
+    listing of its methods."""
+    from sympy import Lambda
+    srv, doc = serve_expr(Lambda(x, x**2))
+    page = _open(browser, srv.url)
+    menu = page.locator(".se-methods")
+    assert _wait(lambda: menu.is_visible())
+    assert "( ) apply" in menu.locator("option").all_inner_texts()
+    menu.select_option("__call__")
+    form = page.locator(".se-fn-form")
+    form.wait_for(state="visible")
+    form.locator("input").first.fill("3")
+    _next_state(page, lambda: form.locator(".se-fn-apply").click())
+    assert doc.expr == 9
+    assert page.errors == []

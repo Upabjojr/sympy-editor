@@ -103,7 +103,7 @@ var SympyEditor = (function () {
     "</ul></section>",
     "<section><h3>Applying functions</h3><ul>",
     "<li><b>Transform \u25be</b> holds the general operations; a second menu appears with operations for the selection's type (Matrix, Integral, Equation\u2026). Picking one applies it at once, to the selection or, with nothing selected, to the whole expression.</li>",
-    "<li><b>Methods \u25be</b> lists everything the selected object's class can do \u2014 .det(), .T, .diff()\u2026 \u2014 one pick calls it.</li>",
+    "<li><b>Methods \u25be</b> lists everything the selected object's class can do \u2014 .det(), .T, .diff()\u2026 \u2014 one pick calls it. A Lambda is itself a function: <b>( ) apply</b> evaluates it at the arguments you give.</li>",
     "<li>The <b>function box</b> searches all of SymPy: pick a function and fill the parameters it asks for; \u201cdiff(x)\u201d, \u201c.T\u201d, \u201cdet()\u201d typed in full apply as written.</li>",
     "<li><b>unevaluated</b> builds the symbolic form (Determinant, Integral, sin(0)\u2026) instead of computing it; <i>Evaluate (doit)</i> computes it later.</li>",
     "<li>The <b>Symbols</b> panel under the formula declares new names and changes what a name stands for (symbol, function, matrix, assumptions).</li>",
@@ -118,8 +118,9 @@ var SympyEditor = (function () {
     "<li>Tap a gap for a caret, tap the caret again to insert; tap an operator for its palette.</li>",
     "<li>Drag to select a range; two fingers zoom; <b>\u2328</b> opens the keyboard for the selection.</li>",
     "</ul></section>",
-    "<section><h3>Zoom</h3><ul>",
+    "<section><h3>Zoom and full screen</h3><ul>",
     "<li><kbd>Ctrl</kbd>+wheel, <kbd>Ctrl</kbd>+<kbd>+</kbd>/<kbd>\u2212</kbd>/<kbd>0</kbd>, pinch, or the \u2212/100%/+ buttons.</li>",
+    "<li>The faint button in the top-right corner of the editing area gives the formula the whole window; it (or <kbd>Esc</kbd>, with nothing selected) comes back.</li>",
     "</ul></section>",
     "</div>"
   ].join("");
@@ -372,6 +373,17 @@ var SympyEditor = (function () {
       'stroke-linecap="round" stroke-linejoin="round"><path d="M8 13.2V3.2"/><path d="M3.9 7.3 8 3.2l4.1 4.1"/></g></svg>';
   }
 
+  /** The full-screen icon: four corner brackets pointing out (or, once the
+   *  formula fills the window, in).  Drawn like the arrows, so it matches
+   *  them on every platform. */
+  function expandSvg(full) {
+    var out = "M2.8 6.2V2.8h3.4M9.8 2.8h3.4v3.4M13.2 9.8v3.4H9.8M6.2 13.2H2.8V9.8";
+    var back = "M6.2 2.8v3.4H2.8M13.2 6.2H9.8V2.8M9.8 13.2V9.8h3.4M2.8 9.8h3.4v3.4";
+    return '<svg class="se-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
+      '<path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" ' +
+      'stroke-linejoin="round" d="' + (full ? back : out) + '"/></svg>';
+  }
+
   /** Give `boxCls` to the marked elements (`cls`) that have no marked
    *  ancestor: one tinted box per changed region, over the node's whole
    *  visual extent, instead of an inline background per level (which paints
@@ -384,6 +396,17 @@ var SympyEditor = (function () {
     }
   }
 
+  // A box whose content is an expression, a name or a number - never prose.
+  // On a touch keyboard that means no shifted first letter, no autocorrect,
+  // no prediction and no spelling underline.
+  function noAutoCaps(el) {
+    if (!el.hasAttribute("autocapitalize")) el.setAttribute("autocapitalize", "off");
+    if (!el.hasAttribute("autocorrect")) el.setAttribute("autocorrect", "off");
+    if (!el.hasAttribute("autocomplete")) el.setAttribute("autocomplete", "off");
+    if (!el.hasAttribute("spellcheck")) el.setAttribute("spellcheck", "false");
+    return el;
+  }
+
   function h(tag, attrs, children) {
     var el = document.createElement(tag);
     if (attrs) {
@@ -391,6 +414,10 @@ var SympyEditor = (function () {
         if (attrs[k] !== null && attrs[k] !== undefined) el.setAttribute(k, attrs[k]);
       }
     }
+    // What is typed here is code, never prose: a touch keyboard must not come
+    // up shifted (x, not X), nor autocorrect or predict.  Every text box in
+    // the editor gets this unless it asks for something else.
+    if (tag === "input" && (!attrs || !attrs.type || attrs.type === "text")) noAutoCaps(el);
     (children || []).forEach(function (c) {
       el.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
     });
@@ -538,15 +565,30 @@ var SympyEditor = (function () {
         class: "se-view", tabindex: "0", role: "application",
         "aria-label": "SymPy expression; click to select a sub-expression"
       });
-      root.appendChild(this.view);
+      // The view sits on a stage: a wide formula scrolls inside the view, so
+      // anything that must stay pinned to the corner of the editing area (the
+      // full-screen button) lives beside it, not in it.
+      this.stage = h("div", { class: "se-stage" }, [this.view]);
+      root.appendChild(this.stage);
+      this.fullBtn = h("button", { type: "button", class: "se-fullbtn",
+        title: "Full screen: the formula alone, as large as the window (F, or Esc to come back)",
+        "aria-label": "Full screen" });
+      this.fullBtn.innerHTML = expandSvg(false);
+      this.fullBtn.addEventListener("click", function (ev) {
+        ev.preventDefault();
+        self.setFullscreen(!self.fullscreen);
+        self.view.focus({ preventScroll: true });
+      });
+      this.stage.appendChild(this.fullBtn);
+      this.fullscreen = false;
       this.zoom = 1;
       this._applyZoom(this._initialZoom());
 
       // The SymPy source line: editable text (Enter applies, Esc reverts) whose
       // selection is linked to the rendering both ways.  The rendering itself is
       // never replaced by code: whole-expression edits happen here.
-      this.source = h("code", { class: "se-source", spellcheck: "false",
-        title: o.readOnly ? "SymPy source" : "SymPy source: select to select in the formula; edit, then Enter to apply (Esc reverts)" });
+      this.source = noAutoCaps(h("code", { class: "se-source",
+        title: o.readOnly ? "SymPy source" : "SymPy source: select to select in the formula; edit, then Enter to apply (Esc reverts)" }));
       if (!o.readOnly) {
         this.source.setAttribute("contenteditable", "plaintext-only");
         if (!this.source.isContentEditable) this.source.setAttribute("contenteditable", "true");
@@ -1224,7 +1266,7 @@ var SympyEditor = (function () {
         for (var i = 0; i < entries.length; i++) {
           var e = entries[i];
           this.methodsMenu.appendChild(h("option", { value: e.name, title: e.doc || "" },
-            [e.property ? "." + e.name : "." + e.name + "()"]));
+            [e.label || (e.property ? "." + e.name : "." + e.name + "()")]));
         }
         this.methodsMenu.selectedIndex = 0;
       }
@@ -1663,7 +1705,8 @@ var SympyEditor = (function () {
       } else if (k === "Enter") {
         if (!ro) this.beginEdit(this.selected || "/");
       } else if (k === "Escape") {
-        this.select(null);
+        if (!this.selected && this.fullscreen) this.setFullscreen(false);
+        else this.select(null);
       } else if ((k === "Backspace" || k === "Delete") && this.selected === "/" && !ro) {
         this.editSource("");                     // the whole expression: start over in the source line
       } else if (k === "Backspace") {
@@ -3684,6 +3727,33 @@ var SympyEditor = (function () {
         hist.appendChild(row);
       });
       this._renderHistory();
+    }
+
+    /* ---- full screen ---- */
+
+    /** Give the formula the whole window: the editor becomes a fixed panel
+     *  over the page, the editing area takes all the height that is left and
+     *  the formula is drawn larger.  Everything else on the page is simply
+     *  covered.  The corner button and Esc (when nothing is selected) come
+     *  back. */
+    setFullscreen(on) {
+      on = !!on;
+      if (on === this.fullscreen) return;
+      this.fullscreen = on;
+      this.root.classList.toggle("se-full", on);
+      if (this.fullBtn) {
+        this.fullBtn.innerHTML = expandSvg(on);
+        var title = on ? "Leave full screen (Esc)"
+                       : "Full screen: the formula alone, as large as the window";
+        this.fullBtn.setAttribute("title", title);
+        this.fullBtn.setAttribute("aria-label", title);
+      }
+      // the view changed size: the overlay boxes and the caret are placed in
+      // pixels, so they have to be measured again
+      this._gapCache = null;
+      if (this.caret) this._hideCaret();
+      this._applySelection();
+      this._setStatus(on ? "Full screen - Esc or the corner button comes back" : "");
     }
 
     /* ---- zoom and sideways scrolling ---- */
