@@ -171,7 +171,10 @@ def test_str_spans_match_str(expr):
     for path, (start, end) in spans.items():
         node = get_at(expr, parse_path(path))
         piece = text[start:end]
-        # a negated term is printed without its sign; a denominator as its reciprocal
+        # a negated term carries its sign (the display puts a space after it:
+        # "x - sin(x)"), a denominator is printed as its reciprocal
+        if piece.startswith("- "):
+            piece = "-" + piece[2:]
         forms = {str(node)}
         for make in (lambda n: -n, lambda n: 1 / n):
             try:

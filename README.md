@@ -209,9 +209,14 @@ with "GitHub Actions" as the source once).
 
 ### The source line
 
-The SymPy source under the formula is linked to the rendering: select a
-piece of it and the corresponding sub-expression is selected in the formula;
-select in the formula and the matching source text is highlighted.  The line
+The SymPy source under the formula and the formula itself are one document
+seen twice, and the two follow each other both ways.  Select a piece of the
+text and the corresponding sub-expression is selected in the formula; select
+in the formula and the matching source text is highlighted, a negated term
+with its sign.  Put the text cursor in the line and a caret appears at the
+same place in the formula (whatever was selected is dropped, as it would be
+in a text editor); move the caret in the formula and a cursor shows where it
+stands in the text.  The line
 is editable and **previews as you type**: whenever the text parses, the
 formula above shows it (a text that does not parse marks the line red and
 leaves the formula alone); Enter commits it — as one undo step — and Esc

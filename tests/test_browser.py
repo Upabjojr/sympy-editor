@@ -3096,11 +3096,14 @@ def test_a_caret_in_the_source_line_is_a_caret_in_the_formula(browser, serve_exp
             r.collapse(true);
             const s = getSelection(); s.removeAllRanges(); s.addRange(r);
         }""", offset)
-        return page.evaluate("""() => {
+        # selectionchange is delivered asynchronously: wait for the caret to follow
+        state = lambda: page.evaluate("""() => {
             const e = document.querySelector('.sympy-editor').__sympyEditor;
             return {selected: e.selected, range: !!e.range,
                     caret: e.caret ? [e.caret.path, e.caret.extend || null] : null};
         }""")
+        _wait(lambda: state()["caret"] is not None)
+        return state()
 
     at = caret_at(text.index("y"))                            # right before the denominator
     assert at["selected"] is None and not at["range"]         # the selection is lifted...
@@ -3219,4 +3222,42 @@ def test_the_history_strip_opens_in_its_final_shape(browser, serve_expr):
     page.wait_for_selector(".se-history-view")
     assert page.locator(".se-history-head .se-play").count() == 0
     assert page.locator(".se-history-head .se-head-save").count() == 1
+    assert page.errors == []
+
+
+def test_the_formula_and_the_source_line_show_the_same_place(browser, serve_expr):
+    """The two views are one document.  What is selected in the formula is
+    marked in the source text, and the formula's caret shows there as a
+    cursor of its own - the other half of putting the text cursor in the
+    line and getting a caret in the formula."""
+    srv, doc = serve_expr(x**2 / y - sin(x))
+    page = _open(browser, srv.url)
+    text = page.locator(".se-source").inner_text()
+    marker_at = """() => {
+        const src = document.querySelector('.se-source');
+        const c = src.querySelector('.se-source-caret');
+        if (!c) return null;
+        let off = 0;
+        for (const n of src.childNodes) { if (n === c) break; off += (n.textContent || '').length; }
+        return off;
+    }"""
+
+    _select(page, "/1/d")                                    # the y of x**2/y
+    assert page.locator(".se-source mark").inner_text() == "y"
+    assert page.evaluate(marker_at) is None                  # a selection, not a caret
+
+    _select(page, "/0")                                      # a whole term: - sin(x)
+    assert page.locator(".se-source mark").inner_text() == "- sin(x)"
+
+    _select(page, "/1/d")
+    page.keyboard.press("ArrowDown")                         # into a caret beside it
+    assert page.locator(".se-caret").count() == 1
+    assert page.locator(".se-source mark").count() == 0      # no selection any more...
+    assert page.evaluate(marker_at) == text.index("y") + 1   # ...a cursor where the caret is
+    page.keyboard.press("ArrowLeft")                         # the cursor follows the caret
+    assert page.evaluate(marker_at) == text.index("y")
+
+    page.keyboard.press("Escape")                            # and goes when nothing is marked
+    assert page.evaluate(marker_at) is None
+    assert page.locator(".se-source").inner_text() == text
     assert page.errors == []

@@ -1301,7 +1301,8 @@ var SympyEditor = (function () {
         self._onKey(ev);
       });
       this.source.addEventListener("focus", function () {
-        if (self.source.querySelector("mark")) self.source.textContent = self.source.textContent;   // plain text to edit
+        // plain text to edit: the highlight and the caret marker step aside
+        if (self.source.querySelector("mark, .se-source-caret")) self.source.textContent = self.source.textContent;
       });
       this.source.addEventListener("input", function () {
         self.sourceDirty = true;
@@ -2608,6 +2609,18 @@ var SympyEditor = (function () {
     _markSource(paths) {
       if (this.sourceDirty || document.activeElement === this.source || !this.state) return;
       var text = this.state.src || "";
+      // A caret in the formula is a caret in the source line: the two views
+      // are one document, so what is marked in one is marked in the other.
+      if (!paths.length && this.caret) {
+        var at = this._sourceOffsetOf(this.caret);
+        if (at !== null && at <= text.length) {
+          this.source.textContent = "";
+          this.source.appendChild(document.createTextNode(text.slice(0, at)));
+          this.source.appendChild(h("span", { class: "se-source-caret", "aria-hidden": "true" }));
+          this.source.appendChild(document.createTextNode(text.slice(at)));
+          return;
+        }
+      }
       var spans = this.state.spans || {};
       var lo = Infinity, hi = -Infinity;
       for (var i = 0; i < paths.length; i++) {
@@ -2665,25 +2678,33 @@ var SympyEditor = (function () {
      *  the snapshot gives each path its span in the source, so the two line
      *  up: the gap after `x` is where `x` ends in the text. */
     _caretNear(off) {
-      var spans = (this.state && this.state.spans) || {};
-      var pathOf = function (el) {
-        var node = el && el.closest ? el.closest("[data-path]") : null;
-        return node ? node.getAttribute("data-path") : null;
-      };
       var list = this._caretPositions();
       var best = null, bestDist = Infinity;
       for (var i = 0; i < list.length; i++) {
-        var g = list[i].gap, where = null, p;
-        if (g.extend === "before" && spans[g.path]) where = spans[g.path][0];
-        else if (g.extend === "after" && spans[g.path]) where = spans[g.path][1];
-        else if ((p = pathOf(g.rightEl)) && spans[p]) where = spans[p][0];
-        else if ((p = pathOf(g.leftEl)) && spans[p]) where = spans[p][1];
-        else if (spans[g.path]) where = spans[g.path][0];
+        var where = this._sourceOffsetOf(list[i].gap);
         if (where === null) continue;
         var d = Math.abs(where - off);
         if (d < bestDist) { bestDist = d; best = list[i]; }
       }
       return best;
+    }
+
+    /** Where a caret position of the formula falls in the source text: the
+     *  start of what is to its right, or the end of what is to its left.
+     *  Null when neither side is a node the source knows. */
+    _sourceOffsetOf(gap) {
+      var spans = (this.state && this.state.spans) || {};
+      var pathOf = function (el) {
+        var node = el && el.closest ? el.closest("[data-path]") : null;
+        return node ? node.getAttribute("data-path") : null;
+      };
+      var p;
+      if (gap.extend === "before" && spans[gap.path]) return spans[gap.path][0];
+      if (gap.extend === "after" && spans[gap.path]) return spans[gap.path][1];
+      if ((p = pathOf(gap.rightEl)) && spans[p]) return spans[p][0];
+      if ((p = pathOf(gap.leftEl)) && spans[p]) return spans[p][1];
+      if (spans[gap.path]) return spans[gap.path][0];
+      return null;
     }
 
     /** Apply the edited source line as the whole expression. */

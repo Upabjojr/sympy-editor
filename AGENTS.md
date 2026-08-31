@@ -458,11 +458,18 @@ Two conventions between printer, document and front end:
   viewer in a page or a fragment.  Keep the payload shape identical on both
   sides: one viewer serves the editor's sessions and any list of
   expressions.
-- **The source line's caret.**  A collapsed selection there is a caret in
-  the formula: `_caretNear(offset)` matches every position of
-  `_caretPositions()` to a character offset (the span of the node beside it,
-  from `state.spans`) and `_showCaret` lifts the selection and places it.
-  The two views are one document; a caret in one is a caret in the other.
+- **The two views are one document.**  Formula and source line follow each
+  other both ways, and all four directions must keep working:
+  selection -> `<mark>` (`_markSource`), mark -> selection
+  (`_onSourceSelection`), text caret -> formula caret (`_caretNear` +
+  `_showCaret`), formula caret -> `.se-source-caret` (`_markSource` again).
+  `_sourceOffsetOf(gap)` is the one place that maps a caret position to a
+  character offset - through `state.spans` and the paths of the elements
+  beside the gap - and `_caretNear` is its inverse by nearest offset.  A
+  negated term's source span covers its minus (`AnnotatedStrPrinter.
+  _print_Add` puts the sign inside the term's marker, as the LaTeX printer
+  does), so selecting `- sin(x)` marks the same text in both; a plus stays
+  outside, since there it is the operator between two terms.
 - **The source line's selection.**  Selecting text there selects in the
   formula (`_onSourceSelection`, `selectionchange`).  Two things used to
   break it and both are easy to reintroduce: `contenteditable` must be

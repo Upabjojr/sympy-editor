@@ -483,6 +483,19 @@
 }
 @media (prefers-reduced-motion: reduce) { .se-caret { animation: none; } }
 
+/* the formula's caret, shown in the source line: the two views are one
+ * document, so a cursor in one appears in the other */
+.se-source-caret {
+  display: inline-block;
+  width: 0;
+  height: 1em;
+  margin: 0 -1px;
+  vertical-align: text-bottom;
+  border-left: 2px solid rgba(var(--se-accent), 0.95);
+  animation: se-blink 1.1s step-end infinite;
+}
+@media (prefers-reduced-motion: reduce) { .se-source-caret { animation: none; } }
+
 .se-busy .se-view { opacity: 0.6; }
 .se-closed .se-view { opacity: 0.7; }
 

@@ -702,13 +702,25 @@ class AnnotatedStrPrinter(_AnnotatingMixin, StrPrinter):
                 if negative:
                     sign = "-"
             if precedence(term) < prec or is_add(term):
-                parts.extend([sign, "(%s)" % t])
-            else:
-                parts.extend([sign, t])
-        sign = parts.pop(0)
-        if sign == "+":
-            sign = ""
-        return sign + " ".join(parts)
+                t = "(%s)" % t
+            parts.append((sign, t))
+        # A minus belongs to the term it negates - the rendering shows
+        # "- sin(x)" as one term, sign included - so it goes inside that
+        # term's marker and the source span covers it too.  A plus does not:
+        # there it is the operator between two terms, selectable on its own.
+        # The printed characters are unchanged either way.
+        def signed(prefix: str, text: str) -> str:
+            pair = self._unwrap(text)
+            if not pair:
+                return prefix + text
+            path, inner = pair
+            return MARK_START + path + MARK_SEP + prefix + inner + MARK_END
+
+        first_sign, first = parts[0]
+        out = signed("-", first) if first_sign == "-" else first
+        for sign, text in parts[1:]:
+            out += " " + (signed("- ", text) if sign == "-" else sign + " " + text)
+        return out
 
 
 def _annotated_matrix_str(printer, expr) -> str:
