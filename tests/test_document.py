@@ -1067,3 +1067,26 @@ def test_wrapping_in_a_container_builds_the_container():
     # and what really cannot be wrapped still says so
     with pytest.raises(ValueError, match="Cannot wrap in Integral"):
         Document(x + y).wrap("/", "Integral")
+
+
+def test_applying_a_container_takes_the_expression_as_its_contents():
+    """The function box goes through `call`, not `wrap`: typing Matrix there
+    failed the same way, since Matrix(x) is an error in SymPy."""
+    from sympy import Array, FiniteSet, ImmutableMatrix, Matrix
+
+    x, y = symbols("x y")
+    d = Document(x + y)
+    d.call("/", "Matrix")
+    assert d.expr == Matrix([[x + y]])
+    d = Document(x + y)
+    d.handle({"action": "call", "path": "/", "func": "ImmutableMatrix"})
+    assert d.expr == ImmutableMatrix([[x + y]])
+    d = Document(x + y)
+    d.call("/", "Matrix", lazy=True)                 # unevaluated asks for the same thing
+    assert d.expr == Matrix([[x + y]])
+    # ordinary functions are untouched, and a real error is still an error
+    d = Document(x + y)
+    d.call("/", "expand")
+    assert d.expr == x + y
+    with pytest.raises(ValueError, match="Unknown SymPy function"):
+        Document(x + y).call("/", "no_such_function_at_all")

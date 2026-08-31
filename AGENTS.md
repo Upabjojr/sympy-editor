@@ -380,10 +380,16 @@ Two conventions between printer, document and front end:
   one (`_renameSession`), which sets `title: true` on the stored row;
   `_storeSession` then leaves the name alone.  Emptying the field clears
   `title` and hands the session back to its formula.
-- **Wrapping in a container.**  `Document.wrap` calls `fn(node)`, and a
-  container refuses that - `Matrix(x)` is an error, `Matrix([[x]])` is the
-  1x1 matrix.  On failure it retries `fn([[node]])` then `fn([node])` before
-  reporting, which is what makes wrapping in Matrix, Array or a set work.
+- **Containers take contents, not arguments.**  `Matrix(x)` is an error,
+  `Matrix([[x]])` is the 1x1 matrix, so `_over_contents(fn, target, args)`
+  retries `fn([[node]])` then `fn([node])` when the plain call fails.  Both
+  `Document.call` (which is where the function box goes - the only path a
+  user has) and `Document.wrap` go through it; fixing one and not the other
+  leaves the bug exactly where it is felt.
+- **The `?` guide is part of the tool.**  `HELP_HTML` is what a user reads to
+  find out what the editor can do: a feature that is not in it does not
+  exist for them.  Update it in the same commit as the feature -
+  `test_help_button_shows_the_guide` checks a phrase from each area.
 - **Tool blocks and columns.**  Every tool lives in a `.se-block`
   (`data-block`: session, zoom, sessions, nav, edit, clip, apply) built by
   the `block()` helper, and a block never breaks apart.  Under 44rem the

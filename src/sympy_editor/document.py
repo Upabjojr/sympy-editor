@@ -148,6 +148,22 @@ METHOD_SKIP = {
 _TYPE_METHODS_CACHE: Dict[type, List[Dict[str, Any]]] = {}
 
 
+def _over_contents(fn, target, args):
+    """``fn(target, *args)``, falling back to the same call over the node's
+    contents for a container that refuses a bare expression: ``Matrix(x)`` is
+    an error, ``Matrix([[x]])`` is the 1x1 matrix holding it.  Applying or
+    wrapping in Matrix, Array or a set means the latter."""
+    try:
+        return fn(target, *args)
+    except Exception:
+        for contents in ([[target]], [target]):
+            try:
+                return fn(contents, *args)
+            except Exception:
+                continue
+        raise
+
+
 def render_step(expr: Basic, printer_settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """One step of a history as the viewer wants it: ``{"latex", "nodes"}``,
     the annotated LaTeX of ``expr`` and its node table by path.  Two of these
@@ -835,11 +851,11 @@ class Document:
             fn = getattr(sympy, name)
             if lazy and (isinstance(fn, type) or name in UNEVALUATED_CONSTRUCTORS):
                 with sympy.evaluate(False):
-                    result = fn(target, *args)
+                    result = _over_contents(fn, target, args)
             else:
                 if lazy:
                     self.last_note = f"{name} has no unevaluated form: applied"
-                result = fn(target, *args)
+                result = _over_contents(fn, target, args)
         elif not name.startswith("_") and hasattr(target, name):
             if lazy:
                 self.last_note = f"{name} has no unevaluated form: applied"
@@ -942,24 +958,15 @@ class Document:
         if not callable(fn) or name.startswith("_"):
             fn = Function(name)      # not a function anywhere: an undefined one, f(x)
         try:
-            result = sympify(fn(target, *extra))
+            result = sympify(_over_contents(fn, target, extra))
             # Wrapping builds, it does not compute: when the node is no longer
             # inside what came back (sqrt of 4 is 2, cos of 0 is 1), keep the
             # application unevaluated so the editor shows what was asked for.
             if target not in getattr(result, "args", ()):
                 with sympy.evaluate(False):
-                    result = sympify(fn(target, *extra))
+                    result = sympify(_over_contents(fn, target, extra))
         except Exception as exc:     # noqa: BLE001 - a wrong number of arguments, mostly
-            # A container wants its contents, not an argument: Matrix(x) is an
-            # error, Matrix([[x]]) is the 1x1 matrix holding x.  Wrapping in
-            # Matrix, Array... means exactly that, so try it before giving up.
-            try:
-                result = sympify(fn([[target]], *extra))
-            except Exception:
-                try:
-                    result = sympify(fn([target], *extra))
-                except Exception:
-                    raise ValueError(f"Cannot wrap in {name}: {exc}") from None
+            raise ValueError(f"Cannot wrap in {name}: {exc}") from None
         if not isinstance(result, Basic):
             raise ValueError(f"{name} returned {type(result).__name__}, not an expression")
         if children is not None:
