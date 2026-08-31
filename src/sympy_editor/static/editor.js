@@ -757,6 +757,9 @@ var SympyEditor = (function () {
       if (o.sessions && !o.readOnly) {
         block("sessions");
         btn("drawer", "\u2630", "Sessions and history");
+        // On a narrow screen the blocks pack into lines: this ends the first
+        // one, so nothing can slip to the right of the drawer's button.
+        this.tools.appendChild(h("span", { class: "se-linebreak" }));
       }
       if (!o.readOnly) {
         // 4. moving the selection

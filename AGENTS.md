@@ -383,7 +383,11 @@ Two conventions between printer, document and front end:
   44rem `.se-tools` becomes a three-column grid and `:nth-child(3n+1/2/0)`
   put each block at the start, the centre or the end of its column.  The
   sessions button is its own block at the right end because the drawer
-  slides in from the right.  `test_the_tools_are_laid_out_in_columns` and
+  slides in from the right: wide it is the third block, so it lands in the
+  right-hand column; narrow, `order` moves it up to the first line and a
+  `.se-linebreak` span ends that line so nothing can sit to its right.  That
+  span is why the column rules use `:nth-of-type` - it takes no grid cell but
+  `:nth-child` would count it and shift every block after it one column.  `test_the_tools_are_laid_out_in_columns` and
   `test_the_tools_stay_in_blocks_on_a_narrow_screen` measure the edges.
 - **The slideshow.**  `PLAYER_JS` is plain ES5 in a string, inlined in every
   report: the slides are the `section.step` and `.transition` elements

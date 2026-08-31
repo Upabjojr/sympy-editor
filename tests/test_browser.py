@@ -2645,6 +2645,19 @@ def test_the_sessions_button_sits_on_the_side_the_drawer_opens(browser, tmp_path
     assert row["blocks"] >= 3                                   # ...on the row with the timeline and the zoom
     assert abs(row["drawer"] - row["edge"]) <= 1, row           # and it ends that row, at the strip's right edge
     assert row["drawer"] == row["rightmost"], row
+    # and on a phone, where the blocks pack into lines instead of columns,
+    # it moves up to end the first line rather than starting the second
+    page.set_viewport_size({"width": 384, "height": 780})
+    page.wait_for_timeout(100)
+    narrow = page.evaluate("""() => {
+        const strip = document.querySelector('.se-tools').getBoundingClientRect();
+        const blocks = [...document.querySelectorAll('.se-tools > .se-block')].filter(el => el.getBoundingClientRect().height);
+        const tops = blocks.map(el => Math.round(el.getBoundingClientRect().top));
+        const first = Math.min(...tops);
+        const drawer = document.querySelector('.se-tools [data-cmd="drawer"]').closest('.se-block').getBoundingClientRect();
+        return {onFirstLine: Math.round(drawer.top) === first, fromRight: Math.round(strip.right - drawer.right)};
+    }""")
+    assert narrow["onFirstLine"] and narrow["fromRight"] <= 1, narrow
     # the drawer really does come from the right
     assert page.evaluate("getComputedStyle(document.querySelector('.se-drawer')).right") == "0px"
     page.close()
