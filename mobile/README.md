@@ -103,3 +103,19 @@ as artifacts; with the secrets `ANDROID_KEYSTORE_BASE64` + passwords and
   to edit it (tap a gap for a caret, again to insert), drag to select a
   range, ↑ / *Delete* / the menus in the toolbar; ⌨ opens the on-screen
   keyboard for the selection, the caret or the whole expression.
+
+## The icon
+
+`python mobile/make_icons.py` builds every size the app and the store need
+from two things: `mobile/icon/sympy-mark.svg` - SymPy's own logo with the
+wordmark taken off, since an icon has no room for text - and a pencil the
+script draws over it, which is what says the app *edits* the mathematics.
+It writes the master SVGs beside the mark, the `mipmap-*` PNGs (legacy,
+round and the 108dp adaptive foreground), the adaptive-icon XML with its
+background colour, and `mobile/icon/icon-512.png` for a store listing.
+Needs `rsvg-convert` (`apt install librsvg2-bin`).
+
+The mark's author, Fredrik Johansson, permits its free use on SymPy's own
+terms (the note travels in the file).  That is a copyright licence, not a
+trademark one: an app that is not part of the SymPy project should not
+present itself as if it were - see the application id above.

@@ -3,6 +3,8 @@
     <!-- The bundle is fully offline; INTERNET is only needed by a CDN (build_www.py with the cdn option) bundle. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <application
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
         android:allowBackup="true"
         android:supportsRtl="true"

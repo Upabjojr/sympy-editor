@@ -151,3 +151,23 @@ def test_the_android_app_is_configured_for_its_own_python():
     assert "AndroidPlatform" in kotlin and "Executors.newSingleThreadExecutor" in kotlin
     src = (ROOT / "src" / "sympy_editor" / "static" / "editor.js").read_text(encoding="utf-8")
     assert "native: nativeBackend" in src
+
+
+def test_the_app_has_an_icon_of_its_own():
+    """Without one Android shows the default robot, and a store listing has
+    nothing to put on its card."""
+    res = ROOT / "mobile/android/app/src/main/res"
+    for density in ("mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi"):
+        for name in ("ic_launcher.png", "ic_launcher_round.png", "ic_launcher_foreground.png"):
+            assert (res / f"mipmap-{density}" / name).is_file(), (density, name)
+    # adaptive icons (API 26+): a masked foreground over a flat background
+    adaptive = (res / "mipmap-anydpi-v26/ic_launcher.xml").read_text(encoding="utf-8")
+    assert "<adaptive-icon" in adaptive and "@mipmap/ic_launcher_foreground" in adaptive
+    assert "ic_launcher_background" in (res / "values/ic_launcher_background.xml").read_text(encoding="utf-8")
+    manifest = (ROOT / "mobile/android/app/src/main/AndroidManifest.xml").read_text(encoding="utf-8")
+    assert 'android:icon="@mipmap/ic_launcher"' in manifest
+    assert 'android:roundIcon="@mipmap/ic_launcher_round"' in manifest
+    # the art is built from SymPy's own mark, which travels with the repo
+    mark = (ROOT / "mobile/icon/sympy-mark.svg").read_text(encoding="utf-8")
+    assert "Fredrik Johansson" in mark and "SymPy_text" not in mark      # the wordmark is off
+    assert (ROOT / "mobile/icon/icon-512.png").is_file()                      # what the store listing wants
