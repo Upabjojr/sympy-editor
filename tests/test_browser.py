@@ -1193,7 +1193,7 @@ def test_long_formula_scrolls_sideways_and_fits_a_phone(browser, serve_expr):
     # the page itself does not overflow: the editor fits the screen, the tools wrap onto several rows
     assert page.evaluate("document.documentElement.scrollWidth") <= 400
     assert page.evaluate("getComputedStyle(document.querySelector('.se-tools')).flexWrap") == "wrap"
-    rows = page.evaluate("(() => { const tops = new Set([...document.querySelectorAll('.se-tools > button')].map(b => Math.round(b.getBoundingClientRect().top))); return tops.size; })()")
+    rows = page.evaluate("(() => { const tops = new Set([...document.querySelectorAll('.se-tools [data-cmd]')].map(b => Math.round(b.getBoundingClientRect().top))); return tops.size; })()")
     assert rows >= 2 and page.evaluate("(() => { const t = document.querySelector('.se-tools'); return t.scrollWidth <= t.clientWidth; })()")
     # the action bar under a selection wraps as well instead of running off the screen
     _click(page, "/0")
@@ -1688,7 +1688,9 @@ def test_history_report_is_self_contained_and_works_offline(browser, serve_expr,
     _next_state(page, lambda: page.select_option(".se-ops", "factor"))
     assert doc.expr == x**2 + cos(y)
     html = page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.buildReport()")
-    assert html.startswith("<!DOCTYPE html>") and "data:font/woff2;base64," in html and "<script" not in html
+    assert html.startswith("<!DOCTYPE html>") and "data:font/woff2;base64," in html
+    assert "<script src" not in html and "<link" not in html      # nothing is fetched: only the inline player
+    assert html.count("<script>") == 1
     # Every KaTeX @font-face must survive the inlining: with only the first
     # one left, \left[ fell back to a normal-height bracket (document.fonts
     # .check() is true for an undeclared family, so count the rules).
@@ -1706,6 +1708,10 @@ def test_history_report_is_self_contained_and_works_offline(browser, serve_expr,
     rp.on("pageerror", lambda e: errors.append(str(e)))
     rp.goto(path.as_uri())
     assert rp.locator(".step .katex").count() == 3 and rp.locator(".transition").count() == 2
+    # ...and it plays there too, offline
+    rp.locator(".player .play").click()
+    assert rp.evaluate("document.body.classList.contains('slides')")
+    assert rp.locator(".slide-on").count() == 1
     assert rp.evaluate("document.fonts.ready.then(() => document.fonts.check('12px KaTeX_Main'))")
     assert rp.locator(".transition .what").first.inner_text() == "Edit: sin(y) → cos(y)"
     assert rp.locator('.step[data-current="1"] h2').inner_text().startswith("STEP 3") or "current" in rp.locator('.step[data-current="1"] h2').inner_text().lower()
@@ -2257,45 +2263,70 @@ def test_status_line_names_the_selection_on_its_own_line(browser, serve_expr):
         page.close()
 
 
-def test_toolbar_groups_the_tools_in_rows(browser, serve_expr):
-    """The tools sit in three rows of related blocks, not one long strip."""
+def test_the_tools_are_laid_out_in_columns(browser, serve_expr):
+    """The tools sit in blocks, and the blocks in three columns: the left one
+    starts at the left edge, the right one ends at the right edge, the middle
+    one is centred.  One long strip of buttons, or rows each ending wherever
+    their content happens to stop, read as a mess."""
     srv, doc = serve_expr(x + y)
     page = browser.new_page(viewport={"width": 1100, "height": 800})
     page.goto(srv.url)
-    page.wait_for_selector(".se-view .katex [data-path]")
-    # Row index per tool: the tools of a row are centred on the same line,
-    # whatever their own height (a select is taller than a button).
-    rows = page.evaluate("""() => {
-        const items = [];
-        for (const b of document.querySelectorAll('.se-tools [data-cmd]')) items.push([b.getAttribute('data-cmd'), b]);
-        for (const [k, sel] of [['ops', '.se-ops'], ['fn', '.se-fn'], ['lazy', '.se-lazy']]) {
-            const el = document.querySelector(sel);
-            if (el) items.push([k, el]);
-        }
-        const mid = el => { const r = el.getBoundingClientRect(); return r.height ? (r.top + r.bottom) / 2 : null; };
-        const bands = [];
-        for (const [, el] of items) {
-            const m = mid(el);
-            if (m !== null && !bands.some(b => Math.abs(b - m) < 9)) bands.push(m);
-        }
-        bands.sort((a, b) => a - b);
-        const out = {};
-        for (const [name, el] of items) {
-            const m = mid(el);                      // hidden tools (the touch keyboard button) have no row
-            if (m !== null) out[name] = bands.findIndex(b => Math.abs(b - m) < 9);
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    blocks = page.evaluate("""() => {
+        const strip = document.querySelector('.se-tools').getBoundingClientRect();
+        const out = [];
+        for (const el of document.querySelectorAll('.se-tools > .se-block')) {
+            const r = el.getBoundingClientRect();
+            if (!r.width || !r.height) continue;
+            out.push({name: el.getAttribute('data-block'),
+                      left: Math.round(r.left - strip.left), right: Math.round(strip.right - r.right),
+                      top: Math.round(r.top), wide: el.classList.contains('se-block-wide')});
         }
         return out;
     }""")
-    # 1: the session and its timeline, with the zoom
-    assert rows["undo"] == rows["redo"] == rows["history"] == rows["help"] == rows["zoomin"]
-    # 2: the selection - navigation, what to do with it, the clipboard
-    assert rows["parent"] == rows["child"] == rows["left"] == rows["right"]
-    assert rows["parent"] == rows["edit"] == rows["delete"] == rows["copy"] == rows["paste"]
-    # 3: what to apply
-    assert rows["ops"] == rows["fn"] == rows["lazy"]
-    assert rows["undo"] < rows["parent"] < rows["ops"], rows
-    assert len(set(rows.values())) == 3, rows
-    assert page.locator(".se-tools .se-sep").count() >= 3          # blocks divided within a row
+    by = {b["name"]: b for b in blocks}
+    assert {"session", "zoom", "nav", "edit", "clip", "apply"} <= set(by), blocks
+    rows = sorted({b["top"] for b in blocks})
+    assert len(rows) == 3, blocks                                  # two rows of three, then the wide one
+    # a block never breaks apart: what belongs together stays on one line
+    assert by["session"]["top"] == by["zoom"]["top"] == by["nav"]["top"]
+    assert by["edit"]["top"] == by["clip"]["top"]
+    assert by["apply"]["top"] == rows[2] and by["apply"]["wide"]
+    # left column flush left, right column flush right, middle centred
+    assert by["session"]["left"] <= 1 and by["edit"]["left"] <= 1, blocks
+    assert by["nav"]["right"] <= 1, blocks
+    assert abs(by["zoom"]["left"] - by["zoom"]["right"]) <= 2, blocks
+    assert abs(by["clip"]["left"] - by["clip"]["right"]) <= 2, blocks
+    assert by["apply"]["left"] <= 1 and by["apply"]["right"] <= 1, blocks
+    page.close()
+
+
+def test_the_tools_stay_in_blocks_on_a_narrow_screen(browser, serve_expr):
+    """No room for three columns on a phone: the blocks spread across each
+    line instead, one against the left edge and one against the right, so
+    the strip still reads as a grid and nothing hangs in the middle."""
+    srv, doc = serve_expr(x + y)
+    page = browser.new_page(viewport={"width": 384, "height": 780})
+    page.goto(srv.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    lines = page.evaluate("""() => {
+        const strip = document.querySelector('.se-tools').getBoundingClientRect();
+        const by = {};
+        for (const el of document.querySelectorAll('.se-tools > .se-block')) {
+            const r = el.getBoundingClientRect();
+            if (!r.width || !r.height) continue;
+            const key = Math.round(r.top);
+            (by[key] = by[key] || []).push({left: r.left - strip.left, right: strip.right - r.right});
+        }
+        return Object.keys(by).sort((a, b) => a - b).map(k => by[k]);
+    }""")
+    assert len(lines) >= 3, lines
+    for line in lines:
+        assert line[0]["left"] <= 1, lines                          # every line starts at the left edge
+        if len(line) > 1:
+            assert line[-1]["right"] <= 1, lines                    # and, with something to spread, ends at the right
+    assert any(len(line) > 1 for line in lines), lines
+    assert page.evaluate("document.documentElement.scrollWidth") <= 384   # nothing overflows
     page.close()
 
 
@@ -2436,9 +2467,12 @@ def test_full_screen_button_gives_the_formula_the_window(browser, serve_expr):
     assert "se-full" in page.locator(".sympy-editor").get_attribute("class")
     assert page.evaluate("window.SympyEditorApp.calls") == [True]
     page.wait_for_function("!!document.fullscreenElement", timeout=10000)   # and the browser, for real
-    # nothing but the tools and the formula is left
+    # nothing but the formula is left: the tools, the source line and the
+    # Symbols panel all step aside
+    assert not page.locator(".se-toolbar").is_visible()
     assert not page.locator(".se-source").is_visible()
     assert not page.locator(".se-symbols").is_visible()
+    assert page.locator(".se-fullbtn").is_visible()          # the way back stays
     root = page.locator(".sympy-editor").bounding_box()
     assert (round(root["x"]), round(root["y"])) == (0, 0)                # the page behind is covered
     assert (round(root["width"]), round(root["height"])) == (900, 620)
@@ -2457,40 +2491,10 @@ def test_full_screen_button_gives_the_formula_the_window(browser, serve_expr):
     assert "se-full" not in page.locator(".sympy-editor").get_attribute("class")
     assert page.evaluate("window.SympyEditorApp.calls") == [True, False]
     page.wait_for_function("!document.fullscreenElement", timeout=10000)
+    assert page.locator(".se-toolbar").is_visible()
     assert page.locator(".se-source").is_visible()
     assert round(page.locator(".se-view").bounding_box()["height"]) == round(short)
     assert errors == []
-    page.close()
-
-
-def test_tool_rows_are_centred_in_the_strip(browser, serve_expr):
-    """Every row of tools is centred on its own line.  Left-aligned, a short
-    row (undo/redo, History, the zoom) hung off the left edge under a much
-    longer one, which read as a mistake."""
-    srv, doc = serve_expr(x + y)
-    page = browser.new_page(viewport={"width": 1100, "height": 800})
-    page.goto(srv.url)
-    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
-    rows = page.evaluate("""() => {
-        const strip = document.querySelector('.se-tools').getBoundingClientRect();
-        const bands = [];
-        for (const el of document.querySelectorAll('.se-tools > *')) {
-            const r = el.getBoundingClientRect();
-            if (!r.height || !r.width) continue;          // the row breaks are zero-high
-            const mid = (r.top + r.bottom) / 2;
-            let band = bands.find(b => Math.abs(b.mid - mid) < 9);
-            if (!band) bands.push(band = {mid: mid, left: r.left, right: r.right});
-            band.left = Math.min(band.left, r.left);
-            band.right = Math.max(band.right, r.right);
-        }
-        bands.sort((a, b) => a.mid - b.mid);
-        return bands.map(b => ({before: b.left - strip.left, after: strip.right - b.right,
-                                width: b.right - b.left}));
-    }""")
-    assert len(rows) >= 3, rows
-    for row in rows:
-        assert abs(row["before"] - row["after"]) <= 2, rows      # as much room on the left as on the right
-    assert any(row["before"] > 20 for row in rows), rows         # a short row really is pulled in
     page.close()
 
 
@@ -2628,15 +2632,19 @@ def test_the_sessions_button_sits_on_the_side_the_drawer_opens(browser, tmp_path
     page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
     row = page.evaluate("""() => {
         const drawer = document.querySelector('.se-tools [data-cmd="drawer"]').getBoundingClientRect();
+        const strip = document.querySelector('.se-tools').getBoundingClientRect();
         const mine = [], mid = (drawer.top + drawer.bottom) / 2;
-        for (const el of document.querySelectorAll('.se-tools > *, .se-tools .se-zoom > *')) {
+        for (const el of document.querySelectorAll('.se-tools > .se-block')) {
             const r = el.getBoundingClientRect();
             if (r.height && r.width && Math.abs((r.top + r.bottom) / 2 - mid) < 9) mine.push(r.right);
         }
-        return {drawer: drawer.right, rightmost: Math.max(...mine), n: mine.length};
+        return {drawer: drawer.right, edge: strip.right, blocks: mine.length,
+                rightmost: Math.max(...mine), block: document.querySelector('.se-tools [data-cmd="drawer"]').closest('.se-block').getAttribute('data-block')};
     }""")
-    assert row["n"] > 3                                        # the row it shares with undo/redo/zoom
-    assert row["drawer"] == row["rightmost"], row              # and it ends that row
+    assert row["block"] == "sessions"                           # a block of its own...
+    assert row["blocks"] >= 3                                   # ...on the row with the timeline and the zoom
+    assert abs(row["drawer"] - row["edge"]) <= 1, row           # and it ends that row, at the strip's right edge
+    assert row["drawer"] == row["rightmost"], row
     # the drawer really does come from the right
     assert page.evaluate("getComputedStyle(document.querySelector('.se-drawer')).right") == "0px"
     page.close()
@@ -2657,4 +2665,53 @@ def test_the_full_screen_button_is_a_finger_sized_target(browser, serve_expr):
     assert icon["width"] < 25, icon                       # the drawing itself stays small
     page.locator(".se-fullbtn").tap()
     assert "se-full" in page.locator(".sympy-editor").get_attribute("class")
+    page.close()
+
+
+def test_a_history_plays_as_a_slideshow(browser, tmp_path):
+    """A history can be watched, not only read: the report carries its own
+    player - one slide per step and per change - so the editor's History
+    view, a page of its own and a saved file all play the same way."""
+    from sympy import Integral, cos
+    from sympy_editor import History, to_history_html
+
+    hist = History([
+        Integral(x * sin(x), x),
+        (-x * cos(x) + Integral(cos(x), x), "by parts"),
+        (-x * cos(x) + sin(x), "the last integral"),
+    ], title="By parts")
+    path = tmp_path / "play.html"
+    path.write_text(to_history_html(hist), encoding="utf-8")
+    page = browser.new_page(viewport={"width": 900, "height": 700})
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(path.as_uri())
+    page.wait_for_selector(".se-history-frame", timeout=30000)
+    frame = page.frame_locator(".se-history-frame")
+    frame.locator(".player").wait_for(timeout=30000)
+    doc = page.frames[1]
+    # three steps and the two changes between them: five slides
+    assert frame.locator(".player .count").inner_text() == "1 / 5"
+    assert doc.evaluate("document.querySelectorAll('.slide-on').length") == 0   # everything shown until asked
+
+    frame.locator(".player .play").click()
+    assert doc.evaluate("document.body.classList.contains('slides')")
+    assert doc.evaluate("document.querySelectorAll('.slide-on').length") == 1
+    assert not frame.locator("h1").is_visible()                # the slide has the screen to itself
+    assert "Pause" in frame.locator(".player .play").inner_text()
+    assert _wait(lambda: frame.locator(".player .count").inner_text() == "2 / 5", timeout=10)
+    assert frame.locator(".transition.slide-on").count() == 1  # a change is a slide of its own
+
+    frame.locator(".player .play").click()                     # pause where it stands
+    at = frame.locator(".player .count").inner_text()
+    assert "Play" in frame.locator(".player .play").inner_text()
+    frame.locator(".player .next").click()
+    assert frame.locator(".player .count").inner_text() != at
+    frame.locator(".player .prev").click()
+    assert frame.locator(".player .count").inner_text() == at
+    frame.locator(".player .exit").click()                     # back to the whole history
+    assert not doc.evaluate("document.body.classList.contains('slides')")
+    assert doc.evaluate("document.querySelectorAll('.slide-on').length") == 0
+    assert frame.locator("h1").is_visible()
+    assert errors == []
     page.close()

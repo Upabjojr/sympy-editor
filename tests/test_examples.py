@@ -34,3 +34,39 @@ def test_generated_page_is_up_to_date(page):
 def test_no_pages_is_fine():
     # Pages are git-ignored build products; their absence is not an error.
     assert EXAMPLES.is_dir()
+
+
+NOTEBOOKS = sorted(EXAMPLES.glob("*.ipynb"))
+
+
+@pytest.mark.parametrize("nb", NOTEBOOKS, ids=[p.name for p in NOTEBOOKS])
+def test_notebook_is_well_formed(nb):
+    doc = json.loads(nb.read_text(encoding="utf-8"))
+    assert doc["nbformat"] == 4 and doc["cells"]
+    assert doc["metadata"]["kernelspec"]["language"] == "python"
+    for cell in doc["cells"]:
+        assert cell["cell_type"] in ("markdown", "code")
+        assert isinstance(cell["source"], list)
+
+
+def test_the_manualintegrate_example_still_runs(tmp_path, monkeypatch):
+    """The notebook reaches into `sympy.integrals.manualintegrate` - a private
+    rule tree that SymPy is free to change.  It is an example, not part of
+    the library, but a broken example is worse than none: run its cells."""
+    from sympy import Symbol, sin
+
+    nb = EXAMPLES / "manualintegrate_steps.ipynb"
+    if not nb.exists():
+        pytest.skip("example not present")
+    cells = [c for c in json.loads(nb.read_text(encoding="utf-8"))["cells"] if c["cell_type"] == "code"]
+    monkeypatch.chdir(tmp_path)                      # the last cell writes a file
+    ns = {}
+    for i, cell in enumerate(cells):
+        exec(compile("".join(cell["source"]), f"<cell {i}>", "exec"), ns)
+    x = Symbol("x")
+    hist = ns["integration_history"](x * sin(x), x)
+    assert len(hist) > 2
+    assert hist[0] == ns["Integral"](x * sin(x), x)
+    assert hist[-1] == (x * sin(x)).integrate(x)     # the chain really ends at the antiderivative
+    assert hist.actions[1] == "Parts"
+    assert (tmp_path / "integration_steps.html").is_file()

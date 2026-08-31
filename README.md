@@ -252,6 +252,10 @@ formula with what went in red.  Bold colour and a faint box mark exactly
 what the step touched, nothing around it.  Tapping a step opens it in the editor.  From
 there:
 
+- **Play** runs the history as a slideshow: one slide per step and one per
+  change, large and centred, advancing on its own (space pauses, ← → step,
+  Esc shows the whole history again).  The player travels with the page, so
+  a saved report plays too.
 - **Save as web page** downloads the same view as a self-contained HTML
   file: KaTeX's rendering and fonts are inlined, so it works offline and can
   be shared as it is.
@@ -301,6 +305,13 @@ The page runs no Python: it renders the steps with KaTeX in the browser, and
 its **Save as web page** button writes the whole thing - fonts included - to
 one offline file.  `examples/demo_history.py` builds one.
 
+`examples/manualintegrate_steps.ipynb` shows the point of the separation: it
+flattens the rule tree that `sympy.integrals.manualintegrate.integral_steps`
+returns into a list of expressions - one rule per step, by parts, by
+substitution, term by term - and hands it to the viewer, so SymPy's own
+reasoning can be read (and played) like any other derivation.  That code
+lives in the notebook: the library knows nothing about `manualintegrate`.
+
 ### Long computations
 
 A transformation that takes a while does not freeze the page: after a moment
@@ -330,9 +341,9 @@ it.  Available on Pyodide-backed pages.
 The formula sits on its own faintly outlined canvas, with the SymPy source
 of the whole expression under it and the tools above.  A quasi-transparent
 button in the canvas's top-right corner gives the formula the **whole
-screen**: the editor covers the page, the source line and the Symbols panel
-step aside, the editing area takes every pixel the tools leave, and the
-formula is drawn larger.  It is real full screen where the platform has one -
+screen**: the editor covers the page, everything else - the tools, the
+source line, the Symbols panel - steps aside, and the formula alone is drawn
+large in the middle.  It is real full screen where the platform has one -
 the browser's own (the Fullscreen API), and in the Android app the status and
 navigation bars go too.  The same button - or Esc, when nothing is selected -
 comes back.
@@ -344,11 +355,12 @@ The toolbar is organised in three rows of related blocks: the session and
 its timeline (sessions, undo/redo, History, ?, Done) with the zoom; the
 selection (navigation arrows, then Edit/Unwrap/Delete/Isolate and the
 clipboard); and what to apply (the Transform, type and Methods menus, the
-function box, the unevaluated toggle).  Each row is centred on its own, so a
-short row sits in the middle of the strip instead of hanging off the left
-edge.  On a narrow screen each row wraps onto as
-many lines as it needs, and so does the action bar under a selection:
-every button stays reachable.
+function box, the unevaluated toggle).  The blocks sit in columns - three
+from 44rem, and on a narrow screen they spread across each line instead -
+so the left column starts at the left edge, the right one ends at the right
+edge, and the strip reads as a grid rather than a wall of buttons.  A block
+never breaks apart: what belongs together stays together, and the action bar
+under a selection wraps the same way, so every button stays reachable.
 
 ## How it works
 

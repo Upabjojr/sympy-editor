@@ -376,12 +376,21 @@ Two conventions between printer, document and front end:
   hair lighter than the panel, darker in dark mode) inside `--se-rule`, a
   faint 1px border.  The change tint mixes into `--se-surface`, not
   `--se-bg`, so it matches the ground it sits on.
-- **Tool rows.**  The sessions button (`☰`) ends the first row because the
-  drawer it opens slides in from the right.  `.se-tools` wraps and
-  `justify-content: center` applies
-  per flex line, so every row of tools is centred on its own (the `.se-break`
-  spans are full-width and zero-high, so they never join a row).
-  `test_tool_rows_are_centred_in_the_strip` measures the margins.
+- **Tool blocks and columns.**  Every tool lives in a `.se-block`
+  (`data-block`: session, zoom, sessions, nav, edit, clip, apply) built by
+  the `block()` helper, and a block never breaks apart.  Under 44rem the
+  blocks spread across each line (`justify-content: space-between`); from
+  44rem `.se-tools` becomes a three-column grid and `:nth-child(3n+1/2/0)`
+  put each block at the start, the centre or the end of its column.  The
+  sessions button is its own block at the right end because the drawer
+  slides in from the right.  `test_the_tools_are_laid_out_in_columns` and
+  `test_the_tools_stay_in_blocks_on_a_narrow_screen` measure the edges.
+- **The slideshow.**  `PLAYER_JS` is plain ES5 in a string, inlined in every
+  report: the slides are the `section.step` and `.transition` elements
+  already on the page, shown one at a time under `body.slides`.  It has to
+  keep working offline in a saved file years from now - no dependency, no
+  build step, and the report stays self-contained (the tests check there is
+  no `<script src>` and no `<link>`).
 - **The history viewer is not the editor.**  `buildHistoryReport(hist,
   opts)`, `renderMarked`, `katexCssInline` and `saveFile` are free functions
   in editor.js, and `SympyEditor.mountHistory(host, cfg)` shows a history
@@ -409,8 +418,9 @@ Two conventions between printer, document and front end:
   relative`) beside `.se-fullbtn`, not inside it: within the view a wide
   formula would scroll the button out of sight.  `Editor.setFullscreen`
   toggles `.se-full` on the root - `position: fixed`, a column flex box, the
-  stage and the view taking the leftover height, the source line and the
-  Symbols panel hidden, the formula centred and drawn at 1.9em - and Esc
+  stage and the view taking the leftover height, the toolbar, the source line
+  and the Symbols panel all hidden (the corner button and the floating action
+  bar are what is left), the formula centred and drawn at 1.9em - and Esc
   leaves it when nothing is selected (the last `Escape` branch of `_onKey`).
   The panel is only the fallback: `_browserFullscreen` asks for the real
   thing through the Fullscreen API (a user gesture is needed, and an iframe
