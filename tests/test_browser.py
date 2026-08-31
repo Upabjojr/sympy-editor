@@ -2713,19 +2713,25 @@ def test_a_history_plays_as_a_slideshow(browser, tmp_path):
     for sel in (".se-play", ".se-play-count"):
         box = page.locator(sel).bounding_box()
         assert strip["y"] <= box["y"] and box["y"] + box["height"] <= strip["y"] + strip["height"] + 1
-    # three steps and the two changes between them: five slides
-    assert page.locator(".se-play-count").inner_text() == "1 / 5"
+    # one slide per step - three of them - and the change that produced a
+    # step is shown with it, not on a slide of its own
+    assert page.locator(".se-play-count").inner_text() == "1 / 3"
     assert doc.evaluate("document.querySelectorAll('.slide-on').length") == 0   # everything shown until asked
     assert not page.locator(".se-play-all").is_visible()
 
     page.locator(".se-play").click()
     assert doc.evaluate("document.body.classList.contains('slides')")
-    assert doc.evaluate("document.querySelectorAll('.slide-on').length") == 1
+    assert doc.evaluate("document.querySelectorAll('.slide-on').length") == 1   # the first step, alone
     assert not frame.locator("h1").is_visible()               # the slide has the frame to itself
     assert "Pause" in page.locator(".se-play").inner_text()
     assert page.locator(".se-play-all").is_visible()
-    assert _wait(lambda: page.locator(".se-play-count").inner_text() == "2 / 5", timeout=10)
-    assert frame.locator(".transition.slide-on").count() == 1  # a change is a slide of its own
+    assert _wait(lambda: page.locator(".se-play-count").inner_text() == "2 / 3", timeout=10)
+    # the change and its result are on screen together, in that order
+    shown = doc.evaluate("""() => [...document.querySelectorAll('.slide-on')]
+        .map(el => el.className.split(' ')[0] + ':' + (el.querySelector('.what') || {}).textContent)""")
+    assert len(shown) == 2 and shown[0].startswith("transition:by parts") and shown[1].startswith("step:")
+    assert frame.locator(".transition.slide-on .rep-removed").count() > 0   # what it was, in red
+    assert frame.locator(".step.slide-on .rep-added").count() > 0           # what it became, in green
 
     page.locator(".se-play").click()                           # pause where it stands
     at = page.locator(".se-play-count").inner_text()

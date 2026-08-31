@@ -390,8 +390,12 @@ Two conventions between printer, document and front end:
   `:nth-child` would count it and shift every block after it one column.  `test_the_tools_are_laid_out_in_columns` and
   `test_the_tools_stay_in_blocks_on_a_narrow_screen` measure the edges.
 - **The slideshow.**  `PLAYER_JS` is plain ES5 in a string, inlined in every
-  report: the slides are the `section.step` and `.transition` elements
-  already on the page, shown one at a time under `body.slides`.  It has to
+  report: the slides are built from the `section.step` and `.transition`
+  elements already on the page, one slide per step with the `.transition`
+  that produced it grouped in front of it (`slide-on`, plus `slide-top` /
+  `slide-bottom` on the group's ends so it centres as one), shown under
+  `body.slides`.  A change and its result belong on the screen together -
+  never one slide after the other.  It has to
   keep working offline in a saved file years from now - no dependency, no
   build step, and the report stays self-contained (the tests check there is
   no `<script src>` and no `<link>`).  A host drives it from its own fixed

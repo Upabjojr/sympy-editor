@@ -252,8 +252,9 @@ formula with what went in red.  Bold colour and a faint box mark exactly
 what the step touched, nothing around it.  Tapping a step opens it in the editor.  From
 there:
 
-- **Play** runs the history as a slideshow: one slide per step and one per
-  change, large and centred, advancing on its own.  Its controls sit in the
+- **Play** runs the history as a slideshow: one slide per step, with the
+  change that produced it - what it was in red, what it became in green -
+  on the same screen, large and centred, advancing on its own.  Its controls sit in the
   strip above, which stays put while the steps go by; inside the report the
   same keys work (space pauses, ← → step, Esc shows the whole history
   again).  The player travels with the page, so a saved report plays on its
