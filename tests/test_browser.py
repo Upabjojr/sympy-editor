@@ -3175,7 +3175,7 @@ def test_a_session_can_be_given_a_name(browser, tmp_path):
     row = page.locator(".se-session").first
     assert _wait(lambda: row.locator(".se-session-row > code").inner_text() == "x + y")
 
-    row.locator(".se-session-rename").click()
+    row.locator(".se-session-rename").first.click()
     field = row.locator("input.se-session-name")
     field.wait_for()
     field.fill("Simplifying the Hamiltonian")
@@ -3195,7 +3195,7 @@ def test_a_session_can_be_given_a_name(browser, tmp_path):
     assert _wait(lambda: page.locator(".se-session").first.locator(".se-session-row > code").inner_text() == "Simplifying the Hamiltonian")
 
     # emptying the name hands the session back to its formula
-    page.locator(".se-session").first.locator(".se-session-rename").click()
+    page.locator(".se-session").first.locator(".se-session-rename").first.click()
     field = page.locator(".se-session").first.locator("input.se-session-name")
     field.wait_for()
     field.fill("")
@@ -3278,3 +3278,50 @@ def test_the_formula_and_the_source_line_show_the_same_place(browser, serve_expr
     assert page.evaluate(marker_at) is None
     assert page.locator(".se-source").inner_text() == text
     assert page.errors == []
+
+
+def test_naming_a_session_owns_the_row_until_it_is_done(browser, tmp_path):
+    """While a session is being named the row is the field and its two
+    answers - the pencil, Open and Delete step aside, so a stray tap cannot
+    open or delete what is being renamed - and a snapshot arriving in the
+    background must not rebuild the list under the typing."""
+    path = tmp_path / "naming.html"
+    path.write_text(to_html(x + y, options={"sessions": True}), encoding="utf-8")
+    page = browser.new_page(viewport={"width": 1000, "height": 800})
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.add_init_script("""localStorage.setItem('sympy-editor:sessions', JSON.stringify({
+        current: 's1',
+        list: [{id: 's1', name: 'x + y', updated: 2, state: null, empty: false},
+               {id: 's2', name: 'an older one', updated: 1, state: null, empty: false, title: true}]
+    }));""")
+    page.goto(path.as_uri())
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    page.locator('[data-cmd="drawer"]').click()
+    row = page.locator(".se-session[data-id]").last               # not the current session
+    assert _wait(lambda: row.locator("code").first.inner_text() == "an older one")
+    assert row.locator("[data-delete]").is_enabled()              # deleting needs a second session
+    assert row.locator("[data-delete]").inner_text() == "Delete"
+
+    row.locator(".se-session-rename").first.click()
+    field = page.locator("input.se-session-name")
+    field.wait_for()
+    assert field.input_value() == "an older one"                  # a name of its own is there to edit
+    assert row.locator("button").all_inner_texts() == ["✓", "✕"]
+    assert row.locator("[data-open]").count() == 0 and row.locator("[data-delete]").count() == 0
+    # the editor stores a session in the background; the field must survive it
+    page.evaluate("document.querySelector('.sympy-editor').__sympyEditor._fillSessions()")
+    page.wait_for_timeout(600)
+    assert page.locator("input.se-session-name").count() == 1
+
+    field.fill("Hamiltonian")
+    row.locator(".se-session-drop").click()                       # ✕ leaves it as it was
+    assert _wait(lambda: row.locator("code").first.inner_text() == "an older one")
+    assert row.locator("[data-open]").count() == 1                # and the row comes back whole
+
+    row.locator(".se-session-rename").first.click()
+    page.locator("input.se-session-name").fill("Hamiltonian")
+    row.locator(".se-session-keep").click()                       # ✓ keeps it
+    assert _wait(lambda: row.locator("code").first.inner_text() == "Hamiltonian")
+    assert errors == []
+    page.close()

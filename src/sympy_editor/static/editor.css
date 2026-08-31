@@ -712,7 +712,8 @@
 .se-session code { font-family: var(--se-mono); color: var(--se-fg); flex: 1 1 10rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .se-session-rename { font-size: 12px; line-height: 1; padding: 0.25rem 0.4rem; border: 1px solid var(--se-border); border-radius: 0.3rem; background: var(--se-btn); color: inherit; cursor: pointer; }
 .se-session-rename:hover { border-color: rgba(var(--se-accent), 0.6); }
-.se-session-name { font: inherit; font-family: var(--se-mono); width: 100%; min-width: 0; padding: 0.1rem 0.3rem; border: 1px solid rgba(var(--se-accent), 0.7); border-radius: 0.25rem; background: var(--se-field); color: inherit; }
+.se-session-name { font: inherit; font-family: var(--se-mono); flex: 1 1 auto; min-width: 0; padding: 0.25rem 0.4rem; border: 1px solid rgba(var(--se-accent), 0.7); border-radius: 0.25rem; background: var(--se-field); color: inherit; }
+.se-session-name:focus { outline: 2px solid rgba(var(--se-accent), 0.45); outline-offset: -1px; }
 .se-session-current code { font-weight: 600; }
 .se-session-when { white-space: nowrap; }
 .se-session button, .se-session-new {

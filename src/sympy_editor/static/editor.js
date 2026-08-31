@@ -3730,23 +3730,37 @@ var SympyEditor = (function () {
       this._fillSessions();
     }
 
-    /** Rename a session: the name becomes a field, Enter (or leaving it)
-     *  keeps what was typed, Esc gives up.  A name typed here is the user's
-     *  and is never replaced by the formula (see _storeSession); emptying it
-     *  hands the session back to the formula. */
-    _renameSession(sess, label) {
+    /** Rename a session: the row becomes a field with the width to type in,
+     *  and the buttons that were there step aside - a stray tap on Open or
+     *  Delete in the middle of naming something is no help to anyone.
+     *  Enter or ✓ (or leaving the field) keeps what was typed, Esc or ✕ gives
+     *  up.  A name typed here is the user's and is never replaced by the
+     *  formula (see _storeSession); emptying it hands the session back. */
+    _renameSession(sess, head) {
       var self = this;
-      if (label.querySelector("input")) return;
+      if (head.querySelector("input.se-session-name")) return;
       var input = h("input", { type: "text", class: "se-session-name", value: sess.title ? sess.name : "",
                                placeholder: sess.name || "a name for this session", "aria-label": "Session name" });
-      label.textContent = "";
-      label.appendChild(input);
+      var button = function (glyph, title, cls) {
+        var b = h("button", { type: "button", class: "se-session-rename " + cls, title: title, "aria-label": title }, [glyph]);
+        b.addEventListener("mousedown", function (ev) { ev.preventDefault(); });   // the field keeps the focus
+        return b;
+      };
+      var keep = button("\u2713", "Keep this name (Enter)", "se-session-keep");
+      var drop = button("\u2715", "Leave the name as it was (Esc)", "se-session-drop");
+      head.textContent = "";
+      head.appendChild(input);
+      head.appendChild(keep);
+      head.appendChild(drop);
       input.focus();
       input.select();
-      var done = function (keep) {
+      var done = function (save) {
         if (input._done) return;
         input._done = true;
-        if (keep) {
+        // out of the DOM first: _fillSessions steps aside for a rename in
+        // progress, and this one is over
+        if (input.parentNode) input.parentNode.removeChild(input);
+        if (save) {
           var store = self._sessionStore || self._loadSessions();
           var row = store.list.filter(function (s) { return s.id === sess.id; })[0];
           if (row) {
@@ -3756,8 +3770,10 @@ var SympyEditor = (function () {
             self._saveSessions(store);
           }
         }
-        self._fillSessions();
+        self._fillSessions();       // the row comes back, with whatever else changed meanwhile
       };
+      keep.addEventListener("click", function (ev) { ev.stopPropagation(); done(true); });
+      drop.addEventListener("click", function (ev) { ev.stopPropagation(); done(false); });
       input.addEventListener("keydown", function (ev) {
         if (ev.key === "Enter") { ev.preventDefault(); done(true); }
         else if (ev.key === "Escape") { ev.preventDefault(); done(false); }
@@ -4124,6 +4140,11 @@ var SympyEditor = (function () {
 
     _fillSessions() {
       if (!this.sessions) return;
+      // A rename in progress owns the list: rebuilding it here would throw
+      // away the field the user is typing in (a snapshot arriving in the
+      // background is enough to do it).  The rename calls this again when it
+      // is done, so nothing is missed.
+      if (this.sessionsBody && this.sessionsBody.querySelector("input.se-session-name")) return;
       var self = this;
       var store = this._sessionStore || this._loadSessions();
       var body = this.sessionsBody;
@@ -4140,8 +4161,8 @@ var SympyEditor = (function () {
         head.appendChild(label);
         var rename = h("button", { type: "button", class: "se-session-rename", title: "Give this session a name of your own",
                                    "aria-label": "Rename this session" }, ["\u270e"]);
-        rename.addEventListener("click", function (ev) { ev.stopPropagation(); self._renameSession(sess, label); });
-        label.addEventListener("dblclick", function (ev) { ev.stopPropagation(); self._renameSession(sess, label); });
+        rename.addEventListener("click", function (ev) { ev.stopPropagation(); self._renameSession(sess, head); });
+        label.addEventListener("dblclick", function (ev) { ev.stopPropagation(); self._renameSession(sess, head); });
         head.appendChild(rename);
         head.appendChild(h("span", { class: "se-session-when" }, [when.toLocaleDateString() + " " + when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })]));
         var open = h("button", { type: "button", "data-open": sess.id, title: "Open this session" }, [current ? "Current" : "Open"]);

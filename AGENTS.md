@@ -379,7 +379,12 @@ Two conventions between printer, document and front end:
 - **Sessions.**  A session's `name` follows its formula until the user types
   one (`_renameSession`), which sets `title: true` on the stored row;
   `_storeSession` then leaves the name alone.  Emptying the field clears
-  `title` and hands the session back to its formula.
+  `title` and hands the session back to its formula.  While a rename is open
+  it owns the row - the field plus ✓ and ✕, with the pencil, Open and Delete
+  gone - and `_fillSessions` returns early if a `input.se-session-name` is in
+  the list: a snapshot arriving in the background used to rebuild the rows
+  and take the field away mid-typing.  `done()` removes the input before
+  asking for the refresh, or that guard would keep the row in edit mode.
 - **Containers take contents, not arguments.**  `Matrix(x)` is an error,
   `Matrix([[x]])` is the 1x1 matrix, so `_over_contents(fn, target, args)`
   retries `fn([[node]])` then `fn([node])` when the plain call fails.  Both
