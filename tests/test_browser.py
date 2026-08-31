@@ -2096,3 +2096,20 @@ def test_methods_menu_lists_and_calls_class_methods(browser, serve_expr):
     opts = menu.locator("option").all_inner_texts()
     assert ".det()" not in opts and ".round()" in opts       # the Integer's list, not the matrix's
     assert page.errors == []
+
+
+def test_help_button_shows_the_guide(browser, serve_expr):
+    srv, doc = serve_expr(x + y)
+    page = _open(browser, srv.url)
+    page.locator('.se-toolbar [data-cmd="help"]').click()
+    view = page.locator(".se-help-view")
+    assert view.is_visible()
+    text = view.inner_text().lower()
+    for expected in ("selecting", "unwrap", "operators", "unevaluated", "methods", "history", "phone"):
+        assert expected in text, expected
+    page.keyboard.press("Escape")                     # Esc closes it
+    assert page.locator(".se-help-view").count() == 0
+    page.locator('.se-toolbar [data-cmd="help"]').click()
+    page.locator(".se-help-view .se-history-close").click()   # so does the X
+    assert page.locator(".se-help-view").count() == 0
+    assert page.errors == []

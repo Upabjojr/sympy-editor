@@ -432,6 +432,13 @@
 .se-history-title small { font-weight: normal; font-size: 11px; opacity: 0.7; }
 .se-history-head button { font: inherit; font-size: 13px; padding: 0.3rem 0.6rem; border: 1px solid var(--se-border); border-radius: 0.3rem; background: transparent; color: inherit; cursor: pointer; }
 .se-history-head .se-history-close { font-size: 15px; line-height: 1; padding: 0.3rem 0.5rem; }
+.se-help-body { overflow: auto; padding: 0.9rem 1.3rem 2rem; }
+.se-help-cols { max-width: 64rem; margin: 0 auto; column-width: 26rem; column-gap: 2.2rem; }
+.se-help-body section { break-inside: avoid; margin: 0 0 1.1rem; }
+.se-help-body h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--se-muted); margin: 0 0 0.35rem; }
+.se-help-body ul { margin: 0; padding-left: 1.1rem; font-size: 13.5px; line-height: 1.55; }
+.se-help-body li { margin: 0.18rem 0; }
+.se-help-body kbd { font-family: var(--se-mono); font-size: 0.85em; border: 1px solid var(--se-border); border-bottom-width: 2px; border-radius: 0.25rem; padding: 0 0.3em; background: rgba(127, 127, 127, 0.08); }
 .se-history-frame { flex: 1; width: 100%; border: 0; background: transparent; }
 .se-history-report { font: inherit; font-size: 12px; padding: 0.15rem 0.5rem; border: 1px solid var(--se-border); border-radius: 0.3rem; background: transparent; color: inherit; cursor: pointer; }
 .se-step .se-diff-removed, .se-step .se-diff-added { font-weight: bold; border-radius: 0.15em; padding: 0 0.05em; }

@@ -69,6 +69,56 @@ var SympyEditor = (function () {
     ".katex-display { margin: 0.3em 0; text-align: left; } .katex-display > .katex { text-align: left; }",
     "footer { margin-top: 2rem; font-size: 0.8rem; color: #656d76; }"
   ].join("\n");
+  // The in-page guide (the toolbar's "?"): every gesture, key and tool.
+  var HELP_HTML = [
+    '<div class="se-help-cols">',
+    "<section><h3>Selecting</h3><ul>",
+    "<li>Click the middle of anything to select it; click the same spot again for the enclosing expression.</li>",
+    "<li><kbd>\u2191</kbd> enclosing, <kbd>\u2193</kbd> inside, <kbd>\u2190</kbd>/<kbd>\u2192</kbd> siblings, <kbd>Esc</kbd> deselects (the same arrows sit in the toolbar and under the selection).</li>",
+    "<li>Drag across terms to select a range; <kbd>Shift</kbd>+<kbd>\u2190</kbd>/<kbd>\u2192</kbd> grows and shrinks it.</li>",
+    "<li>The line under the tools names the selection: its type and SymPy form.</li>",
+    "</ul></section>",
+    "<section><h3>Editing</h3><ul>",
+    "<li>Just type over a selection to replace it; <kbd>Enter</kbd> or a double-click edits its existing text in place.</li>",
+    "<li><b>Delete</b> removes the selection. Deleting the whole expression empties the view: type the new one right there.</li>",
+    "<li><b>Unwrap</b> (<kbd>Backspace</kbd>) removes the node but keeps an argument: cos(\u03b8) \u2192 \u03b8; it asks which one when there is a choice.</li>",
+    "<li><b>Isolate</b> keeps only the selection; <b>Copy</b>/<b>Paste</b> and <kbd>Ctrl</kbd>+<kbd>C</kbd>/<kbd>X</kbd>/<kbd>V</kbd> work on selections and carets.</li>",
+    "<li><kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> redoes.</li>",
+    "<li>The source line under the formula is the whole expression as SymPy text: edit it there too.</li>",
+    "</ul></section>",
+    "<section><h3>Typing between things</h3><ul>",
+    "<li>Click between two terms, or at the left/right edge of an object: a caret appears. <kbd>Tab</kbd>/<kbd>Shift</kbd>+<kbd>Tab</kbd> put it after/before the selection; <kbd>\u2190</kbd>/<kbd>\u2192</kbd> walk it through the formula like a text cursor.</li>",
+    "<li>What you type is spliced in: operators as written, nothing between means multiplication (cos(t) after x gives x\u22c5cos(t)), <b>+</b>/<b>\u2212</b> add and subtract at the level of the sum, and a typed comma adds a function argument.</li>",
+    "<li>Next to a matrix entry or a power's base the caret extends that object: \u201c+ 1\u201d adds to it, \u201cy\u201d multiplies it.</li>",
+    "<li>LaTeX shortcuts in any field: \\theta becomes \u03b8 as you type (Greek letters, \\infty, \\le\u2026).</li>",
+    "</ul></section>",
+    "<section><h3>Operators</h3><ul>",
+    "<li>Click an operator itself (<b>+</b>, <b>\u2212</b>, <b>\u22c5</b>, <b>=</b>\u2026) to select it; a small palette appears.</li>",
+    "<li>Type <kbd>+</kbd> <kbd>-</kbd> <kbd>*</kbd> <kbd>/</kbd> <kbd>^</kbd> <kbd>=</kbd> to change it; <kbd>Del</kbd> removes it \u2014 side by side, the two multiply (x + y \u2192 xy).</li>",
+    "<li>In a sum, * binds just the two terms (x + y + z \u2192 xy + z); in a product, + splits it there (x\u22c5y\u22c5z \u2192 x + yz).</li>",
+    "</ul></section>",
+    "<section><h3>Applying functions</h3><ul>",
+    "<li><b>Transform \u25be</b> holds the general operations; a second menu appears with operations for the selection's type (Matrix, Integral, Equation\u2026). Picking one applies it at once, to the selection or, with nothing selected, to the whole expression.</li>",
+    "<li><b>Methods \u25be</b> lists everything the selected object's class can do \u2014 .det(), .T, .diff()\u2026 \u2014 one pick calls it.</li>",
+    "<li>The <b>function box</b> searches all of SymPy: pick a function and fill the parameters it asks for; \u201cdiff(x)\u201d, \u201c.T\u201d, \u201cdet()\u201d typed in full apply as written.</li>",
+    "<li><b>unevaluated</b> builds the symbolic form (Determinant, Integral, sin(0)\u2026) instead of computing it; <i>Evaluate (doit)</i> computes it later.</li>",
+    "<li>The <b>Symbols</b> panel under the formula declares new names and changes what a name stands for (symbol, function, matrix, assumptions).</li>",
+    "</ul></section>",
+    "<section><h3>History and sessions</h3><ul>",
+    "<li><b>History</b> shows every step and what changed (green: what a step brought, red: what it lost); tap a step to go back to it.</li>",
+    "<li>From there, save the history as a self-contained web page or as a Python script that rebuilds every step.</li>",
+    "<li><b>\u2630</b> lists the sessions, where the page keeps several.</li>",
+    "</ul></section>",
+    "<section><h3>On a phone or tablet</h3><ul>",
+    "<li>Tap to select; tap the selected node again to edit it.</li>",
+    "<li>Tap a gap for a caret, tap the caret again to insert; tap an operator for its palette.</li>",
+    "<li>Drag to select a range; two fingers zoom; <b>\u2328</b> opens the keyboard for the selection.</li>",
+    "</ul></section>",
+    "<section><h3>Zoom</h3><ul>",
+    "<li><kbd>Ctrl</kbd>+wheel, <kbd>Ctrl</kbd>+<kbd>+</kbd>/<kbd>\u2212</kbd>/<kbd>0</kbd>, pinch, or the \u2212/100%/+ buttons.</li>",
+    "</ul></section>",
+    "</div>"
+  ].join("");
   var ZOOM_KEY = "sympy-editor:zoom";
   var ZOOM_STEP = 1.2;
 
@@ -375,6 +425,7 @@ var SympyEditor = (function () {
         btn("redo", "↷", "Redo (Ctrl+Shift+Z, Ctrl+Y)");
         sep();
         btn("history", "History", "View the history of this session: every step, what changed and what produced it - and save it as a web page or a Python script");
+        btn("help", "?", "How to use the editor: every gesture, key and tool");
         if (o.finishButton) btn("finish", "Done", "Finish editing and hand the expression back to Python");
         sep();
       }
@@ -1504,6 +1555,7 @@ var SympyEditor = (function () {
     _onKey(ev) {
       if (this.closed) return;
       var k = ev.key;
+      if (this.helpView && k === "Escape") { ev.preventDefault(); this.closeHelp(); return; }
       var mod = ev.ctrlKey || ev.metaKey;
       var ro = this.opts.readOnly;
       var t = this.selected ? this.tree[this.selected] : null;
@@ -2913,6 +2965,7 @@ var SympyEditor = (function () {
           return this._selectChild();
         case "drawer": return this.toggleDrawer();
         case "history": return this.showHistory();
+        case "help": return this.showHelp();
         case "report": return this.exportReport();
         case "left":
         case "right": {
@@ -3339,6 +3392,7 @@ var SympyEditor = (function () {
       }
       this._setStatus("");
       this.closeHistory();
+      this.closeHelp();
       var frame = h("iframe", { class: "se-history-frame", title: "History" });
       var saveHtml = h("button", { type: "button", "data-save": "html", title: "A self-contained web page: works offline, KaTeX rendering and fonts included" }, ["Save as web page"]);
       var savePy = h("button", { type: "button", "data-save": "py", title: "A Python script rebuilding every step with SymPy" }, ["Save as Python"]);
@@ -3374,6 +3428,36 @@ var SympyEditor = (function () {
       this.root.appendChild(view);
       frame.srcdoc = html;
       close.focus();
+    }
+
+    /** The guide in a box: what showHelp shows the toolbar's "?" opens.
+     *  Static content (HELP_HTML), same overlay dress as the history view. */
+    showHelp() {
+      if (this.helpView) { this.closeHelp(); return; }    // the button toggles it
+      var self = this;
+      this.closeDrawer();
+      this.closeHistory();
+      var close = h("button", { type: "button", class: "se-history-close", title: "Close (Esc)", "aria-label": "Close" }, ["\u2715"]);
+      var head = h("div", { class: "se-history-head" }, [
+        h("span", { class: "se-history-title" }, ["How to use the editor"]), close]);
+      var body = h("div", { class: "se-help-body" });
+      body.innerHTML = HELP_HTML;
+      var view = h("div", { class: "se-history-view se-help-view", role: "dialog", "aria-label": "How to use the editor" }, [head, body]);
+      close.addEventListener("click", function () { self.closeHelp(); });
+      this._helpKey = function (ev) { if (ev.key === "Escape") { ev.preventDefault(); self.closeHelp(); } };
+      view.addEventListener("keydown", this._helpKey);           // (the editor's own handler stops Esc from reaching the document)
+      document.addEventListener("keydown", this._helpKey);
+      this.helpView = view;
+      this.root.appendChild(view);
+      close.focus();
+    }
+
+    closeHelp() {
+      if (!this.helpView) return;
+      if (this._helpKey) { document.removeEventListener("keydown", this._helpKey); this._helpKey = null; }
+      if (this.helpView.parentNode) this.helpView.parentNode.removeChild(this.helpView);
+      this.helpView = null;
+      this.view.focus({ preventScroll: true });
     }
 
     closeHistory() {

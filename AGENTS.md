@@ -355,6 +355,14 @@ Two conventions between printer, document and front end:
   the general Transform menu, since an expression, a matrix and an array can all
   be differentiated by `[x, y]` - and a kind-specific copy would put a type menu
   on every scalar, which the editor deliberately does not have.
+- **Help view.**  The toolbar's "?" (`showHelp`/`closeHelp`) overlays
+  `HELP_HTML` - the whole gesture/key/tool guide, static content in
+  `.se-help-body` (multi-column via `column-width`), dressed as the
+  history view (`.se-history-view se-help-view`).  Esc closes it from
+  anywhere (`_onKey` checks `helpView` first - the toolbar click refocuses
+  the formula view, whose handler would swallow Esc otherwise); opening
+  the history view closes it.  Keep HELP_HTML in step with README's table
+  when gestures change.
 - **Layout stability.**  `.sympy-editor` is `display: block` and
   `.se-status` has its own full line under the tool rows (`flex: 0 0 100%;
   min-width: 0; min-height: 1.3em`): the status text must never change the

@@ -281,8 +281,11 @@ what went in red, then this one with what came in green - and clicking a
 row goes back (or forward) to that step.  Tapping a session's row opens
 it.  Available on Pyodide-backed pages.
 
+The toolbar's **?** opens this whole guide inside the editor - every
+gesture, key and tool in one box (Esc closes it).
+
 The toolbar is organised in three rows of related blocks: the session and
-its timeline (sessions, undo/redo, History, Done) with the zoom; the
+its timeline (sessions, undo/redo, History, ?, Done) with the zoom; the
 selection (navigation arrows, then Edit/Unwrap/Delete/Isolate and the
 clipboard); and what to apply (the Transform, type and Methods menus, the
 function box, the unevaluated toggle).  On a narrow screen each row wraps onto as
