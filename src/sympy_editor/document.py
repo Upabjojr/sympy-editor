@@ -148,6 +148,18 @@ METHOD_SKIP = {
 _TYPE_METHODS_CACHE: Dict[type, List[Dict[str, Any]]] = {}
 
 
+def render_step(expr: Basic, printer_settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """One step of a history as the viewer wants it: ``{"latex", "nodes"}``,
+    the annotated LaTeX of ``expr`` and its node table by path.  Two of these
+    are all it takes to show a change as a diff, which is why this is a plain
+    function: :class:`History` builds steps from expressions that never went
+    through an editor."""
+    tex, nodes = annotate(expr, **(printer_settings or {}))
+    return {"latex": tex,
+            "nodes": {format_path(p): {"src": str(n), "type": type(n).__name__, "nargs": len(n.args)}
+                      for p, n in nodes.items()}}
+
+
 def type_methods(cls: type) -> List[Dict[str, Any]]:
     """The public methods and properties of ``cls`` (a SymPy class), as
     ``[{"name", "doc", "property"}]``, sorted by name - what the methods
@@ -469,9 +481,7 @@ class Document:
         except TypeError:          # unhashable
             hit = None
         if hit is None:
-            tex, nodes = annotate(expr, **self.printer_settings)
-            hit = {"latex": tex, "nodes": {format_path(p): {"src": str(n), "type": type(n).__name__, "nargs": len(n.args)}
-                                            for p, n in nodes.items()}}
+            hit = render_step(expr, self.printer_settings)
             try:
                 if len(cache) > 400:
                     cache.clear()

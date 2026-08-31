@@ -17,10 +17,20 @@ Local server (blocks until you press *Done* in the browser)::
 
     from sympy_editor import serve
     new_expr = serve(expr)
+
+A history of expressions, step by step, with no editor around it - a
+derivation carried out in Python shown the way the editor shows its own
+sessions::
+
+    from sympy_editor import History, save_history_html
+    steps = History([f0, (f1, "integration by parts"), (f2, "the last integral")])
+    save_history_html(steps, "steps.html")
 """
 
 from .document import Document
-from .html import display_html, save_html, to_html
+from .history import History
+from .html import (display_history, display_html, save_history_html, save_html,
+                   to_history_html, to_html)
 from .ops import get_ops, register_op
 from .printer import (
     AnnotatedLatexPrinter,
@@ -46,8 +56,10 @@ __all__ = [
     "latex_spans",
     "Document",
     "EditorServer",
+    "History",
     "annotate",
     "delete_at",
+    "display_history",
     "display_html",
     "edit",
     "format_path",
@@ -56,9 +68,11 @@ __all__ = [
     "parse_path",
     "register_op",
     "replace_at",
+    "save_history_html",
     "save_html",
     "serve",
     "strip_annotations",
+    "to_history_html",
     "to_html",
 ]
 

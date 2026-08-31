@@ -425,6 +425,173 @@ var SympyEditor = (function () {
   }
 
   /* ------------------------------------------------------------------ */
+  /* History viewer (no editor: any list of expressions)                 */
+  /* ------------------------------------------------------------------ */
+
+  /** The KaTeX stylesheet with its fonts inlined as data URIs (fetched once
+   *  per page): what makes a report self-contained. */
+  async function katexCssInline(href) {
+    var cache = window.__sympyEditorKatexInline || (window.__sympyEditorKatexInline = {});
+    if (!cache[href]) {
+      cache[href] = (async function () {
+        var base = new URL(href, document.baseURI);
+        var css = await (await fetch(base.href)).text();
+        var fonts = {};
+        var re = /url\((?:"|')?(fonts\/[^)"']+\.woff2)(?:"|')?\)/g, m;
+        while ((m = re.exec(css))) fonts[m[1]] = true;
+        await Promise.all(Object.keys(fonts).map(async function (rel) {
+          var blob = await (await fetch(new URL(rel, base).href)).blob();
+          fonts[rel] = await new Promise(function (resolve, reject) {
+            var r = new FileReader();
+            r.onload = function () { resolve(r.result); };
+            r.onerror = reject;
+            r.readAsDataURL(blob);
+          });
+        }));
+        // Keep the woff2 face only, as a data URI (the woff/ttf fallbacks
+        // would be dead links).  The src declaration is replaced up to the
+        // next ";" or "}" - never past it: in minified CSS the last
+        // declaration of a block has no ";", and running over the "}" would
+        // swallow the following @font-face rules whole (every face but the
+        // first was lost, and \left[ fell back to a normal-height bracket).
+        return css.replace(/src:\s*url\((?:"|')?(fonts\/[^)"']+\.woff2)(?:"|')?\)\s*format\((?:"|')?woff2(?:"|')?\)[^;}]*/g, function (all, rel) {
+          return "src:url(" + fonts[rel] + ") format(\"woff2\")";
+        });
+      })().catch(function (e) { delete cache[href]; throw e; });
+    }
+    return cache[href];
+  }
+
+  /** KaTeX HTML for `latex`, the nodes not in `kept` marked with `cls`
+   *  (all of them plain when `kept` is null), no data-path attributes. */
+  function renderMarked(latex, kept, cls) {
+    var div = document.createElement("div");
+    div.innerHTML = katex.renderToString(latex, { displayMode: true, output: "html", throwOnError: false,
+      trust: function (ctx) { return ctx.command === "\\htmlData"; },
+      strict: function (code) { return code === "htmlExtension" ? "ignore" : "warn"; } });
+    var els = div.querySelectorAll("[data-path]");
+    for (var i = 0; i < els.length; i++) {
+      var p = els[i].getAttribute("data-path");
+      if (kept) els[i].classList.add(kept[p] ? "rep-kept" : cls);
+      els[i].removeAttribute("data-path");
+    }
+    markBoxes(div, cls, "rep-box");
+    return div.innerHTML;
+  }
+
+  function escHtml(s) {
+    return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; });
+  }
+
+  /** A self-contained page showing a history step by step: every step
+   *  rendered (what it brought in green) and, between two steps, what
+   *  produced the change with the previous formula (what it lost in red).
+   *
+   *  `hist` is `{steps: [{latex, nodes}], labels: [source], actions:
+   *  [what produced each step], index}` - the editor's own sessions produce
+   *  one, and so does `sympy_editor.History` over any list of expressions
+   *  (the steps of a derivation computed in Python, for instance).  Nothing
+   *  here knows about the editor: `index` may be absent, and so may
+   *  `actions`. */
+  async function buildHistoryReport(hist, opts) {
+    opts = opts || {};
+    if (!hist || !hist.steps || !hist.steps.length) throw new Error("No history to report");
+    var css = await katexCssInline(opts.katexCss || DEFAULTS.katexCss);
+    var title = opts.title || "History";
+    var labels = hist.labels || [];
+    var out = [];
+    for (var i = 0; i < hist.steps.length; i++) {
+      var step = hist.steps[i], prev = i > 0 ? hist.steps[i - 1] : null, diff = null;
+      if (prev) {
+        diff = diffNodes(prev.nodes, step.nodes);
+        out.push('<div class="transition"><div class="arrow">↓</div><div class="what">' + escHtml((hist.actions && hist.actions[i]) || opts.defaultAction || "") + "</div>" +
+          '<div class="before"><span class="label">from (what went is red)</span>' + renderMarked(prev.latex, diff.oldKept, "rep-removed") + "</div></div>");
+      }
+      out.push('<section class="step" data-index="' + i + '"' + (i === hist.index ? ' data-current="1"' : "") + "><h2>Step " + (i + 1) + (i === hist.index ? " — current" : "") +
+        (i === 0 ? " — start" : "") + '</h2><div class="formula">' + renderMarked(step.latex, diff ? diff.newKept : null, "rep-added") +
+        "</div>" + (labels[i] === undefined ? "" : "<code>" + escHtml(labels[i]) + "</code>") + "</section>");
+    }
+    var when = new Date();
+    return "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
+      "<title>" + escHtml(title) + "</title><style>\n" + css + "\n" + REPORT_CSS + "\n</style></head><body><main>" +
+      "<h1>" + escHtml(title) + "</h1><p class=\"meta\">" + escHtml(when.toLocaleString()) + " · " + hist.steps.length + " step" + (hist.steps.length === 1 ? "" : "s") +
+      " · green: what a step brought, red: what the previous one lost</p>" + out.join("\n") +
+      "<footer>Generated by sympy-editor. This file is self-contained (KaTeX rendering and fonts included) and works offline.</footer></main></body></html>\n";
+  }
+
+  /** Offer `text` as a file: the host app, the share sheet, or a download. */
+  async function saveFile(name, mime, text) {
+    var app = window.SympyEditorApp;
+    if (app && (app.shareFile || (mime === "text/html" && app.shareHtml))) {
+      if (app.shareFile) app.shareFile(name, mime, text); else app.shareHtml(name, text);
+      return "ready: choose where to save or share it";
+    }
+    var file = null;
+    try { file = new File([text], name, { type: mime }); } catch (e) { /* no File constructor */ }
+    if (file && navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: name }); return "shared"; }
+      catch (e) { if (e && e.name === "AbortError") return ""; }
+    }
+    var url = URL.createObjectURL(new Blob([text], { type: mime }));
+    var a = h("a", { href: url, download: name });
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+    return "downloaded: " + name;
+  }
+
+  /** The history viewer on its own, with no editor and no backend behind it:
+   *  `cfg.history` is the payload above, from wherever.  The report is built
+   *  in the page and shown in an iframe (its own stylesheet), under a strip
+   *  with the title and a button that saves the page.  `cfg.onStep(i)` (when
+   *  given) is called when a step is clicked.
+   *
+   *  Returns `{element, ready}`, `ready` resolving with the report's HTML. */
+  function mountHistory(host, cfg) {
+    cfg = cfg || {};
+    var opts = Object.assign({}, DEFAULTS, cfg.options || {});
+    var hist = cfg.history;
+    var title = cfg.title || "History";
+    // The strip is the chrome around the report, so it carries a plain name;
+    // the report inside the frame is the document, and carries `title`.
+    var heading = cfg.heading || "History";
+    var frame = h("iframe", { class: "se-history-frame", title: title });
+    var save = h("button", { type: "button", title: "A self-contained web page: works offline, KaTeX rendering and fonts included" }, ["Save as web page"]);
+    var note = h("small", {}, [cfg.hint || (cfg.onStep ? "tap a step to open it" : "")]);
+    var head = h("div", { class: "se-history-head" }, [h("span", { class: "se-history-title" }, [heading, note]), save]);
+    var view = h("div", { class: "sympy-editor se-history-page" }, [head, frame]);
+    if (host) host.appendChild(view);
+    var ready = loadKatex(opts)
+      .then(function () { return buildHistoryReport(hist, { title: title, katexCss: opts.katexCss }); })
+      .then(function (html) {
+        frame.addEventListener("load", function () {
+          var d = frame.contentDocument;
+          if (!d || !cfg.onStep) return;
+          var style = d.createElement("style");
+          style.textContent = ".step[data-index] { cursor: pointer; } .step[data-index]:hover { border-color: #3b82f6; }";
+          d.head.appendChild(style);
+          var steps = d.querySelectorAll(".step[data-index]");
+          for (var i = 0; i < steps.length; i++) {
+            steps[i].addEventListener("click", function (ev) {
+              var index = parseInt(ev.currentTarget.getAttribute("data-index"), 10);
+              if (!isNaN(index)) cfg.onStep(index);
+            });
+          }
+        });
+        frame.srcdoc = html;
+        save.addEventListener("click", function () {
+          saveFile((cfg.filename || "history") + ".html", "text/html", html);
+        });
+        return html;
+      }, function (e) {
+        head.appendChild(h("span", { class: "se-error" }, ["The history could not be shown: " + ((e && e.message) || e)]));
+        throw e;
+      });
+    return { element: view, ready: ready };
+  }
+
+  /* ------------------------------------------------------------------ */
   /* Editor                                                              */
   /* ------------------------------------------------------------------ */
 
@@ -3317,88 +3484,24 @@ var SympyEditor = (function () {
 
     /* ---- the history report ---- */
 
-    /** The KaTeX stylesheet with its fonts inlined as data URIs (fetched
-     *  once per page): what makes a report self-contained. */
-    async _katexCssInline() {
-      var cache = window.__sympyEditorKatexInline || (window.__sympyEditorKatexInline = {});
-      var href = this.opts.katexCss;
-      if (!cache[href]) {
-        cache[href] = (async function () {
-          var base = new URL(href, document.baseURI);
-          var css = await (await fetch(base.href)).text();
-          var fonts = {};
-          var re = /url\((?:"|')?(fonts\/[^)"']+\.woff2)(?:"|')?\)/g, m;
-          while ((m = re.exec(css))) fonts[m[1]] = true;
-          await Promise.all(Object.keys(fonts).map(async function (rel) {
-            var blob = await (await fetch(new URL(rel, base).href)).blob();
-            fonts[rel] = await new Promise(function (resolve, reject) {
-              var r = new FileReader();
-              r.onload = function () { resolve(r.result); };
-              r.onerror = reject;
-              r.readAsDataURL(blob);
-            });
-          }));
-          // Keep the woff2 face only, as a data URI (the woff/ttf fallbacks
-          // would be dead links).  The src declaration is replaced up to the
-          // next ";" or "}" - never past it: in minified CSS the last
-          // declaration of a block has no ";", and running over the "}" would
-          // swallow the following @font-face rules whole (every face but the
-          // first was lost, and \left[ fell back to a normal-height bracket).
-          return css.replace(/src:\s*url\((?:"|')?(fonts\/[^)"']+\.woff2)(?:"|')?\)\s*format\((?:"|')?woff2(?:"|')?\)[^;}]*/g, function (all, rel) {
-            return "src:url(" + fonts[rel] + ") format(\"woff2\")";
-          });
-        })().catch(function (e) { delete cache[href]; throw e; });
-      }
-      return cache[href];
-    }
+    /** The KaTeX stylesheet with its fonts inlined (see katexCssInline). */
+    async _katexCssInline() { return katexCssInline(this.opts.katexCss); }
 
-    /** KaTeX HTML for `latex`, the nodes not in `kept` marked with `cls`
-     *  (all of them plain when `kept` is null), no data-path attributes. */
-    _renderMarked(latex, kept, cls) {
-      var div = document.createElement("div");
-      div.innerHTML = katex.renderToString(latex, { displayMode: true, output: "html", throwOnError: false,
-        trust: function (ctx) { return ctx.command === "\\htmlData"; },
-        strict: function (code) { return code === "htmlExtension" ? "ignore" : "warn"; } });
-      var els = div.querySelectorAll("[data-path]");
-      for (var i = 0; i < els.length; i++) {
-        var p = els[i].getAttribute("data-path");
-        if (kept) els[i].classList.add(kept[p] ? "rep-kept" : cls);
-        els[i].removeAttribute("data-path");
-      }
-      markBoxes(div, cls, "rep-box");
-      return div.innerHTML;
-    }
+    /** KaTeX HTML for `latex` with the changed nodes marked (renderMarked). */
+    _renderMarked(latex, kept, cls) { return renderMarked(latex, kept, cls); }
 
-    /** The self-contained HTML report of the current history: every step
-     *  rendered (what came in green), and between two steps what produced
-     *  the change and the previous formula with what went in red. */
+    /** The self-contained HTML report of this session's history.  The
+     *  building is `buildHistoryReport`, which knows nothing about the
+     *  editor: the same page can be made from any list of expressions
+     *  (`sympy_editor.History`). */
     async buildReport() {
-      var esc = function (s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
       var snap = await this.backend.send({ action: "export" }, function () {});
       var hist = snap && snap.history ? snap.history : this._history;
       if (!hist || !hist.steps) throw new Error("No history to report");
       if (snap && snap.history) this._history = snap.history;
-      var css = await this._katexCssInline();
       var sess = this._currentSession();
-      var title = "SymPy editor \u2014 history" + (sess && sess.name ? " of " + sess.name : "");
-      var out = [];
-      for (var i = 0; i < hist.steps.length; i++) {
-        var step = hist.steps[i], prev = i > 0 ? hist.steps[i - 1] : null, diff = null;
-        if (prev) {
-          diff = diffNodes(prev.nodes, step.nodes);
-          out.push('<div class="transition"><div class="arrow">\u2193</div><div class="what">' + esc((hist.actions && hist.actions[i]) || "Edit") + "</div>" +
-            '<div class="before"><span class="label">from (what went is red)</span>' + this._renderMarked(prev.latex, diff.oldKept, "rep-removed") + "</div></div>");
-        }
-        out.push('<section class="step" data-index="' + i + '"' + (i === hist.index ? ' data-current="1"' : "") + "><h2>Step " + (i + 1) + (i === hist.index ? " \u2014 current" : "") +
-          (i === 0 ? " \u2014 start" : "") + '</h2><div class="formula">' + this._renderMarked(step.latex, diff ? diff.newKept : null, "rep-added") +
-          "</div><code>" + esc(hist.labels[i]) + "</code></section>");
-      }
-      var when = new Date();
-      return "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
-        "<title>" + esc(title) + "</title><style>\n" + css + "\n" + REPORT_CSS + "\n</style></head><body><main>" +
-        "<h1>" + esc(title) + "</h1><p class=\"meta\">" + esc(when.toLocaleString()) + " \u00b7 " + hist.steps.length + " step" + (hist.steps.length === 1 ? "" : "s") +
-        " \u00b7 green: what a step brought, red: what the previous one lost</p>" + out.join("\n") +
-        "<footer>Generated by sympy-editor. This file is self-contained (KaTeX rendering and fonts included) and works offline.</footer></main></body></html>\n";
+      return buildHistoryReport(hist, { title: "SymPy editor \u2014 history" + (sess && sess.name ? " of " + sess.name : ""),
+                                        katexCss: this.opts.katexCss, defaultAction: "Edit" });
     }
 
     /** The Python script reproducing the history (built by the document). */
@@ -3440,25 +3543,8 @@ var SympyEditor = (function () {
 
     /** Hand `text` to the app's share sheet, the Web Share API or a download, in that order. */
     async _exportFile(name, mime, text, what) {
-      var app = window.SympyEditorApp;
-      if (app && (app.shareFile || (mime === "text/html" && app.shareHtml))) {       // the Android app: save or share
-        if (app.shareFile) app.shareFile(name, mime, text); else app.shareHtml(name, text);
-        this._setStatus(what + " ready: choose where to save or share it");
-        return;
-      }
-      var file = null;
-      try { file = new File([text], name, { type: mime }); } catch (e) { /* no File constructor */ }
-      if (file && navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-        try { await navigator.share({ files: [file], title: name }); this._setStatus(what + " shared"); return; }
-        catch (e) { if (e && e.name === "AbortError") { this._setStatus(""); return; } }
-      }
-      var url = URL.createObjectURL(new Blob([text], { type: mime }));
-      var a = h("a", { href: url, download: name });
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
-      this._setStatus(what + " downloaded: " + name);
+      var how = await saveFile(name, mime, text);       // the host app, the share sheet, or a download
+      this._setStatus(how ? what + " " + how : "");
     }
 
     /* ---- the history view ---- */
@@ -4225,6 +4311,8 @@ var SympyEditor = (function () {
     Editor: Editor,
     backends: backends,
     mount: mount,
+    mountHistory: mountHistory,
+    buildHistoryReport: buildHistoryReport,
     loadKatex: loadKatex,
     toDisplay: toDisplay,
     toSource: toSource,

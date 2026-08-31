@@ -20,8 +20,9 @@ def test_generated_page_is_up_to_date(page):
     hint = f"regenerate it: python examples/{page.stem}.py"
     assert read_static("editor.js").strip() in text, f"{page.name} embeds an outdated editor.js; {hint}"
     assert read_static("editor.css").strip() in text, f"{page.name} embeds an outdated editor.css; {hint}"
-    configs = re.findall(r"SympyEditor\.mount\(document\.getElementById\(\"[^\"]+\"\), (\{.*?\})\);\n", text)
-    assert configs, f"no editor found in {page.name}"
+    # An editor page mounts an editor; a history page mounts the viewer alone.
+    configs = re.findall(r"SympyEditor\.mount(?:History)?\(document\.getElementById\(\"[^\"]+\"\), (\{.*?\})\);\n", text)
+    assert configs, f"no editor or history viewer found in {page.name}"
     current = python_sources()
     for raw in configs:
         cfg = json.loads(raw)

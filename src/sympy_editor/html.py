@@ -31,6 +31,7 @@ from sympy import Basic, srepr
 
 from .document import Document
 from .examples import examples
+from .history import History
 
 __all__ = [
     "KATEX_VERSION",
@@ -41,6 +42,9 @@ __all__ = [
     "save_html",
     "display_html",
     "build_config",
+    "to_history_html",
+    "save_history_html",
+    "display_history",
 ]
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -261,6 +265,100 @@ def display_html(expr, **kwargs):
 
     kwargs.setdefault("full_page", False)
     return HTML(to_html(expr, **kwargs))
+
+
+# -- the history viewer, on its own ----------------------------------------
+# The step-by-step view of a history needs no editor and no Python backend:
+# a list of expressions is enough (see history.py).  These build a page - or
+# a notebook cell - around SympyEditor.mountHistory.
+
+
+def _as_history(steps, **kwargs) -> History:
+    if isinstance(steps, History):
+        if kwargs:
+            raise TypeError("History options cannot be combined with an existing History")
+        return steps
+    if isinstance(steps, Document):
+        return History.from_document(steps, **kwargs)
+    return History(steps, **kwargs)
+
+
+def build_history_config(history: History, *, title: Optional[str] = None,
+                         urls: Optional[Dict[str, str]] = None,
+                         options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """The JSON config consumed by ``SympyEditor.mountHistory``."""
+    all_urls = default_urls()
+    all_urls.update(urls or {})
+    opts: Dict[str, Any] = {"katexJs": all_urls["katexJs"], "katexCss": all_urls["katexCss"]}
+    opts.update(options or {})
+    return {"history": history.payload(), "title": title or history.title or "History", "options": opts}
+
+
+def render_history_fragment(config: Dict[str, Any], element_id: Optional[str] = None) -> str:
+    """HTML fragment (styles + container + inline scripts) for ``config``."""
+    element_id = element_id or "sympy-history-" + uuid.uuid4().hex[:12]
+    katex_css = _html.escape(str(config["options"].get("katexCss", "")), quote=True)
+    return (
+        f'<link rel="stylesheet" href="{katex_css}">\n'
+        f"<style>\n{read_static('editor.css')}\n</style>\n"
+        f'<div id="{element_id}" class="sympy-editor-host"></div>\n'
+        f'<script>\nif (!window.SympyEditor) {{\n{read_static("editor.js")}\n}}\n</script>\n'
+        "<script>\n"
+        f'SympyEditor.mountHistory(document.getElementById("{element_id}"), {_script_json(config)});\n'
+        "</script>\n"
+    )
+
+
+def to_history_html(
+    steps,
+    *,
+    full_page: bool = True,
+    title: Optional[str] = None,
+    options: Optional[Dict[str, Any]] = None,
+    urls: Optional[Dict[str, str]] = None,
+    head: str = "",
+    element_id: Optional[str] = None,
+    **history_kwargs,
+) -> str:
+    """A page showing a sequence of expressions step by step, each change as
+    a diff - the editor's History view, without the editor.
+
+    ``steps`` is a :class:`~sympy_editor.History`, a :class:`Document` (its
+    own history), or anything :class:`History` accepts: a list of
+    expressions, each optionally paired with what produced it
+    (``(expr, "integration by parts")``).  Nothing here needs the WYSIWYG
+    editor, so a derivation computed in Python can be shown the same way.
+
+    The other arguments are :func:`to_html`'s: ``full_page`` for a document
+    rather than an embeddable fragment, ``urls`` to override the KaTeX
+    locations, ``head`` for extra markup, ``element_id`` for a reproducible
+    page.  ``history_kwargs`` go to :class:`History` (``actions``,
+    ``index``, ``printer_settings``).
+    """
+    history = _as_history(steps, **history_kwargs)
+    config = build_history_config(history, title=title, urls=urls, options=options)
+    fragment = render_history_fragment(config, element_id)
+    if not full_page:
+        return fragment
+    # No <h1> of its own: the report inside the viewer already opens with the
+    # title and the step count.
+    page = _PAGE.replace("<h1>%(title)s</h1>\n", "")
+    return page % {"title": _html.escape(config["title"]), "fragment": fragment, "head": head}
+
+
+def save_history_html(steps, path, **kwargs) -> Path:
+    """Write :func:`to_history_html` output to ``path`` and return it."""
+    path = Path(path)
+    path.write_text(to_history_html(steps, **kwargs), encoding="utf-8")
+    return path
+
+
+def display_history(steps, **kwargs):
+    """An ``IPython.display.HTML`` fragment showing the steps in a notebook."""
+    from IPython.display import HTML
+
+    kwargs.setdefault("full_page", False)
+    return HTML(to_history_html(steps, **kwargs))
 
 
 def new_token() -> str:

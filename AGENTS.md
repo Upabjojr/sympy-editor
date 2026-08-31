@@ -380,6 +380,19 @@ Two conventions between printer, document and front end:
   per flex line, so every row of tools is centred on its own (the `.se-break`
   spans are full-width and zero-high, so they never join a row).
   `test_tool_rows_are_centred_in_the_strip` measures the margins.
+- **The history viewer is not the editor.**  `buildHistoryReport(hist,
+  opts)`, `renderMarked`, `katexCssInline` and `saveFile` are free functions
+  in editor.js, and `SympyEditor.mountHistory(host, cfg)` shows a history
+  with no editor and no backend behind it: `cfg.history` is
+  `{steps: [{latex, nodes}], labels, actions, index}` - what both
+  `Document.history_labels()` and `History.payload()` produce.  `Editor`
+  keeps thin wrappers (`buildReport` fetches the session's history and
+  delegates).  On the Python side `render_step(expr, printer_settings)` in
+  document.py builds one step, `history.History` holds a list of them, and
+  `html.to_history_html` / `save_history_html` / `display_history` wrap the
+  viewer in a page or a fragment.  Keep the payload shape identical on both
+  sides: one viewer serves the editor's sessions and any list of
+  expressions.
 - **Full screen.**  `.se-view` lives on a `.se-stage` (`position:
   relative`) beside `.se-fullbtn`, not inside it: within the view a wide
   formula would scroll the button out of sight.  `Editor.setFullscreen`

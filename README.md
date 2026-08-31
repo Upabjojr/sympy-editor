@@ -265,6 +265,42 @@ Browsers download the files (or offer the share sheet where the Web Share
 API takes files); the Android app saves them in Downloads and opens the
 share sheet.
 
+### The history viewer on its own (no editor)
+
+The step-by-step view is not part of the editor: it needs a list of
+expressions and a word about what turned each into the next, whoever
+computed them.  So a derivation carried out in Python - the steps of an
+integration, a chain of rewrites, the output of somebody else's algorithm -
+is shown exactly the way the editor shows its own sessions, with the same
+diffs:
+
+```python
+from sympy import Integral, cos, sin, symbols
+from sympy_editor import History, save_history_html
+
+x = symbols("x")
+steps = History([
+    Integral(x * sin(x), x),
+    (-x * cos(x) + Integral(cos(x), x), "by parts: u = x, dv = sin(x) dx"),
+    (-x * cos(x) + sin(x), "the remaining integral"),
+], title="∫ x sin(x) dx, by parts")
+
+save_history_html(steps, "steps.html")      # a page of its own
+```
+
+- `History(steps, ...)` takes expressions or `(expr, "what produced it")`
+  pairs; `History.add(expr, action)` appends one at a time, so a loop can
+  build the history as it computes; `History.from_document(doc)` takes an
+  editing session's own.
+- `to_history_html(steps, full_page=False)` gives an embeddable fragment and
+  `display_history(steps)` shows it in a notebook cell (no kernel round
+  trip: the page is static).
+- Both accept a `History`, a `Document`, or just a list of expressions.
+
+The page runs no Python: it renders the steps with KaTeX in the browser, and
+its **Save as web page** button writes the whole thing - fonts included - to
+one offline file.  `examples/demo_history.py` builds one.
+
 ### Long computations
 
 A transformation that takes a while does not freeze the page: after a moment

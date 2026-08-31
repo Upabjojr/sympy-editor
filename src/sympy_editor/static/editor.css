@@ -583,6 +583,19 @@
 .se-help-body li { margin: 0.18rem 0; }
 .se-help-body kbd { font-family: var(--se-mono); font-size: 0.85em; border: 1px solid var(--se-border); border-bottom-width: 2px; border-radius: 0.25rem; padding: 0 0.3em; background: rgba(127, 127, 127, 0.08); }
 .se-history-frame { flex: 1; width: 100%; border: 0; background: transparent; }
+/* The history viewer standing on its own - a page of its own, or a notebook
+ * cell - with no editor around it: the same strip and frame as the overlay
+ * above, but in the flow of the document (SympyEditor.mountHistory). */
+.se-history-page {
+  display: flex;
+  flex-direction: column;
+  height: 80vh;
+  min-height: 22rem;
+  padding: 0;
+  overflow: hidden;
+}
+.se-history-page .se-history-frame { flex: 1 1 auto; min-height: 0; }
+.se-history-page .se-error { font-size: 12px; }
 .se-history-report { font: inherit; font-size: 12px; padding: 0.15rem 0.5rem; border: 1px solid var(--se-border); border-radius: 0.3rem; background: transparent; color: inherit; cursor: pointer; }
 .se-step .se-diff-removed, .se-step .se-diff-added { font-weight: bold; }
 .se-step .se-diff-removed { color: var(--se-removed); }

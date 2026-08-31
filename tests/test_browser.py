@@ -2525,3 +2525,44 @@ def test_a_lambda_can_be_applied_to_arguments(browser, serve_expr):
     _next_state(page, lambda: form.locator(".se-fn-apply").click())
     assert doc.expr == 9
     assert page.errors == []
+
+
+def test_the_history_viewer_runs_without_any_editor(browser, tmp_path):
+    """A page built from a list of expressions - nobody edited anything -
+    shows every step with its diff, and saves itself as one file."""
+    from sympy import Integral, cos
+    from sympy_editor import History, to_history_html
+
+    hist = History([
+        Integral(x * sin(x), x),
+        (-x * cos(x) + Integral(cos(x), x), "by parts"),
+        (-x * cos(x) + sin(x), "the last integral"),
+    ], title="By parts")
+    path = tmp_path / "steps.html"
+    path.write_text(to_history_html(hist), encoding="utf-8")
+    page = browser.new_page(viewport={"width": 1000, "height": 800})
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(path.as_uri())
+    page.wait_for_selector(".se-history-page .se-history-frame", timeout=30000)
+    assert page.locator(".se-view").count() == 0              # no editor on the page at all
+    frame = page.frame_locator(".se-history-frame")
+    frame.locator(".step").first.wait_for(timeout=30000)
+    assert frame.locator(".step").count() == 3
+    assert "By parts" in frame.locator("h1").inner_text()
+    # what each step brought is green, what the one before lost is red...
+    assert frame.locator(".step .rep-added").count() > 0
+    assert frame.locator(".transition .rep-removed").count() > 0
+    # ...over its whole extent, one box per changed region (as in the editor)
+    assert frame.locator(".step .rep-added.rep-box").count() > 0
+    # ...and the action that produced each step is named
+    whats = frame.locator(".transition .what").all_inner_texts()
+    assert whats == ["by parts", "the last integral"]
+    # no step is "current": nothing is being edited here
+    assert frame.locator('.step[data-current="1"]').count() == 0
+    # the fonts travelled with the page: the tall integral sign is drawn, not
+    # a fallback glyph (the same regression the editor's report had)
+    assert frame.locator(".step .delimsizing, .step .mop").count() > 0
+    assert page.locator(".se-history-head button").inner_text() == "Save as web page"
+    assert errors == []
+    page.close()
