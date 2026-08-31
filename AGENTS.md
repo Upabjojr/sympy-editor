@@ -366,6 +366,10 @@ Two conventions between printer, document and front end:
   moves nothing else (measured in
   `test_change_tint_covers_the_whole_changed_area`); the tint is opaque, so
   nothing can stack darker.
+- **Editing area.**  `.se-view` is a canvas of its own: `--se-surface` (a
+  hair lighter than the panel, darker in dark mode) inside `--se-rule`, a
+  faint 1px border.  The change tint mixes into `--se-surface`, not
+  `--se-bg`, so it matches the ground it sits on.
 - **Button surface.**  The tools are raised, not flat: a barely-there
   vertical gradient (`--se-btn`), a lit top edge and a soft drop shadow
   (`--se-btn-edge`, `--se-btn-shadow`), hover lifting it with an accent

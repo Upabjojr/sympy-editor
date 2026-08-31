@@ -25,6 +25,10 @@
   --se-btn-shadow-hover: 0 2px 4px rgba(16, 24, 40, 0.1);
   --se-btn-shadow-down: inset 0 1.5px 3px rgba(16, 24, 40, 0.16);
   --se-field: linear-gradient(180deg, #fbfbfc 0%, #ffffff 100%);
+  /* The editing area is a canvas of its own: a hair lighter than the panel,
+   * inside a rule faint enough to stay out of the way of the formula. */
+  --se-surface: #fcfcfd;
+  --se-rule: rgba(16, 24, 40, 0.09);
   position: relative;
   display: block;            /* block, not shrink-to-fit: the status text must not shift the formula */
   box-sizing: border-box;
@@ -56,6 +60,8 @@
     --se-btn-shadow-hover: 0 2px 5px rgba(0, 0, 0, 0.45);
     --se-btn-shadow-down: inset 0 1.5px 3px rgba(0, 0, 0, 0.45);
     --se-field: linear-gradient(180deg, #232529 0%, #292c30 100%);
+    --se-surface: #232529;
+    --se-rule: rgba(255, 255, 255, 0.1);
   }
 }
 .sympy-editor * { box-sizing: border-box; }
@@ -264,12 +270,14 @@
 }
 
 .se-view {
-  padding: 0.6rem 0.4rem;
+  padding: 0.6rem 0.5rem;
+  background: var(--se-surface);
+  border: 1px solid var(--se-rule);
   overflow-x: auto;          /* a long formula scrolls sideways: wheel, drag on empty space, the scrollbar */
   overflow-y: hidden;
   scrollbar-width: thin;
   outline: none;
-  border-radius: 0.3rem;
+  border-radius: 0.4rem;
   font-size: calc(1.3em * var(--se-zoom, 1));   /* --se-zoom: Editor.setZoom (buttons, Ctrl+wheel, pinch) */
   cursor: default;
   user-select: none;
@@ -300,7 +308,7 @@
 
 .se-source {
   display: block;
-  margin-top: 0.3rem;
+  margin-top: 0.25rem;
   padding: 0.2rem 0.4rem;
   font-family: var(--se-mono);
   font-size: 12px;
@@ -418,7 +426,7 @@
  * and below - so the box is inline-block, whose box is the node's whole
  * visual extent.  It changes no other position: the surrounding formula does
  * not move when the marks appear or go. */
-.se-view .se-added-box { display: inline-block; border-radius: 0.15em; background: color-mix(in srgb, rgb(var(--se-added-rgb)) 8%, var(--se-bg)); }
+.se-view .se-added-box { display: inline-block; border-radius: 0.15em; background: color-mix(in srgb, rgb(var(--se-added-rgb)) 8%, var(--se-surface)); }
 .se-view .se-ghost .se-added-box { background: transparent; }    /* the animation overlays sit on the real formula: no second paint */
 .se-view .se-ghost-new .se-added .se-kept, .se-view .se-added .se-kept { color: var(--se-fg); }   /* kept inside new: normal */
 .se-view .se-changing { opacity: 0; }

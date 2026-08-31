@@ -291,6 +291,9 @@ what went in red, then this one with what came in green - and clicking a
 row goes back (or forward) to that step.  Tapping a session's row opens
 it.  Available on Pyodide-backed pages.
 
+The formula sits on its own faintly outlined canvas, with the SymPy source
+of the whole expression under it and the tools above.
+
 The toolbar's **?** opens this whole guide inside the editor - every
 gesture, key and tool in one box (Esc closes it).
 
