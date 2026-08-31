@@ -366,6 +366,16 @@ Two conventions between printer, document and front end:
   moves nothing else (measured in
   `test_change_tint_covers_the_whole_changed_area`); the tint is opaque, so
   nothing can stack darker.
+- **Button surface.**  The tools are raised, not flat: a barely-there
+  vertical gradient (`--se-btn`), a lit top edge and a soft drop shadow
+  (`--se-btn-edge`, `--se-btn-shadow`), hover lifting it with an accent
+  border, `:active` flipping the gradient and moving the shadow inside
+  (`--se-btn-down`, half a pixel down), `:focus-visible` an accent ring,
+  and disabled buttons flat with no shadow.  Fields (the function box)
+  are sunken instead (`--se-field` plus an inner shadow), so a control
+  looks like what it does.  Dark mode redefines the same tokens; the
+  transitions are dropped under `prefers-reduced-motion`.  Keep the
+  paddings as they are - the toolbar-row and arrow tests measure them.
 - **Icons.**  The four navigation arrows are `arrowSvg(dir)`: one drawing
   rotated, sized to the text line box (`.se-icon`), so they match each
   other and the buttons beside them on every platform.  As text glyphs they
