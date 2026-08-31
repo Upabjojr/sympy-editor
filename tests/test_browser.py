@@ -2784,3 +2784,76 @@ def test_up_and_down_walk_into_a_determinant_s_matrix(browser, serve_expr):
     page.keyboard.press("ArrowUp")
     assert page.locator(".se-selected").get_attribute("data-path") == "/"
     assert page.errors == []
+
+
+def test_the_history_can_be_resized(browser, tmp_path):
+    """The formulas are the point of a history, so they take the size the
+    reader wants - in the listing and in the slideshow alike: the buttons in
+    the strip, Ctrl+wheel, or two fingers."""
+    from sympy import Integral, cos
+    from sympy_editor import History, to_history_html
+
+    hist = History([
+        Integral(x * sin(x), x),
+        (-x * cos(x) + Integral(cos(x), x), "by parts"),
+        (-x * cos(x) + sin(x), "the last integral"),
+    ], title="By parts")
+    path = tmp_path / "zoom.html"
+    path.write_text(to_history_html(hist), encoding="utf-8")
+    page = browser.new_page(viewport={"width": 900, "height": 700}, has_touch=True)
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(path.as_uri())
+    page.wait_for_selector(".se-history-frame", timeout=30000)
+    frame = page.frame_locator(".se-history-frame")
+    frame.locator(".step").first.wait_for(timeout=30000)
+    doc = page.frames[1]
+    size = lambda sel=".step": doc.evaluate(
+        "s => parseFloat(getComputedStyle(document.querySelector(s)).fontSize)", sel)
+
+    assert _wait(lambda: page.locator(".se-play-zoom").count() == 2)
+    smaller, larger = page.locator(".se-play-zoom").first, page.locator(".se-play-zoom").last
+    listed = size()
+    larger.click()
+    larger.click()
+    assert size() > listed * 1.3, (listed, size())
+    grown = size()
+    smaller.click()
+    assert listed < size() < grown
+
+    # the slideshow scales with it, instead of pinning its own size
+    page.locator(".se-play").click()
+    slide = size(".step.slide-on")
+    assert slide > size(".transition")                      # a slide is drawn larger to start with
+    larger.click()
+    assert size(".step.slide-on") > slide
+    page.locator(".se-play-all").click()
+
+    # Ctrl+wheel over the report, as everywhere else in the editor
+    at = size()
+    box = page.locator(".se-history-frame").bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    page.keyboard.down("Control")
+    page.mouse.wheel(0, -240)
+    page.keyboard.up("Control")
+    assert _wait(lambda: size() > at)
+
+    # and two fingers
+    at = size()
+    doc.evaluate("""() => {
+        const mk = (x, y) => ({clientX: x, clientY: y, identifier: x, target: document.body});
+        const fire = (type, pts) => {
+            const e = new Event(type, {bubbles: true, cancelable: true});
+            e.touches = pts; e.changedTouches = pts;
+            document.dispatchEvent(e);
+        };
+        fire('touchstart', [mk(100, 100), mk(200, 100)]);
+        fire('touchmove', [mk(60, 100), mk(260, 100)]);
+        fire('touchend', []);
+    }""")
+    assert _wait(lambda: size() > at)
+
+    # the panel itself is resizable where it sits in a page
+    assert page.evaluate("getComputedStyle(document.querySelector('.se-history-page')).resize") == "vertical"
+    assert errors == []
+    page.close()

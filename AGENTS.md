@@ -404,6 +404,14 @@ Two conventions between printer, document and front end:
   builds the buttons for `.se-history-head`, and `body.hosted` hides the
   report's own bar - the controls must not scroll away with the steps.  The
   saved file keeps its bar, since it has no host.
+- **The history's zoom.**  `--se-report-zoom` on the report's root scales
+  `.step` and `.transition`; the slideshow's own size multiplies it
+  (`calc(1.35em * var(--se-report-zoom, 1))`), so do not give `.slide-on` a
+  plain font-size again - that pinned the slideshow and the buttons stopped
+  working there.  The player owns the value (`setZoom`, `zoomIn`/`zoomOut`
+  on `window.sympyHistoryPlayer`) and drives it from the strip's buttons,
+  Ctrl+wheel and a two-finger pinch inside the report.  `.se-history-page`
+  is `resize: vertical` so an embedded viewer can be dragged taller.
 - **The history viewer is not the editor.**  `buildHistoryReport(hist,
   opts)`, `renderMarked`, `katexCssInline` and `saveFile` are free functions
   in editor.js, and `SympyEditor.mountHistory(host, cfg)` shows a history

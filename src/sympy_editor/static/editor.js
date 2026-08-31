@@ -50,6 +50,9 @@ var SympyEditor = (function () {
     "@media (prefers-color-scheme: dark) { body { --fg: #e6e6e6; --bg: #1e1e1e; } .step, .transition .before { border-color: #444; } .meta, .transition .what, .step code, footer { color: #a0a0a0; } }",
     "main { max-width: 60rem; margin: 0 auto; }",
     "h1 { font-size: 1.3rem; margin: 0 0 0.3rem; } .meta { color: #656d76; font-size: 0.9rem; margin: 0 0 1.5rem; }",
+    /* the formulas have a size of their own: the player's zoom scales the
+     * steps and the changes between them, never the controls */
+    ".step, .transition { font-size: calc(1em * var(--se-report-zoom, 1)); }",
     ".step { border: 1px solid #d0d7de; border-radius: 0.6rem; padding: 0.8rem 1rem; margin: 0; overflow-x: auto; }",
     ".step h2 { font-size: 0.85rem; font-weight: 600; margin: 0 0 0.4rem; color: #656d76; text-transform: uppercase; letter-spacing: 0.04em; }",
     ".step .formula { font-size: 1.25em; } .step code { display: block; margin-top: 0.5rem; font-size: 0.8rem; color: #656d76; white-space: pre-wrap; word-break: break-word; }",
@@ -86,7 +89,7 @@ var SympyEditor = (function () {
     "body.slides h1, body.slides .meta, body.slides footer { display: none; }",
     "body.slides .player .exit { display: inline-block; }",
     "body.slides .step, body.slides .transition { display: none; }",
-    "body.slides .slide-on { display: block; font-size: 1.35em; }",
+    "body.slides .slide-on { display: block; font-size: calc(1.35em * var(--se-report-zoom, 1)); }",
     ".slide-top { margin-top: auto; } .slide-bottom { margin-bottom: auto; }",
     "body.slides .transition.slide-on { margin-left: 0; }",
     "body.slides .transition.slide-on { display: grid; }",
@@ -548,6 +551,8 @@ var SympyEditor = (function () {
     var player = hist.steps.length < 2 ? "" :
       '<div class="player">' +
       '<button type="button" class="play" title="Watch the steps one at a time">\u25b6 Play</button>' +
+      '<button type="button" class="zoom-out" title="Smaller (Ctrl+wheel)">\u2212</button>' +
+      '<button type="button" class="zoom-in" title="Larger (Ctrl+wheel)">+</button>' +
       '<button type="button" class="step-btn prev" title="Previous (\u2190)">\u25c0</button>' +
       '<button type="button" class="step-btn next" title="Next (\u2192)">\u25b6</button>' +
       '<span class="count"></span>' +
@@ -581,7 +586,14 @@ var SympyEditor = (function () {
     "  if (pending) slides.push([pending]);",
     "  var body = document.body, count = bar.querySelector('.count');",
     "  var play = bar.querySelector('.play'), i = 0, timer = null;",
-    "  var STEP_MS = 2200;",
+    "  var STEP_MS = 2200, zoom = 1;",
+    "  // The formulas are the point: they must be as big or as small as the",
+    "  // reader wants, in the listing as much as in the slideshow.",
+    "  function setZoom(z) {",
+    "    zoom = Math.max(0.5, Math.min(4, Math.round(z * 100) / 100));",
+    "    document.documentElement.style.setProperty('--se-report-zoom', zoom);",
+    "    if (typeof announce === 'function') announce();",
+    "  }",
     "  function clear() {",
     "    for (var k = 0; k < nodes.length; k++) nodes[k].classList.remove('slide-on', 'slide-top', 'slide-bottom');",
     "  }",
@@ -609,6 +621,28 @@ var SympyEditor = (function () {
     "  bar.querySelector('.prev').addEventListener('click', function () { enter(i - 1); });",
     "  bar.querySelector('.next').addEventListener('click', function () { enter(i + 1); });",
     "  bar.querySelector('.exit').addEventListener('click', exit);",
+    "  bar.querySelector('.zoom-out').addEventListener('click', function () { setZoom(zoom / 1.2); });",
+    "  bar.querySelector('.zoom-in').addEventListener('click', function () { setZoom(zoom * 1.2); });",
+    "  // two fingers pinch the formulas, as everywhere else in the editor",
+    "  var pinch = null;",
+    "  function spread(t) {",
+    "    var dx = t[0].clientX - t[1].clientX, dy = t[0].clientY - t[1].clientY;",
+    "    return Math.sqrt(dx * dx + dy * dy);",
+    "  }",
+    "  document.addEventListener('touchstart', function (ev) {",
+    "    if (ev.touches.length === 2) pinch = {from: spread(ev.touches), zoom: zoom};",
+    "  }, {passive: true});",
+    "  document.addEventListener('touchmove', function (ev) {",
+    "    if (!pinch || ev.touches.length !== 2) return;",
+    "    ev.preventDefault();",
+    "    if (pinch.from > 0) setZoom(pinch.zoom * spread(ev.touches) / pinch.from);",
+    "  }, {passive: false});",
+    "  document.addEventListener('touchend', function () { pinch = null; }, {passive: true});",
+    "  document.addEventListener('wheel', function (ev) {",
+    "    if (!ev.ctrlKey) return;",
+    "    ev.preventDefault();",
+    "    setZoom(zoom * (ev.deltaY < 0 ? 1.1 : 1 / 1.1));",
+    "  }, {passive: false});",
     "  document.addEventListener('keydown', function (ev) {",
     "    if (!body.classList.contains('slides')) return;",
     "    if (ev.key === 'ArrowRight') { stop(); show(i + 1); }",
@@ -623,7 +657,7 @@ var SympyEditor = (function () {
     "  // drives the same engine from its own fixed strip, so the controls do",
     "  // not scroll away with the steps.",
     "  var listeners = [];",
-    "  function state() { return {index: i, total: slides.length, playing: !!timer, on: body.classList.contains('slides')}; }",
+    "  function state() { return {index: i, total: slides.length, playing: !!timer, zoom: zoom, on: body.classList.contains('slides')}; }",
     "  function announce() { for (var k = 0; k < listeners.length; k++) listeners[k](state()); }",
     "  var _show = show, _stop = stop, _enter = enter, _start = start, _exit = exit;",
     "  show = function (n) { _show(n); announce(); };",
@@ -636,6 +670,8 @@ var SympyEditor = (function () {
     "    toggle: function () { if (timer) stop(); else start(); },",
     "    prev: function () { enter(i - 1); }, next: function () { enter(i + 1); },",
     "    exit: function () { exit(); }, state: state,",
+    "    zoomIn: function () { setZoom(zoom * 1.2); }, zoomOut: function () { setZoom(zoom / 1.2); },",
+    "    setZoom: setZoom,",
     "    subscribe: function (cb) { listeners.push(cb); cb(state()); }",
     "  };",
     "})();"
@@ -652,7 +688,11 @@ var SympyEditor = (function () {
     var next = h("button", { type: "button", class: "se-play-step", title: "The next step (\u2192)", "aria-label": "Next slide" }, ["\u25b6"]);
     var count = h("span", { class: "se-play-count" });
     var all = h("button", { type: "button", class: "se-play-all", title: "Back to the whole history (Esc)" }, ["Show all"]);
-    var els = [play, prev, next, count, all];
+    // The formulas have a size of their own here: the buttons, Ctrl+wheel and
+    // two fingers all drive the same zoom inside the report.
+    var out = h("button", { type: "button", class: "se-play-zoom", title: "Smaller formulas (Ctrl+wheel, pinch)", "aria-label": "Smaller" }, ["\u2212"]);
+    var into = h("button", { type: "button", class: "se-play-zoom", title: "Larger formulas (Ctrl+wheel, pinch)", "aria-label": "Larger" }, ["+"]);
+    var els = [play, prev, next, count, all, out, into];
     var api = null;
     els.forEach(function (el) { el.hidden = true; });
     frame.addEventListener("load", function () {
@@ -670,6 +710,8 @@ var SympyEditor = (function () {
     prev.addEventListener("click", function () { if (api) api.prev(); });
     next.addEventListener("click", function () { if (api) api.next(); });
     all.addEventListener("click", function () { if (api) api.exit(); });
+    out.addEventListener("click", function () { if (api) api.zoomOut(); });
+    into.addEventListener("click", function () { if (api) api.zoomIn(); });
     return els;
   }
 

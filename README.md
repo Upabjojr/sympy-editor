@@ -254,7 +254,10 @@ there:
 
 - **Play** runs the history as a slideshow: one slide per step, with the
   change that produced it - what it was in red, what it became in green -
-  on the same screen, large and centred, advancing on its own.  Its controls sit in the
+  on the same screen, large and centred, advancing on its own.
+- **− / +** in the same strip set the size of the formulas, in the listing
+  and in the slideshow alike; Ctrl+wheel and two fingers do the same.  On a
+  page of its own the whole panel can be dragged taller or shorter.  Its controls sit in the
   strip above, which stays put while the steps go by; inside the report the
   same keys work (space pauses, ← → step, Esc shows the whole history
   again).  The player travels with the page, so a saved report plays on its
