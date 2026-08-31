@@ -979,10 +979,12 @@ var SympyEditor = (function () {
       // never replaced by code: whole-expression edits happen here.
       this.source = noAutoCaps(h("code", { class: "se-source",
         title: o.readOnly ? "SymPy source" : "SymPy source: select to select in the formula; edit, then Enter to apply (Esc reverts)" }));
-      if (!o.readOnly) {
-        this.source.setAttribute("contenteditable", "plaintext-only");
-        if (!this.source.isContentEditable) this.source.setAttribute("contenteditable", "true");
-      }
+      // Plain "true", not "plaintext-only": with plaintext-only a drag over
+      // the line selects nothing at all in Chromium (a double-click still
+      // does), which took away the whole point of the line - selecting text
+      // here selects in the formula.  What is typed stays plain anyway: the
+      // paste handler inserts text, and only textContent is ever read.
+      if (!o.readOnly) this.source.setAttribute("contenteditable", "true");
       this.sourceDirty = false;
       if (o.showSource) root.appendChild(this.source);
 
@@ -2242,6 +2244,11 @@ var SympyEditor = (function () {
     /** Show the floating action bar under a viewport rectangle (null hides it). */
     _placeActions(rect) {
       if (!this.actions) return;
+      // The bar acts on the formula.  While the source line has the focus the
+      // work is in the text, and popping the bar up there took the selection
+      // apart mid-drag: it appears under the pointer, the pointer leaves the
+      // line, and the browser drops the selection being made.
+      if (document.activeElement === this.source) rect = null;
       if (!rect || this.input || this.closed) { this.actions.hidden = true; this.view.style.paddingBottom = ""; return; }
       var t = this.selected ? this.tree[this.selected] : null;
       var selNode = this.selected && !this.range ? this.state.nodes[this.selected] : null;

@@ -2863,3 +2863,62 @@ def test_the_history_can_be_resized(browser, tmp_path):
     assert page.evaluate("getComputedStyle(document.querySelector('.se-history-page')).resize") == "vertical"
     assert errors == []
     page.close()
+
+
+def test_dragging_over_the_source_line_selects_in_the_formula(browser, serve_expr):
+    """The source line is linked to the rendering both ways.  Selecting text
+    in it used to come apart: the floating action bar popped up under the
+    pointer as soon as a node matched, the pointer left the line, and the
+    browser dropped the selection being made - so nothing was ever selected
+    and the formula never followed."""
+    srv, doc = serve_expr(x**2 / y - sin(x))
+    page = _open(browser, srv.url)
+    assert page.locator(".se-source").inner_text() == "x**2/y - sin(x)"
+    # where "sin(x)" sits on the screen, to the pixel
+    where = page.evaluate("""() => {
+        const src = document.querySelector('.se-source'), text = src.textContent;
+        const i = text.indexOf('sin(x)');
+        const r = document.createRange();
+        r.setStart(src.firstChild, i);
+        r.setEnd(src.firstChild, i + 'sin(x)'.length);
+        const b = r.getBoundingClientRect();
+        return {left: b.left, right: b.right, y: (b.top + b.bottom) / 2};
+    }""")
+    page.mouse.move(where["left"] + 1, where["y"])
+    page.mouse.down()
+    for k in range(1, 7):
+        page.mouse.move(where["left"] + 1 + k * (where["right"] - where["left"] - 2) / 6, where["y"])
+    page.mouse.up()
+
+    assert page.evaluate("String(getSelection())") == "sin(x)"      # the text really is selected
+    assert page.locator(".se-status").inner_text() == "sin: sin(x)"  # and the formula followed
+    assert page.locator(".se-view .se-selected").count() >= 1
+    assert not page.locator(".se-actions").is_visible()              # the bar keeps out of the way
+    # a caret in the line hints at the node it falls in, without selecting
+    page.mouse.click(where["left"] + 2, where["y"])
+    assert page.evaluate("String(getSelection())") == ""
+    assert page.errors == []
+
+
+def test_every_control_is_finger_sized_on_a_touch_screen(browser, serve_expr):
+    """A coarse pointer makes the controls bigger - but only those the rule
+    listed, so the menus added later stayed 12px next to a 14px Transform,
+    visibly smaller and harder to hit."""
+    from sympy import Matrix
+
+    srv, doc = serve_expr(Matrix([[1, 2], [3, 4]]))
+    page = browser.new_page(viewport={"width": 420, "height": 800}, has_touch=True, is_mobile=True)
+    page.goto(srv.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    assert _wait(lambda: page.locator(".se-methods").is_visible() and page.locator(".se-typemenu").is_visible())
+    sizes = page.evaluate("""() => {
+        const out = {};
+        for (const s of ['.se-ops', '.se-typemenu', '.se-methods', '.se-fn', '[data-cmd="edit"]']) {
+            const el = document.querySelector(s), cs = getComputedStyle(el), r = el.getBoundingClientRect();
+            out[s] = [cs.fontSize, Math.round(r.height)];
+        }
+        return out;
+    }""")
+    assert len({v[0] for v in sizes.values()}) == 1, sizes          # one type size for all of them
+    assert all(v[1] >= 32 for v in sizes.values()), sizes           # and a target a finger can hit
+    page.close()

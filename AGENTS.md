@@ -425,6 +425,18 @@ Two conventions between printer, document and front end:
   viewer in a page or a fragment.  Keep the payload shape identical on both
   sides: one viewer serves the editor's sessions and any list of
   expressions.
+- **The source line's selection.**  Selecting text there selects in the
+  formula (`_onSourceSelection`, `selectionchange`).  Two things used to
+  break it and both are easy to reintroduce: `contenteditable` must be
+  `"true"`, not `"plaintext-only"` (a drag over a plaintext-only line
+  selects nothing in Chromium, though a double-click does), and
+  `_placeActions` must do nothing while the source has the focus - the
+  floating bar appearing under the pointer takes the drag apart.  A test
+  drags over `sin(x)` and checks both the text and the formula.
+- **Touch sizes.**  The `any-pointer: coarse` rule lists every control that
+  grows for a finger.  A control added later and left out of that list stays
+  12px beside its 14px neighbours - which is exactly what happened to the
+  type and Methods menus.  Add new controls to it.
 - **Printers that reach past `_print`.**  Annotation happens in
   `_AnnotatingMixin._print`, so a `_print_*` that formats a child without
   going through `self._print` leaves that node out of the view tree and

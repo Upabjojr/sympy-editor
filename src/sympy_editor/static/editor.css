@@ -758,11 +758,17 @@
 
 /* touch screens: bigger targets, larger formula */
 @media (pointer: coarse) {
-  .se-toolbar button, .se-ops, .se-sym select, .se-sym input, .se-sym button, .se-actions button, .se-opbar button {
+  /* every control the finger can hit, the menus and the function box
+   * included: leaving one out left it visibly smaller than the rest (the
+   * type and Methods menus beside Transform) and harder to tap */
+  .se-toolbar button, .se-ops, .se-typemenu, .se-methods, .se-fn,
+  .se-sym select, .se-sym input, .se-sym button, .se-actions button, .se-opbar button {
     font-size: 14px;
     padding: 0.45rem 0.7rem;
     min-height: 2.2rem;
   }
+  .se-lazy { font-size: 14px; }
+  .se-lazy-box { width: 1.1rem; height: 1.1rem; }
   .se-view { font-size: calc(1.6em * var(--se-zoom, 1)); padding: 0.8rem 0.5rem; }
   .se-inline { font-size: 0.9em; }
   .sympy-editor { min-width: 0; width: 100%; }
