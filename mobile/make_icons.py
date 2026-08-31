@@ -15,8 +15,11 @@ What comes out:
 * `mobile/icon/icon-foreground.svg`  the art alone, in the 108dp box an
   adaptive icon wants, with everything inside the central 72dp the launcher
   is guaranteed to show;
-* `android/app/src/main/res/mipmap-*/`  the PNGs the app ships;
-* `mobile/icon/icon-512.png`         the store listing's icon.
+* `android/app/src/main/res/mipmap-*/`  the PNGs the Android app ships;
+* `ios/SymPyEditor/Assets.xcassets/AppIcon.appiconset/`  the iOS app icon,
+  the single 1024x1024 Xcode has wanted since 14;
+* `mobile/icon/icon-512.png`         Google Play's listing icon;
+* `mobile/icon/icon-1024.png`        the same at App Store size.
 
 Needs `rsvg-convert` (librsvg) for the PNGs; without it the SVGs are still
 written and it says so.
@@ -32,6 +35,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ICON = HERE / "icon"
 RES = HERE / "android/app/src/main/res"
+IOS_ICONS = HERE / "ios/SymPyEditor/Assets.xcassets/AppIcon.appiconset"
 
 #: The mark's own drawing, in the source SVG's 750x750 user units (measured
 #: once from a render of mobile/icon/sympy-mark.svg: the tail reaches far to
@@ -130,6 +134,48 @@ COLOURS = ('<?xml version="1.0" encoding="utf-8"?>\n'
            f'    <color name="ic_launcher_background">{BACKGROUND}</color>\n'
            "</resources>\n")
 
+#: Xcode 14 and later take one 1024x1024 image for every place an iOS icon is
+#: shown, and make the rest themselves.  It must be opaque, with no alpha.
+IOS_CONTENTS = """{
+  "images" : [
+    {
+      "filename" : "icon-1024.png",
+      "idiom" : "universal",
+      "platform" : "ios",
+      "size" : "1024x1024"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}
+"""
+
+ASSETS_CONTENTS = """{
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}
+"""
+
+
+def flatten(png: Path, background: str = BACKGROUND) -> None:
+    """Drop the alpha channel: the App Store refuses an icon that has one.
+    Does nothing without Pillow, and says so."""
+    try:
+        from PIL import Image
+    except ImportError:
+        print("Pillow is not installed:", png, "keeps its alpha channel (the App Store wants none)")
+        return
+    image = Image.open(png)
+    if image.mode != "RGBA":
+        return
+    flat = Image.new("RGB", image.size, background)
+    flat.paste(image, mask=image.split()[-1])
+    flat.save(png)
+
 
 def render(svg: Path, png: Path, size: int) -> None:
     png.parent.mkdir(parents=True, exist_ok=True)
@@ -156,8 +202,15 @@ def main() -> int:
     (adaptive / "ic_launcher_round.xml").write_text(ADAPTIVE, encoding="utf-8")
     (RES / "values").mkdir(parents=True, exist_ok=True)
     (RES / "values/ic_launcher_background.xml").write_text(COLOURS, encoding="utf-8")
-    render(ICON / "icon.svg", ICON / "icon-512.png", 512)      # the store listing wants exactly this
-    print("Wrote the mipmaps under", RES, "and", ICON / "icon-512.png")
+    render(ICON / "icon.svg", ICON / "icon-512.png", 512)       # Google Play's listing icon
+    render(ICON / "icon.svg", ICON / "icon-1024.png", 1024)     # the App Store's
+    IOS_ICONS.mkdir(parents=True, exist_ok=True)
+    render(ICON / "icon.svg", IOS_ICONS / "icon-1024.png", 1024)
+    flatten(IOS_ICONS / "icon-1024.png")                        # iOS rejects an icon with alpha
+    (IOS_ICONS / "Contents.json").write_text(IOS_CONTENTS, encoding="utf-8")
+    (IOS_ICONS.parent / "Contents.json").write_text(ASSETS_CONTENTS, encoding="utf-8")
+    print("Wrote the mipmaps under", RES, ", the iOS icon under", IOS_ICONS,
+          "and", ICON / "icon-512.png", "/", ICON / "icon-1024.png")
     return 0
 
 

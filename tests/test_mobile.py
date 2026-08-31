@@ -170,4 +170,14 @@ def test_the_app_has_an_icon_of_its_own():
     # the art is built from SymPy's own mark, which travels with the repo
     mark = (ROOT / "mobile/icon/sympy-mark.svg").read_text(encoding="utf-8")
     assert "Fredrik Johansson" in mark and "SymPy_text" not in mark      # the wordmark is off
-    assert (ROOT / "mobile/icon/icon-512.png").is_file()                      # what the store listing wants
+    # what the two stores ask for: 512 for Google Play, 1024 for the App Store
+    from PIL import Image
+    for name, size in (("icon-512.png", 512), ("icon-1024.png", 1024)):
+        with Image.open(ROOT / "mobile/icon" / name) as image:
+            assert image.size == (size, size), name
+    ios = ROOT / "mobile/ios/SymPyEditor/Assets.xcassets/AppIcon.appiconset"
+    with Image.open(ios / "icon-1024.png") as image:
+        assert image.size == (1024, 1024)
+        assert image.mode == "RGB"          # the App Store refuses an icon with alpha
+    assert '"size" : "1024x1024"' in (ios / "Contents.json").read_text(encoding="utf-8")
+    assert "ASSETCATALOG_COMPILER_APPICON_NAME" in (ROOT / "mobile/ios/project.yml").read_text(encoding="utf-8")

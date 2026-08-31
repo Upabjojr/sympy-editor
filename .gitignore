@@ -6,6 +6,7 @@ dist/
 .pytest_cache/
 .ipynb_checkpoints/
 examples/*.html
+examples/derivations/*.html
 
 # mobile packaging: generated bundle and native build products
 mobile/www/

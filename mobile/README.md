@@ -112,8 +112,18 @@ wordmark taken off, since an icon has no room for text - and a pencil the
 script draws over it, which is what says the app *edits* the mathematics.
 It writes the master SVGs beside the mark, the `mipmap-*` PNGs (legacy,
 round and the 108dp adaptive foreground), the adaptive-icon XML with its
-background colour, and `mobile/icon/icon-512.png` for a store listing.
-Needs `rsvg-convert` (`apt install librsvg2-bin`).
+background colour, the iOS asset catalogue, and the two the stores ask for:
+
+| where | size | why |
+| --- | --- | --- |
+| `res/mipmap-*/ic_launcher*.png` | 48-192 px | what Android draws in the launcher |
+| `res/mipmap-*/ic_launcher_foreground.png` | 108-432 px | the adaptive icon's foreground, art inside the central 72dp |
+| `ios/.../AppIcon.appiconset/icon-1024.png` | 1024 | every iOS size, made by Xcode from this one - and it must have no alpha |
+| `icon-512.png` | 512 | Google Play's listing |
+| `icon-1024.png` | 1024 | the App Store's |
+
+Needs `rsvg-convert` (`apt install librsvg2-bin`), and Pillow to flatten the
+iOS icon.
 
 The mark's author, Fredrik Johansson, permits its free use on SymPy's own
 terms (the note travels in the file).  That is a copyright licence, not a

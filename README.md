@@ -320,6 +320,14 @@ The page runs no Python: it renders the steps with KaTeX in the browser, and
 its **Save as web page** button writes the whole thing - fonts included - to
 one offline file.  `examples/demo_history.py` builds one.
 
+`examples/derivations/` is a shelf of worked derivations built this way -
+the quadratic formula by completing the square, the Gaussian integral, the
+geometric series, Euler's identity, a derivative from first principles,
+partial fractions, the eigenvalues of a matrix, Gaussian elimination, the
+harmonic oscillator from its Lagrangian, least squares.  `python
+examples/derivations/build.py --open` writes a page for each and an index
+over them.
+
 `examples/manualintegrate_steps.ipynb` shows the point of the separation: it
 flattens the rule tree that `sympy.integrals.manualintegrate.integral_steps`
 returns into a list of expressions - one rule per step, by parts, by

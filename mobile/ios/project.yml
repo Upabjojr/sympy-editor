@@ -10,7 +10,7 @@ targets:
     type: application
     platform: iOS
     sources:
-      - path: SymPyEditor
+      - path: SymPyEditor        # includes Assets.xcassets, built by mobile/make_icons.py
       - path: ../www          # the shared bundle, copied into the app as a folder
         type: folder
         buildPhase: resources
@@ -25,6 +25,7 @@ targets:
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
     settings:
       base:
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         PRODUCT_BUNDLE_IDENTIFIER: org.sympy.editor
         TARGETED_DEVICE_FAMILY: "1,2"
         DEVELOPMENT_TEAM: ${IOS_TEAM_ID}
