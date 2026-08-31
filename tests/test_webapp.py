@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import threading
 from pathlib import Path
 
@@ -67,3 +68,41 @@ def test_service_worker_installs_and_caches(tmp_path):
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+def test_the_showcase_carries_the_shelf_and_one_copy_of_the_editor(tmp_path):
+    """`--shelf` builds the page that introduces the project with every
+    derivation embedded.  Ten separate exports would carry ten copies of the
+    editor's code; this carries one, which is what keeps it a third of a
+    megabyte instead of three."""
+    build = _load()
+    out = build.derivations_page(tmp_path / "shelf", urls=None, editor_href="editor.html")
+    assert out is not None and out.name == "index.html"
+    page = out.read_text(encoding="utf-8")
+    assert page.count("SympyEditor.mountHistory(") >= 8          # one viewer per derivation
+    assert page.count("var SympyEditor") <= 1                    # and one copy of the code
+    assert 'href="editor.html"' in page                          # the editor is a click away
+    assert "SymPy editor" in page and "history" in page          # the project is introduced
+    assert '"hideTitle": true' in page                           # the card names it, the report need not
+    assert len(page) < 900_000, len(page)
+
+
+def test_the_web_app_wears_the_app_s_own_icon(tmp_path):
+    """The PWA's icons are the logo the phone app wears, rendered from the
+    one SVG - no second drawing of the same thing, and no PNG in the
+    repository: they are made at build time."""
+    build = _load()
+    out = tmp_path / "icons"
+    out.mkdir()
+    build.write_icons(out)
+    logo = (ROOT / "mobile/icon/icon.svg").read_text(encoding="utf-8")
+    assert (out / "icon.svg").read_text(encoding="utf-8") == logo
+    if not shutil.which("rsvg-convert"):
+        pytest.skip("needs librsvg to render the PNGs")
+    from PIL import Image
+
+    for size in (192, 512):
+        with Image.open(out / f"icon-{size}.png") as image:
+            assert image.size == (size, size)
+    manifest = build.manifest()
+    assert [i["src"] for i in manifest["icons"]] == ["icon.svg", "icon-192.png", "icon-512.png"]

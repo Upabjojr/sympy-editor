@@ -88,6 +88,7 @@ var SympyEditor = (function () {
     ".player .play { min-width: 6.2em; }",     /* Play and Pause are not the same width */
     ".player .count { min-width: 4.2em; text-align: center; }",
     "body.hosted .player { display: none; }",   /* the host shows the controls in its own fixed strip */
+    "body.no-title h1, body.no-title .meta { display: none; }",   /* the page around it already says what this is */
     "@media (prefers-color-scheme: dark) { .player button { background: #2a2d31; border-color: #444; } }",
     "body.slides { display: flex; flex-direction: column; min-height: 100vh; box-sizing: border-box; }",
     /* width: 100% - as a flex item, "margin: 0 auto" would otherwise stop it
@@ -822,7 +823,12 @@ var SympyEditor = (function () {
       .then(function (html) {
         frame.addEventListener("load", function () {
           var d = frame.contentDocument;
-          if (!d || !cfg.onStep) return;
+          if (!d) return;
+          // `hideTitle`: the page around the viewer already names the history,
+          // so the report does not say it a second time.  A saved copy still
+          // does - that file has no page around it.
+          if (cfg.hideTitle) d.body.classList.add("no-title");
+          if (!cfg.onStep) return;
           var style = d.createElement("style");
           style.textContent = ".step[data-index] { cursor: pointer; } .step[data-index]:hover { border-color: #3b82f6; }";
           d.head.appendChild(style);

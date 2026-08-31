@@ -320,6 +320,11 @@ The page runs no Python: it renders the steps with KaTeX in the browser, and
 its **Save as web page** button writes the whole thing - fonts included - to
 one offline file.  `examples/demo_history.py` builds one.
 
+`python webapp/build.py --shelf DIR` writes that shelf as a page that
+introduces the project with every derivation embedded in it, an editor
+beside it and KaTeX with them: about 1.5 MB, a folder to drop into any site.
+The full web app build puts the same page at `dist/derivations/`.
+
 `examples/derivations/` is a shelf of worked derivations built this way -
 the quadratic formula by completing the square, the Gaussian integral, the
 geometric series, Euler's identity, a derivative from first principles,
