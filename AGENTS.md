@@ -409,7 +409,13 @@ Two conventions between printer, document and front end:
   is `inline-flex` with `flex: 0 0 auto`, which wraps as a whole.  Put a new
   control in a group, never loose in the strip: a `- 100% +` broken across
   two lines is not a control.  The report's own bar does the same with
-  `.player .group`.
+  `.player .group`.  Nothing in the strip may move when the player's state
+  changes: `.se-play` holds the width of the wider of Play/Pause, the
+  counter and the zoom level are tabular with a `min-width`, and "Show all"
+  toggles `visibility` (a `se-on` class), never `hidden` - which used to
+  shove every button beside it the moment Play was pressed.
+  `test_nothing_in_the_history_strip_moves` compares the geometry of every
+  control before, during and after playing.
 - **The history's zoom.**  `--se-report-zoom` on the report's root scales
   `.step` and `.transition`; the slideshow's own size multiplies it
   (`calc(1.35em * var(--se-report-zoom, 1))`), so do not give `.slide-on` a

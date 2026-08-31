@@ -83,13 +83,16 @@ var SympyEditor = (function () {
     ".player .count { font-size: 0.85rem; color: #656d76; font-variant-numeric: tabular-nums; }",
     ".player .zoom-level { font-variant-numeric: tabular-nums; min-width: 4em; }",
     ".player .group { display: inline-flex; align-items: center; gap: 0.4rem; }",   /* wraps as a unit */
-    ".player .exit { display: none; }",
+    ".player .exit { visibility: hidden; }",   /* keeps its place: nothing moves when the slideshow starts */
+    "body.slides .player .exit { visibility: visible; }",
+    ".player .play { min-width: 6.2em; }",     /* Play and Pause are not the same width */
+    ".player .count { min-width: 4.2em; text-align: center; }",
     "body.hosted .player { display: none; }",   /* the host shows the controls in its own fixed strip */
     "@media (prefers-color-scheme: dark) { .player button { background: #2a2d31; border-color: #444; } }",
     "body.slides { display: flex; flex-direction: column; min-height: 100vh; box-sizing: border-box; }",
     "body.slides main { flex: 1; display: flex; flex-direction: column; }",
     "body.slides h1, body.slides .meta, body.slides footer { display: none; }",
-    "body.slides .player .exit { display: inline-block; }",
+
     "body.slides .step, body.slides .transition { display: none; }",
     "body.slides .slide-on { display: block; font-size: calc(1.35em * var(--se-report-zoom, 1)); }",
     ".slide-top { margin-top: auto; } .slide-bottom { margin-bottom: auto; }",
@@ -717,7 +720,10 @@ var SympyEditor = (function () {
         play.textContent = st.playing ? "\u23f8 Pause" : "\u25b6 Play";
         count.textContent = (st.index + 1) + " / " + st.total;
         level.textContent = Math.round(st.zoom * 100) + "%";
-        all.hidden = !st.on;
+        // "Show all" keeps its place when it has nothing to do: hiding it
+        // outright shifted every button beside it the moment Play was
+        // pressed, so it goes invisible, not away.
+        all.classList.toggle("se-on", !!st.on);
       });
     });
     play.addEventListener("click", function () { if (api) api.toggle(); });

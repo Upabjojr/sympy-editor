@@ -2961,3 +2961,45 @@ def test_the_history_strip_wraps_by_groups(browser, tmp_path):
         zoom = next(g for g in groups if "100%" in g["label"])
         assert zoom["lines"] == 1, (width, zoom)
     page.close()
+
+
+def test_nothing_in_the_history_strip_moves(browser, tmp_path):
+    """Pressing Play used to shift the buttons beside it: "Show all" appeared
+    out of nowhere and Pause is wider than Play.  Every control keeps its
+    exact place, whatever the player is doing."""
+    from sympy import Integral, cos
+    from sympy_editor import History, to_history_html
+
+    hist = History([
+        Integral(x * sin(x), x),
+        (-x * cos(x) + Integral(cos(x), x), "by parts"),
+        (-x * cos(x) + sin(x), "the last integral"),
+    ], title="By parts")
+    path = tmp_path / "steady.html"
+    path.write_text(to_history_html(hist), encoding="utf-8")
+    page = browser.new_page(viewport={"width": 420, "height": 640})
+    page.goto(path.as_uri())
+    page.wait_for_selector(".se-history-frame", timeout=30000)
+    assert _wait(lambda: page.locator(".se-play").is_visible())
+    WHERE = """() => {
+        const out = {};
+        for (const el of document.querySelectorAll('.se-history-head button, .se-history-head .se-play-count')) {
+            const r = el.getBoundingClientRect();
+            out[el.className.split(' ')[0] + '|' + (el.getAttribute('aria-label') || '')] =
+                [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)];
+        }
+        return out;
+    }"""
+    at_rest = page.evaluate(WHERE)
+    assert len(at_rest) >= 6, at_rest
+
+    page.locator(".se-play").click()                        # Play -> Pause, "Show all" wakes up
+    assert page.evaluate(WHERE) == at_rest
+    assert page.locator(".se-play-all").is_visible()
+    assert _wait(lambda: page.locator(".se-play-count").inner_text() == "2 / 3", timeout=10)
+    assert page.evaluate(WHERE) == at_rest                  # and while it plays
+    page.locator(".se-play-zoom").last.click()              # 100% -> 120%
+    assert page.evaluate(WHERE) == at_rest
+    page.locator(".se-play-all").click()                    # back to the listing
+    assert page.evaluate(WHERE) == at_rest
+    page.close()

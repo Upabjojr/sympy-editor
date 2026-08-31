@@ -640,7 +640,14 @@
 /* The player's controls live in the strip, which does not scroll: the
  * slideshow is driven from the same place whatever the steps do. */
 .se-history-head .se-play-step { padding: 0.3rem 0.5rem; line-height: 1; }
-.se-history-head .se-play-count { font-size: 12px; color: var(--se-muted); font-variant-numeric: tabular-nums; min-width: 3.2em; text-align: center; }
+/* Nothing in the strip moves when the slideshow starts or stops: the
+ * play button holds the width of the wider of its two labels, the counter
+ * and the zoom level are tabular and wide enough for what they can say, and
+ * "Show all" goes invisible rather than away when it has nothing to do. */
+.se-history-head .se-play { min-width: 6.2em; justify-content: center; }
+.se-history-head .se-play-count { font-size: 12px; color: var(--se-muted); font-variant-numeric: tabular-nums; min-width: 4.2em; text-align: center; }
+.se-history-head .se-play-all { visibility: hidden; }
+.se-history-head .se-play-all.se-on { visibility: visible; }
 .se-history-head .se-play-zoom { padding: 0.3rem 0.55rem; line-height: 1; min-width: 2.1em; }
 .se-history-head .se-play-level { padding: 0.3rem 0.4rem; line-height: 1; min-width: 3.6em; font-variant-numeric: tabular-nums; }
 .se-history-head [hidden] { display: none; }
