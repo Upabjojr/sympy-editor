@@ -2429,9 +2429,16 @@ def test_full_screen_button_gives_the_formula_the_window(browser, serve_expr):
     assert view["x"] + view["width"] - (box["x"] + box["width"]) < 12                   # ...right corner
     size = lambda: float(page.evaluate("parseFloat(getComputedStyle(document.querySelector('.se-view')).fontSize)"))
     small, short = size(), view["height"]
+    # the host application (the Android app) is asked for its own full screen
+    page.evaluate("window.SympyEditorApp = { calls: [], setFullscreen(on) { this.calls.push(on); } };")
 
     btn.click()
     assert "se-full" in page.locator(".sympy-editor").get_attribute("class")
+    assert page.evaluate("window.SympyEditorApp.calls") == [True]
+    page.wait_for_function("!!document.fullscreenElement", timeout=10000)   # and the browser, for real
+    # nothing but the tools and the formula is left
+    assert not page.locator(".se-source").is_visible()
+    assert not page.locator(".se-symbols").is_visible()
     root = page.locator(".sympy-editor").bounding_box()
     assert (round(root["x"]), round(root["y"])) == (0, 0)                # the page behind is covered
     assert (round(root["width"]), round(root["height"])) == (900, 620)
@@ -2448,6 +2455,9 @@ def test_full_screen_button_gives_the_formula_the_window(browser, serve_expr):
     assert "se-full" in page.locator(".sympy-editor").get_attribute("class")
     page.keyboard.press("Escape")                                       # then leaves full screen
     assert "se-full" not in page.locator(".sympy-editor").get_attribute("class")
+    assert page.evaluate("window.SympyEditorApp.calls") == [True, False]
+    page.wait_for_function("!document.fullscreenElement", timeout=10000)
+    assert page.locator(".se-source").is_visible()
     assert round(page.locator(".se-view").bounding_box()["height"]) == round(short)
     assert errors == []
     page.close()

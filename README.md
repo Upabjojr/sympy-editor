@@ -330,9 +330,12 @@ it.  Available on Pyodide-backed pages.
 The formula sits on its own faintly outlined canvas, with the SymPy source
 of the whole expression under it and the tools above.  A quasi-transparent
 button in the canvas's top-right corner gives the formula the **whole
-window**: the editor covers the page, the editing area takes every pixel the
-tools leave, and the formula is drawn larger.  The same button - or Esc, when
-nothing is selected - comes back.
+screen**: the editor covers the page, the source line and the Symbols panel
+step aside, the editing area takes every pixel the tools leave, and the
+formula is drawn larger.  It is real full screen where the platform has one -
+the browser's own (the Fullscreen API), and in the Android app the status and
+navigation bars go too.  The same button - or Esc, when nothing is selected -
+comes back.
 
 The toolbar's **?** opens this whole guide inside the editor - every
 gesture, key and tool in one box (Esc closes it).

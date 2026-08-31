@@ -120,7 +120,7 @@ var SympyEditor = (function () {
     "</ul></section>",
     "<section><h3>Zoom and full screen</h3><ul>",
     "<li><kbd>Ctrl</kbd>+wheel, <kbd>Ctrl</kbd>+<kbd>+</kbd>/<kbd>\u2212</kbd>/<kbd>0</kbd>, pinch, or the \u2212/100%/+ buttons.</li>",
-    "<li>The faint button in the top-right corner of the editing area gives the formula the whole window; it (or <kbd>Esc</kbd>, with nothing selected) comes back.</li>",
+    "<li>The faint button in the top-right corner of the editing area gives the formula the whole screen \u2014 the browser\u2019s chrome and, in the app, the system bars go too; it (or <kbd>Esc</kbd>, with nothing selected) comes back.</li>",
     "</ul></section>",
     "</div>"
   ].join("");
@@ -3817,16 +3817,25 @@ var SympyEditor = (function () {
 
     /* ---- full screen ---- */
 
-    /** Give the formula the whole window: the editor becomes a fixed panel
-     *  over the page, the editing area takes all the height that is left and
-     *  the formula is drawn larger.  Everything else on the page is simply
-     *  covered.  The corner button and Esc (when nothing is selected) come
-     *  back. */
+    /** Give the formula the whole screen, as far as the platform allows:
+     *
+     *  - the editor becomes a fixed panel over the page, the editing area
+     *    takes all the height that is left, the formula is drawn larger and
+     *    the source line and the Symbols panel step aside (the tools stay:
+     *    the point is to work on the formula, not only to look at it);
+     *  - the browser is asked for real full screen (the Fullscreen API), so
+     *    its own chrome goes too;
+     *  - the host application is asked for the same (the Android app hides
+     *    the status and navigation bars).
+     *
+     *  The corner button and Esc (when nothing is selected) come back. */
     setFullscreen(on) {
       on = !!on;
       if (on === this.fullscreen) return;
       this.fullscreen = on;
       this.root.classList.toggle("se-full", on);
+      this._nativeFullscreen(on);
+      this._browserFullscreen(on);
       if (this.fullBtn) {
         this.fullBtn.innerHTML = expandSvg(on);
         var title = on ? "Leave full screen (Esc)"
@@ -3840,6 +3849,47 @@ var SympyEditor = (function () {
       if (this.caret) this._hideCaret();
       this._applySelection();
       this._setStatus(on ? "Full screen - Esc or the corner button comes back" : "");
+    }
+
+    /** The host application's own full screen (the Android app takes the
+     *  status and navigation bars away).  Absent in a plain browser. */
+    _nativeFullscreen(on) {
+      var app = window.SympyEditorApp;
+      if (!app || !app.setFullscreen) return;
+      try { app.setFullscreen(on); } catch (e) { /* an older host: the CSS panel is all there is */ }
+    }
+
+    /** The browser's own full screen, so its chrome goes as well.  It needs a
+     *  user gesture (the button click is one) and is refused in an iframe
+     *  without allowfullscreen: the fixed panel is the fallback, and stands
+     *  on its own. */
+    _browserFullscreen(on) {
+      var self = this;
+      if (!this._fsListener) {
+        // leaving through the browser (F11, Esc, the tab bar) must leave here too
+        this._fsListener = function () {
+          var el = document.fullscreenElement || document.webkitFullscreenElement;
+          if (self._usedFsApi && !el && self.fullscreen) self.setFullscreen(false);
+        };
+        document.addEventListener("fullscreenchange", this._fsListener);
+        document.addEventListener("webkitfullscreenchange", this._fsListener);
+      }
+      try {
+        if (on) {
+          var req = this.root.requestFullscreen || this.root.webkitRequestFullscreen;
+          if (!req) return;
+          var p = req.call(this.root, { navigationUI: "hide" });
+          this._usedFsApi = true;
+          if (p && p.catch) p.catch(function () { self._usedFsApi = false; });
+        } else if (this._usedFsApi) {
+          this._usedFsApi = false;
+          var exit = document.exitFullscreen || document.webkitExitFullscreen;
+          if (exit && (document.fullscreenElement || document.webkitFullscreenElement)) {
+            var q = exit.call(document);
+            if (q && q.catch) q.catch(function () { /* already out */ });
+          }
+        }
+      } catch (e) { this._usedFsApi = false; }
     }
 
     /* ---- zoom and sideways scrolling ---- */

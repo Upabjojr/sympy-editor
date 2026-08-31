@@ -20,6 +20,7 @@ import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewClientCompat
 import com.chaquo.python.PyObject
@@ -157,6 +158,24 @@ class MainActivity : AppCompatActivity() {
 
     /** ``window.SympyEditorApp`` in the page. */
     inner class ReportBridge {
+        /** Full screen for real: the page's own full-screen button asks the
+         *  app to take the status and navigation bars away (a swipe from an
+         *  edge brings them back transiently).  Without this the WebView
+         *  keeps its inset padding and the bars stay: "full screen" would
+         *  only mean the page hiding its own furniture. */
+        @JavascriptInterface
+        fun setFullscreen(on: Boolean) {
+            runOnUiThread {
+                val controller = WindowCompat.getInsetsController(window, web)
+                if (on) {
+                    controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    controller.hide(WindowInsetsCompat.Type.systemBars())
+                } else {
+                    controller.show(WindowInsetsCompat.Type.systemBars())
+                }
+            }
+        }
+
         /** Save `html` as `name` in Downloads (Android 10+) and offer to share it. */
         @JavascriptInterface
         fun shareHtml(name: String, html: String) = shareFile(name, "text/html", html)

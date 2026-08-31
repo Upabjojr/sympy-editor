@@ -330,6 +330,9 @@
   border-radius: 0;
 }
 .sympy-editor.se-full .se-stage { flex: 1 1 auto; min-height: 0; display: flex; }
+/* the furniture that is not a tool steps aside: on a phone the source line
+ * and the Symbols panel are a sixth of the screen */
+.sympy-editor.se-full > .se-source, .sympy-editor.se-full > .se-symbols { display: none; }
 .sympy-editor.se-full .se-view {
   flex: 1 1 auto;
   min-height: 0;

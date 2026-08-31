@@ -397,10 +397,17 @@ Two conventions between printer, document and front end:
   relative`) beside `.se-fullbtn`, not inside it: within the view a wide
   formula would scroll the button out of sight.  `Editor.setFullscreen`
   toggles `.se-full` on the root - `position: fixed`, a column flex box, the
-  stage and the view taking the leftover height, the formula centred and
-  drawn at 1.9em - and Esc leaves it when nothing is selected (the last
-  `Escape` branch of `_onKey`).  The button re-measures the overlay boxes
-  after the size change.
+  stage and the view taking the leftover height, the source line and the
+  Symbols panel hidden, the formula centred and drawn at 1.9em - and Esc
+  leaves it when nothing is selected (the last `Escape` branch of `_onKey`).
+  The panel is only the fallback: `_browserFullscreen` asks for the real
+  thing through the Fullscreen API (a user gesture is needed, and an iframe
+  without `allowfullscreen` refuses - hence the fallback) and follows
+  `fullscreenchange` so leaving through the browser leaves here too, while
+  `_nativeFullscreen` calls `window.SympyEditorApp.setFullscreen(on)`, which
+  the Android app answers by hiding the system bars
+  (`WindowInsetsControllerCompat`, `MainActivity.ReportBridge`).  The button
+  re-measures the overlay boxes after the size change.
 - **Touch keyboards.**  `noAutoCaps` (applied by `h()` to every text input,
   and by hand to the contenteditable source line) turns off
   `autocapitalize`, `autocorrect`, `autocomplete` and `spellcheck`: what is
