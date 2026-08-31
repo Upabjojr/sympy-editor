@@ -3183,3 +3183,40 @@ def test_a_session_can_be_given_a_name(browser, tmp_path):
     assert _wait(lambda: page.locator(".se-session").first.locator(".se-session-row > code").inner_text() != "Simplifying the Hamiltonian")
     assert errors == []
     page.close()
+
+
+def test_the_history_strip_opens_in_its_final_shape(browser, serve_expr):
+    """The player's controls used to appear only once the report inside the
+    iframe answered, so opening the view showed a strip that rearranged
+    itself a moment later.  They are built in place, already counting the
+    steps, and merely become usable."""
+    srv, doc = serve_expr((x + y) ** 2)
+    page = _open(browser, srv.url)
+    _next_state(page, lambda: page.select_option(".se-ops", "expand"))     # two steps: there is a player
+    GEOM = """() => {
+        const out = {};
+        for (const el of document.querySelectorAll('.se-history-head button, .se-history-head select, .se-history-head .se-play-count')) {
+            const r = el.getBoundingClientRect();
+            out[(el.className || el.tagName).split(' ')[0]] = [Math.round(r.x), Math.round(r.y), Math.round(r.width)];
+        }
+        return out;
+    }"""
+    page.locator('.se-toolbar [data-cmd="history"]').click()
+    page.wait_for_selector(".se-history-head .se-play")                    # the strip's first paint
+    at_first = page.evaluate(GEOM)
+    assert page.locator(".se-play-count").inner_text() == "1 / 2"          # it already knows the steps
+    assert page.locator(".se-play-level").inner_text() == "100%"
+    page.wait_for_function("() => !document.querySelector('.se-history-head .se-play').disabled", timeout=30000)
+    assert page.evaluate(GEOM) == at_first                                 # and nothing moved
+    assert len(at_first) >= 6, at_first
+    page.keyboard.press("Escape")
+
+    # a history of one step has nothing to play, and shows no player at all
+    srv2, doc2 = serve_expr(x + y)
+    page.goto(srv2.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    page.locator('.se-toolbar [data-cmd="history"]').click()
+    page.wait_for_selector(".se-history-view")
+    assert page.locator(".se-history-head .se-play").count() == 0
+    assert page.locator(".se-history-head .se-head-save").count() == 1
+    assert page.errors == []

@@ -711,7 +711,13 @@ var SympyEditor = (function () {
    *  engine stays inside the report (so a saved file still plays on its
    *  own).  Returns the elements; they wire themselves up when the frame
    *  loads, and stay hidden if the report has no player (a single step). */
-  function playerControls(frame) {
+  function playerControls(frame, total) {
+    // Nothing at all when there is nothing to play (a history of one step):
+    // the report has no player either.  Otherwise the controls are built in
+    // their final shape - the counter already knows how many steps there
+    // are - and only wait to be enabled, so opening the view does not shove
+    // them around once the report answers.
+    if (!(total >= 2)) return [];
     var play = h("button", { type: "button", class: "se-play", title: "Play the history as a slideshow" }, ["\u25b6 Play"]);
     var prev = h("button", { type: "button", class: "se-play-step", title: "The step before (\u2190)", "aria-label": "Previous slide" }, ["\u25c0"]);
     var next = h("button", { type: "button", class: "se-play-step", title: "The next step (\u2192)", "aria-label": "Next slide" }, ["\u25b6"]);
@@ -728,13 +734,19 @@ var SympyEditor = (function () {
     var playing = h("span", { class: "se-head-group" }, [play, prev, next, count, all]);
     var zooming = h("span", { class: "se-head-group" }, [out, level, into]);
     var els = [play, prev, next, count, all, out, level, into];
+    count.textContent = "1 / " + total;
+    level.textContent = "100%";
     var api = null;
-    els.forEach(function (el) { el.hidden = true; });
+    var pressable = [play, prev, next, all, out, into, level];
+    pressable.forEach(function (el) { el.disabled = true; });   // until the report answers
     frame.addEventListener("load", function () {
       api = frame.contentWindow && frame.contentWindow.sympyHistoryPlayer;
-      if (!api) return;                                  // nothing to play: one step
+      // (an iframe fires "load" once for its empty document before srcdoc is
+      // set: that one finds no player, and the controls simply stay as they
+      // are - built, in place, waiting)
+      if (!api) return;
       frame.contentDocument.body.classList.add("hosted");   // the report's own bar steps aside
-      els.forEach(function (el) { el.hidden = false; });
+      pressable.forEach(function (el) { el.disabled = false; });
       api.subscribe(function (st) {
         play.textContent = st.playing ? "\u23f8 Pause" : "\u25b6 Play";
         count.textContent = (st.index + 1) + " / " + st.total;
@@ -797,7 +809,8 @@ var SympyEditor = (function () {
     var note = h("small", {}, [cfg.hint || (cfg.onStep ? "tap a step to open it" : "")]);
     var head = h("div", { class: "se-history-head" },
       [h("span", { class: "se-history-title" }, [heading, note])]
-        .concat(playerControls(frame), [h("span", { class: "se-head-group" }, [save])]));
+        .concat(playerControls(frame, ((hist && hist.steps) || []).length),
+              [h("span", { class: "se-head-group" }, [save])]));
     var view = h("div", { class: "sympy-editor se-history-page" }, [head, frame]);
     if (host) host.appendChild(view);
     var ready = loadKatex(opts)
@@ -3910,7 +3923,7 @@ var SympyEditor = (function () {
       var close = h("button", { type: "button", class: "se-history-close", title: "Close (Esc)", "aria-label": "Close" }, ["\u2715"]);
       var head = h("div", { class: "se-history-head" },
         [h("span", { class: "se-history-title" }, ["History", h("small", {}, ["tap a step to open it"])])]
-          .concat(playerControls(frame),
+          .concat(playerControls(frame, ((this._history && this._history.steps) || []).length),
                   [h("span", { class: "se-head-group" }, [save]),
                    h("span", { class: "se-head-group se-head-close" }, [close])]));
       var view = h("div", { class: "se-history-view", role: "dialog", "aria-label": "History" }, [head, frame]);

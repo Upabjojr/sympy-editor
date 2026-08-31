@@ -423,7 +423,14 @@ Two conventions between printer, document and front end:
   toggles `visibility` (a `se-on` class), never `hidden` - which used to
   shove every button beside it the moment Play was pressed.
   `test_nothing_in_the_history_strip_moves` compares the geometry of every
-  control before, during and after playing.
+  control before, during and after playing.  The same goes for opening the
+  view: `playerControls(frame, total)` takes the number of steps up front,
+  builds the controls in their final shape (the counter already reads
+  `1 / n`) merely disabled, and returns nothing at all below two steps -
+  they used to appear only when the iframe answered, which rearranged the
+  strip a moment after it was drawn.  Note an iframe fires `load` once for
+  its empty document before `srcdoc` is set; that one finds no player and
+  must leave the controls alone.
 - **Walking versus playing.**  The player's `prev`/`next` go through
   `stepBy`, which plays a slide under `body.slides` and otherwise `locate`s
   the step in the listing - scrolling to it and outlining it with
