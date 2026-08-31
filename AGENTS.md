@@ -394,7 +394,12 @@ Two conventions between printer, document and front end:
   already on the page, shown one at a time under `body.slides`.  It has to
   keep working offline in a saved file years from now - no dependency, no
   build step, and the report stays self-contained (the tests check there is
-  no `<script src>` and no `<link>`).
+  no `<script src>` and no `<link>`).  A host drives it from its own fixed
+  strip: the report exposes `window.sympyHistoryPlayer`
+  (play/pause/toggle/prev/next/exit/state/subscribe), `playerControls(frame)`
+  builds the buttons for `.se-history-head`, and `body.hosted` hides the
+  report's own bar - the controls must not scroll away with the steps.  The
+  saved file keeps its bar, since it has no host.
 - **The history viewer is not the editor.**  `buildHistoryReport(hist,
   opts)`, `renderMarked`, `katexCssInline` and `saveFile` are free functions
   in editor.js, and `SympyEditor.mountHistory(host, cfg)` shows a history
@@ -408,6 +413,13 @@ Two conventions between printer, document and front end:
   viewer in a page or a fragment.  Keep the payload shape identical on both
   sides: one viewer serves the editor's sessions and any list of
   expressions.
+- **Printers that reach past `_print`.**  Annotation happens in
+  `_AnnotatingMixin._print`, so a `_print_*` that formats a child without
+  going through `self._print` leaves that node out of the view tree and
+  ↑/↓ skip it.  `LatexPrinter._print_Determinant` did exactly that
+  (`_print_matrix_contents`), so `AnnotatedLatexPrinter` overrides it and
+  prints the matrix with `mat_delim` emptied - the bars are the
+  determinant's.  Watch for the same shape in any printer added later.
 - **What "changed" means in a diff.**  `diffNodes` aligns two node tables;
   `folded(tree, nodes, p) = nargs - children.length` is how many arguments
   the printer draws inside the node itself instead of giving them a place of

@@ -633,6 +633,11 @@
 .se-history-head button:hover { background: var(--se-btn-hover); border-color: rgba(var(--se-accent), 0.55); box-shadow: var(--se-btn-edge), var(--se-btn-shadow-hover); }
 .se-history-head button:active { background: var(--se-btn-down); box-shadow: var(--se-btn-shadow-down); }
 .se-history-head .se-history-close { font-size: 15px; line-height: 1; padding: 0.3rem 0.5rem; }
+/* The player's controls live in the strip, which does not scroll: the
+ * slideshow is driven from the same place whatever the steps do. */
+.se-history-head .se-play-step { padding: 0.3rem 0.5rem; line-height: 1; }
+.se-history-head .se-play-count { font-size: 12px; color: var(--se-muted); font-variant-numeric: tabular-nums; min-width: 3.2em; text-align: center; }
+.se-history-head [hidden] { display: none; }
 .se-help-body { overflow: auto; padding: 0.9rem 1.3rem 2rem; }
 .se-help-cols { max-width: 64rem; margin: 0 auto; column-width: 26rem; column-gap: 2.2rem; }
 .se-help-body section { break-inside: avoid; margin: 0 0 1.1rem; }

@@ -253,9 +253,11 @@ what the step touched, nothing around it.  Tapping a step opens it in the editor
 there:
 
 - **Play** runs the history as a slideshow: one slide per step and one per
-  change, large and centred, advancing on its own (space pauses, ← → step,
-  Esc shows the whole history again).  The player travels with the page, so
-  a saved report plays too.
+  change, large and centred, advancing on its own.  Its controls sit in the
+  strip above, which stays put while the steps go by; inside the report the
+  same keys work (space pauses, ← → step, Esc shows the whole history
+  again).  The player travels with the page, so a saved report plays on its
+  own too.
 - **Save as web page** downloads the same view as a self-contained HTML
   file: KaTeX's rendering and fonts are inlined, so it works offline and can
   be shared as it is.

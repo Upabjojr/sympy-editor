@@ -517,9 +517,32 @@ class _AnnotatingMixin:
             self._stack.pop()
         return self._annotated(expr, path, tex)
 
+def _is_block_matrix(mat) -> bool:
+    from sympy.matrices.expressions.blockmatrix import BlockMatrix
+    return isinstance(mat, BlockMatrix)
+
+
 class AnnotatedLatexPrinter(_AnnotatingMixin, LatexPrinter):
     """LaTeX printer that annotates every printed sub-expression with its
     path (KaTeX ``\\htmlData``)."""
+
+    def _print_Determinant(self, expr):
+        # LatexPrinter prints the determinant of an explicit matrix by
+        # reaching for its contents (``_print_matrix_contents``) instead of
+        # printing the matrix, so the matrix node never went through
+        # ``_print`` and got no annotation: the view tree jumped from the
+        # Determinant straight to the entries, and ↑/↓ skipped the matrix.
+        # Print it properly, with its own delimiters off - the bars are the
+        # determinant's.
+        mat = expr.arg
+        if getattr(mat, "is_MatrixExpr", False) and not _is_block_matrix(mat):
+            return r"\left|{%s}\right|" % self._print(mat)
+        delim = self._settings["mat_delim"]
+        self._settings["mat_delim"] = ""
+        try:
+            return r"\left|{%s}\right|" % self._print(mat)
+        finally:
+            self._settings["mat_delim"] = delim
 
     def _print_Add(self, expr, order=None):
         # Same as LatexPrinter._print_Add, except that a term printed as

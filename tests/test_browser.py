@@ -2577,7 +2577,8 @@ def test_the_history_viewer_runs_without_any_editor(browser, tmp_path):
     # the fonts travelled with the page: the tall integral sign is drawn, not
     # a fallback glyph (the same regression the editor's report had)
     assert frame.locator(".step .delimsizing, .step .mop").count() > 0
-    assert page.locator(".se-history-head button").inner_text() == "Save as web page"
+    assert page.locator(".se-history-head button").last.inner_text() == "Save as web page"
+    assert page.locator(".se-history-head .se-play").is_visible()      # and the player, in the fixed strip
     assert errors == []
     page.close()
 
@@ -2682,9 +2683,9 @@ def test_the_full_screen_button_is_a_finger_sized_target(browser, serve_expr):
 
 
 def test_a_history_plays_as_a_slideshow(browser, tmp_path):
-    """A history can be watched, not only read: the report carries its own
-    player - one slide per step and per change - so the editor's History
-    view, a page of its own and a saved file all play the same way."""
+    """A history can be watched, not only read.  The engine ships inside the
+    report - so a saved file plays on its own - but the controls belong in
+    the strip above it, which does not scroll away with the steps."""
     from sympy import Integral, cos
     from sympy_editor import History, to_history_html
 
@@ -2701,28 +2702,39 @@ def test_a_history_plays_as_a_slideshow(browser, tmp_path):
     page.goto(path.as_uri())
     page.wait_for_selector(".se-history-frame", timeout=30000)
     frame = page.frame_locator(".se-history-frame")
-    frame.locator(".player").wait_for(timeout=30000)
+    frame.locator(".step").first.wait_for(timeout=30000)
     doc = page.frames[1]
-    # three steps and the two changes between them: five slides
-    assert frame.locator(".player .count").inner_text() == "1 / 5"
-    assert doc.evaluate("document.querySelectorAll('.slide-on').length") == 0   # everything shown until asked
 
-    frame.locator(".player .play").click()
+    # the controls are in the fixed strip, not inside the scrolling report
+    head = page.locator(".se-history-head")
+    assert _wait(lambda: head.locator(".se-play").is_visible())
+    assert not frame.locator(".player").is_visible()          # the report's own bar steps aside
+    strip = head.bounding_box()
+    for sel in (".se-play", ".se-play-count"):
+        box = page.locator(sel).bounding_box()
+        assert strip["y"] <= box["y"] and box["y"] + box["height"] <= strip["y"] + strip["height"] + 1
+    # three steps and the two changes between them: five slides
+    assert page.locator(".se-play-count").inner_text() == "1 / 5"
+    assert doc.evaluate("document.querySelectorAll('.slide-on').length") == 0   # everything shown until asked
+    assert not page.locator(".se-play-all").is_visible()
+
+    page.locator(".se-play").click()
     assert doc.evaluate("document.body.classList.contains('slides')")
     assert doc.evaluate("document.querySelectorAll('.slide-on').length") == 1
-    assert not frame.locator("h1").is_visible()                # the slide has the screen to itself
-    assert "Pause" in frame.locator(".player .play").inner_text()
-    assert _wait(lambda: frame.locator(".player .count").inner_text() == "2 / 5", timeout=10)
+    assert not frame.locator("h1").is_visible()               # the slide has the frame to itself
+    assert "Pause" in page.locator(".se-play").inner_text()
+    assert page.locator(".se-play-all").is_visible()
+    assert _wait(lambda: page.locator(".se-play-count").inner_text() == "2 / 5", timeout=10)
     assert frame.locator(".transition.slide-on").count() == 1  # a change is a slide of its own
 
-    frame.locator(".player .play").click()                     # pause where it stands
-    at = frame.locator(".player .count").inner_text()
-    assert "Play" in frame.locator(".player .play").inner_text()
-    frame.locator(".player .next").click()
-    assert frame.locator(".player .count").inner_text() != at
-    frame.locator(".player .prev").click()
-    assert frame.locator(".player .count").inner_text() == at
-    frame.locator(".player .exit").click()                     # back to the whole history
+    page.locator(".se-play").click()                           # pause where it stands
+    at = page.locator(".se-play-count").inner_text()
+    assert "Play" in page.locator(".se-play").inner_text()
+    page.locator(".se-play-step").last.click()
+    assert page.locator(".se-play-count").inner_text() != at
+    page.locator(".se-play-step").first.click()
+    assert page.locator(".se-play-count").inner_text() == at
+    page.locator(".se-play-all").click()                       # back to the whole history
     assert not doc.evaluate("document.body.classList.contains('slides')")
     assert doc.evaluate("document.querySelectorAll('.slide-on').length") == 0
     assert frame.locator("h1").is_visible()
@@ -2743,4 +2755,26 @@ def test_the_three_menus_are_one_size(browser, serve_expr):
         .map(s => Math.round(document.querySelector(s).getBoundingClientRect().width))""")
     assert len(set(widths)) == 1, widths
     assert widths[0] > 100, widths                        # and wide enough to read
+    assert page.errors == []
+
+
+def test_up_and_down_walk_into_a_determinant_s_matrix(browser, serve_expr):
+    """|M| is drawn by the Determinant around the matrix's contents, so the
+    matrix had no place in the view tree: ↓ from the determinant landed on an
+    entry and ↑ came straight back, skipping the matrix itself."""
+    from sympy import Determinant, Matrix
+
+    srv, doc = serve_expr(Determinant(Matrix([[x]])))
+    page = _open(browser, srv.url)
+    _select(page, "/")
+    assert page.locator(".se-status").inner_text().startswith("Determinant")
+    page.keyboard.press("ArrowDown")                       # into the matrix
+    assert page.locator(".se-selected").get_attribute("data-path") == "/0"
+    assert "Matrix" in page.locator(".se-status").inner_text()
+    page.keyboard.press("ArrowDown")                       # and on to the entry
+    assert page.locator(".se-selected").get_attribute("data-path") == "/0/2/0"
+    page.keyboard.press("ArrowUp")                         # back up through the matrix
+    assert page.locator(".se-selected").get_attribute("data-path") == "/0"
+    page.keyboard.press("ArrowUp")
+    assert page.locator(".se-selected").get_attribute("data-path") == "/"
     assert page.errors == []

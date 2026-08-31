@@ -79,6 +79,7 @@ var SympyEditor = (function () {
     ".player button:hover { border-color: #3b82f6; }",
     ".player .count { font-size: 0.85rem; color: #656d76; font-variant-numeric: tabular-nums; }",
     ".player .exit { display: none; }",
+    "body.hosted .player { display: none; }",   /* the host shows the controls in its own fixed strip */
     "@media (prefers-color-scheme: dark) { .player button { background: #2a2d31; border-color: #444; } }",
     "body.slides { display: flex; flex-direction: column; min-height: 100vh; box-sizing: border-box; }",
     "body.slides main { flex: 1; display: flex; flex-direction: column; }",
@@ -598,8 +599,59 @@ var SympyEditor = (function () {
     "    ev.preventDefault();",
     "  });",
     "  count.textContent = '1 / ' + slides.length;",
+    "  // A host (the editor's History view, a page that embeds the report)",
+    "  // drives the same engine from its own fixed strip, so the controls do",
+    "  // not scroll away with the steps.",
+    "  var listeners = [];",
+    "  function state() { return {index: i, total: slides.length, playing: !!timer, on: body.classList.contains('slides')}; }",
+    "  function announce() { for (var k = 0; k < listeners.length; k++) listeners[k](state()); }",
+    "  var _show = show, _stop = stop, _enter = enter, _start = start, _exit = exit;",
+    "  show = function (n) { _show(n); announce(); };",
+    "  stop = function () { _stop(); announce(); };",
+    "  enter = function (n) { _enter(n); announce(); };",
+    "  start = function () { _start(); announce(); };",
+    "  exit = function () { _exit(); announce(); };",
+    "  window.sympyHistoryPlayer = {",
+    "    play: function () { start(); }, pause: function () { stop(); },",
+    "    toggle: function () { if (timer) stop(); else start(); },",
+    "    prev: function () { enter(i - 1); }, next: function () { enter(i + 1); },",
+    "    exit: function () { exit(); }, state: state,",
+    "    subscribe: function (cb) { listeners.push(cb); cb(state()); }",
+    "  };",
     "})();"
   ].join("\n");
+
+  /** The player's controls for a host that shows a report in an iframe: the
+   *  buttons belong in the fixed strip, where they stay put, while the
+   *  engine stays inside the report (so a saved file still plays on its
+   *  own).  Returns the elements; they wire themselves up when the frame
+   *  loads, and stay hidden if the report has no player (a single step). */
+  function playerControls(frame) {
+    var play = h("button", { type: "button", class: "se-play", title: "Play the history as a slideshow" }, ["\u25b6 Play"]);
+    var prev = h("button", { type: "button", class: "se-play-step", title: "The step before (\u2190)", "aria-label": "Previous slide" }, ["\u25c0"]);
+    var next = h("button", { type: "button", class: "se-play-step", title: "The next step (\u2192)", "aria-label": "Next slide" }, ["\u25b6"]);
+    var count = h("span", { class: "se-play-count" });
+    var all = h("button", { type: "button", class: "se-play-all", title: "Back to the whole history (Esc)" }, ["Show all"]);
+    var els = [play, prev, next, count, all];
+    var api = null;
+    els.forEach(function (el) { el.hidden = true; });
+    frame.addEventListener("load", function () {
+      api = frame.contentWindow && frame.contentWindow.sympyHistoryPlayer;
+      if (!api) return;                                  // nothing to play: one step
+      frame.contentDocument.body.classList.add("hosted");   // the report's own bar steps aside
+      els.forEach(function (el) { el.hidden = false; });
+      api.subscribe(function (st) {
+        play.textContent = st.playing ? "\u23f8 Pause" : "\u25b6 Play";
+        count.textContent = (st.index + 1) + " / " + st.total;
+        all.hidden = !st.on;
+      });
+    });
+    play.addEventListener("click", function () { if (api) api.toggle(); });
+    prev.addEventListener("click", function () { if (api) api.prev(); });
+    next.addEventListener("click", function () { if (api) api.next(); });
+    all.addEventListener("click", function () { if (api) api.exit(); });
+    return els;
+  }
 
   /** Offer `text` as a file: the host app, the share sheet, or a download. */
   async function saveFile(name, mime, text) {
@@ -641,7 +693,8 @@ var SympyEditor = (function () {
     var frame = h("iframe", { class: "se-history-frame", title: title });
     var save = h("button", { type: "button", title: "A self-contained web page: works offline, KaTeX rendering and fonts included" }, ["Save as web page"]);
     var note = h("small", {}, [cfg.hint || (cfg.onStep ? "tap a step to open it" : "")]);
-    var head = h("div", { class: "se-history-head" }, [h("span", { class: "se-history-title" }, [heading, note]), save]);
+    var head = h("div", { class: "se-history-head" },
+      [h("span", { class: "se-history-title" }, [heading, note])].concat(playerControls(frame), [save]));
     var view = h("div", { class: "sympy-editor se-history-page" }, [head, frame]);
     if (host) host.appendChild(view);
     var ready = loadKatex(opts)
@@ -3672,8 +3725,9 @@ var SympyEditor = (function () {
       var saveHtml = h("button", { type: "button", "data-save": "html", title: "A self-contained web page: works offline, KaTeX rendering and fonts included" }, ["Save as web page"]);
       var savePy = h("button", { type: "button", "data-save": "py", title: "A Python script rebuilding every step with SymPy" }, ["Save as Python"]);
       var close = h("button", { type: "button", class: "se-history-close", title: "Close (Esc)", "aria-label": "Close" }, ["\u2715"]);
-      var head = h("div", { class: "se-history-head" }, [
-        h("span", { class: "se-history-title" }, ["History", h("small", {}, ["tap a step to open it"])]), saveHtml, savePy, close]);
+      var head = h("div", { class: "se-history-head" },
+        [h("span", { class: "se-history-title" }, ["History", h("small", {}, ["tap a step to open it"])])]
+          .concat(playerControls(frame), [saveHtml, savePy, close]));
       var view = h("div", { class: "se-history-view", role: "dialog", "aria-label": "History" }, [head, frame]);
       saveHtml.addEventListener("click", function () { self.exportReport(html); });
       savePy.addEventListener("click", function () { self.exportPython(); });

@@ -220,3 +220,32 @@ def test_rational_numerator_and_denominator_have_paths():
     # a coefficient is printed as a fraction of the product: the parts are the product's, not the number's
     tex, nodes = annotate(Rational(1, 2) * x)
     assert nodes[("n",)] == x and nodes[("d",)] == 2 and (0, "d") not in nodes and (0,) not in nodes
+
+
+def test_a_determinant_annotates_the_matrix_it_encloses():
+    """SymPy's LatexPrinter draws |...| around a matrix's *contents*, never
+    printing the matrix itself, so the matrix node got no annotation: the
+    view tree jumped from the Determinant to the entries and ↑/↓ skipped it.
+    """
+    from sympy import Determinant, Matrix, MatrixSymbol
+
+    x, y = symbols("x y")
+    tex, nodes = annotate(Determinant(Matrix([[x]])))
+    paths = {format_path(p): n for p, n in nodes.items()}
+    assert paths["/"].func is Determinant
+    assert paths["/0"] == Matrix([[x]])                      # the matrix is a step of its own
+    assert "/0/2/0" in paths and paths["/0/2/0"] == x        # and its entries are still there
+    assert r"\htmlData{path=/0}{\begin{matrix}" in tex       # inside the bars, without its own brackets
+    assert r"\left[" not in tex
+
+    # bigger matrices, and a determinant of a matrix symbol, work the same
+    tex, nodes = annotate(Determinant(Matrix([[x, 1], [2, y]])))
+    paths = {format_path(p) for p in nodes}
+    assert {"/", "/0", "/0/2/0", "/0/2/3"} <= paths
+    tex, nodes = annotate(Determinant(MatrixSymbol("A", 2, 2)))
+    assert {format_path(p) for p in nodes} == {"/", "/0"}
+
+    # and the enclosing expression's paths still lead into it
+    tex, nodes = annotate(y + Determinant(Matrix([[x]])))
+    paths = {format_path(p): n for p, n in nodes.items()}
+    assert paths["/1/0"] == Matrix([[x]]) and paths["/1/0/2/0"] == x
