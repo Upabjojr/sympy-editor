@@ -193,43 +193,65 @@ SHELF = """<!DOCTYPE html>
 <style>
 {editor_css}
 :root {{ color-scheme: light dark; }}
-body {{ margin: 0; padding: 0 1.2rem 5rem; background: #ffffff; color: #1f2328;
+body {{ margin: 0; padding: 0 1.2rem 5rem; color: #1f2328;
+       background: #f6f8fa linear-gradient(180deg, #eef2f7 0%, #f9fafb 22rem, #f6f8fa 100%);
        font: 16px/1.65 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }}
 main {{ max-width: 58rem; margin: 0 auto; }}
 header {{ padding: 3.5rem 0 2.5rem; }}
-h1 {{ font-size: 2rem; margin: 0 0 0.4rem; letter-spacing: -0.01em;
-      display: flex; align-items: center; gap: 0.7rem; }}
-h1 img {{ border-radius: 0.8rem; }}
-header p {{ margin: 0 0 1rem; color: #656d76; max-width: 42rem; }}
-header .actions {{ display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 1.4rem; }}
-header a.button {{ display: inline-block; padding: 0.5rem 1.1rem; border-radius: 0.4rem;
-                  border: 1px solid #d0d7de; text-decoration: none; color: inherit; font-size: 0.95rem; }}
-header a.primary {{ background: #3b82f6; border-color: #3b82f6; color: #ffffff; }}
-header a.button:hover {{ border-color: #3b82f6; }}
-h2.shelf {{ font-size: 1.1rem; text-transform: uppercase; letter-spacing: 0.06em; color: #656d76;
-           border-top: 1px solid #d0d7de; padding-top: 1.4rem; margin: 2rem 0 0; }}
-.card {{ margin: 2.4rem 0 0; }}
+p.eyebrow {{ margin: 0 0 0.6rem; font-size: 0.8rem; font-weight: 600; letter-spacing: 0.09em;
+            text-transform: uppercase; color: #3b82f6; }}
+h1 {{ font-size: 2.2rem; margin: 0 0 0.5rem; letter-spacing: -0.015em;
+      display: flex; align-items: center; gap: 0.8rem; }}
+h1 img {{ border-radius: 0.9rem; box-shadow: 0 1px 2px rgba(27, 31, 36, 0.12), 0 10px 24px -12px rgba(27, 31, 36, 0.35); }}
+header p {{ margin: 0 0 1rem; color: #57606a; max-width: 42rem; }}
+header .actions {{ display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 1.5rem; }}
+header a.button {{ display: inline-block; padding: 0.55rem 1.15rem; border-radius: 0.55rem;
+                  border: 1px solid #d0d7de; text-decoration: none; color: inherit; font-size: 0.95rem;
+                  background: #ffffff; box-shadow: 0 1px 2px rgba(27, 31, 36, 0.06);
+                  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease; }}
+header a.primary {{ background: linear-gradient(180deg, #4f8ef7, #2e6fe3); border-color: #2e6fe3; color: #ffffff;
+                   box-shadow: 0 1px 2px rgba(46, 111, 227, 0.25), 0 6px 16px -8px rgba(46, 111, 227, 0.6); }}
+header a.button:hover {{ border-color: #3b82f6; transform: translateY(-1px);
+                        box-shadow: 0 2px 4px rgba(27, 31, 36, 0.08), 0 10px 20px -10px rgba(27, 31, 36, 0.25); }}
+h2.shelf {{ font-size: 0.95rem; text-transform: uppercase; letter-spacing: 0.08em; color: #57606a;
+           display: flex; align-items: center; gap: 0.8rem; margin: 2.6rem 0 0; }}
+h2.shelf::after {{ content: ""; flex: 1; height: 1px;
+                  background: linear-gradient(90deg, #d0d7de, rgba(208, 215, 222, 0)); }}
+.card {{ margin: 1.8rem 0 0; padding: 1.3rem 1.4rem 1.1rem; background: #ffffff;
+        border: 1px solid #d8dee4; border-radius: 1rem;
+        box-shadow: 0 1px 2px rgba(27, 31, 36, 0.04), 0 12px 28px -22px rgba(27, 31, 36, 0.4); }}
 .card h3 {{ font-size: 1.15rem; margin: 0 0 0.15rem; }}
-.card p {{ margin: 0 0 0.8rem; color: #656d76; font-size: 0.95rem; }}
-.card .steps {{ float: right; font-size: 0.85rem; color: #656d76; }}
-.card .se-history-page {{ height: 30rem; min-height: 18rem; }}
+.card p {{ margin: 0 0 0.9rem; color: #57606a; font-size: 0.95rem; }}
+.card .steps {{ float: right; font-size: 0.8rem; font-variant-numeric: tabular-nums;
+               color: #2e6fe3; background: rgba(59, 130, 246, 0.1);
+               border-radius: 1rem; padding: 0.15rem 0.65rem; margin: 0.1rem 0 0 0.8rem; }}
+.card .se-history-page {{ height: 30rem; min-height: 18rem; border: 1px solid #e4e8ec; border-radius: 0.6rem; }}
 footer {{ margin-top: 4rem; padding-top: 1.4rem; border-top: 1px solid #d0d7de;
-         color: #656d76; font-size: 0.9rem; }}
+         color: #57606a; font-size: 0.9rem; }}
 footer code {{ font-size: 0.85em; }}
 footer nav.legal {{ margin-top: 0.7rem; }}
 footer nav.legal a {{ color: inherit; }}
 header a.button code {{ font-size: 0.85em; }}
 @media (prefers-color-scheme: dark) {{
-  body {{ background: #1e1e1e; color: #e6e6e6; }}
-  header p, .card p, .card .steps, footer, h2.shelf {{ color: #a0a0a0; }}
-  header a.button {{ border-color: #444; }} header a.primary {{ border-color: #3b82f6; }}
-  h2.shelf, footer {{ border-color: #444; }}
+  body {{ color: #e6e6e6; background: #1b1d20 linear-gradient(180deg, #202329 0%, #1c1e22 22rem, #1b1d20 100%); }}
+  header p, .card p, footer {{ color: #a0a0a0; }}
+  p.eyebrow {{ color: #7cadf8; }}
+  h2.shelf {{ color: #a0a0a0; }}
+  h2.shelf::after {{ background: linear-gradient(90deg, #3a3f45, rgba(58, 63, 69, 0)); }}
+  header a.button {{ background: #24272c; border-color: #3a3f45; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); }}
+  header a.primary {{ background: linear-gradient(180deg, #3f7cec, #2a62c9); border-color: #2a62c9; color: #ffffff; }}
+  .card {{ background: #212429; border-color: #363b41;
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 14px 30px -22px rgba(0, 0, 0, 0.8); }}
+  .card .steps {{ color: #7cadf8; background: rgba(59, 130, 246, 0.16); }}
+  .card .se-history-page {{ border-color: #33383e; }}
+  footer {{ border-color: #444; }}
 }}
 </style>
 </head>
 <body>
 <main>
 <header>
+  <p class="eyebrow">Free &amp; open source \u00b7 BSD 3-Clause</p>
   <h1><img src="icon.svg" alt="" width="56" height="56"> SymPy editor</h1>
   <p>A click-to-edit editor for SymPy expressions: select a piece of a formula
   and change it in place - type over it, apply any SymPy function to it, pull
