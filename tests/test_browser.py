@@ -2902,6 +2902,65 @@ def test_the_history_can_be_resized(browser, tmp_path):
     page.close()
 
 
+def test_the_slideshow_runs_at_the_speed_it_is_told(browser, tmp_path):
+    """A slideshow at one pace suits nobody: the strip halves and doubles it.
+    The buttons say \u00bd\u00d7 and 2\u00d7 rather than - and +, which two groups
+    along already mean the size of the formulas."""
+    from sympy import Integral, cos
+    from sympy_editor import History, to_history_html
+
+    hist = History([
+        Integral(x * sin(x), x),
+        (-x * cos(x) + Integral(cos(x), x), "by parts"),
+        (-x * cos(x) + sin(x), "the last integral"),
+    ], title="By parts")
+    path = tmp_path / "speed.html"
+    path.write_text(to_history_html(hist), encoding="utf-8")
+    page = browser.new_page(viewport={"width": 1100, "height": 700})
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(path.as_uri())
+    page.wait_for_selector(".se-history-frame", timeout=30000)
+    page.frame_locator(".se-history-frame").locator(".step").first.wait_for(timeout=30000)
+    page.wait_for_function("() => !document.querySelector('.se-play').disabled", timeout=30000)
+
+    slower, faster = page.locator(".se-play-speed").first, page.locator(".se-play-speed").last
+    rate, count = page.locator(".se-play-rate"), page.locator(".se-play-count")
+    assert (slower.inner_text(), faster.inner_text()) == ("\u00bd\u00d7", "2\u00d7")
+    assert rate.inner_text() == "1\u00d7"                       # and it says where it stands
+    speed = lambda: page.frames[1].evaluate("() => window.sympyHistoryPlayer.state().speed")
+
+    faster.click()
+    assert rate.inner_text() == "2\u00d7" and speed() == 2
+    faster.click()
+    faster.click()
+    assert rate.inner_text() == "4\u00d7" and speed() == 4     # and no faster than that
+    slower.click()
+    assert rate.inner_text() == "2\u00d7"
+    rate.click()                                             # the readout is the way back
+    assert rate.inner_text() == "1\u00d7" and speed() == 1
+    for _ in range(4):
+        slower.click()
+    assert rate.inner_text() == "0.25\u00d7" and speed() == 0.25
+
+    # a quarter of the speed really is slower: nothing moves in a second and
+    # a half, where four times the speed reaches the end inside it
+    page.locator(".se-play").click()
+    page.wait_for_timeout(1500)
+    assert count.inner_text() == "1 / 3", count.inner_text()
+    page.locator(".se-play").click()                         # pause
+    rate.click()
+    faster.click()
+    faster.click()
+    assert rate.inner_text() == "4\u00d7"
+    page.locator(".se-play").click()
+    assert _wait(lambda: count.inner_text() == "3 / 3", 3.0)
+    # and it stops there, one interval later - a short one, at this speed
+    assert _wait(lambda: page.locator(".se-play").inner_text().endswith("Play"), 2.0)
+    assert errors == []
+    page.close()
+
+
 def test_dragging_over_the_source_line_selects_in_the_formula(browser, serve_expr):
     """The source line is linked to the rendering both ways.  Selecting text
     in it used to come apart: the floating action bar popped up under the

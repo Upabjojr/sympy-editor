@@ -666,6 +666,10 @@
 .se-history-head .se-play-all { visibility: hidden; }
 .se-history-head .se-play-all.se-on { visibility: visible; }
 .se-history-head .se-play-zoom { padding: 0.3rem 0.55rem; line-height: 1; min-width: 2.1em; }
+/* the speed, beside the size: the readout in the middle is as wide as the
+ * slowest it goes (0.25\00d7), so changing speed moves nothing */
+.se-history-head .se-play-speed { padding: 0.3rem 0.55rem; line-height: 1; min-width: 2.4em; }
+.se-history-head .se-play-rate { padding: 0.3rem 0.4rem; line-height: 1; min-width: 3.4em; font-variant-numeric: tabular-nums; }
 .se-history-head .se-head-save {
   font: inherit; font-size: 13px; padding: 0.3rem 0.6rem;
   border: 1px solid var(--se-border); border-radius: 0.3rem;

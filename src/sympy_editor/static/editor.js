@@ -82,6 +82,7 @@ var SympyEditor = (function () {
     ".player button:hover { border-color: #3b82f6; }",
     ".player .count { font-size: 0.85rem; color: #656d76; font-variant-numeric: tabular-nums; }",
     ".player .zoom-level { font-variant-numeric: tabular-nums; min-width: 4em; }",
+    ".player .speed-level { font-variant-numeric: tabular-nums; min-width: 3.2em; }",
     ".player .group { display: inline-flex; align-items: center; gap: 0.4rem; }",   /* wraps as a unit */
     ".player .exit { visibility: hidden; }",   /* keeps its place: nothing moves when the slideshow starts */
     "body.slides .player .exit { visibility: visible; }",
@@ -149,7 +150,7 @@ var SympyEditor = (function () {
     "</ul></section>",
     "<section><h3>History and sessions</h3><ul>",
     "<li><b>History</b> shows every step and what changed (green: what a step brought, red: what it lost); tap a step to go back to it.</li>",
-    "<li>The strip above plays the history as a slideshow \u2014 a step and the change that produced it on one screen \u2014 and its <b>\u25c0 \u25b6</b> walk the steps one at a time when it is not playing; <b>\u2212 / +</b> set the size of the formulas (Ctrl+wheel and two fingers too).</li>",
+    "<li>The strip above plays the history as a slideshow \u2014 a step and the change that produced it on one screen \u2014 and its <b>\u25c0 \u25b6</b> walk the steps one at a time when it is not playing; <b>\u00bd\u00d7 / 2\u00d7</b> halve and double the speed (<kbd>,</kbd> and <kbd>.</kbd> while it plays), and <b>\u2212 / +</b> set the size of the formulas (Ctrl+wheel and two fingers too).</li>",
     "<li><b>Save \u25be</b> writes it out: a self-contained web page that works offline and plays on its own, or a Python script that rebuilds every step with SymPy.</li>",
     "<li><b>\u2630</b> lists the sessions, where the page keeps several. A session is labelled with its formula until you give it a name of your own (the pencil beside it, or a double-click), which nothing overwrites.</li>",
     "</ul></section>",
@@ -572,6 +573,10 @@ var SympyEditor = (function () {
       '<span class="count"></span>' +
       '<button type="button" class="exit" title="Back to the whole history (Esc)">Show all</button></span>' +
       '<span class="group">' +
+      '<button type="button" class="speed-slower" title="Slower: half the speed (,)">\u00bd\u00d7</button>' +
+      '<button type="button" class="speed-level" title="Back to the normal speed">1\u00d7</button>' +
+      '<button type="button" class="speed-faster" title="Faster: twice the speed (.)">2\u00d7</button></span>' +
+      '<span class="group">' +
       '<button type="button" class="zoom-out" title="Smaller (Ctrl+wheel)">\u2212</button>' +
       '<button type="button" class="zoom-level" title="Back to the normal size">100%</button>' +
       '<button type="button" class="zoom-in" title="Larger (Ctrl+wheel)">+</button></span></div>';
@@ -605,6 +610,7 @@ var SympyEditor = (function () {
     "  var body = document.body, count = bar.querySelector('.count');",
     "  var play = bar.querySelector('.play'), i = 0, timer = null;",
     "  var STEP_MS = 2200, zoom = 1, level = bar.querySelector('.zoom-level');",
+    "  var speed = 1, rate = bar.querySelector('.speed-level');",
     "  // The formulas are the point: they must be as big or as small as the",
     "  // reader wants, in the listing as much as in the slideshow.",
     "  function setZoom(z) {",
@@ -612,6 +618,15 @@ var SympyEditor = (function () {
     "    document.documentElement.style.setProperty('--se-report-zoom', zoom);",
     "    level.textContent = Math.round(zoom * 100) + '%';",
     "    if (typeof announce === 'function') announce();",
+    "  }",
+    "  // How fast it plays: a step every 2.2s at 1x, and the buttons halve or",
+    "  // double that.  A factor, not a duration - \u00bd\u00d7 is what \"half as fast\"",
+    "  // means, and it needs neither a + nor a - to say it.",
+    "  function setSpeed(s) {",
+    "    speed = Math.max(0.25, Math.min(4, s));",
+    "    rate.textContent = (Math.round(speed * 100) / 100) + '\\u00d7';",
+    "    if (timer) { clearInterval(timer); timer = setInterval(tick, STEP_MS / speed); }",
+    "    announce();",
     "  }",
     "  function clear() {",
     "    for (var k = 0; k < nodes.length; k++) nodes[k].classList.remove('slide-on', 'slide-top', 'slide-bottom', 'slide-here');",
@@ -645,7 +660,7 @@ var SympyEditor = (function () {
     "  function stepBy(d) { if (body.classList.contains('slides')) enter(i + d); else locate(i + d); }",
     "  function start() {",
     "    enter(i + 1 >= slides.length ? 0 : i);",
-    "    timer = setInterval(tick, STEP_MS);",
+    "    timer = setInterval(tick, STEP_MS / speed);",
     "    play.innerHTML = '\\u23f8 Pause';",
     "  }",
     "  // leaving the slideshow lands on the step it was showing, not at the top",
@@ -657,6 +672,9 @@ var SympyEditor = (function () {
     "  bar.querySelector('.zoom-out').addEventListener('click', function () { setZoom(zoom / 1.2); });",
     "  bar.querySelector('.zoom-in').addEventListener('click', function () { setZoom(zoom * 1.2); });",
     "  level.addEventListener('click', function () { setZoom(1); });",
+    "  bar.querySelector('.speed-slower').addEventListener('click', function () { setSpeed(speed / 2); });",
+    "  bar.querySelector('.speed-faster').addEventListener('click', function () { setSpeed(speed * 2); });",
+    "  rate.addEventListener('click', function () { setSpeed(1); });",
     "  // two fingers pinch the formulas, as everywhere else in the editor",
     "  var pinch = null;",
     "  function spread(t) {",
@@ -683,6 +701,8 @@ var SympyEditor = (function () {
     "    else if (ev.key === 'ArrowLeft') { stop(); show(i - 1); }",
     "    else if (ev.key === 'Escape') { exit(); return; }",
     "    else if (ev.key === ' ') { if (timer) stop(); else start(); }",
+    "    else if (ev.key === ',' || ev.key === '<') setSpeed(speed / 2);",
+    "    else if (ev.key === '.' || ev.key === '>') setSpeed(speed * 2);",
     "    else return;",
     "    ev.preventDefault();",
     "  });",
@@ -691,7 +711,7 @@ var SympyEditor = (function () {
     "  // drives the same engine from its own fixed strip, so the controls do",
     "  // not scroll away with the steps.",
     "  var listeners = [];",
-    "  function state() { return {index: i, total: slides.length, playing: !!timer, zoom: zoom, on: body.classList.contains('slides')}; }",
+    "  function state() { return {index: i, total: slides.length, playing: !!timer, zoom: zoom, speed: speed, on: body.classList.contains('slides')}; }",
     "  function announce() { for (var k = 0; k < listeners.length; k++) listeners[k](state()); }",
     "  var _show = show, _stop = stop, _enter = enter, _start = start, _exit = exit;",
     "  show = function (n) { _show(n); announce(); };",
@@ -706,6 +726,8 @@ var SympyEditor = (function () {
     "    exit: function () { exit(); }, state: state,",
     "    zoomIn: function () { setZoom(zoom * 1.2); }, zoomOut: function () { setZoom(zoom / 1.2); },",
     "    setZoom: setZoom,",
+    "    slower: function () { setSpeed(speed / 2); }, faster: function () { setSpeed(speed * 2); },",
+    "    setSpeed: setSpeed,",
     "    subscribe: function (cb) { listeners.push(cb); cb(state()); }",
     "  };",
     "})();"
@@ -728,21 +750,27 @@ var SympyEditor = (function () {
     var next = h("button", { type: "button", class: "se-play-step", title: "The next step (\u2192)", "aria-label": "Next slide" }, ["\u25b6"]);
     var count = h("span", { class: "se-play-count" });
     var all = h("button", { type: "button", class: "se-play-all", title: "Back to the whole history (Esc)" }, ["Show all"]);
+    // How fast it runs: halving and doubling, so the readout between them is
+    // the factor it is - and the pair says "speed" without borrowing the
+    // + and - that mean size two groups along.
+    var slower = h("button", { type: "button", class: "se-play-speed", title: "Slower: half the speed (,)", "aria-label": "Slower" }, ["\u00bd\u00d7"]);
+    var rate = h("button", { type: "button", class: "se-play-rate", title: "Back to the normal speed" }, ["1\u00d7"]);
+    var faster = h("button", { type: "button", class: "se-play-speed", title: "Faster: twice the speed (.)", "aria-label": "Faster" }, ["2\u00d7"]);
     // The formulas have a size of their own here: the buttons, Ctrl+wheel and
     // two fingers all drive the same zoom inside the report.
     var out = h("button", { type: "button", class: "se-play-zoom", title: "Smaller formulas (Ctrl+wheel, pinch)", "aria-label": "Smaller" }, ["\u2212"]);
     var level = h("button", { type: "button", class: "se-play-level", title: "Back to the normal size" }, ["100%"]);
     var into = h("button", { type: "button", class: "se-play-zoom", title: "Larger formulas (Ctrl+wheel, pinch)", "aria-label": "Larger" }, ["+"]);
-    // Two groups, each of which wraps as a unit: playing the history, and
-    // the size of it.  A "- 100% +" split across two lines is nobody's idea
-    // of a control.
+    // Three groups, each of which wraps as a unit: playing the history, how
+    // fast, and how big.  A "- 100% +" split across two lines is nobody's
+    // idea of a control.
     var playing = h("span", { class: "se-head-group" }, [play, prev, next, count, all]);
+    var speeding = h("span", { class: "se-head-group" }, [slower, rate, faster]);
     var zooming = h("span", { class: "se-head-group" }, [out, level, into]);
-    var els = [play, prev, next, count, all, out, level, into];
     count.textContent = "1 / " + total;
     level.textContent = "100%";
     var api = null;
-    var pressable = [play, prev, next, all, out, into, level];
+    var pressable = [play, prev, next, all, slower, rate, faster, out, into, level];
     pressable.forEach(function (el) { el.disabled = true; });   // until the report answers
     frame.addEventListener("load", function () {
       api = frame.contentWindow && frame.contentWindow.sympyHistoryPlayer;
@@ -756,6 +784,7 @@ var SympyEditor = (function () {
         play.textContent = st.playing ? "\u23f8 Pause" : "\u25b6 Play";
         count.textContent = (st.index + 1) + " / " + st.total;
         level.textContent = Math.round(st.zoom * 100) + "%";
+        rate.textContent = (Math.round((st.speed || 1) * 100) / 100) + "\u00d7";
         // "Show all" keeps its place when it has nothing to do: hiding it
         // outright shifted every button beside it the moment Play was
         // pressed, so it goes invisible, not away.
@@ -769,7 +798,10 @@ var SympyEditor = (function () {
     out.addEventListener("click", function () { if (api) api.zoomOut(); });
     into.addEventListener("click", function () { if (api) api.zoomIn(); });
     level.addEventListener("click", function () { if (api) api.setZoom(1); });
-    return [playing, zooming];
+    slower.addEventListener("click", function () { if (api) api.slower(); });
+    faster.addEventListener("click", function () { if (api) api.faster(); });
+    rate.addEventListener("click", function () { if (api) api.setSpeed(1); });
+    return [playing, speeding, zooming];
   }
 
   /** Offer `text` as a file: the host app, the share sheet, or a download. */
