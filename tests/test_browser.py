@@ -3049,6 +3049,37 @@ def test_the_app_wears_its_own_icon_beside_its_name(browser, serve_expr):
     assert page.errors == []
 
 
+def test_destroying_an_editor_takes_its_listeners_off_the_document(browser, serve_expr):
+    """A notebook makes and throws away many editors.  destroy() removed the
+    listeners it kept a list of, but not the full-screen pair nor those of
+    an open help or history overlay: each dead editor stayed reachable from
+    the document."""
+    srv, doc = serve_expr(x + y)
+    page = _open(browser, srv.url)
+    left = page.evaluate("""async () => {
+        const live = new Map();
+        const add = document.addEventListener.bind(document), remove = document.removeEventListener.bind(document);
+        document.addEventListener = (kind, fn, opts) => { live.set(fn, kind); return add(kind, fn, opts); };
+        document.removeEventListener = (kind, fn, opts) => { live.delete(fn); return remove(kind, fn, opts); };
+        const host = document.createElement('div');
+        document.body.appendChild(host);
+        const first = document.querySelector('.sympy-editor').__sympyEditor;
+        const editor = SympyEditor.mount(host, { backend: 'readonly', snapshot: first.state, options: {} });
+        await new Promise(r => setTimeout(r, 400));
+        // (a read-only editor gets the snapshot's method lists like any other,
+        // and used to throw on them halfway through setState)
+        const settled = host.querySelector('.sympy-editor').getAttribute('data-seq');
+        editor.setFullscreen(true);          // the fullscreenchange pair
+        editor.showHelp();                   // a keydown on the document
+        editor.destroy();
+        return { left: Array.from(live.values()), settled: settled };
+    }""")
+    assert left["settled"] == "1", left
+    assert left["left"] == [], left
+    assert page.locator(".se-help-view").count() == 0
+    assert page.errors == []
+
+
 def test_dragging_over_the_source_line_selects_in_the_formula(browser, serve_expr):
     """The source line is linked to the rendering both ways.  Selecting text
     in it used to come apart: the floating action bar popped up under the

@@ -939,6 +939,10 @@ var SympyEditor = (function () {
       var root = h("div", { class: "sympy-editor" });
       this.root = root;
       this.buttons = {};
+      // Every snapshot may carry method lists (see _fillMethods); a read-only
+      // editor has no menu to show them in but still receives them, and
+      // setState must not trip over a table that was never made.
+      this._methodsCache = {};   // entries by type name, from the snapshots (Document piggybacks new types)
       this.toolbar = h("div", { class: "se-toolbar", role: "toolbar" });
       // The tools sit in their own strip: on a narrow screen it scrolls
       // sideways instead of wrapping onto several rows.
@@ -1037,7 +1041,6 @@ var SympyEditor = (function () {
         this.methodsMenu = h("select", { class: "se-methods", hidden: "",
           title: "Methods of the selection's class (of the whole expression when nothing is selected): pick one to call it; a method with parameters asks for them" });
         current.appendChild(this.methodsMenu);
-        this._methodsCache = {};   // entries by type name, from the snapshots (Document piggybacks new types)
         // Function box: search SymPy's functions; a picked function that needs
         // parameters asks for them (see _showFnForm).
         this.fnInput = h("input", { class: "se-fn", type: "text", placeholder: "SymPy function… (search)",
@@ -3731,7 +3734,18 @@ var SympyEditor = (function () {
 
     _saveSessions(store) {
       this._sessionStore = store;
-      try { localStorage.setItem(SESSIONS_KEY, JSON.stringify(store)); } catch (e) { /* no storage */ }
+      try {
+        localStorage.setItem(SESSIONS_KEY, JSON.stringify(store));
+        this._storageFull = false;
+      } catch (e) {
+        // No storage at all (a private window, say) is nothing to report; a
+        // full one is: the sessions silently stopping being kept is worse
+        // than a word about it.
+        if (!this._storageFull && e && /quota|exceeded/i.test(String(e.name) + " " + String(e.message))) {
+          this._storageFull = true;
+          this._setStatus("The sessions could not be saved: the browser's storage is full (delete a session or two)");
+        }
+      }
     }
 
     _currentSession() {
@@ -4470,11 +4484,21 @@ var SympyEditor = (function () {
       if (this.typeMenu) this.typeMenu.disabled = dis;
     }
 
-    /** Remove the editor from the page. */
+    /** Remove the editor from the page, and everything it put on the
+     *  document: a notebook makes and disposes of many editors, and each
+     *  listener left behind would keep its editor alive. */
     destroy() {
       this.closeDrawer();
+      this.closeHistory();
+      this.closeHelp();
+      if (this.fullscreen) this.setFullscreen(false);
       (this._docListeners || []).forEach(function (l) { document.removeEventListener(l[0], l[1]); });
       this._docListeners = [];
+      if (this._fsListener) {
+        document.removeEventListener("fullscreenchange", this._fsListener);
+        document.removeEventListener("webkitfullscreenchange", this._fsListener);
+        this._fsListener = null;
+      }
       if (this.root.parentNode) this.root.parentNode.removeChild(this.root);
     }
   }
@@ -4743,14 +4767,20 @@ var SympyEditor = (function () {
    *  SymPy natively (mobile/android, Chaquopy) - nothing to download, no
    *  WebAssembly, and the same Document code as everywhere else. */
   function nativeBackend(cfg) {
-    var pending = {}, seq = 0, docId = null, started = null;
-    window.__sympyEditorNative = function (req, ok, payload) {
-      var p = pending[req];
-      if (!p) return;
-      delete pending[req];
-      if (!ok) { p.reject(new Error(payload)); return; }
-      try { p.resolve(JSON.parse(payload)); } catch (e) { p.reject(e); }
-    };
+    // The host answers through one function on window, so the requests of
+    // every editor on the page share one table: a second editor defining
+    // the function again would have taken the first one's answers away.
+    var shared = window.__sympyEditorNativeShared || (window.__sympyEditorNativeShared = { pending: {}, seq: 0 });
+    var pending = shared.pending, docId = null, started = null;
+    if (!window.__sympyEditorNative) {
+      window.__sympyEditorNative = function (req, ok, payload) {
+        var p = pending[req];
+        if (!p) return;
+        delete pending[req];
+        if (!ok) { p.reject(new Error(payload)); return; }
+        try { p.resolve(JSON.parse(payload)); } catch (e) { p.reject(e); }
+      };
+    }
     function call(method, args) {
       return new Promise(function (resolve, reject) {
         var host = window.SympyEditorPy;
@@ -4758,7 +4788,7 @@ var SympyEditor = (function () {
           reject(new Error("This page needs the app's Python (window.SympyEditorPy)"));
           return;
         }
-        var req = "r" + (++seq);
+        var req = "r" + (++shared.seq);
         pending[req] = { resolve: resolve, reject: reject };
         try {
           host[method].apply(host, [req].concat(args));
@@ -4769,7 +4799,7 @@ var SympyEditor = (function () {
       });
     }
     function newDoc(srepr, state) {
-      docId = "doc" + (++seq);
+      docId = "doc" + (++shared.seq);
       return call("newDoc", [docId, srepr, JSON.stringify(Object.assign({}, cfg.document || {}, state || {}))]);
     }
     function start(report) {

@@ -95,3 +95,51 @@ def test_document_options_cannot_accompany_a_document():
         SympyEditorWidget(Document(x), parser="implicit")
     w = SympyEditorWidget(x, parser="implicit")
     assert w.document.parser == "implicit"
+
+
+def test_widget_answers_every_message_by_its_request_id():
+    """The front end pairs answers with messages by the id it sends; a
+    message that got no answer (a worker dying on an unprintable result)
+    left its promise hanging and the editor busy for good."""
+    w = SympyEditorWidget(x**2 + x)
+    w._on_msg(w, {"action": "call", "path": "/", "func": "Tuple(1, [x])", "_req": 7}, [])
+    w.wait(5)
+    snap = json.loads(w.snapshot)
+    assert snap["_req"] == 7 and "cannot be shown" in snap["error"] and w.expr == x**2 + x
+    w.expr = x                                       # a push from the kernel answers nothing
+    assert "_req" not in json.loads(w.snapshot)
+    seq = json.loads(w.snapshot)["seq"]
+    # even a message whose handling blows up is answered, with a new seq
+    w.document.handle = lambda message: (_ for _ in ()).throw(RuntimeError("boom"))
+    w._on_msg(w, {"action": "snapshot", "_req": 8}, [])
+    w.wait(5)
+    snap = json.loads(w.snapshot)
+    assert snap["_req"] == 8 and "boom" in snap["error"] and snap["seq"] > seq and snap["src"] == "x"
+
+
+def test_widget_interrupts_the_message_that_is_running():
+    """Interrupt used to hit the latest thread started - often one waiting
+    for the lock behind the long computation (the session autosave) - so
+    the autosave died and the computation ran on."""
+    import time
+    from sympy_editor.ops import Op
+
+    def forever(expr):
+        while True:
+            time.sleep(0.001)
+
+    w = SympyEditorWidget(Document(x, ops={"forever": Op("forever", "Forever", forever)}))
+    seen = []
+    w.observe(lambda change: seen.append(json.loads(change.new)), names="snapshot")
+    w._on_msg(w, {"action": "apply", "path": "/", "op": "forever", "_req": 1}, [])
+    deadline = time.time() + 5
+    while w._running is None and time.time() < deadline:
+        time.sleep(0.01)
+    assert w._running is not None
+    w._on_msg(w, {"action": "export", "_req": 2}, [])          # queued behind it
+    time.sleep(0.2)
+    w._on_msg(w, {"action": "interrupt"}, [])
+    w.wait(5)
+    assert [s["_req"] for s in seen] == [1, 2]
+    assert seen[0]["error"].startswith("Interrupted") and w.expr == x
+    assert seen[1]["error"] is None and "export" in seen[1]
