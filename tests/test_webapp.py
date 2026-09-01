@@ -133,3 +133,21 @@ def test_the_shelf_carries_the_licence_and_the_privacy_statement(tmp_path):
     for href in ('href="license.html"', 'href="privacy.html"',
                  'href="https://github.com/Upabjojr/sympy-editor"', 'href="https://pypi.org/project/sympy-editor/"'):
         assert href in index, href
+
+
+def test_the_shelf_teaches_and_shows_the_notebook_only_when_it_can(tmp_path):
+    """The page carries the code that uses the package, and the notebook
+    screenshots are content that lives beside it: the section appears only
+    where the images are, so a bare rebuild is never broken pictures."""
+    build = _load()
+    out = build.derivations_page(tmp_path / "bare", urls=None, editor_href="editor.html")
+    page = out.read_text(encoding="utf-8")
+    for said in ("pip install", "sympy-editor[jupyter]", "save_html", "History", "on_change"):
+        assert said in page, said
+    assert "jupyter-widget.png" not in page                     # no image, no section
+    shot = tmp_path / "with"
+    shot.mkdir()
+    (shot / "jupyter-widget.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    page = build.derivations_page(shot, urls=None, editor_href="editor.html").read_text(encoding="utf-8")
+    assert '<img src="jupyter-widget.png"' in page and "In the notebook" in page
+    assert "jupyter-plot.png" not in page                       # only the images that are there

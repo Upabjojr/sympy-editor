@@ -226,6 +226,23 @@ h2.shelf::after {{ content: ""; flex: 1; height: 1px;
                color: #2e6fe3; background: rgba(59, 130, 246, 0.1);
                border-radius: 1rem; padding: 0.15rem 0.65rem; margin: 0.1rem 0 0 0.8rem; }}
 .card .se-history-page {{ height: 30rem; min-height: 18rem; border: 1px solid #e4e8ec; border-radius: 0.6rem; }}
+.snippets {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(21rem, 1fr));
+             gap: 1.2rem; margin-top: 1.8rem; }}
+.snippet {{ background: #ffffff; border: 1px solid #d8dee4; border-radius: 1rem; padding: 1.2rem 1.3rem;
+           box-shadow: 0 1px 2px rgba(27, 31, 36, 0.04), 0 12px 28px -22px rgba(27, 31, 36, 0.4); }}
+.snippet h3 {{ font-size: 1.02rem; margin: 0 0 0.2rem; }}
+.snippet p {{ margin: 0 0 0.8rem; color: #57606a; font-size: 0.92rem; }}
+.snippet pre {{ margin: 0; padding: 0.9rem 1rem; border-radius: 0.6rem; overflow-x: auto;
+               background: #0e1116; color: #d6dde6; font-size: 0.83rem; line-height: 1.6; }}
+.snippet pre + p {{ margin-top: 0.8rem; }}
+.snippet .k {{ color: #7cadf8; }} .snippet .s {{ color: #8ddb8c; }}
+.snippet .c {{ color: #768390; font-style: italic; }} .snippet .f {{ color: #e3b341; }}
+figure.shot {{ margin: 1.8rem 0 0; padding: 0.8rem 0.8rem 0.6rem; background: #ffffff;
+              border: 1px solid #d8dee4; border-radius: 1rem;
+              box-shadow: 0 1px 2px rgba(27, 31, 36, 0.04), 0 12px 28px -22px rgba(27, 31, 36, 0.4); }}
+figure.shot img {{ display: block; width: 100%; height: auto; border-radius: 0.6rem;
+                  border: 1px solid #e4e8ec; }}
+figure.shot figcaption {{ padding: 0.7rem 0.4rem 0.2rem; color: #57606a; font-size: 0.9rem; }}
 footer {{ margin-top: 4rem; padding-top: 1.4rem; border-top: 1px solid #d0d7de;
          color: #57606a; font-size: 0.9rem; }}
 footer code {{ font-size: 0.85em; }}
@@ -244,6 +261,10 @@ header a.button code {{ font-size: 0.85em; }}
           box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 14px 30px -22px rgba(0, 0, 0, 0.8); }}
   .card .steps {{ color: #7cadf8; background: rgba(59, 130, 246, 0.16); }}
   .card .se-history-page {{ border-color: #33383e; }}
+  .snippet, figure.shot {{ background: #212429; border-color: #363b41;
+                          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 14px 30px -22px rgba(0, 0, 0, 0.8); }}
+  .snippet p, figure.shot figcaption {{ color: #a0a0a0; }}
+  figure.shot img {{ border-color: #33383e; }}
   footer {{ border-color: #444; }}
 }}
 </style>
@@ -267,6 +288,48 @@ header a.button code {{ font-size: 0.85em; }}
     <a class="button" href="https://pypi.org/project/sympy-editor/"><code>pip install sympy-editor</code></a>
   </div>
 </header>
+<h2 class="shelf">Use it</h2>
+<div class="snippets">
+<section class="snippet">
+  <h3>In a Jupyter notebook</h3>
+  <p>The widget runs every edit in the kernel's own SymPy: <code>w.expr</code>
+  is the live, edited expression.</p>
+  <pre><code>pip install <span class="s">"sympy-editor[jupyter]"</span></code></pre>
+  <p></p>
+  <pre><code><span class="k">from</span> sympy <span class="k">import</span> symbols, sin
+<span class="k">from</span> sympy_editor <span class="k">import</span> edit
+
+x = <span class="f">symbols</span>(<span class="s">"x"</span>)
+w = <span class="f">edit</span>(<span class="f">sin</span>(x) / x)  <span class="c"># click it, edit in place</span>
+w.expr                <span class="c"># what it is now, live</span>
+w.<span class="f">on_change</span>(<span class="k">lambda</span> e: <span class="f">print</span>(<span class="s">"now:"</span>, e))</code></pre>
+</section>
+<section class="snippet">
+  <h3>A page of its own</h3>
+  <p>One self-contained file whose edits run in the browser \u2014 or a local
+  server that hands the result back to Python.</p>
+  <pre><code><span class="k">from</span> sympy_editor <span class="k">import</span> save_html, serve
+
+<span class="f">save_html</span>(expr, <span class="s">"expr.html"</span>)  <span class="c"># one file, no server</span>
+new = <span class="f">serve</span>(expr)             <span class="c"># blocks until Done</span></code></pre>
+</section>
+<section class="snippet">
+  <h3>A history from plain Python</h3>
+  <p>The viewer on this page needs no editor: a list of expressions and a
+  word about each step is enough.</p>
+  <pre><code><span class="k">from</span> sympy_editor <span class="k">import</span> History
+<span class="k">from</span> sympy_editor <span class="k">import</span> save_history_html
+
+steps = <span class="f">History</span>([
+    <span class="f">Integral</span>(x * <span class="f">sin</span>(x), x),
+    (-x * <span class="f">cos</span>(x)
+     + <span class="f">Integral</span>(<span class="f">cos</span>(x), x), <span class="s">"by parts"</span>),
+    (-x * <span class="f">cos</span>(x) + <span class="f">sin</span>(x), <span class="s">"the last integral"</span>),
+])
+<span class="f">save_history_html</span>(steps, <span class="s">"steps.html"</span>)</code></pre>
+</section>
+</div>
+{figures}
 <h2 class="shelf">Worked derivations</h2>
 {cards}
 <footer>Each one is a <code>sympy_editor.History</code>: a list of expressions
@@ -478,9 +541,23 @@ def derivations_page(folder: Path, *, urls: dict | None = None,
         config["heading"] = "Steps"
         mounts.append(f'SympyEditor.mountHistory(document.getElementById("{element}"), '
                       f"{json.dumps(config, ensure_ascii=False).replace('<', chr(92) + 'u003c')});")
+    # Screenshots are content, not build products: they are taken from a
+    # live JupyterLab and live beside the page.  The section appears only
+    # where they do, so a bare rebuild is never a page of broken images.
+    shots = [("jupyter-widget.png",
+              "The widget in JupyterLab: the formula is the interface \u2014 click a piece to select it, "
+              "type over it, or apply any SymPy function; the kernel computes, and <code>w.expr</code> follows."),
+             ("jupyter-plot.png",
+              "Two widgets wired together in a notebook: every edit committed in the editor redraws the plot "
+              "(<code>examples/plot_alongside.ipynb</code> in the repository).")]
+    figures = "\n".join(f'<figure class="shot"><img src="{name}" alt="" loading="lazy">'
+                        f"<figcaption>{caption}</figcaption></figure>"
+                        for name, caption in shots if (folder / name).is_file())
+    if figures:
+        figures = '<h2 class="shelf">In the notebook</h2>\n' + figures
     page = SHELF.format(
         katex_css=html.escape(urls["katexCss"] if urls else default_urls()["katexCss"], quote=True),
-        editor_css=read_static("editor.css"), cards="\n".join(cards),
+        editor_css=read_static("editor.css"), cards="\n".join(cards), figures=figures,
         editor_js=read_static("editor.js"), mounts="\n".join(mounts), count=len(cards),
         editor_href=html.escape(editor_href, quote=True))
     folder.mkdir(parents=True, exist_ok=True)
