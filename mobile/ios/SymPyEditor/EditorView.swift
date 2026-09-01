@@ -12,18 +12,25 @@ import WebKit
 /// MainActivity.PythonBridge.  Files are served through a custom URL scheme
 /// because fetch() is not available to file:// pages.
 struct EditorView: UIViewRepresentable {
+    /// The bundle's own origin - the only one this WebView ever navigates to
+    /// - and the page it opens, which is the same bundle Android loads.
+    static let scheme = "app"
+    static let host = "www"
+    static let start = URL(string: "app://www/index.html")!
+
     func makeCoordinator() -> PythonBridge { PythonBridge() }
 
     func makeUIView(context: Context) -> WKWebView {
         let bridge = context.coordinator
         let config = WKWebViewConfiguration()
-        config.setURLSchemeHandler(BundleSchemeHandler(), forURLScheme: "app")
+        config.setURLSchemeHandler(BundleSchemeHandler(), forURLScheme: Self.scheme)
         config.userContentController.addUserScript(
             WKUserScript(source: PythonBridge.injectedScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         config.userContentController.add(bridge, name: PythonBridge.handlerName)
 
         let web = WKWebView(frame: .zero, configuration: config)
         web.allowsBackForwardNavigationGestures = false
+        web.navigationDelegate = bridge.navigation
         #if DEBUG
         // Safari's Web Inspector can attach to a debug build (Develop >
         // Simulator): without it a page that fails is a white rectangle.
@@ -33,7 +40,7 @@ struct EditorView: UIViewRepresentable {
         // Start the interpreter while the page loads, so the first edit does
         // not wait for it (importing SymPy takes a moment).
         bridge.warmUp()
-        web.load(URLRequest(url: URL(string: "app://www/index.html")!))
+        web.load(URLRequest(url: Self.start))
         return web
     }
 
@@ -69,6 +76,10 @@ final class PythonBridge: NSObject, WKScriptMessageHandler {
     private static let functions = ["newDoc": "new_doc", "handle": "handle", "version": "version"]
 
     weak var webView: WKWebView?
+
+    /// Kept here because a WKWebView holds its navigation delegate weakly,
+    /// and this object is the one SwiftUI keeps alive.
+    let navigation = BundleNavigation()
 
     private let runtime = PythonRuntime()
     /// Python runs on one thread of its own: a long computation must not
@@ -116,15 +127,36 @@ final class PythonBridge: NSObject, WKScriptMessageHandler {
     }
 }
 
+/// Only the bundle is shown in this WebView.  The bridge above is injected
+/// into whatever page it loads and evaluates what it is given, so a page from
+/// anywhere else must never get it; any other link opens outside the app.
+final class BundleNavigation: NSObject, WKNavigationDelegate {
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        guard let url = navigationAction.request.url else { decisionHandler(.cancel); return }
+        if url.scheme == EditorView.scheme && url.host == EditorView.host {
+            decisionHandler(.allow)
+            return
+        }
+        decisionHandler(.cancel)
+        if UIApplication.shared.canOpenURL(url) { UIApplication.shared.open(url) }
+    }
+}
+
 /// Serves app://www/<path> from the bundled `www` folder with proper MIME types.
 final class BundleSchemeHandler: NSObject, WKURLSchemeHandler {
     func webView(_ webView: WKWebView, start task: WKURLSchemeTask) {
         guard let url = task.request.url, let base = Bundle.main.resourceURL else {
             task.didFailWithError(URLError(.badURL)); return
         }
+        // The bundle and nothing above it: a path of ../.. in a request must
+        // not reach the rest of the app.
+        let root = base.appendingPathComponent(EditorView.host).standardizedFileURL
         let relative = url.path.hasPrefix("/") ? String(url.path.dropFirst()) : url.path
-        let file = base.appendingPathComponent("www").appendingPathComponent(relative)
-        guard let data = try? Data(contentsOf: file) else {
+        let file = root.appendingPathComponent(relative).standardizedFileURL
+        guard url.host == EditorView.host,
+              file.path == root.path || file.path.hasPrefix(root.path + "/"),
+              let data = try? Data(contentsOf: file) else {
             task.didFailWithError(URLError(.fileDoesNotExist)); return
         }
         let headers = ["Content-Type": mimeType(for: file.pathExtension), "Content-Length": String(data.count)]

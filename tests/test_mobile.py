@@ -281,6 +281,15 @@ def test_the_webview_shows_the_bundle_and_nothing_else():
     assert 'BUNDLE_HOST = "appassets.androidplatform.net"' in kt and "url.host == BUNDLE_HOST" in kt
     assert "Intent.ACTION_VIEW" in kt
 
+    # the same rule on iOS, where the bridge is a user script and would be
+    # injected into any page the view were allowed to reach
+    swift = (ROOT / "mobile/ios/SymPyEditor/EditorView.swift").read_text(encoding="utf-8")
+    assert "WKNavigationDelegate" in swift and "decidePolicyFor" in swift
+    assert "url.scheme == EditorView.scheme && url.host == EditorView.host" in swift
+    assert "decisionHandler(.cancel)" in swift and "UIApplication.shared.open(url)" in swift
+    # and a request may not climb out of the bundle it is served from
+    assert "standardizedFileURL" in swift and 'hasPrefix(root.path + "/")' in swift
+
 
 def test_no_image_is_committed():
     """Images are drawn, not kept: `mobile/make_icons.py` makes every one of
