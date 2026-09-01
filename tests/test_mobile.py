@@ -272,6 +272,16 @@ def test_the_app_view_wears_the_icon_and_is_the_same_on_both_phones():
     assert "app://www/index.html" in view                          # the same bundle, by name
 
 
+def test_the_webview_shows_the_bundle_and_nothing_else():
+    """The two bridges are injected into whatever page the WebView loads, and
+    the Python one evaluates what it is handed: a page from anywhere else
+    must never get them.  Links to other places open outside the app."""
+    kt = (ROOT / "mobile/android/app/src/main/java/org/sympy/editor/MainActivity.kt").read_text(encoding="utf-8")
+    assert "override fun shouldOverrideUrlLoading" in kt
+    assert 'BUNDLE_HOST = "appassets.androidplatform.net"' in kt and "url.host == BUNDLE_HOST" in kt
+    assert "Intent.ACTION_VIEW" in kt
+
+
 def test_no_image_is_committed():
     """Images are drawn, not kept: `mobile/make_icons.py` makes every one of
     them from the SVGs, and a build calls it."""

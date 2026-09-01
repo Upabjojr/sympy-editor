@@ -43,6 +43,10 @@ import java.util.concurrent.Executors
 class MainActivity : AppCompatActivity() {
     private lateinit var web: WebView
 
+    /** The origin the bundle is served on (WebViewAssetLoader's), the only
+     *  one this WebView navigates to. */
+    private val BUNDLE_HOST = "appassets.androidplatform.net"
+
     /** Python runs on one thread of its own: a long computation must not
      *  block the interface, and CPython objects belong to their thread. */
     private val pythonThread = Executors.newSingleThreadExecutor()
@@ -110,6 +114,21 @@ class MainActivity : AppCompatActivity() {
         web.webViewClient = object : WebViewClientCompat() {
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
                 loader.shouldInterceptRequest(request.url)
+
+            /** Only the bundle is shown in this WebView.  The two bridges
+             *  above are injected into whatever page it loads, and the
+             *  Python one evaluates what it is given: a page from anywhere
+             *  else must never get them.  Any other link opens outside. */
+            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                val url = request.url
+                if (url.scheme == "https" && url.host == BUNDLE_HOST) return false
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW, url))
+                } catch (e: android.content.ActivityNotFoundException) {
+                    // nothing can open it: then nothing does
+                }
+                return true
+            }
         }
         onBackPressedDispatcher.addCallback(this) { if (web.canGoBack()) web.goBack() else finish() }
 

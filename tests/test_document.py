@@ -203,7 +203,7 @@ def test_new_names_in_a_matrix_slot_are_matrix_symbols():
 
 
 def test_symbols_panel_info_and_retype():
-    from sympy import MatAdd, MatrixSymbol, Matrix, symbols
+    from sympy import MatrixBase, MatrixExpr, MatrixSymbol, symbols
     x, y = symbols("x y")
     p = symbols("p", positive=True)
     doc = Document(x * y + y ** 2 + p)
@@ -211,14 +211,20 @@ def test_symbols_panel_info_and_retype():
     assert [s["name"] for s in symbols_info] == ["p", "x", "y"]
     assert symbols_info[1] == {"name": "x", "used": True, "type": "Symbol", "assumptions": []}
     assert "positive" in symbols_info[0]["assumptions"] and "commutative" not in symbols_info[0]["assumptions"]
-    doc.handle({"action": "retype", "name": "y", "type": "MatrixSymbol", "rows": "2", "cols": "n"})
+    # y cannot become a matrix here: p would be added to it, which SymPy's own
+    # operators refuse (this used to commit an Add of a scalar and a MatAdd)
+    snap = doc.handle({"action": "retype", "name": "y", "type": "MatrixSymbol", "rows": "2", "cols": "n"})
+    assert snap["error"] and "cannot become" in snap["error"] and doc.expr == x * y + y ** 2 + p
+    # where every term is a matrix it can
+    doc = Document(x * y + 2 * y)
+    assert doc.handle({"action": "retype", "name": "y", "type": "MatrixSymbol", "rows": "2", "cols": "n"})["error"] is None
     Y = MatrixSymbol("y", 2, symbols("n"))
-    assert doc.namespace()["y"] == Y
+    assert doc.namespace()["y"] == Y and isinstance(doc.expr, MatrixExpr)       # (x + 2)*y, a MatMul
     assert [s for s in doc.symbol_info() if s["name"] == "y"] == [
         {"name": "y", "used": True, "type": "MatrixSymbol", "shape": ["2", "n"]}]
     doc.undo()
     doc.retype("y", "Matrix", 2, 2)
-    assert isinstance(doc.expr.args[0], Matrix) or doc.expr.has(Matrix) or "y[0, 0]" in str(doc.expr)
+    assert isinstance(doc.expr, MatrixBase) and "y[0, 0]" in str(doc.expr)
     # a matrix under a transpose cannot become a scalar: refused, state unchanged
     doc3 = Document(MatrixSymbol("A", 2, 2).T)
     snap = doc3.handle({"action": "retype", "name": "A", "type": "Symbol"})
@@ -1090,3 +1096,98 @@ def test_applying_a_container_takes_the_expression_as_its_contents():
     assert d.expr == x + y
     with pytest.raises(ValueError, match="Unknown SymPy function"):
         Document(x + y).call("/", "no_such_function_at_all")
+
+
+def test_every_answer_of_handle_says_what_happened_and_nothing_else():
+    """``goto`` did its work and then fell through to "Unknown action": the
+    step opened and the front end showed a red error for it, every time a
+    history step was tapped.  No action that does its job may answer with
+    an error."""
+    from sympy import symbols
+    x = symbols("x")
+    doc = Document(x)
+    doc.set("x + 1")
+    snap = doc.handle({"action": "goto", "index": 0})
+    assert snap["error"] is None and snap["src"] == "x" and snap["can_redo"]
+    for msg in [{"action": "redo"}, {"action": "undo"}, {"action": "snapshot"}, {"action": "export"},
+                {"action": "methods", "path": "/"}, {"action": "script"}, {"action": "functions"},
+                {"action": "signature", "name": "diff", "path": "/"}, {"action": "preview", "src": "x"},
+                {"action": "declare", "name": "q"}, {"action": "undeclare", "name": "q"}]:
+        assert doc.handle(msg)["error"] is None, msg
+
+
+def test_what_cannot_be_shown_is_never_committed():
+    """A committed expression the printer chokes on failed every request
+    after it - the document was dead, and in the widget the worker thread
+    died with it.  ``factor_list`` returned a tuple holding a plain list
+    (now a Tuple all the way down); anything else that cannot be shown is
+    refused before it becomes the current expression."""
+    from sympy import Integer, Tuple, symbols
+    x = symbols("x")
+    doc = Document(x**2 + x)
+    snap = doc.handle({"action": "call", "path": "/", "func": "factor_list()"})
+    assert snap["error"] is None and "\\htmlData{path=/}" in snap["latex"]
+    assert isinstance(doc.expr, Tuple) and doc.expr[0] == 1
+    doc.undo()
+    # a Tuple around a plain list is constructible and unprintable
+    before = doc.expr
+    with pytest.raises(ValueError, match="cannot be shown"):
+        doc.set(Tuple(Integer(1), [x]))
+    assert doc.expr == before
+    snap = doc.handle({"action": "call", "path": "/", "func": "Tuple(1, [x])"})
+    assert snap["error"] and "cannot be shown" in snap["error"] and doc.expr == before
+    assert doc.handle({"action": "snapshot"})["error"] is None       # and the document lives on
+
+
+def test_typing_over_a_matrix_previews_what_it_commits():
+    """The preview parsed the source line without the context ``set`` parses
+    it with: ``a*b + c`` typed over a matrix previewed as a scalar sum and
+    committed as a sum of matrix symbols.  Whatever the rule, it is one."""
+    from sympy import ImmutableMatrix, symbols
+    x = symbols("x")
+    for start in (ImmutableMatrix([[1, 2], [3, 4]]), x + 1):
+        doc = Document(start)
+        pv = doc.handle({"action": "preview", "src": "a*b + c"})
+        st = doc.handle({"action": "set", "src": "a*b + c"})
+        assert pv["error"] is None and st["error"] is None
+        assert pv["nodes"]["/"]["type"] == st["nodes"]["/"]["type"] and pv["src"] == st["src"]
+    assert st["nodes"]["/"]["type"] == "Add"                           # a scalar over a scalar...
+    assert Document(ImmutableMatrix([[1]])).handle({"action": "set", "src": "a*b + c"})["nodes"]["/"]["type"] == "MatAdd"
+
+
+def test_retype_refuses_a_tree_sympy_would_not_build():
+    """``xreplace`` skips the constructors' checks: a scalar turned into a
+    matrix left ``1 + Matrix`` behind, which prints - so the old guard let
+    it through - but which SymPy would never build, and on which simplify,
+    expand and doit were silent no-ops."""
+    from sympy import MatrixBase, symbols
+    x = symbols("x")
+    doc = Document(x + 1)
+    snap = doc.handle({"action": "retype", "name": "x", "type": "Matrix", "rows": 2, "cols": 2})
+    assert snap["error"] and "cannot become" in snap["error"]
+    assert doc.expr == x + 1 and "x" not in doc.declared
+    snap = Document(2**x).handle({"action": "retype", "name": "x", "type": "MatrixSymbol", "rows": 2, "cols": 2})
+    assert snap["error"] and "cannot become" in snap["error"]                # a matrix exponent
+    doc = Document(2 * x)
+    assert doc.handle({"action": "retype", "name": "x", "type": "Matrix", "rows": 2, "cols": 2})["error"] is None
+    assert isinstance(doc.expr, MatrixBase)                               # a scalar times a matrix is fine
+
+
+def test_a_failing_listener_does_not_fail_the_edit(caplog):
+    """The edit is committed before the listeners hear of it: one that raised
+    made handle report an error for a change that had happened."""
+    from sympy import symbols
+    x, y = symbols("x y")
+    doc = Document(x)
+    doc.on_change(lambda e: 1 / 0)
+    snap = doc.handle({"action": "set", "src": "y"})
+    assert snap["error"] is None and doc.expr == y
+    assert "on_change callback" in caplog.text and "ZeroDivisionError" in caplog.text
+
+
+def test_labels_that_do_not_fit_the_history_are_refused():
+    with pytest.raises(ValueError, match="labels for"):
+        Document(None, history=["Symbol('x')"], labels=["a", "b"])
+    # trimming to max_history keeps the labels with the steps that stay
+    doc = Document(None, history=["Symbol('x')", "Symbol('y')", "Symbol('z')"], labels=["a", "b", "c"], max_history=2)
+    assert [str(e) for e in doc._history] == ["y", "z"] and doc._labels == ["b", "c"]

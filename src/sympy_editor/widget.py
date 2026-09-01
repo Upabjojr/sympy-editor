@@ -58,6 +58,13 @@ class SympyEditorWidget(anywidget.AnyWidget):
         super().__init__(options=opts, **kwargs)
         self._lock = threading.Lock()          # one message at a time
         self._worker: Optional[threading.Thread] = None
+        #: ident of the thread inside ``Document.handle`` right now - the one
+        #: an interrupt is for.  Not the latest thread started: that one may
+        #: be waiting for the lock behind it (an autosave, a preview), and
+        #: interrupting it would kill the wrong message and let the long
+        #: computation run on.
+        self._running: Optional[int] = None
+        self._last: Dict[str, Any] = {}
         self._push(self.document.snapshot())
         self.on_msg(self._on_msg)
 
@@ -71,16 +78,31 @@ class SympyEditorWidget(anywidget.AnyWidget):
         if not isinstance(content, dict) or "action" not in content:
             return
         if content["action"] == "interrupt":
-            worker = self._worker
-            if worker is not None and worker.is_alive():
-                interrupt_thread(worker.ident)
+            ident = self._running
+            if ident is not None:
+                interrupt_thread(ident)
             return
         self._worker = threading.Thread(target=self._run, args=(content,), daemon=True)
         self._worker.start()
 
     def _run(self, content: Dict[str, Any]) -> None:
-        with self._lock:
-            self._push(self.document.handle(content))
+        """Answer one message - always.  The front end pairs each answer with
+        the message it sent by the request id it put in (``_req``), so a
+        message that got no answer would leave its promise hanging and the
+        editor busy for good: whatever goes wrong, a snapshot goes back."""
+        req = content.get("_req")
+        try:
+            with self._lock:
+                self._running = threading.get_ident()
+                try:
+                    snap = self.document.handle(content)
+                finally:
+                    self._running = None
+        except BaseException as exc:            # Interrupted while waiting, a broken document...
+            snap = dict(self._last, error=f"{type(exc).__name__}: {exc}", seq=self._last.get("seq", 0) + 1)
+        if req is not None:
+            snap["_req"] = req
+        self._push(snap)
 
     def wait(self, timeout: Optional[float] = None) -> None:
         """Block until the message being processed (if any) is done."""
@@ -89,6 +111,7 @@ class SympyEditorWidget(anywidget.AnyWidget):
             worker.join(timeout)
 
     def _push(self, snap: Dict[str, Any]) -> None:
+        self._last = snap
         self.snapshot = json.dumps(snap)
 
     def refresh(self) -> None:

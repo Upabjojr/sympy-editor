@@ -21,6 +21,10 @@ classifiers = [
 ]
 dependencies = ["sympy>=1.14"]   # the oldest version CI runs the suite on (job "oldest-sympy"); the browser gets the same release
 
+[project.urls]
+Homepage = "https://upabjojr.github.io/sympy-editor/"
+Documentation = "https://upabjojr.github.io/sympy-editor/"
+
 [project.optional-dependencies]
 jupyter = ["anywidget>=0.9"]
 test = ["pytest"]
