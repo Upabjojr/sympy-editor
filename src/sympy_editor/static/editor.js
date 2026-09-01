@@ -1715,7 +1715,13 @@ var SympyEditor = (function () {
         if (newGhost.parentNode) newGhost.parentNode.removeChild(newGhost);
       };
       this._finishAnimation = finish;
-      Promise.all(animations.map(function (a) { return a.finished.catch(function () {}); })).then(finish, finish);
+      // A WebView older than Chrome 84 has no Animation.finished: its events
+      // say the same thing, and the timeout below is the last word anyway.
+      var ended = function (a) {
+        if (a.finished) return a.finished.catch(function () {});
+        return new Promise(function (resolve) { a.onfinish = a.oncancel = resolve; });
+      };
+      Promise.all(animations.map(ended)).then(finish, finish);
       setTimeout(finish, ms + 200);
     }
 

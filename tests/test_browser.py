@@ -1531,6 +1531,35 @@ def test_empty_formula_keeps_the_cursor_and_zoom_block_stays_together(browser, s
     assert errors == []
 
 
+def test_the_change_animation_ends_where_animations_have_no_finished(browser, serve_expr):
+    """An Android WebView older than Chrome 84 (what an Android 11 image
+    ships, and what a phone that cannot update from Play still runs) has
+    `Animation` but not its `finished` promise: waiting on it threw on every
+    edit that animated, and the page showed "Cannot read property 'catch' of
+    undefined" instead of the change.  The finish and cancel events say the
+    same thing, so the animation is waited on either way."""
+    from sympy import cos
+    srv, doc = serve_expr(x**2 + sin(y))
+    ctx = browser.new_context()
+    ctx.add_init_script("delete Animation.prototype.finished;")
+    page = ctx.new_page()
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(srv.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    assert not page.evaluate("'finished' in Animation.prototype")
+    nodes = doc.snapshot()["nodes"]
+    ps = next(k for k, v in nodes.items() if v["src"] == "sin(y)")
+    _next_state(page, lambda: page.evaluate(
+        "document.querySelector('.sympy-editor').__sympyEditor.send({action: 'replace', path: '%s', src: 'cos(y)'})" % ps))
+    assert page.locator(".se-ghost").count() == 2                 # it animates...
+    assert _wait(lambda: page.locator(".se-ghost").count() == 0, timeout=5)   # ...and comes to an end
+    assert page.locator(".se-error:not([hidden])").count() == 0
+    assert errors == []
+    assert doc.expr == x**2 + cos(y)
+    ctx.close()
+
+
 def test_change_animation_red_to_green(browser, serve_expr):
     from sympy import cos
     srv, doc = serve_expr(x**2 + sin(y))
