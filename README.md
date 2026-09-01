@@ -95,7 +95,7 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | Copy / cut / paste a part | **Copy** / **Paste** (toolbar or action bar) | Ctrl+C / Ctrl+X copy the selection's SymPy source; Ctrl+V pastes over a selection or at a caret |
 | Apply any SymPy function | the **function box** in the toolbar: type to search SymPy's functions, pick one; a function that needs parameters asks for them (symbol parameters offer the selection's free symbols — `solve` on `sin(x)cos(y)` asks x or y); `diff(x)`, `.T`, `det()` typed in full apply as written | |
 | Call a method of the selection's class | the **Methods** menu lists the public methods and properties of the selected object's class (of the whole expression when nothing is selected) — `.det()`, `.T`, `.rref()` on a matrix, `.diff()`, `.as_poly()` on an expression; picking one calls it, and a method that needs parameters asks for them.  A `Lambda` is itself a function: its menu starts with **( ) apply**, which asks for the arguments and evaluates it there (`(3)` in the function box does the same) | |
-| Undo / redo | ↶ / ↷ | Ctrl+Z / Ctrl+Shift+Z |
+| Undo / redo | ↺ / ↻ | Ctrl+Z / Ctrl+Shift+Z |
 | Zoom the formula | **−** / **100%** (reset) / **+**, Ctrl+mouse wheel, pinch with two fingers | Ctrl+plus / Ctrl+minus / Ctrl+0 |
 | Scroll a formula wider than the view | the scrollbar, the mouse wheel over the formula, or drag its empty space (one finger on a phone) | |
 
@@ -114,7 +114,7 @@ On phones and tablets: tap to select, **tap the selected node again to edit
 it**, tap a gap for a caret and tap it again to insert, tap an operator to
 change it from its palette, drag to select a
 range; the toolbar has ↑
-for the parent and a ⌨ button that opens the keyboard for the selection, the
+for the parent and a keyboard button that opens the keyboard for the selection, the
 caret or the whole expression; the menus apply an operation as soon as it is
 picked.  Two fingers zoom the formula, a drag on its empty space scrolls it
 sideways, and vertical swipes still scroll the page.
@@ -197,12 +197,13 @@ and iOS (SwiftUI `WKWebView`) app: `python mobile/build_www.py` produces the
 shared, offline-capable bundle, and each platform folder is a few files that
 just display it.
 
-The **Android app runs Python itself**: CPython 3.12 and SymPy are packaged in
-the APK (Chaquopy) and the page edits through the app's own interpreter (the
-`native` backend), so there is no WebAssembly runtime to start and no Pyodide
-in the bundle - faster to open, and the same SymPy as on the desktop.  It
-needs Android 7.0 (API 24).  The iOS app and the web app still run Python in
-the page with Pyodide.  See `mobile/README.md`.
+**Both apps run Python themselves**: CPython and SymPy are packaged in the app
+- Android through Chaquopy, iOS through `Python.xcframework` - and the page
+edits through the app's own interpreter (the `native` backend), so there is no
+WebAssembly runtime to start and no Pyodide in the bundle - faster to open,
+and the same SymPy as on the desktop.  Android 7.0 (API 24) and iOS 15.
+Only the web app still runs Python in the page, with Pyodide.  See
+`mobile/README.md`.
 
 ### Web app
 
@@ -361,7 +362,7 @@ lost.
 
 ### Sessions and history (mobile app, or `options={"sessions": True}`)
 
-The **☰** button opens a lateral drawer, out of the widget, listing your
+The **≡** button opens a lateral drawer, out of the widget, listing your
 **sessions** — expressions, each with its own undo history, kept in the
 browser's storage.  **New session…** offers an empty formula (the default:
 you type it in the source line), a copy of the current expression, or one

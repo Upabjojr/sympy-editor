@@ -1,12 +1,14 @@
 """The app's Python side: the documents the WebView edits live here.
 
-The Android app ships CPython and SymPy (Chaquopy, see app/build.gradle.kts)
-instead of running them in the browser, so this module is what the page talks
-to through ``window.SympyEditorPy`` (MainActivity.PythonBridge) - the same
+Both apps ship CPython and SymPy instead of running them in the browser -
+Android through Chaquopy (see android/app/build.gradle.kts), iOS through
+Python.xcframework (see ios/project.yml) - so this module is what the page
+talks to through ``window.SympyEditorPy``: the same
 :class:`sympy_editor.document.Document` the server and the Jupyter widget use,
 with JSON in and JSON out.
 
-``sympy_editor`` itself is copied next to this file by ``mobile/build.py``.
+``mobile/build.py`` stages this file and the ``sympy_editor`` package side by
+side where each platform's build expects them.
 """
 
 from __future__ import annotations

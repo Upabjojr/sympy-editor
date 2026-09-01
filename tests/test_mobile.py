@@ -2,6 +2,7 @@
 
 import http.server
 import importlib.util
+import re
 import shutil
 import sys
 import os
@@ -83,8 +84,8 @@ def test_native_project_files_are_well_formed():
 
 
 def _load_app_module():
-    """The module the Android app runs (android/app/src/main/python)."""
-    path = ROOT / "mobile" / "android" / "app" / "src" / "main" / "python" / "sympy_editor_app.py"
+    """The module both apps run (mobile/app, staged into each by build.py)."""
+    path = ROOT / "mobile" / "app" / "sympy_editor_app.py"
     spec = importlib.util.spec_from_file_location("sympy_editor_app", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -92,7 +93,7 @@ def _load_app_module():
 
 
 def test_the_app_python_module_edits_documents():
-    """What the Android app's CPython runs: JSON in, snapshots out.
+    """What the apps' own CPython runs: JSON in, snapshots out.
 
     The app ships Python and SymPy (Chaquopy) instead of loading Pyodide in
     the WebView; MainActivity.PythonBridge calls exactly these functions.
@@ -153,6 +154,82 @@ def test_the_android_app_is_configured_for_its_own_python():
     assert "AndroidPlatform" in kotlin and "Executors.newSingleThreadExecutor" in kotlin
     src = (ROOT / "src" / "sympy_editor" / "static" / "editor.js").read_text(encoding="utf-8")
     assert "native: nativeBackend" in src
+
+
+def test_the_ios_app_is_configured_for_its_own_python():
+    """The Xcode setup that puts CPython and SymPy in the .app.
+
+    iOS cannot run Pyodide the way Android could have: the interpreter is
+    CPython built for iOS (Python.xcframework), and the bridge to the page is
+    the same protocol MainActivity speaks."""
+    yaml = pytest.importorskip("yaml")
+    spec = yaml.safe_load((ROOT / "mobile" / "ios" / "project.yml").read_text(encoding="utf-8"))
+    target = spec["targets"]["SymPyEditor"]
+    assert any(d.get("framework") == "Python.xcframework" and d.get("embed") for d in target["dependencies"])
+    folders = {s["path"] for s in target["sources"] if isinstance(s, dict)}
+    assert {"app", "app_packages", "../www"} <= folders     # the app's Python, SymPy, and the page
+    # the standard library is installed into the bundle by the script the
+    # support package ships, and every extension module made into a framework
+    script = "\n".join(s["script"] for s in target["postBuildScripts"])
+    assert "install_python Python.xcframework app app_packages" in script
+
+    swift = (ROOT / "mobile" / "ios" / "SymPyEditor" / "EditorView.swift").read_text(encoding="utf-8")
+    assert "SympyEditorPy" in swift and "__sympyEditorNative" in swift
+    assert "DispatchQueue(label:" in swift              # Python on one thread of its own
+    objc = (ROOT / "mobile" / "ios" / "SymPyEditor" / "PythonRuntime.m").read_text(encoding="utf-8")
+    assert "Py_InitializeFromConfig" in objc and "PyGILState_Ensure" in objc
+    assert "sympy_editor_app" in objc
+
+    build = (ROOT / "mobile" / "build.py").read_text(encoding="utf-8")
+    assert "PYTHON_APPLE_SUPPORT" in build              # the interpreter is pinned, and downloaded
+    assert "build_www(cdn, native=True)" in build       # so the page never asks for Pyodide
+
+
+def test_both_bridges_offer_what_the_page_calls():
+    """Both apps inject `window.SympyEditorPy`; every method the page calls
+    has to exist on each side and reach a function of sympy_editor_app.
+
+    (Each bridge offers `version` too, which the page keeps in reserve for an
+    about box - hence a subset, not an equality.)"""
+    src = (ROOT / "src" / "sympy_editor" / "static" / "editor.js").read_text(encoding="utf-8")
+    called = set(re.findall(r'call\("(\w+)"', src))
+    assert called == {"newDoc", "handle"}, called
+    for bridge in ("mobile/ios/SymPyEditor/EditorView.swift",
+                   "mobile/android/app/src/main/java/org/sympy/editor/MainActivity.kt"):
+        text = (ROOT / bridge).read_text(encoding="utf-8")
+        for method in called:
+            assert method in text, (bridge, method)
+    mod = _load_app_module()
+    for function in ("new_doc", "handle", "version", "close"):
+        assert callable(getattr(mod, function))
+
+
+def test_the_history_is_written_into_its_frame_not_handed_to_it():
+    """Both apps serve the bundle from an origin of their own - a custom URL
+    scheme on iOS, an https asset host on Android - and a `srcdoc` frame under
+    a custom scheme loads, calls itself complete, and stays empty: the history
+    opened on a header with no steps under it.  The report is written into the
+    frame's document instead, which works everywhere."""
+    src = (ROOT / "src" / "sympy_editor" / "static" / "editor.js").read_text(encoding="utf-8")
+    start = src.index("async showHistory()")
+    view = src[start:src.index("showHelp() {", start)]
+    assert "doc.open();" in view and "doc.write(html);" in view and "doc.close();" in view
+    # the frame is dressed once, by whichever of the two paths arrives first
+    assert "frame.addEventListener(\"load\", dress)" in view and "dress();" in view
+    assert "if (dressed || !d || !d.body || !d.body.firstChild) return;" in view
+
+
+def test_the_toolbar_only_uses_glyphs_every_platform_has():
+    """iOS has no glyph for these, and a button that shows an empty box says
+    nothing: the icons without a character everywhere are drawn instead (as
+    the arrows and the keyboard are), and the rest were chosen from what all
+    three platforms carry."""
+    missing_on_ios = {"\u21b6": "undo", "\u21b7": "redo", "\u2328": "keyboard",
+                      "\u2630": "drawer", "\u2715": "close"}
+    src = (ROOT / "src" / "sympy_editor" / "static" / "editor.js").read_text(encoding="utf-8")
+    for glyph, what in missing_on_ios.items():
+        assert glyph not in src, f"{what}: U+{ord(glyph):04X} does not render on iOS"
+    assert "function keyboardSvg()" in src              # the one with no replacement is drawn
 
 
 def test_the_app_has_an_icon_of_its_own():
@@ -219,6 +296,15 @@ def test_the_webview_shows_the_bundle_and_nothing_else():
     assert 'BUNDLE_HOST = "appassets.androidplatform.net"' in kt and "url.host == BUNDLE_HOST" in kt
     assert "Intent.ACTION_VIEW" in kt
 
+    # the same rule on iOS, where the bridge is a user script and would be
+    # injected into any page the view were allowed to reach
+    swift = (ROOT / "mobile/ios/SymPyEditor/EditorView.swift").read_text(encoding="utf-8")
+    assert "WKNavigationDelegate" in swift and "decidePolicyFor" in swift
+    assert "url.scheme == EditorView.scheme && url.host == EditorView.host" in swift
+    assert "decisionHandler(.cancel)" in swift and "UIApplication.shared.open(url)" in swift
+    # and a request may not climb out of the bundle it is served from
+    assert "standardizedFileURL" in swift and 'hasPrefix(root.path + "/")' in swift
+
 
 def test_no_image_is_committed():
     """Images are drawn, not kept: `mobile/make_icons.py` makes every one of
@@ -229,7 +315,7 @@ def test_no_image_is_committed():
                              cwd=ROOT, capture_output=True, text=True, check=True).stdout.split()
     assert tracked == [], tracked
     build = (ROOT / "mobile/build.py").read_text(encoding="utf-8")
-    assert "make_icons()" in build          # ...and a build draws them when they are missing
+    assert "make_icons(" in build           # ...and a build draws them when they are missing
 
 
 @pytest.mark.skipif(not shutil.which("rsvg-convert"), reason="needs librsvg (rsvg-convert)")

@@ -1,4 +1,8 @@
 # XcodeGen spec (brew install xcodegen; xcodegen generate) - see mobile/README.md
+#
+# Python.xcframework, app/ and app_packages/ are build products, staged by
+# mobile/build.py (they are not in the repository): the interpreter, the
+# app's Python, and SymPy.
 name: SymPyEditor
 options:
   bundleIdPrefix: org.sympy
@@ -14,6 +18,16 @@ targets:
       - path: ../www          # the shared bundle, copied into the app as a folder
         type: folder
         buildPhase: resources
+      - path: app             # sympy_editor_app.py and the sympy_editor package
+        type: folder
+        buildPhase: resources
+      - path: app_packages    # SymPy and mpmath
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - framework: Python.xcframework
+        embed: true
+        codeSign: true
     info:
       path: SymPyEditor/Info.plist
       properties:
@@ -30,3 +44,20 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         DEVELOPMENT_TEAM: ${IOS_TEAM_ID}
         CODE_SIGN_STYLE: Automatic
+        SWIFT_OBJC_BRIDGING_HEADER: SymPyEditor/SymPyEditor-Bridging-Header.h
+        # The stdlib's extension modules are loaded from the app bundle.
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+    postBuildScripts:
+      # The standard library cannot live inside an XCFramework, so the support
+      # package ships this: it copies the stdlib for the slice being built into
+      # the app and turns every .so into the .framework iOS insists on.  Runs
+      # after the resources are in place, which is what it expects.
+      - name: Process Python libraries
+        basedOnDependencyAnalysis: false
+        script: |
+          set -e
+          # An unsigned build (the simulator, CODE_SIGNING_ALLOWED=NO) still has
+          # to sign the frameworks this makes: ad-hoc is what the simulator wants.
+          export EXPANDED_CODE_SIGN_IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:--}"
+          source "$PROJECT_DIR/Python.xcframework/build/utils.sh"
+          install_python Python.xcframework app app_packages

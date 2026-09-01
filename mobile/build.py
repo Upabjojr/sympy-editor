@@ -5,6 +5,7 @@
     python mobile/build.py android --release  # release APK + AAB (signed if ANDROID_KEYSTORE... are set)
     python mobile/build.py ios                # .ipa (macOS + Xcode; IOS_TEAM_ID for signing)
     python mobile/build.py ios --simulator    # .app for the iOS simulator, no signing needed
+    python mobile/build.py ios --simulator --run   # ... and install and launch it there
 
 Both start by (re)building the shared bundle mobile/www with build_www.py.
 
@@ -21,11 +22,22 @@ import platform
 import shutil
 import subprocess
 import sys
+import tarfile
+import urllib.request
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ANDROID = HERE / "android"
 IOS = HERE / "ios"
+APP = HERE / "app"                      # the Python side both apps run
+
+#: The iOS interpreter: a release of github.com/beeware/Python-Apple-support,
+#: which is how CPython's official iOS support is packaged as an XCFramework
+#: (the standard library and the tools to install it travel with it).
+PYTHON_APPLE_SUPPORT = "3.13-b14"
+
+#: Where the downloads live, as in build_www.py.
+CACHE = Path.home() / ".cache" / "sympy-editor"
 
 
 def run(cmd, cwd=None, env=None):
@@ -33,28 +45,51 @@ def run(cmd, cwd=None, env=None):
     subprocess.run(cmd, cwd=cwd, env=env, check=True)
 
 
-def build_www(cdn: bool, android: bool) -> None:
+def build_www(cdn: bool, *, android: bool = False, native: bool = False) -> None:
     cmd = [sys.executable, str(HERE / "build_www.py")]
     if cdn:
         cmd.append("--cdn")
     if android:
         cmd.append("--android")
+    if native:
+        cmd.append("--native")
     run(cmd)
 
 
-def copy_python_sources() -> Path:
-    """Put the current ``sympy_editor`` package where Chaquopy picks it up.
+def download(url: str, dest: Path) -> Path:
+    """Fetch ``url`` once into ``dest`` (a file in the cache)."""
+    if dest.is_file():
+        return dest
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    print("  downloading", url, flush=True)
+    with urllib.request.urlopen(url, timeout=300) as resp, open(dest, "wb") as out:
+        shutil.copyfileobj(resp, out)
+    return dest
 
-    The Android app runs the editor's own Python (see
-    ``android/app/src/main/python/sympy_editor_app.py``); SymPy comes from
-    PyPI at build time, this package comes from the checkout, so the app is
-    never built against a stale copy."""
-    src = HERE.parent / "src" / "sympy_editor"
-    dest = ANDROID / "app" / "src" / "main" / "python" / "sympy_editor"
-    if dest.exists():
-        shutil.rmtree(dest)
-    shutil.copytree(src, dest, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-    print(f"+ copied {src} -> {dest}")
+
+def sympy_version() -> str:
+    """The SymPy the apps ship: the release the browser build uses too."""
+    sys.path.insert(0, str(HERE.parent / "src"))
+    from sympy_editor.html import SYMPY_VERSION
+
+    return SYMPY_VERSION
+
+
+def copy_python_sources(dest: Path) -> Path:
+    """Put the app's Python - ``mobile/app/sympy_editor_app.py`` and the
+    current ``sympy_editor`` package - where the platform's build looks for
+    it: ``src/main/python`` for Chaquopy, ``ios/app`` for the app bundle.
+
+    SymPy comes from PyPI at build time; this code comes from the checkout,
+    so neither app is ever built against a stale copy."""
+    dest.mkdir(parents=True, exist_ok=True)
+    package = dest / "sympy_editor"
+    if package.exists():
+        shutil.rmtree(package)
+    shutil.copytree(HERE.parent / "src" / "sympy_editor", package,
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    shutil.copyfile(APP / "sympy_editor_app.py", dest / "sympy_editor_app.py")
+    print(f"+ staged the app's Python in {dest}")
     return dest
 
 
@@ -104,15 +139,16 @@ def android_env() -> dict:
     return env
 
 
-def make_icons() -> None:
-    """Draw the app's icons, unless they are already there.
+def make_icons(needed: Path) -> None:
+    """Draw the app's icons, unless ``needed`` - the one this platform would
+    miss first - is already there.
 
     They are build products - no PNG is committed - so a fresh checkout has
     the SVGs and this makes the rest.  Without them the manifest points at a
-    `@mipmap/ic_launcher` that does not exist and the build stops.
+    `@mipmap/ic_launcher` that does not exist, or the asset catalogue has no
+    AppIcon, and the build stops.
     """
-    launcher = ANDROID / "app/src/main/res/mipmap-mdpi/ic_launcher.png"
-    if launcher.is_file():
+    if needed.is_file():
         return
     if not shutil.which("rsvg-convert"):
         sys.exit("the icons are missing and rsvg-convert is not installed "
@@ -122,8 +158,8 @@ def make_icons() -> None:
 
 def android_build(release: bool, cdn: bool) -> list[Path]:
     build_www(cdn, android=True)
-    copy_python_sources()
-    make_icons()
+    copy_python_sources(ANDROID / "app" / "src" / "main" / "python")
+    make_icons(ANDROID / "app/src/main/res/mipmap-mdpi/ic_launcher.png")
     gradlew = ANDROID / ("gradlew.bat" if platform.system() == "Windows" else "gradlew")
     tasks = ["assembleRelease", "bundleRelease"] if release else ["assembleDebug"]
     run([str(gradlew), "--no-daemon", *tasks], cwd=ANDROID, env=android_env())
@@ -135,11 +171,100 @@ def android_build(release: bool, cdn: bool) -> list[Path]:
     return made
 
 
-def ios_build(simulator: bool, cdn: bool, method: str) -> list[Path]:
+def ios_runtime() -> Path:
+    """Stage the interpreter the iOS app ships.
+
+    ``Python.xcframework`` is CPython built for iOS - the device and the
+    simulator, and for the simulator both architectures - as python.org's own
+    support project packages it.  It is 100+ MB of build product, so it is
+    downloaded once into the cache and linked into ``mobile/ios`` rather than
+    committed or copied; ``project.yml`` embeds it, and the build phase it
+    carries (``build/utils.sh``) installs the standard library into the app
+    and turns each extension module into the framework iOS insists on.
+    """
+    version, build = PYTHON_APPLE_SUPPORT.split("-")
+    root = CACHE / "python-apple-support" / PYTHON_APPLE_SUPPORT
+    framework = root / "Python.xcframework"
+    if not framework.is_dir():
+        archive = download(
+            f"https://github.com/beeware/Python-Apple-support/releases/download/"
+            f"{PYTHON_APPLE_SUPPORT}/Python-{version}-iOS-support.{build}.tar.gz",
+            CACHE / "python-apple-support" / f"Python-{version}-iOS-support.{build}.tar.gz")
+        print(f"+ unpacking {archive.name}", flush=True)
+        root.mkdir(parents=True, exist_ok=True)
+        with tarfile.open(archive) as tar:
+            try:
+                tar.extractall(root, filter="tar")
+            except TypeError:                     # no extraction filter before 3.12
+                tar.extractall(root)
+    link = IOS / "Python.xcframework"
+    if link.is_symlink() or link.exists():
+        link.unlink() if link.is_symlink() else shutil.rmtree(link)
+    link.symlink_to(framework, target_is_directory=True)
+    print(f"+ linked {link} -> {framework}")
+    return link
+
+
+def ios_packages() -> Path:
+    """Install SymPy - pure Python, so the wheel from PyPI runs on iOS as it
+    stands - into the folder the app bundles as ``app_packages``.
+
+    Its own test suite is half of what SymPy weighs and no app runs it, so it
+    does not travel: the app is ~25 MB lighter for the loss of `sympy.test()`.
+    """
+    packages = IOS / "app_packages"
+    stamp = packages / ".sympy-version"
+    wanted = sympy_version()
+    if stamp.is_file() and stamp.read_text(encoding="utf-8").strip() == wanted:
+        return packages
+    if packages.exists():
+        shutil.rmtree(packages)
+    run([sys.executable, "-m", "pip", "install", "--quiet", "--target", str(packages),
+         "--no-compile", "--only-binary=:all:", f"sympy=={wanted}"])
+    for tests in sorted(packages.rglob("tests")):
+        if tests.is_dir():
+            shutil.rmtree(tests)
+    for cache in sorted(packages.rglob("__pycache__")):
+        shutil.rmtree(cache, ignore_errors=True)
+    stamp.write_text(wanted + "\n", encoding="utf-8")
+    size = sum(f.stat().st_size for f in packages.rglob("*") if f.is_file())
+    print(f"+ staged SymPy {wanted} in {packages} ({size / 1e6:.0f} MB)")
+    return packages
+
+
+def simulator_arch() -> str:
+    """The one architecture a simulator build needs: this Mac's own.
+
+    It is also the one the interpreter can be installed for - the standard
+    library that travels with Python.xcframework is per architecture, and its
+    install script takes a single ``ARCHS`` - so the build asks for exactly
+    the slice the simulator on this machine will run.
+    """
+    return "arm64" if platform.machine() in ("arm64", "aarch64") else "x86_64"
+
+
+def simulator_run(app: Path) -> None:
+    """Install ``app`` on a booted simulator - booting the newest iPhone if
+    none is running - and launch it."""
+    listing = subprocess.run(["xcrun", "simctl", "list", "devices", "booted"],
+                             capture_output=True, text=True).stdout
+    if "(Booted)" not in listing:
+        run(["xcrun", "simctl", "boot", "iPhone 17"])
+    run(["open", "-a", "Simulator"])
+    run(["xcrun", "simctl", "install", "booted", str(app)])
+    run(["xcrun", "simctl", "launch", "booted", "org.sympy.editor"])
+
+
+def ios_build(simulator: bool, cdn: bool, method: str, launch: bool = False) -> list[Path]:
     if platform.system() != "Darwin":
         sys.exit("iOS builds need macOS with Xcode (or the mobile.yml GitHub workflow).")
-    build_www(cdn, android=False)
-    make_icons()
+    # The app runs its own Python, as the Android one does, so the page uses
+    # the native backend and no Pyodide is vendored into the bundle.
+    build_www(cdn, native=True)
+    copy_python_sources(IOS / "app")
+    ios_runtime()
+    ios_packages()
+    make_icons(IOS / "SymPyEditor/Assets.xcassets/AppIcon.appiconset/icon-1024.png")
     if not shutil.which("xcodegen"):
         sys.exit("xcodegen not found: brew install xcodegen (or create the project by hand, see mobile/README.md)")
     env = dict(os.environ, IOS_TEAM_ID=os.environ.get("IOS_TEAM_ID", ""))
@@ -148,8 +273,14 @@ def ios_build(simulator: bool, cdn: bool, method: str) -> list[Path]:
     if simulator:
         run(["xcodebuild", "-project", "SymPyEditor.xcodeproj", "-scheme", "SymPyEditor", "-configuration", "Debug",
              "-sdk", "iphonesimulator", "-destination", "generic/platform=iOS Simulator",
-             "-derivedDataPath", str(out / "derived"), "CODE_SIGNING_ALLOWED=NO", "build"], cwd=IOS)
-        return sorted((out / "derived").rglob("SymPyEditor.app"))
+             "-derivedDataPath", str(out / "derived"), "CODE_SIGNING_ALLOWED=NO",
+             f"ARCHS={simulator_arch()}", "ONLY_ACTIVE_ARCH=NO", "build"], cwd=IOS)
+        made = sorted((out / "derived").rglob("SymPyEditor.app"))
+        if launch and made:
+            simulator_run(made[0])
+        return made
+    if launch:
+        sys.exit("--run installs on the simulator: use it with --simulator.")
     if not env["IOS_TEAM_ID"]:
         sys.exit("set IOS_TEAM_ID (Apple developer team) to build a signed .ipa, or use --simulator")
     archive = out / "SymPyEditor.xcarchive"
@@ -170,11 +301,13 @@ def main(argv=None) -> int:
     ap.add_argument("platform", choices=["android", "ios"])
     ap.add_argument("--release", action="store_true", help="Android: release APK + AAB instead of a debug APK")
     ap.add_argument("--simulator", action="store_true", help="iOS: build a simulator .app instead of an .ipa")
+    ap.add_argument("--run", action="store_true", help="iOS: install the simulator .app and launch it")
     ap.add_argument("--cdn", action="store_true", help="bundle without vendored assets (needs network at run time)")
     ap.add_argument("--method", default=os.environ.get("IOS_EXPORT_METHOD", "development"),
                     help="iOS export method: development, ad-hoc, app-store-connect")
     args = ap.parse_args(argv)
-    made = android_build(args.release, args.cdn) if args.platform == "android" else ios_build(args.simulator, args.cdn, args.method)
+    made = (android_build(args.release, args.cdn) if args.platform == "android"
+            else ios_build(args.simulator, args.cdn, args.method, args.run))
     print("\nBuilt:" if made else "\nNo artifacts found.")
     for p in made:
         print("  ", p, f"({p.stat().st_size / 1e6:.1f} MB)" if p.is_file() else "")

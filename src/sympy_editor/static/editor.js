@@ -155,12 +155,12 @@ var SympyEditor = (function () {
     "<li><b>History</b> shows every step and what changed (green: what a step brought, red: what it lost); tap a step to go back to it.</li>",
     "<li>The strip above plays the history as a slideshow \u2014 a step and the change that produced it on one screen \u2014 and its <b>\u25c0 \u25b6</b> walk the steps one at a time when it is not playing; the two dials halve and double the speed, which is written between them (<kbd>,</kbd> and <kbd>.</kbd> while it plays), and <b>\u2212 / +</b> set the size of the formulas (Ctrl+wheel and two fingers too).</li>",
     "<li><b>Save \u25be</b> writes it out: a self-contained web page that works offline and plays on its own, or a Python script that rebuilds every step with SymPy.</li>",
-    "<li><b>\u2630</b> lists the sessions, where the page keeps several. A session is labelled with its formula until you give it a name of your own (the pencil beside it, or a double-click), which nothing overwrites.</li>",
+    "<li><b>\u2261</b> lists the sessions, where the page keeps several. A session is labelled with its formula until you give it a name of your own (the pencil beside it, or a double-click), which nothing overwrites.</li>",
     "</ul></section>",
     "<section><h3>On a phone or tablet</h3><ul>",
     "<li>Tap to select; tap the selected node again to edit it.</li>",
     "<li>Tap a gap for a caret, tap the caret again to insert; tap an operator for its palette.</li>",
-    "<li>Drag to select a range; two fingers zoom; <b>\u2328</b> opens the keyboard for the selection.</li>",
+    "<li>Drag to select a range; two fingers zoom; the <b>keyboard</b> button opens the keyboard for the selection.</li>",
     "</ul></section>",
     "<section><h3>Zoom and full screen</h3><ul>",
     "<li><kbd>Ctrl</kbd>+wheel, <kbd>Ctrl</kbd>+<kbd>+</kbd>/<kbd>\u2212</kbd>/<kbd>0</kbd>, pinch, or the \u2212/100%/+ buttons.</li>",
@@ -426,6 +426,18 @@ var SympyEditor = (function () {
     return '<svg class="se-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
       '<g transform="rotate(' + deg + ' 8 8)" fill="none" stroke="currentColor" stroke-width="1.7" ' +
       'stroke-linecap="round" stroke-linejoin="round"><path d="M8 13.2V3.2"/><path d="M3.9 7.3 8 3.2l4.1 4.1"/></g></svg>';
+  }
+
+  /** A keyboard: a case, three keys and a space bar.  Drawn, not typed,
+   *  for the reason the arrows are - iOS has no glyph for \u2328 (nor for
+   *  \u21b6, \u21b7 or \u2630, which is why the buttons around it settled on
+   *  characters every platform does have), and a button that shows an empty
+   *  box says nothing at all. */
+  function keyboardSvg() {
+    return '<svg class="se-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
+      '<g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
+      '<rect x="1.7" y="4.5" width="12.6" height="7" rx="1.4"/>' +
+      '<path d="M5 7.5h.01M8 7.5h.01M11 7.5h.01M5.4 9.6h5.2"/></g></svg>';
   }
 
   /** The full-screen icon: four corner brackets pointing out (or, once the
@@ -966,19 +978,21 @@ var SympyEditor = (function () {
         return b;
       };
       var sep = function () { current.appendChild(h("span", { class: "se-sep" })); };
-      // The arrows are drawn, not typed: one icon rotated four ways (arrowSvg).
-      var arrowBtn = function (cmd, dir, title) {
+      // The icons are drawn, not typed, so that they are the same everywhere.
+      var iconBtn = function (cmd, svg, title) {
         var b = btn(cmd, "", title);
-        b.innerHTML = arrowSvg(dir);
+        b.innerHTML = svg;
         b.setAttribute("aria-label", title);
         return b;
       };
+      // The arrows are one icon rotated four ways (arrowSvg).
+      var arrowBtn = function (cmd, dir, title) { return iconBtn(cmd, arrowSvg(dir), title); };
 
       // 1. the session and its timeline
       block("session");
       if (!o.readOnly) {
-        btn("undo", "↶", "Undo (Ctrl+Z)");
-        btn("redo", "↷", "Redo (Ctrl+Shift+Z, Ctrl+Y)");
+        btn("undo", "↺", "Undo (Ctrl+Z)");
+        btn("redo", "↻", "Redo (Ctrl+Shift+Z, Ctrl+Y)");
         sep();
         btn("history", "History", "View the history of this session: every step, what changed and what produced it - play it as a slideshow, or save it as a web page or a Python script");
         btn("help", "?", "How to use the editor: every gesture, key and tool");
@@ -996,7 +1010,7 @@ var SympyEditor = (function () {
       //    in from the right, so the tap and what it opens are on one side
       if (o.sessions && !o.readOnly) {
         block("sessions");
-        btn("drawer", "\u2630", "Sessions and history");
+        btn("drawer", "\u2261", "Sessions and history");
         // On a narrow screen the blocks pack into lines: this ends the first
         // one, so nothing can slip to the right of the drawer's button.
         this.tools.appendChild(h("span", { class: "se-linebreak" }));
@@ -1016,7 +1030,7 @@ var SympyEditor = (function () {
         btn("isolate", "Isolate", "Keep only the selection: it becomes the whole expression (Ctrl+Shift+I)");
         // 6. the keyboard and the clipboard
         block("clip");
-        btn("keyboard", "⌨", "Open the keyboard: edit the selection, insert at the caret, or edit the whole expression");
+        iconBtn("keyboard", keyboardSvg(), "Open the keyboard: edit the selection, insert at the caret, or edit the whole expression");
       } else {
         block("clip");
       }
@@ -1117,13 +1131,14 @@ var SympyEditor = (function () {
         root.appendChild(this.symbols);
       }
 
-      // Sessions and history live in a lateral drawer (the ☰ button), out of
+      // Sessions and history live in a lateral drawer (the ≡ button), out of
       // the widget: several expressions, each with its own undo history, kept
-      // in localStorage (needs a backend with openDocument, i.e. Pyodide).
+      // in localStorage (needs a backend with openDocument: Pyodide, or the
+      // app's own Python).
       this.sessions = null;
       this.drawer = null;
       if (o.sessions && !o.readOnly) {
-        var close = h("button", { type: "button", class: "se-drawer-close", title: "Close" }, ["\u2715"]);
+        var close = h("button", { type: "button", class: "se-drawer-close", title: "Close" }, ["\u00d7"]);
         close.addEventListener("click", function () { self.closeDrawer(); });
         this.sessionsBody = h("div", { class: "se-sessions" });
         this.historyBody = h("div", { class: "se-history" });
@@ -2321,7 +2336,7 @@ var SympyEditor = (function () {
 
     /** Ask which argument to leave behind: a node with several of them - a
      *  power (base or exponent), a sum, a fraction - has no natural one, so
-     *  the user picks instead of the editor guessing.  Escape, or the ✕,
+     *  the user picks instead of the editor guessing.  Escape, or the ×,
      *  leaves the expression alone. */
     _askKeep(path, choices, focused) {
       var self = this;
@@ -2339,7 +2354,7 @@ var SympyEditor = (function () {
         });
         self.keepMenu.appendChild(b);
       });
-      var cancel = h("button", { type: "button", class: "se-keep-cancel", title: "Keep the expression as it is (Escape)" }, ["\u2715"]);
+      var cancel = h("button", { type: "button", class: "se-keep-cancel", title: "Keep the expression as it is (Escape)" }, ["\u00d7"]);
       cancel.addEventListener("click", function () { self._hideKeep(); self.view.focus({ preventScroll: true }); });
       this.keepMenu.appendChild(cancel);
       this.keepMenu.hidden = false;
@@ -3816,7 +3831,7 @@ var SympyEditor = (function () {
     /** Rename a session: the row becomes a field with the width to type in,
      *  and the buttons that were there step aside - a stray tap on Open or
      *  Delete in the middle of naming something is no help to anyone.
-     *  Enter or ✓ (or leaving the field) keeps what was typed, Esc or ✕ gives
+     *  Enter or ✓ (or leaving the field) keeps what was typed, Esc or × gives
      *  up.  A name typed here is the user's and is never replaced by the
      *  formula (see _storeSession); emptying it hands the session back. */
     _renameSession(sess, head) {
@@ -3830,7 +3845,7 @@ var SympyEditor = (function () {
         return b;
       };
       var keep = button("\u2713", "Keep this name (Enter)", "se-session-keep");
-      var drop = button("\u2715", "Leave the name as it was (Esc)", "se-session-drop");
+      var drop = button("\u00d7", "Leave the name as it was (Esc)", "se-session-drop");
       head.textContent = "";
       head.appendChild(input);
       head.appendChild(keep);
@@ -4044,7 +4059,7 @@ var SympyEditor = (function () {
         h("option", { value: "html", title: "A self-contained web page: works offline, KaTeX rendering and fonts included" }, ["as a web page"]),
         h("option", { value: "py", title: "A Python script rebuilding every step with SymPy" }, ["as a Python script"])
       ]);
-      var close = h("button", { type: "button", class: "se-history-close", title: "Close (Esc)", "aria-label": "Close" }, ["\u2715"]);
+      var close = h("button", { type: "button", class: "se-history-close", title: "Close (Esc)", "aria-label": "Close" }, ["\u00d7"]);
       var head = h("div", { class: "se-history-head" },
         [h("span", { class: "se-history-title" }, ["History", h("small", {}, ["tap a step to open it"])])]
           .concat(playerControls(frame, ((this._history && this._history.steps) || []).length),
@@ -4058,9 +4073,14 @@ var SympyEditor = (function () {
         else if (how === "py") self.exportPython();
       });
       close.addEventListener("click", function () { self.closeHistory(); });
-      frame.addEventListener("load", function () {
+      // Make the steps of the report clickable.  Runs once, whether the frame
+      // reaches it by its load event or by the write below; an empty document
+      // (the about:blank a fresh frame starts on) is not the report yet.
+      var dressed = false;
+      var dress = function () {
         var d = frame.contentDocument;
-        if (!d) return;
+        if (dressed || !d || !d.body || !d.body.firstChild) return;
+        dressed = true;
         var style = d.createElement("style");
         style.textContent = ".step[data-index] { cursor: pointer; } .step[data-index]:hover { border-color: #3b82f6; }";
         d.head.appendChild(style);
@@ -4075,13 +4095,28 @@ var SympyEditor = (function () {
         d.addEventListener("keydown", function (ev) { if (ev.key === "Escape") { ev.preventDefault(); self.closeHistory(); } });
         var current = d.querySelector('.step[data-current="1"]');
         if (current && current.scrollIntoView) current.scrollIntoView({ block: "center" });
-      });
+      };
+      frame.addEventListener("load", dress);
       this._historyKey = function (ev) { if (ev.key === "Escape") { ev.preventDefault(); self.closeHistory(); } };
       view.addEventListener("keydown", this._historyKey);        // (the editor's own handler stops Esc from reaching the document)
       document.addEventListener("keydown", this._historyKey);
       this.historyView = view;
       this.root.appendChild(view);
-      frame.srcdoc = html;
+      // The report is written into the frame, not handed to it as `srcdoc`:
+      // where the page itself comes from a custom URL scheme - which is how
+      // the iOS app serves the bundle - a srcdoc frame loads, reports itself
+      // complete, and stays empty.  Writing works everywhere, and the report
+      // is self-contained (KaTeX already rendered, CSS and player script
+      // inline), so it is whole as soon as the document is closed.
+      var doc = frame.contentDocument;
+      if (doc) {
+        doc.open();
+        doc.write(html);
+        doc.close();
+        dress();
+      } else {
+        frame.srcdoc = html;      // no document to write into: let the frame load it
+      }
       close.focus();
     }
 
@@ -4092,7 +4127,7 @@ var SympyEditor = (function () {
       var self = this;
       this.closeDrawer();
       this.closeHistory();
-      var close = h("button", { type: "button", class: "se-history-close", title: "Close (Esc)", "aria-label": "Close" }, ["\u2715"]);
+      var close = h("button", { type: "button", class: "se-history-close", title: "Close (Esc)", "aria-label": "Close" }, ["\u00d7"]);
       var head = h("div", { class: "se-history-head" }, [
         h("span", { class: "se-history-title" }, ["How to use the editor"]), close]);
       var body = h("div", { class: "se-help-body" });

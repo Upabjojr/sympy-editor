@@ -7,10 +7,11 @@
 
 The bundle is the same editor page ``sympy_editor.to_html`` produces for the
 desktop, with KaTeX vendored under ``www/vendor/`` so that it works without a
-network.  Where the host application has no Python of its own (iOS, the web
-app) the part of Pyodide that SymPy needs is vendored as well; ``--android``
-(``--native``) leaves it out, because the Android app ships CPython and SymPy.  Downloads are cached
-in ``~/.cache/sympy-editor/`` (override with ``--cache``).
+network.  Where the host application has no Python of its own (the web app)
+the part of Pyodide that SymPy needs is vendored as well; ``--native`` (which
+``--android`` implies, and the iOS build passes too) leaves it out, because
+both apps ship CPython and SymPy themselves.  Downloads are cached in
+``~/.cache/sympy-editor/`` (override with ``--cache``).
 
 Nothing here is specific to a platform: Android and iOS each wrap ``www/`` in
 a WebView (see ``mobile/android`` and ``mobile/ios``).
@@ -130,9 +131,9 @@ def build(out: Path, *, cdn: bool = False, cache: Path | None = None, expr=None,
     web app's manifest and service worker, see ``webapp/build.py``).
 
     With ``native``, the page edits through the host application's own Python
-    (``window.SympyEditorPy``) instead of Pyodide: that is what the Android
-    app uses, which ships CPython and SymPy itself, so nothing of Pyodide is
-    vendored into the bundle."""
+    (``window.SympyEditorPy``) instead of Pyodide: that is what both apps use,
+    each shipping CPython and SymPy itself, so nothing of Pyodide is vendored
+    into the bundle."""
     out.mkdir(parents=True, exist_ok=True)
     urls = None if cdn else vendor(out, cache or Path.home() / ".cache" / "sympy-editor", pyodide=not native)
     page = to_html(expr if expr is not None else demo_expression(), urls=urls, title=title, head=head,
