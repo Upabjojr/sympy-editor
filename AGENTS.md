@@ -299,8 +299,8 @@ Two conventions between printer, document and front end:
   the current one after each committed change (debounced `_saveSession`)
   and switches with `backend.openDocument(state)` (Pyodide: a new document
   id in the shared runtime).  All of it lives in a lateral drawer
-  (`.se-drawer`, `position: fixed`, the ☰ toolbar button, Esc / backdrop /
-  ✕ close it), not in the widget's own layout; the history is a sub-tab
+  (`.se-drawer`, `position: fixed`, the ≡ toolbar button, Esc / backdrop /
+  × close it), not in the widget's own layout; the history is a sub-tab
   (`.se-subtabs`, `showDrawerTab("history")` toggles `.se-drawer-pane`)
   nested in the current session's card, so the hierarchy session ⊃ history
   is visible.  `history_labels()` also carries `steps` (annotated LaTeX +
@@ -380,7 +380,7 @@ Two conventions between printer, document and front end:
   one (`_renameSession`), which sets `title: true` on the stored row;
   `_storeSession` then leaves the name alone.  Emptying the field clears
   `title` and hands the session back to its formula.  While a rename is open
-  it owns the row - the field plus ✓ and ✕, with the pencil, Open and Delete
+  it owns the row - the field plus ✓ and ×, with the pencil, Open and Delete
   gone - and `_fillSessions` returns early if a `input.se-session-name` is in
   the list: a snapshot arriving in the background used to rebuild the rows
   and take the field away mid-typing.  `done()` removes the input before
@@ -719,9 +719,11 @@ Everything about phone packaging lives in `mobile/` and is *not* part of the
 pip package.  The rule is minimal wrapping and maximal sharing:
 
 - `mobile/build_www.py` builds `mobile/www/`: the very same page
-  `sympy_editor.to_html()` produces for the desktop, with KaTeX and the part of
-  Pyodide SymPy needs vendored under `www/vendor/` (about 30 MB) so the app
-  works offline.  Test it in a desktop browser with
+  `sympy_editor.to_html()` produces for the desktop, with KaTeX vendored under
+  `www/vendor/` so the app works offline.  `--native` (what both apps use)
+  leaves Pyodide out - the app has an interpreter of its own; without it the
+  Pyodide subset SymPy needs is vendored too (about 30 MB), which is what the
+  web app and a desktop preview want.  Test it in a desktop browser with
   `python -m http.server -d mobile/www` (it must be served, not opened as a
   file: WebAssembly and fetch need an origin).
 - `mobile/android/`: a Gradle/Kotlin project whose only activity is a WebView
@@ -730,8 +732,23 @@ pip package.  The rule is minimal wrapping and maximal sharing:
   Gradle) builds it.
 - `mobile/ios/`: a SwiftUI app with a `WKWebView` and a `WKURLSchemeHandler`
   that serves the bundle from the app bundle (`app://www/...`); the Xcode
-  project is generated from `project.yml` with XcodeGen (or created by hand,
-  see `mobile/README.md`).
+  project is generated from `project.yml` with XcodeGen.  It ships CPython as
+  `Python.xcframework` (python.org's iOS support, pinned in `build.py` and
+  downloaded to the cache); `PythonRuntime.m` starts an isolated interpreter -
+  the C API needs Objective-C, since the framework carries headers and no
+  Swift module - and `EditorView.swift` bridges it to the page.
+- **Both apps run Python natively and speak one protocol.**  The page's
+  `native` backend hands JSON to `window.SympyEditorPy` (`newDoc`, `handle`,
+  each with a request id) and is answered through
+  `window.__sympyEditorNative(id, ok, payload)` from a thread of the app's
+  own.  `mobile/app/sympy_editor_app.py` is that Python, shared: `build.py`
+  stages it and a fresh `src/sympy_editor` into each platform's tree, so add a
+  bridge method in three places or none - Kotlin, Swift, and the module.
+- **Glyphs a platform may lack are drawn, not typed.**  iOS has no character
+  for the arrows, the keyboard, the hamburger or ✕: the arrows, the
+  full-screen brackets and the keyboard are SVG (`arrowSvg`, `expandSvg`,
+  `keyboardSvg`), and the rest use characters all three platforms carry
+  (↺ ↻ ≡ ×).  `tests/test_mobile.py` refuses the ones that do not render.
 - Keep platform code to loading the bundle; every feature belongs in
   `editor.js`/Python so that desktop, Android and iOS stay identical.
   `tests/test_mobile.py` builds the bundle and, with

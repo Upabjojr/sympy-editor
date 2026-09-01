@@ -2,15 +2,22 @@
 
 Minimal native shells around **one shared web bundle**.  Nothing in the
 editor is platform-specific: the Android and iOS apps display the exact page
-`sympy_editor.to_html()` produces for the desktop, with KaTeX and the part of
-Pyodide SymPy needs vendored so the app works offline.  No node.js toolchain.
+`sympy_editor.to_html()` produces for the desktop, with KaTeX vendored so the
+app works offline.  No node.js toolchain.
+
+**Both apps ship CPython and SymPy** and edit in them - Android through
+Chaquopy, iOS through `Python.xcframework` - so the page uses the `native`
+backend of editor.js and no Pyodide is bundled: nothing is downloaded at run
+time, the first edit does not wait for a WebAssembly runtime, and it is the
+same `sympy_editor.document.Document` the server and the Jupyter widget use.
 
 ```
 mobile/
-  build_www.py   -> www/   the shared bundle (index.html + vendor/, ~30 MB)
+  build_www.py   -> www/   the shared bundle (index.html + vendor/katex, ~1 MB native)
   build.py                 one command to produce .apk / .aab / .ipa
+  app/                     the Python both apps run (sympy_editor_app.py)
   android/                 Gradle + Kotlin: a WebView serving www/ (MainActivity.kt, ~60 lines)
-  ios/                     SwiftUI + WKWebView serving www/ (EditorView.swift, ~60 lines)
+  ios/                     SwiftUI + WKWebView serving www/ (EditorView.swift + PythonRuntime.m)
 ```
 
 ## 1. The shared bundle
@@ -50,27 +57,38 @@ ANDROID_KEYSTORE=/path/to/release.keystore  ANDROID_KEYSTORE_PASSWORD=...  ANDRO
 ```
 
 (`keytool -genkeypair -v -keystore release.keystore -alias sympy -keyalg RSA -keysize 2048 -validity 10000` creates one.)
-Opening `mobile/android` in Android Studio works too: run `build_www.py
---android` first so `app/src/main/assets/www` exists.  `gradlew` is a
+Opening `mobile/android` in Android Studio works too: run `python
+mobile/build.py android` once first, so that the bundle
+(`app/src/main/assets/www`) and the app's Python (`app/src/main/python`) are
+staged.  `gradlew` is a
 two-line wrapper that fetches the official wrapper jar on first use.
 
 ## 3. iOS: .ipa
 
 Requirements: macOS with Xcode, `brew install xcodegen`, and an Apple
-developer team for signing.
+developer team for signing (the simulator needs none).
 
 ```bash
-python mobile/build.py ios --simulator    # .app for the simulator, no signing needed
+python mobile/build.py ios --simulator        # .app for the simulator, no signing needed
+python mobile/build.py ios --simulator --run  # ... and install it on a simulator and launch it
 IOS_TEAM_ID=ABCDE12345 python mobile/build.py ios              # development .ipa
 IOS_TEAM_ID=ABCDE12345 python mobile/build.py ios --method app-store-connect
 ```
 
+The first build downloads the interpreter (~40 MB, cached in
+`~/.cache/sympy-editor`) and installs SymPy for the app; the app comes to
+about 95 MB, most of it the standard library and SymPy.
+
 Artifacts: `mobile/ios/build/ipa/SymPyEditor.ipa` (or the simulator `.app`
 under `mobile/ios/build/derived/`).  The Xcode project is generated from
-`project.yml`; to work in Xcode instead: `cd mobile/ios && xcodegen generate
-&& open SymPyEditor.xcodeproj`.  Without XcodeGen, create an iOS App
-(SwiftUI) project named SymPyEditor, add the two files in `SymPyEditor/`, and
-add `mobile/www` as a *folder reference* named `www`.
+`project.yml`; to work in Xcode instead: `python mobile/build.py ios
+--simulator` once (it stages `Python.xcframework`, `app/` and
+`app_packages/`, which are not in the repository), then `cd mobile/ios &&
+xcodegen generate && open SymPyEditor.xcodeproj`.
+
+A simulator build is made for one architecture, this Mac's own: the standard
+library that travels with the interpreter is per architecture, and the script
+that installs it takes a single `ARCHS`.
 
 ## 4. Without a Mac or an Android SDK: GitHub Actions
 
@@ -81,27 +99,47 @@ as artifacts; with the secrets `ANDROID_KEYSTORE_BASE64` + passwords and
 
 ## Notes
 
-- **Android runs Python natively.**  The APK ships CPython 3.12 and SymPy
-  (Chaquopy, configured in `android/app/build.gradle.kts`); the page uses the
-  `native` backend of editor.js and talks to `MainActivity.PythonBridge`
-  through `window.SympyEditorPy`, which calls
-  `android/app/src/main/python/sympy_editor_app.py` on a Python thread of its
-  own.  `mobile/build.py android` copies `src/sympy_editor` there first, so
-  the app always runs the current code.  Nothing is downloaded at run time,
-  and the app needs Android 7.0 (API 24, what Chaquopy requires).
-  A debug build can be inspected from the desktop:
-  `adb forward tcp:9222 localabstract:$(adb shell cat /proc/net/unix | grep -o webview_devtools_remote_[0-9]* | head -1)`,
-  then open `http://localhost:9222` (or drive it with Playwright's
-  `connect_over_cdp`).
-- The page renders instantly and starts Pyodide (Python in WebAssembly) in
-  the background; the status line says "Loading Python runtime" for a few
-  seconds after launch, then edits are immediate.
+- **Both apps run Python natively**, through one protocol: the page uses the
+  `native` backend of editor.js and hands JSON messages to
+  `window.SympyEditorPy`, each with a request id, and gets the answer back
+  through `window.__sympyEditorNative(id, ok, payload)`.  Every call returns
+  at once and is answered from a thread of the app's own, so a long
+  computation never blocks the interface.  Both ends call the same
+  `mobile/app/sympy_editor_app.py`, which `mobile/build.py` stages beside a
+  fresh copy of `src/sympy_editor` - neither app is ever built against stale
+  code.
+  - **Android:** CPython 3.12 and SymPy in the APK (Chaquopy, configured in
+    `android/app/build.gradle.kts`), bridged by `MainActivity.PythonBridge`.
+    Needs Android 7.0 (API 24, what Chaquopy requires).  A debug build can be
+    inspected from the desktop:
+    `adb forward tcp:9222 localabstract:$(adb shell cat /proc/net/unix | grep -o webview_devtools_remote_[0-9]* | head -1)`,
+    then open `http://localhost:9222` (or drive it with Playwright's
+    `connect_over_cdp`).
+  - **iOS:** CPython 3.13 as `Python.xcframework` - python.org's own iOS
+    support, packaged by [Python-Apple-support][pas] and pinned in
+    `build.py` - with the standard library installed into the app and each
+    extension module turned into the framework iOS insists on, by the script
+    that travels with it.  `PythonRuntime.m` starts an isolated interpreter
+    (no environment, no bytecode written beside a signed bundle) and
+    `EditorView.swift` bridges it; a debug build sets `isInspectable`, so
+    Safari's *Develop > Simulator* menu opens the Web Inspector on the page.
+- **Pyodide is not what the apps use, and iOS could not use it anyway.**  The
+  bundle can still be built with it (`build_www.py` without `--native`, which
+  is what the web app and a desktop preview want), but WebKit on the iOS
+  *simulator* segfaults inside its WebAssembly signal handler while Pyodide
+  starts - every version tried, in Safari as much as in a WKWebView - so an
+  app that edited in the page would be untestable there.  Shipping the
+  interpreter settles it, and is better on a device besides: no 20 MB of
+  WebAssembly, and no wait before the first edit.
 - Licences of the vendored parts are listed in `www/vendor/NOTICE.txt`
-  (KaTeX MIT, Pyodide MPL-2.0, CPython PSF, SymPy/mpmath BSD).  Ship that file
-  with the app (it is inside the bundle already).
+  (KaTeX MIT, CPython PSF, SymPy/mpmath BSD; Pyodide MPL-2.0 when it is
+  vendored at all).  Ship that file with the app (it is inside the bundle
+  already).
+
+[pas]: https://github.com/beeware/Python-Apple-support
 - Interaction on touch screens: tap to select, tap the selected node again
   to edit it (tap a gap for a caret, again to insert), drag to select a
-  range, ↑ / *Delete* / the menus in the toolbar; ⌨ opens the on-screen
+  range, ↑ / *Delete* / the menus in the toolbar; the keyboard button opens the on-screen
   keyboard for the selection, the caret or the whole expression.
 
 ## The icon

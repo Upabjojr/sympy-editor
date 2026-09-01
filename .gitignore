@@ -16,12 +16,18 @@ examples/derivations/*.html
 mobile/www/
 mobile/android/app/src/main/assets/
 mobile/android/app/src/main/python/sympy_editor/
+mobile/android/app/src/main/python/sympy_editor_app.py
 mobile/android/.gradle/
 mobile/android/**/build/
 mobile/android/local.properties
 mobile/android/.idea/
 mobile/ios/*.xcodeproj/
 mobile/ios/SymPyEditor/Info.plist
+# the iOS app's Python: the interpreter (linked into the cache), the app's own
+# code and SymPy - all staged by mobile/build.py
+mobile/ios/Python.xcframework
+mobile/ios/app/
+mobile/ios/app_packages/
 mobile/android/gradle/wrapper/gradle-wrapper.jar
 
 # web app build
