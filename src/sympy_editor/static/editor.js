@@ -84,6 +84,9 @@ var SympyEditor = (function () {
     ".player .zoom-level { font-variant-numeric: tabular-nums; min-width: 4em; }",
     ".player .speed-level { font-variant-numeric: tabular-nums; min-width: 3.2em; }",
     ".player .group { display: inline-flex; align-items: center; gap: 0.4rem; }",   /* wraps as a unit */
+    ".player .group.apart { margin-left: 1rem; }",   /* the size is not the speed: leave a gap between them */
+    ".player button svg { display: block; width: 1.15em; height: 1.15em; }",
+    ".player .speed-slower, .player .speed-faster { padding: 0.25rem 0.5rem; }",
     ".player .exit { visibility: hidden; }",   /* keeps its place: nothing moves when the slideshow starts */
     "body.slides .player .exit { visibility: visible; }",
     ".player .play { min-width: 6.2em; }",     /* Play and Pause are not the same width */
@@ -150,7 +153,7 @@ var SympyEditor = (function () {
     "</ul></section>",
     "<section><h3>History and sessions</h3><ul>",
     "<li><b>History</b> shows every step and what changed (green: what a step brought, red: what it lost); tap a step to go back to it.</li>",
-    "<li>The strip above plays the history as a slideshow \u2014 a step and the change that produced it on one screen \u2014 and its <b>\u25c0 \u25b6</b> walk the steps one at a time when it is not playing; <b>\u00bd\u00d7 / 2\u00d7</b> halve and double the speed (<kbd>,</kbd> and <kbd>.</kbd> while it plays), and <b>\u2212 / +</b> set the size of the formulas (Ctrl+wheel and two fingers too).</li>",
+    "<li>The strip above plays the history as a slideshow \u2014 a step and the change that produced it on one screen \u2014 and its <b>\u25c0 \u25b6</b> walk the steps one at a time when it is not playing; the two dials halve and double the speed, which is written between them (<kbd>,</kbd> and <kbd>.</kbd> while it plays), and <b>\u2212 / +</b> set the size of the formulas (Ctrl+wheel and two fingers too).</li>",
     "<li><b>Save \u25be</b> writes it out: a self-contained web page that works offline and plays on its own, or a Python script that rebuilds every step with SymPy.</li>",
     "<li><b>\u2630</b> lists the sessions, where the page keeps several. A session is labelled with its formula until you give it a name of your own (the pencil beside it, or a double-click), which nothing overwrites.</li>",
     "</ul></section>",
@@ -436,6 +439,25 @@ var SympyEditor = (function () {
       'stroke-linejoin="round" d="' + (full ? back : out) + '"/></svg>';
   }
 
+  /** A speedometer: the needle low over an almost empty dial, or high over
+   *  a full one.  The slideshow's speed goes on the button between the two,
+   *  so neither of these carries a figure - and a dial cannot be mistaken
+   *  for the arrows beside it, which mean the step before and the step
+   *  after. */
+  function gaugeSvg(fast) {
+    // A dial across the whole 16x16 box: at 13px there is no room for a
+    // drawing that is merely suggested.  The needle sits at 155 degrees
+    // round it or at 25, and the lit part of the dial runs out to meet it.
+    var end = fast ? "13.71 9.34" : "2.29 9.34";
+    var needle = fast ? "M8 12 12.02 10.13" : "M8 12 3.98 10.13";
+    return '<svg class="se-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
+      '<g fill="none" stroke="currentColor" stroke-linecap="round">' +
+      '<path d="M1.7 12A6.3 6.3 0 0 1 14.3 12" stroke-width="1.5" opacity="0.28"/>' +
+      '<path d="M1.7 12A6.3 6.3 0 0 1 ' + end + '" stroke-width="1.5"/>' +
+      '<path d="' + needle + '" stroke-width="1.9"/></g>' +
+      '<circle cx="8" cy="12" r="1" fill="currentColor"/></svg>';
+  }
+
   /** Give `boxCls` to the marked elements (`cls`) that have no marked
    *  ancestor: one tinted box per changed region, over the node's whole
    *  visual extent, instead of an inline background per level (which paints
@@ -573,10 +595,10 @@ var SympyEditor = (function () {
       '<span class="count"></span>' +
       '<button type="button" class="exit" title="Back to the whole history (Esc)">Show all</button></span>' +
       '<span class="group">' +
-      '<button type="button" class="speed-slower" title="Slower: half the speed (,)">\u00bd\u00d7</button>' +
+      '<button type="button" class="speed-slower" title="Slower: half the speed (,)" aria-label="Slower">' + gaugeSvg(false) + '</button>' +
       '<button type="button" class="speed-level" title="Back to the normal speed">1\u00d7</button>' +
-      '<button type="button" class="speed-faster" title="Faster: twice the speed (.)">2\u00d7</button></span>' +
-      '<span class="group">' +
+      '<button type="button" class="speed-faster" title="Faster: twice the speed (.)" aria-label="Faster">' + gaugeSvg(true) + '</button></span>' +
+      '<span class="group apart">' +
       '<button type="button" class="zoom-out" title="Smaller (Ctrl+wheel)">\u2212</button>' +
       '<button type="button" class="zoom-level" title="Back to the normal size">100%</button>' +
       '<button type="button" class="zoom-in" title="Larger (Ctrl+wheel)">+</button></span></div>';
@@ -750,12 +772,14 @@ var SympyEditor = (function () {
     var next = h("button", { type: "button", class: "se-play-step", title: "The next step (\u2192)", "aria-label": "Next slide" }, ["\u25b6"]);
     var count = h("span", { class: "se-play-count" });
     var all = h("button", { type: "button", class: "se-play-all", title: "Back to the whole history (Esc)" }, ["Show all"]);
-    // How fast it runs: halving and doubling, so the readout between them is
-    // the factor it is - and the pair says "speed" without borrowing the
-    // + and - that mean size two groups along.
-    var slower = h("button", { type: "button", class: "se-play-speed", title: "Slower: half the speed (,)", "aria-label": "Slower" }, ["\u00bd\u00d7"]);
+    // How fast it runs: two dials, halving and doubling, with the speed
+    // itself written between them - the only figure in the group, and never
+    // a + or a - to be taken for the size two groups along.
+    var slower = h("button", { type: "button", class: "se-play-speed", title: "Slower: half the speed (,)", "aria-label": "Slower" }, []);
     var rate = h("button", { type: "button", class: "se-play-rate", title: "Back to the normal speed" }, ["1\u00d7"]);
-    var faster = h("button", { type: "button", class: "se-play-speed", title: "Faster: twice the speed (.)", "aria-label": "Faster" }, ["2\u00d7"]);
+    var faster = h("button", { type: "button", class: "se-play-speed", title: "Faster: twice the speed (.)", "aria-label": "Faster" }, []);
+    slower.innerHTML = gaugeSvg(false);
+    faster.innerHTML = gaugeSvg(true);
     // The formulas have a size of their own here: the buttons, Ctrl+wheel and
     // two fingers all drive the same zoom inside the report.
     var out = h("button", { type: "button", class: "se-play-zoom", title: "Smaller formulas (Ctrl+wheel, pinch)", "aria-label": "Smaller" }, ["\u2212"]);
@@ -763,10 +787,11 @@ var SympyEditor = (function () {
     var into = h("button", { type: "button", class: "se-play-zoom", title: "Larger formulas (Ctrl+wheel, pinch)", "aria-label": "Larger" }, ["+"]);
     // Three groups, each of which wraps as a unit: playing the history, how
     // fast, and how big.  A "- 100% +" split across two lines is nobody's
-    // idea of a control.
+    // idea of a control - and the last two stand further apart, so a speed
+    // is never read as a size.
     var playing = h("span", { class: "se-head-group" }, [play, prev, next, count, all]);
     var speeding = h("span", { class: "se-head-group" }, [slower, rate, faster]);
-    var zooming = h("span", { class: "se-head-group" }, [out, level, into]);
+    var zooming = h("span", { class: "se-head-group se-head-apart" }, [out, level, into]);
     count.textContent = "1 / " + total;
     level.textContent = "100%";
     var api = null;

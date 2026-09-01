@@ -2926,8 +2926,20 @@ def test_the_slideshow_runs_at_the_speed_it_is_told(browser, tmp_path):
 
     slower, faster = page.locator(".se-play-speed").first, page.locator(".se-play-speed").last
     rate, count = page.locator(".se-play-rate"), page.locator(".se-play-count")
-    assert (slower.inner_text(), faster.inner_text()) == ("\u00bd\u00d7", "2\u00d7")
+    # the two buttons are dials, with no word or figure on them: the speed is
+    # written once, on the button between them
+    assert (slower.inner_text().strip(), faster.inner_text().strip()) == ("", "")
+    assert page.locator(".se-play-speed svg").count() == 2
     assert rate.inner_text() == "1\u00d7"                       # and it says where it stands
+    # and the size is a clear step away from the speed, not in the same row of
+    # buttons: a percentage and a factor are not the same kind of thing
+    gap = page.evaluate("""() => {
+        const speed = document.querySelectorAll('.se-play-speed')[1].getBoundingClientRect();
+        const zoom = document.querySelector('.se-play-rate').getBoundingClientRect();
+        const size = document.querySelectorAll('.se-play-zoom')[0].getBoundingClientRect();
+        return [Math.round(size.left - speed.right), Math.round(speed.left - zoom.right)];
+    }""")
+    assert gap[0] > gap[1] * 2, gap                          # wider than the gap inside a group
     speed = lambda: page.frames[1].evaluate("() => window.sympyHistoryPlayer.state().speed")
 
     faster.click()
