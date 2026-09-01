@@ -243,6 +243,9 @@ figure.shot {{ margin: 1.8rem 0 0; padding: 0.8rem 0.8rem 0.6rem; background: #f
 figure.shot img {{ display: block; width: 100%; height: auto; border-radius: 0.6rem;
                   border: 1px solid #e4e8ec; }}
 figure.shot figcaption {{ padding: 0.7rem 0.4rem 0.2rem; color: #57606a; font-size: 0.9rem; }}
+figure.shot.phones {{ display: flex; flex-wrap: wrap; gap: 1.1rem; justify-content: center; }}
+figure.shot.phones img {{ width: min(16rem, 46%); border-radius: 1.1rem; }}
+figure.shot.phones figcaption {{ flex-basis: 100%; text-align: center; }}
 footer {{ margin-top: 4rem; padding-top: 1.4rem; border-top: 1px solid #d0d7de;
          color: #57606a; font-size: 0.9rem; }}
 footer code {{ font-size: 0.85em; }}
@@ -336,7 +339,8 @@ steps = <span class="f">History</span>([
 and a word about what turned each into the next (<code>examples/derivations/</code>
 in the repository). Press <b>Play</b> on any of them, or <b>Save</b> to keep it
 as a single file that works offline.
-<nav class="legal"><a href="https://github.com/Upabjojr/sympy-editor">GitHub</a> \u00b7
+<nav class="legal">\u00a9 2026 <a href="https://github.com/Upabjojr">Francesco Bonazzi</a> \u00b7
+<a href="https://github.com/Upabjojr/sympy-editor">GitHub</a> \u00b7
 <a href="https://pypi.org/project/sympy-editor/">PyPI</a> \u00b7
 <a href="license.html">License (BSD 3-Clause)</a> \u00b7
 <a href="privacy.html">Privacy</a></nav></footer>
@@ -550,11 +554,24 @@ def derivations_page(folder: Path, *, urls: dict | None = None,
              ("jupyter-plot.png",
               "Two widgets wired together in a notebook: every edit committed in the editor redraws the plot "
               "(<code>examples/plot_alongside.ipynb</code> in the repository).")]
-    figures = "\n".join(f'<figure class="shot"><img src="{name}" alt="" loading="lazy">'
-                        f"<figcaption>{caption}</figcaption></figure>"
-                        for name, caption in shots if (folder / name).is_file())
-    if figures:
-        figures = '<h2 class="shelf">In the notebook</h2>\n' + figures
+    sections = []
+    figs = "\n".join(f'<figure class="shot"><img src="{name}" alt="" loading="lazy">'
+                     f"<figcaption>{caption}</figcaption></figure>"
+                     for name, caption in shots if (folder / name).is_file())
+    if figs:
+        sections.append('<h2 class="shelf">In the notebook</h2>\n' + figs)
+    # ...and on a phone: the Android app, photographed running.  The images
+    # are content beside the page, like the notebook's.
+    phones = [("android-editor.png", "The editor on Android: the Gaussian integral selected"),
+              ("android-history.png", "A derivation's history on Android, each step's change in red and green")]
+    have = [(n, alt) for n, alt in phones if (folder / n).is_file()]
+    if have:
+        imgs = "".join(f'<img src="{n}" alt="{alt}" loading="lazy">' for n, alt in have)
+        sections.append('<h2 class="shelf">On a phone</h2>\n<figure class="shot phones">' + imgs
+                        + "<figcaption>The Android app: the same editor with CPython and SymPy packaged"
+                        " inside, so every edit \u2014 and every step of a history \u2014 is computed on"
+                        " the phone, offline.</figcaption></figure>")
+    figures = "\n".join(sections)
     page = SHELF.format(
         katex_css=html.escape(urls["katexCss"] if urls else default_urls()["katexCss"], quote=True),
         editor_css=read_static("editor.css"), cards="\n".join(cards), figures=figures,

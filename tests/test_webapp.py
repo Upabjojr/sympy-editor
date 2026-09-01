@@ -130,6 +130,7 @@ def test_the_shelf_carries_the_licence_and_the_privacy_statement(tmp_path):
         assert '<svg viewBox="0 0 24 24"' in page                        # a drawn icon per card
     # and the shelf links to them, to the repository and to PyPI
     index = out.read_text(encoding="utf-8")
+    assert "Francesco Bonazzi" in index                          # the author, named on the page
     for href in ('href="license.html"', 'href="privacy.html"',
                  'href="https://github.com/Upabjojr/sympy-editor"', 'href="https://pypi.org/project/sympy-editor/"'):
         assert href in index, href
@@ -151,3 +152,9 @@ def test_the_shelf_teaches_and_shows_the_notebook_only_when_it_can(tmp_path):
     page = build.derivations_page(shot, urls=None, editor_href="editor.html").read_text(encoding="utf-8")
     assert '<img src="jupyter-widget.png"' in page and "In the notebook" in page
     assert "jupyter-plot.png" not in page                       # only the images that are there
+    heading = '<h2 class="shelf">On a phone</h2>'
+    assert heading not in page                                  # and no phone section without its shots
+    (shot / "android-editor.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    page = build.derivations_page(shot, urls=None, editor_href="editor.html").read_text(encoding="utf-8")
+    assert heading in page and '<img src="android-editor.png"' in page
+    assert "android-history.png" not in page
