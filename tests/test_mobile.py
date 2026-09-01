@@ -204,6 +204,21 @@ def test_both_bridges_offer_what_the_page_calls():
         assert callable(getattr(mod, function))
 
 
+def test_the_history_is_written_into_its_frame_not_handed_to_it():
+    """Both apps serve the bundle from an origin of their own - a custom URL
+    scheme on iOS, an https asset host on Android - and a `srcdoc` frame under
+    a custom scheme loads, calls itself complete, and stays empty: the history
+    opened on a header with no steps under it.  The report is written into the
+    frame's document instead, which works everywhere."""
+    src = (ROOT / "src" / "sympy_editor" / "static" / "editor.js").read_text(encoding="utf-8")
+    start = src.index("async showHistory()")
+    view = src[start:src.index("showHelp() {", start)]
+    assert "doc.open();" in view and "doc.write(html);" in view and "doc.close();" in view
+    # the frame is dressed once, by whichever of the two paths arrives first
+    assert "frame.addEventListener(\"load\", dress)" in view and "dress();" in view
+    assert "if (dressed || !d || !d.body || !d.body.firstChild) return;" in view
+
+
 def test_the_toolbar_only_uses_glyphs_every_platform_has():
     """iOS has no glyph for these, and a button that shows an empty box says
     nothing: the icons without a character everywhere are drawn instead (as

@@ -4067,9 +4067,14 @@ var SympyEditor = (function () {
         else if (how === "py") self.exportPython();
       });
       close.addEventListener("click", function () { self.closeHistory(); });
-      frame.addEventListener("load", function () {
+      // Make the steps of the report clickable.  Runs once, whether the frame
+      // reaches it by its load event or by the write below; an empty document
+      // (the about:blank a fresh frame starts on) is not the report yet.
+      var dressed = false;
+      var dress = function () {
         var d = frame.contentDocument;
-        if (!d) return;
+        if (dressed || !d || !d.body || !d.body.firstChild) return;
+        dressed = true;
         var style = d.createElement("style");
         style.textContent = ".step[data-index] { cursor: pointer; } .step[data-index]:hover { border-color: #3b82f6; }";
         d.head.appendChild(style);
@@ -4084,13 +4089,28 @@ var SympyEditor = (function () {
         d.addEventListener("keydown", function (ev) { if (ev.key === "Escape") { ev.preventDefault(); self.closeHistory(); } });
         var current = d.querySelector('.step[data-current="1"]');
         if (current && current.scrollIntoView) current.scrollIntoView({ block: "center" });
-      });
+      };
+      frame.addEventListener("load", dress);
       this._historyKey = function (ev) { if (ev.key === "Escape") { ev.preventDefault(); self.closeHistory(); } };
       view.addEventListener("keydown", this._historyKey);        // (the editor's own handler stops Esc from reaching the document)
       document.addEventListener("keydown", this._historyKey);
       this.historyView = view;
       this.root.appendChild(view);
-      frame.srcdoc = html;
+      // The report is written into the frame, not handed to it as `srcdoc`:
+      // where the page itself comes from a custom URL scheme - which is how
+      // the iOS app serves the bundle - a srcdoc frame loads, reports itself
+      // complete, and stays empty.  Writing works everywhere, and the report
+      // is self-contained (KaTeX already rendered, CSS and player script
+      // inline), so it is whole as soon as the document is closed.
+      var doc = frame.contentDocument;
+      if (doc) {
+        doc.open();
+        doc.write(html);
+        doc.close();
+        dress();
+      } else {
+        frame.srcdoc = html;      // no document to write into: let the frame load it
+      }
       close.focus();
     }
 
