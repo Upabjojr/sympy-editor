@@ -80,6 +80,81 @@ def test_the_manualintegrate_example_still_runs(tmp_path, monkeypatch):
     assert (tmp_path / "integration_steps.html").is_file()
 
 
+def _run_notebook(name):
+    """Every code cell of `name`, in one namespace - what a reader gets by
+    running the notebook top to bottom."""
+    nb = EXAMPLES / name
+    if not nb.exists():
+        pytest.skip(f"{name} is not present")
+    ns = {}
+    for i, cell in enumerate(json.loads(nb.read_text(encoding="utf-8"))["cells"]):
+        if cell["cell_type"] == "code":
+            exec(compile("".join(cell["source"]), f"<{name} cell {i}>", "exec"), ns)
+    return ns
+
+
+def test_the_plot_beside_the_editor_follows_it():
+    """The notebook's whole claim is that editing the formula redraws the
+    graph.  The wire is `on_change` -> a traitlet on an Image; run the cells
+    and edit, or the example is worse than none."""
+    pytest.importorskip("matplotlib")
+    pytest.importorskip("ipywidgets")
+    pytest.importorskip("anywidget")
+    from sympy import Symbol, sqrt, sympify
+
+    ns = _run_notebook("plot_alongside.ipynb")
+    x, png_of = ns["x"], ns["png_of"]
+    assert png_of(x**2 - 2).startswith(b"\x89PNG")
+    # a formula under construction is not always a function: none of these
+    # may raise, or one edit ends the session
+    for odd in [sqrt(x), 1 / x, sympify("0"), Symbol("a") * x, sympify("Integral(x, x)")]:
+        assert png_of(odd).startswith(b"\x89PNG"), odd
+
+    before = bytes(ns["plot"].value)             # an Image's value comes back as a memoryview
+    ns["w"].expr = x**3 - x                      # an edit, as the browser would send one
+    assert bytes(ns["plot"].value) not in (before, b"") and bytes(ns["plot"].value).startswith(b"\x89PNG")
+
+    # every free symbol but x gets a slider, and moving one redraws
+    ns["w2"].expr = sympify("d*x + a")
+    assert sorted(str(s) for s in ns["params"]) == ["a", "d"]
+    assert len(ns["rack"].children) == 2
+    drawn = bytes(ns["curve"].value)
+    ns["params"][Symbol("a")].value = 2.5
+    assert bytes(ns["curve"].value) != drawn
+    ns["w2"].expr = sympify("d*x")               # and a slider goes when its symbol does
+    assert sorted(str(s) for s in ns["params"]) == ["d"]
+
+
+def test_the_surface_follows_the_editor():
+    """The same wire, to a widget that redraws itself instead of a picture:
+    the formula is sampled on a grid and assigned to the plotly surface."""
+    pytest.importorskip("plotly")
+    pytest.importorskip("ipywidgets")
+    pytest.importorskip("anywidget")
+    import numpy as np
+    from sympy import sympify
+
+    ns = _run_notebook("plot_surface.ipynb")
+    fig, w = ns["fig"], ns["w"]
+    assert np.asarray(fig.data[0].z).shape == (60, 60)
+    assert fig.layout.title.text == "x**2 - y**2"
+    assert fig.layout.uirevision == "keep"            # a redraw leaves the camera alone
+
+    w.expr = sympify("sqrt(x*y)")                     # not a real number over half the square
+    zs = np.asarray(fig.data[0].z)
+    assert fig.layout.title.text == "sqrt(x*y)"
+    assert 0 < int(np.isnan(zs).sum()) < zs.size      # holes, not an empty plot
+
+    w.expr = sympify("1/(x**2 + y**2)")               # a pole is cut off, not flattening the rest
+    zs = np.asarray(fig.data[0].z)
+    assert np.isfinite(zs).all()
+    assert max(fig.layout.scene.zaxis.range) < np.nanmax(zs) / 2
+
+    ns["mesh_slider"].value = 40                      # a widget that redraws without editing
+    assert np.asarray(fig.data[0].z).shape == (40, 40)
+    assert ns["w"].expr == sympify("1/(x**2 + y**2)")
+
+
 DERIVATIONS = EXAMPLES / "derivations"
 
 

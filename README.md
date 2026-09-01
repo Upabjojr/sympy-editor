@@ -40,6 +40,13 @@ that runs its own SymPy in the browser — useful for notebooks exported with
 picks the kernel widget when anywidget is installed and falls back to Pyodide
 with a warning otherwise.
 
+`on_change` is also how the editor drives another widget.
+`examples/plot_alongside.ipynb` puts a graph beside the formula — every
+committed edit redraws it, and every free symbol but `x` grows a slider —
+and `examples/plot_surface.ipynb` does the same to a `plotly` surface you can
+turn around while you edit, updated in place.  Both are examples: the wire is
+a callback and a traitlet, and the library knows nothing about plotting.
+
 ### Standalone HTML file
 
 ```python
@@ -423,7 +430,7 @@ pytest                           # Python tests (printer, document, HTML, server
 python examples/demo.py          # writes examples/demo.html (regenerate after code changes:
 python examples/demo_matrices.py #  the pages embed the package; tests/test_examples.py checks they are current)
 python examples/demo.py --serve  # local-server mode
-jupyter lab examples/demo.ipynb  # notebook demo
+jupyter lab examples/demo.ipynb  # notebook demo (plot_alongside.ipynb plots what you edit)
 ```
 
 Browser end-to-end tests of the JavaScript front end use
