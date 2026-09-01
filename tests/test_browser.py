@@ -3518,7 +3518,7 @@ def test_naming_a_session_owns_the_row_until_it_is_done(browser, tmp_path):
     field = page.locator("input.se-session-name")
     field.wait_for()
     assert field.input_value() == "an older one"                  # a name of its own is there to edit
-    assert row.locator("button").all_inner_texts() == ["✓", "✕"]
+    assert row.locator("button").all_inner_texts() == ["✓", "×"]   # glyphs every platform has (iOS lacks U+2715)
     assert row.locator("[data-open]").count() == 0 and row.locator("[data-delete]").count() == 0
     # the editor stores a session in the background; the field must survive it
     page.evaluate("document.querySelector('.sympy-editor').__sympyEditor._fillSessions()")
