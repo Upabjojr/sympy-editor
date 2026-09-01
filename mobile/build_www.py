@@ -111,6 +111,19 @@ def vendor(out: Path, cache: Path, pyodide: bool = True) -> dict:
     }
 
 
+def app_logo() -> str:
+    """The app's own icon as inline SVG, for the corner of the toolbar.
+
+    Inline, because the bundle has to work with no network and the icon is a
+    few kilobytes; the same drawing the launcher shows (``mobile/icon``,
+    written by ``make_icons.py``).  Missing, it is simply left out.
+    """
+    svg = HERE / "icon" / "icon.svg"
+    if not svg.is_file():
+        return ""
+    return svg.read_text(encoding="utf-8").split("?>", 1)[-1].strip()
+
+
 def build(out: Path, *, cdn: bool = False, cache: Path | None = None, expr=None, title: str = "SymPy editor",
           head: str = "", native: bool = False) -> Path:
     """Write the bundle to ``out``; ``head`` is extra ``<head>`` markup (the
@@ -125,7 +138,10 @@ def build(out: Path, *, cdn: bool = False, cache: Path | None = None, expr=None,
     page = to_html(expr if expr is not None else demo_expression(), urls=urls, title=title, head=head,
                    backend="native" if native else None,
                    element_id="sympy-editor-app",                         # reproducible: the web app's cache is keyed by content
-                   options={"rememberZoom": True, "sessions": True})   # an app keeps its zoom and sessions between launches
+                   # an app keeps its zoom and sessions between launches, and wears
+                   # its own icon: in a WebView there is no title bar to say
+                   # whose window this is
+                   options={"rememberZoom": True, "sessions": True, "logo": app_logo()})
     (out / "index.html").write_text(page, encoding="utf-8")
     return out
 

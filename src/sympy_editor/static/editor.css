@@ -73,6 +73,16 @@
   gap: 0.25rem;
   margin-bottom: 0.3rem;
 }
+/* The application's own icon, in the top left corner: the apps show it (the
+ * page in the phone's WebView has no title bar of its own to carry a name),
+ * and it is the same drawing the launcher uses.  It sits at the start of the
+ * toolbar and never scrolls with the tools. */
+.se-brand { flex: 0 0 auto; display: flex; align-items: center; align-self: flex-start; margin: 0.1rem 0.35rem 0 0; }
+.se-brand svg { display: block; width: 1.8rem; height: 1.8rem; }
+/* With a mark in the corner the tools take the rest of the row rather than a
+ * line of their own: on a phone a whole row for an icon is a row of tools
+ * lost.  (Only beside a mark - without one the strip is full width.) */
+.se-brand + .se-tools { flex: 1 1 0; width: auto; }
 /* The tools sit in blocks, and the blocks in columns - two on a narrow
  * screen, three from 44rem.  The first column of a row hugs the left edge,
  * the last the right (the middle one is centred when there are three), so

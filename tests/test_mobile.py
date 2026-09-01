@@ -180,6 +180,35 @@ def test_the_app_has_an_icon_of_its_own():
     assert (ROOT / "mobile/make_icons.py").is_file()
 
 
+def test_the_app_view_wears_the_icon_and_is_the_same_on_both_phones():
+    """A page in a WebView has no title bar to say whose window it is, so the
+    bundle carries the app's own icon and shows it in the corner of the
+    toolbar.  And there is one bundle: both apps are a bare WebView over it,
+    with no native chrome of their own, so the view is the same on either
+    phone."""
+    mod = _load_builder()
+    logo = mod.app_logo()
+    assert logo.startswith("<svg") and "SymPy editor" in logo      # the icon, inline, no XML header
+    assert logo in (ROOT / "mobile/icon/icon.svg").read_text(encoding="utf-8")   # the launcher's own art
+
+    page = mod.build(ROOT / "mobile" / "www", cdn=True).joinpath("index.html").read_text(encoding="utf-8")
+    # in the page's own options, with every "<" escaped: markup in a JSON
+    # string must not be able to end the script tag it travels in
+    assert '"logo": "\\u003csvg' in page
+    assert "\\u003c/svg>" in page and "<svg" not in page.split('"logo"')[1][:4000]
+
+    # neither app puts anything of its own around the page
+    manifest = (ROOT / "mobile/android/app/src/main/AndroidManifest.xml").read_text(encoding="utf-8")
+    assert "NoActionBar" in manifest
+    swift = (ROOT / "mobile/ios/SymPyEditor/SymPyEditorApp.swift").read_text(encoding="utf-8")
+    assert "NavigationView" not in swift and "toolbar" not in swift
+    # ...and neither trims the view differently: Android pads its WebView with
+    # the window insets, so iOS must not hand the page an edge Android keeps
+    assert "ignoresSafeArea" not in swift
+    view = (ROOT / "mobile/ios/SymPyEditor/EditorView.swift").read_text(encoding="utf-8")
+    assert "app://www/index.html" in view                          # the same bundle, by name
+
+
 def test_no_image_is_committed():
     """Images are drawn, not kept: `mobile/make_icons.py` makes every one of
     them from the SVGs, and a build calls it."""

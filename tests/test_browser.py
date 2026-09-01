@@ -58,9 +58,9 @@ def serve_expr():
     """Factory: serve_expr(expr) -> (server, document); servers stop at teardown."""
     servers = []
 
-    def _serve(expr):
+    def _serve(expr, **kwargs):
         doc = Document(expr)
-        srv = EditorServer(doc, port=0)
+        srv = EditorServer(doc, port=0, **kwargs)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         servers.append(srv)
         return srv, doc
@@ -3005,6 +3005,40 @@ def test_the_slideshow_runs_at_the_speed_it_is_told(browser, tmp_path):
     assert own.locator(".speed-faster").inner_text().strip() == ""
     assert errors == []
     page.close()
+
+
+def test_the_app_wears_its_own_icon_in_the_corner(browser, serve_expr):
+    """A page in a WebView has no title bar to say whose window it is, so the
+    apps put their icon where a window would carry it: the top left corner,
+    ahead of the tools and outside the strip that scrolls sideways on a
+    narrow screen."""
+    logo = ('<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">'
+            '<rect width="16" height="16" rx="3" fill="#f7f3e6"/>'
+            '<circle cx="8" cy="8" r="4" fill="#3b82f6"/></svg>')
+    srv, doc = serve_expr(x + y, options={"logo": logo})
+    page = _open(browser, srv.url)
+    brand = page.locator(".se-brand")
+    assert brand.count() == 1 and brand.locator("svg").count() == 1
+    where = page.evaluate("""() => {
+        const b = document.querySelector('.se-brand').getBoundingClientRect();
+        const block = document.querySelector('.se-block').getBoundingClientRect();
+        const bar = document.querySelector('.se-toolbar').getBoundingClientRect();
+        return {brand: [b.x, b.y, b.width, b.height], block: [block.x, block.y], bar: [bar.x, bar.y]};
+    }""")
+    assert where["brand"][0] < where["block"][0]                 # to the left of the first tools
+    assert where["brand"][1] <= where["block"][1] + 2            # and on the first row
+    assert abs(where["brand"][0] - where["bar"][0]) < 8          # in the corner of the bar itself
+    assert 20 < where["brand"][2] < 44 and 20 < where["brand"][3] < 44
+    # it belongs to the bar, not to the tools: those scroll sideways when they
+    # do not fit, and the mark must not go with them
+    assert page.evaluate("() => !document.querySelector('.se-tools').contains(document.querySelector('.se-brand'))")
+
+    # a page that asks for no logo has none, and nothing shifts to make room
+    srv2, doc2 = serve_expr(x + y)
+    page.goto(srv2.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    assert page.locator(".se-brand").count() == 0
+    assert page.errors == []
 
 
 def test_dragging_over_the_source_line_selects_in_the_formula(browser, serve_expr):
