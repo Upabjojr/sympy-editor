@@ -156,5 +156,5 @@ def test_the_shelf_teaches_and_shows_the_notebook_only_when_it_can(tmp_path):
     assert heading not in page                                  # and no phone section without its shots
     (shot / "android-editor.png").write_bytes(b"\x89PNG\r\n\x1a\n")
     page = build.derivations_page(shot, urls=None, editor_href="editor.html").read_text(encoding="utf-8")
-    assert heading in page and '<img src="android-editor.png"' in page
+    assert heading in page and '<span class="phone"><img src="android-editor.png"' in page
     assert "android-history.png" not in page

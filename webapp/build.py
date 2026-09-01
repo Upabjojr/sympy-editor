@@ -243,8 +243,20 @@ figure.shot {{ margin: 1.8rem 0 0; padding: 0.8rem 0.8rem 0.6rem; background: #f
 figure.shot img {{ display: block; width: 100%; height: auto; border-radius: 0.6rem;
                   border: 1px solid #e4e8ec; }}
 figure.shot figcaption {{ padding: 0.7rem 0.4rem 0.2rem; color: #57606a; font-size: 0.9rem; }}
-figure.shot.phones {{ display: flex; flex-wrap: wrap; gap: 1.1rem; justify-content: center; }}
-figure.shot.phones img {{ width: min(16rem, 46%); border-radius: 1.1rem; }}
+figure.shot.phones {{ display: flex; flex-wrap: wrap; gap: 1.6rem; justify-content: center; padding-top: 1.4rem; }}
+/* the screenshots wear a phone: a dark bezel, the rim's highlight, a side
+ * button and a punch-hole camera over the screen - so nobody has to read
+ * the caption to see what they are looking at */
+figure.shot.phones .phone {{ position: relative; width: min(15rem, 44%); padding: 0.5rem;
+  background: #23262b; border-radius: 2rem;
+  box-shadow: inset 0 0 0 1.5px #43484f, inset 0 0 0 4px #101215,
+              0 18px 34px -18px rgba(27, 31, 36, 0.55); }}
+figure.shot.phones .phone::before {{ content: ""; position: absolute; top: 1.05rem; left: 50%;
+  transform: translateX(-50%); width: 0.52rem; height: 0.52rem; border-radius: 50%;
+  background: #05070a; box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.06); z-index: 1; }}
+figure.shot.phones .phone::after {{ content: ""; position: absolute; right: -0.22rem; top: 26%;
+  width: 0.22rem; height: 2.6rem; border-radius: 0 0.2rem 0.2rem 0; background: #43484f; }}
+figure.shot.phones img {{ display: block; width: 100%; border-radius: 1.55rem; border: none; }}
 figure.shot.phones figcaption {{ flex-basis: 100%; text-align: center; }}
 footer {{ margin-top: 4rem; padding-top: 1.4rem; border-top: 1px solid #d0d7de;
          color: #57606a; font-size: 0.9rem; }}
@@ -566,7 +578,7 @@ def derivations_page(folder: Path, *, urls: dict | None = None,
               ("android-history.png", "A derivation's history on Android, each step's change in red and green")]
     have = [(n, alt) for n, alt in phones if (folder / n).is_file()]
     if have:
-        imgs = "".join(f'<img src="{n}" alt="{alt}" loading="lazy">' for n, alt in have)
+        imgs = "".join(f'<span class="phone"><img src="{n}" alt="{alt}" loading="lazy"></span>' for n, alt in have)
         sections.append('<h2 class="shelf">On a phone</h2>\n<figure class="shot phones">' + imgs
                         + "<figcaption>The Android app: the same editor with CPython and SymPy packaged"
                         " inside, so every edit \u2014 and every step of a history \u2014 is computed on"
