@@ -75,6 +75,37 @@ IOS_TEAM_ID=ABCDE12345 python mobile/build.py ios              # development .ip
 IOS_TEAM_ID=ABCDE12345 python mobile/build.py ios --method app-store-connect
 ```
 
+Signing goes through the Apple ID signed into Xcode (Settings > Accounts) -
+or, on a machine that has none, through an App Store Connect API key (Users
+and Access > Integrations > API, Developer role), which is what CI wants:
+
+```bash
+IOS_TEAM_ID=ABCDE12345 IOS_API_KEY_ID=U1234ABCDE IOS_API_ISSUER_ID=<issuer uuid> python mobile/build.py ios
+```
+
+The key is `~/.appstoreconnect/private_keys/AuthKey_<ID>.p8`, where Apple's
+tools look too (or `IOS_API_KEY_PATH`).
+
+A development build needs a device registered with the team (Xcode makes
+the profile for it), and an App Store build with a Developer-role key wants
+Apple's *cloud-managed* distribution certificate, which the key may not be
+allowed to create ("Cloud signing permission error").  The way round both
+is a certificate of your own in the keychain and a profile you name:
+
+```bash
+security import distribution.p12 -k ~/Library/Keychains/login.keychain-db -T /usr/bin/codesign   # once
+IOS_TEAM_ID=... IOS_PROVISIONING_PROFILE="SymPy editor App Store" python mobile/build.py ios --method app-store-connect
+```
+
+The profile (App Store type, for `org.sympy.editor` and that certificate,
+made in the developer portal or through the API) goes in
+`~/Library/MobileDevice/Provisioning Profiles/<uuid>.mobileprovision`; the
+archive is then built unsigned and signed on export, with the certificate
+the method calls for - Apple Development, or Apple Distribution.  The first
+signing asks for the keychain in a dialog; *Always Allow* answers it for
+good.  (`security import` refuses a `.p12` written by a recent OpenSSL:
+`openssl pkcs12 -in it.p12 -nodes | openssl pkcs12 -export -legacy -out legacy.p12` re-encodes it.)
+
 The first build downloads the interpreter (~40 MB, cached in
 `~/.cache/sympy-editor`) and installs SymPy for the app; the app comes to
 about 95 MB, most of it the standard library and SymPy.
@@ -95,7 +126,8 @@ that installs it takes a single `ARCHS`.
 `.github/workflows/mobile.yml` (manual trigger, or on `v*` tags) builds the
 debug APK, the release APK + AAB and an iOS simulator app, and uploads them
 as artifacts; with the secrets `ANDROID_KEYSTORE_BASE64` + passwords and
-`IOS_TEAM_ID` it produces signed release artifacts and a `.ipa`.
+`IOS_TEAM_ID` + `IOS_API_KEY_ID` + `IOS_API_ISSUER_ID` + `IOS_API_KEY_BASE64` (the
+`.p8`, base64) it produces signed release artifacts and a `.ipa`.
 
 ## Notes
 

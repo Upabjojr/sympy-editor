@@ -49,8 +49,15 @@ jobs:
         env:
           IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
           IOS_EXPORT_METHOD: ${{ vars.IOS_EXPORT_METHOD || 'development' }}
+          # an App Store Connect API key (Developer role) signs where no Apple ID is
+          IOS_API_KEY_ID: ${{ secrets.IOS_API_KEY_ID }}
+          IOS_API_ISSUER_ID: ${{ secrets.IOS_API_ISSUER_ID }}
         run: |
           python mobile/build.py ios --simulator
+          if [ -n "${{ secrets.IOS_API_KEY_BASE64 }}" ]; then
+            export IOS_API_KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
+            echo "${{ secrets.IOS_API_KEY_BASE64 }}" | base64 -d > "$IOS_API_KEY_PATH"
+          fi
           if [ -n "$IOS_TEAM_ID" ]; then python mobile/build.py ios; fi
       - uses: actions/upload-artifact@v4
         with:

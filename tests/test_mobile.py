@@ -78,9 +78,24 @@ def test_vendored_bundle_is_self_contained(tmp_path):
 def test_native_project_files_are_well_formed():
     import xml.dom.minidom
     xml.dom.minidom.parse(str(ROOT / "mobile" / "android" / "app" / "src" / "main" / "AndroidManifest.xml"))
-    xml.dom.minidom.parse(str(ROOT / "mobile" / "ios" / "ExportOptions.plist"))
     yaml = pytest.importorskip("yaml")   # PyYAML ships with Jupyter; skipped without it
     yaml.safe_load((ROOT / "mobile" / "ios" / "project.yml").read_text(encoding="utf-8"))
+
+
+def test_the_ios_export_options_name_the_profile_and_its_certificate():
+    import plistlib
+    sys.path.insert(0, str(ROOT / "mobile"))
+    from build import export_options
+    automatic = plistlib.loads(export_options("development", "ABCDE12345"))
+    assert automatic["signingStyle"] == "automatic" and automatic["teamID"] == "ABCDE12345"
+    assert "provisioningProfiles" not in automatic
+    manual = plistlib.loads(export_options("app-store-connect", "ABCDE12345", "SymPy editor App Store"))
+    assert manual["method"] == "app-store-connect" and manual["signingStyle"] == "manual"
+    assert manual["signingCertificate"] == "Apple Distribution"
+    assert manual["provisioningProfiles"] == {"org.sympy.editor": "SymPy editor App Store"}
+    assert plistlib.loads(export_options("development", "T", "p"))["signingCertificate"] == "Apple Development"
+    with pytest.raises(SystemExit):
+        export_options("enterprise", "T")
 
 
 def _load_app_module():

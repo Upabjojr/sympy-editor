@@ -11,7 +11,9 @@ Both start by (re)building the shared bundle mobile/www with build_www.py.
 
 Environment for signing:
   Android release:  ANDROID_KEYSTORE (path), ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
-  iOS:              IOS_TEAM_ID (Apple developer team), optional IOS_EXPORT_METHOD (development, ad-hoc, app-store-connect)
+  iOS:              IOS_TEAM_ID (Apple developer team), optional IOS_EXPORT_METHOD (development, ad-hoc, app-store-connect);
+                    without an Apple ID in Xcode, IOS_API_KEY_ID + IOS_API_ISSUER_ID (App Store Connect API key) and,
+                    to sign with a certificate of the keychain, IOS_PROVISIONING_PROFILE (the name of an installed profile)
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ from __future__ import annotations
 import argparse
 import os
 import platform
+import plistlib
 import shutil
 import subprocess
 import sys
@@ -283,17 +286,75 @@ def ios_build(simulator: bool, cdn: bool, method: str, launch: bool = False) -> 
         sys.exit("--run installs on the simulator: use it with --simulator.")
     if not env["IOS_TEAM_ID"]:
         sys.exit("set IOS_TEAM_ID (Apple developer team) to build a signed .ipa, or use --simulator")
+    signing = ["-allowProvisioningUpdates", *api_key_arguments()]
+    profile = os.environ.get("IOS_PROVISIONING_PROFILE")
     archive = out / "SymPyEditor.xcarchive"
+    # With a profile named, the archive is built unsigned and signed on the
+    # way out: the export is where Xcode takes a named profile and the
+    # certificate of the keychain, and the archive would only have insisted
+    # on a profile of its own making.
     run(["xcodebuild", "-project", "SymPyEditor.xcodeproj", "-scheme", "SymPyEditor", "-configuration", "Release",
          "-destination", "generic/platform=iOS", "-archivePath", str(archive),
-         "-allowProvisioningUpdates", f"DEVELOPMENT_TEAM={env['IOS_TEAM_ID']}", "archive"], cwd=IOS, env=env)
-    options = (IOS / "ExportOptions.plist").read_text(encoding="utf-8").replace(
-        "<string>development</string>", f"<string>{method}</string>", 1)
+         *(["CODE_SIGNING_ALLOWED=NO"] if profile else signing),
+         f"DEVELOPMENT_TEAM={env['IOS_TEAM_ID']}", "archive"], cwd=IOS, env=env)
     plist = out / "ExportOptions.plist"
-    plist.write_text(options, encoding="utf-8")
+    plist.write_bytes(export_options(method, env["IOS_TEAM_ID"], profile))
     run(["xcodebuild", "-exportArchive", "-archivePath", str(archive), "-exportOptionsPlist", str(plist),
-         "-exportPath", str(out / "ipa"), "-allowProvisioningUpdates"], cwd=IOS, env=env)
+         "-exportPath", str(out / "ipa"), *signing], cwd=IOS, env=env)
     return sorted((out / "ipa").glob("*.ipa"))
+
+
+def export_options(method: str, team: str, profile: str | None = None) -> bytes:
+    """The ``-exportOptionsPlist`` of ``xcodebuild -exportArchive``.
+
+    Automatic signing lets Xcode find or make the certificate and profile
+    (through the account signed in, or the API key).  With ``profile`` - the
+    name of a provisioning profile installed on this machine, matching
+    ``method`` - signing is manual: that profile, and the certificate of its
+    kind in the keychain (Apple Development for a development build, Apple
+    Distribution otherwise).  It is the way when the key may not create
+    Apple's cloud-managed distribution certificate: export the certificate
+    from the machine that has it, import the .p12, install the profile.
+    """
+    if method not in ("development", "ad-hoc", "app-store-connect"):
+        sys.exit(f"unknown iOS export method {method!r}: development, ad-hoc or app-store-connect")
+    options: dict = {"method": method, "teamID": team, "compileBitcode": False}
+    if profile:
+        options.update(signingStyle="manual",
+                       signingCertificate="Apple Development" if method == "development" else "Apple Distribution",
+                       provisioningProfiles={"org.sympy.editor": profile})
+    else:
+        options["signingStyle"] = "automatic"
+    return plistlib.dumps(options)
+
+
+def api_key_arguments() -> list[str]:
+    """Sign without an Apple ID in Xcode: an App Store Connect API key.
+
+    With ``IOS_API_KEY_ID`` and ``IOS_API_ISSUER_ID`` set (App Store Connect
+    > Users and Access > Integrations > API, a key with the Developer role),
+    xcodebuild fetches and creates the certificate and profile through the
+    API - what a machine with no Xcode account, such as CI, needs.  The key
+    itself is ``IOS_API_KEY_PATH`` or, as for Apple's own tools,
+    ``AuthKey_<ID>.p8`` in ``~/.appstoreconnect/private_keys`` (or
+    ``~/.private_keys``, ``~/private_keys``, ``./private_keys``).  Without
+    the variables, signing goes through the account signed into Xcode.
+    """
+    key_id, issuer = os.environ.get("IOS_API_KEY_ID"), os.environ.get("IOS_API_ISSUER_ID")
+    if not key_id and not issuer:
+        return []
+    if not (key_id and issuer):
+        sys.exit("IOS_API_KEY_ID and IOS_API_ISSUER_ID go together (App Store Connect API key)")
+    home = Path.home()
+    candidates = [Path(os.environ["IOS_API_KEY_PATH"])] if os.environ.get("IOS_API_KEY_PATH") else [
+        folder / f"AuthKey_{key_id}.p8"
+        for folder in (home / ".appstoreconnect" / "private_keys", home / ".private_keys",
+                       home / "private_keys", Path.cwd() / "private_keys")]
+    key = next((p for p in candidates if p.is_file()), None)
+    if key is None:
+        sys.exit(f"the API key AuthKey_{key_id}.p8 was not found: set IOS_API_KEY_PATH")
+    return ["-authenticationKeyPath", str(key.resolve()),
+            "-authenticationKeyID", key_id, "-authenticationKeyIssuerID", issuer]
 
 
 def main(argv=None) -> int:
