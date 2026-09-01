@@ -177,29 +177,39 @@ _PAGE = """<!DOCTYPE html>
   body { margin: 2rem; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
          background: #ffffff; color: #1f2328; }
   @media (prefers-color-scheme: dark) { body { background: #1e1e1e; color: #e6e6e6; } }
-  h1 { font-size: 1.2rem; font-weight: 600; margin: 0 0 1rem; }
+  h1 { font-size: 1.2rem; font-weight: 600; margin: 0 0 1rem;
+       display: flex; align-items: center; gap: 0.5rem; }
+  /* the application's own icon, on the title's line and as tall as it:
+     a page in a WebView has no title bar of its own to carry either */
+  h1 .page-logo { flex: 0 0 auto; display: block; }
+  h1 .page-logo svg { display: block; width: 1.7em; height: 1.7em; }
   /* phones: a margin that keeps the controls clear of rounded corners and notches
    * (the safe-area insets where the browser reports them; the Android app pads natively) */
   @media (max-width: 640px) {
     body { margin: 0.75rem;
            padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0); }
-    h1 { font-size: 1rem; margin: 0.2rem 0 0.5rem; }
+    h1 { font-size: 1rem; margin: 0.2rem 0 0.5rem; gap: 0.4rem; }
   }
 </style>
 </head>
 <body>
-<h1>%(title)s</h1>
+<h1>%(heading)s</h1>
 %(fragment)s</body>
 </html>
 """
 
 
 def render_page(config: Dict[str, Any], title: str = "SymPy editor", head: str = "",
-                element_id: Optional[str] = None) -> str:
+                element_id: Optional[str] = None, logo: str = "") -> str:
     """The full page; ``head`` is extra markup for its ``<head>`` (a web app
     manifest, meta tags, a service-worker registration...); ``element_id``
-    fixes the editor's element id (random otherwise) for a reproducible page."""
-    return _PAGE % {"title": _html.escape(title), "fragment": render_fragment(config, element_id), "head": head}
+    fixes the editor's element id (random otherwise) for a reproducible page;
+    ``logo`` is SVG markup shown beside the title (the applications put their
+    own icon there, having no title bar to carry it)."""
+    name = _html.escape(title)
+    heading = f'<span class="page-logo">{logo}</span>{name}' if logo else name
+    return _PAGE % {"title": name, "heading": heading,
+                    "fragment": render_fragment(config, element_id), "head": head}
 
 
 def to_html(
@@ -213,6 +223,7 @@ def to_html(
     urls: Optional[Dict[str, str]] = None,
     head: str = "",
     element_id: Optional[str] = None,
+    logo: str = "",
     **document_kwargs,
 ) -> str:
     """Render ``expr`` as HTML.
@@ -242,13 +253,16 @@ def to_html(
     element_id
         The id of the editor's element (a random one by default; fix it for a
         reproducible page, e.g. a web app bundle whose cache is keyed by content).
+    logo
+        SVG markup for a mark beside the page's title (the mobile apps and the
+        web app show their own icon there); ignored for a fragment.
     document_kwargs
         Passed to :class:`Document` (``printer_settings``, ``parser``...).
     """
     doc = _as_document(expr, **document_kwargs)
     backend = backend or ("pyodide" if editable else "readonly")
     config = build_config(doc, backend=backend, options=options, urls=urls)
-    return render_page(config, title, head, element_id) if full_page else render_fragment(config, element_id)
+    return render_page(config, title, head, element_id, logo) if full_page else render_fragment(config, element_id)
 
 
 def save_html(expr, path, **kwargs) -> Path:
@@ -342,7 +356,7 @@ def to_history_html(
         return fragment
     # No <h1> of its own: the report inside the viewer already opens with the
     # title and the step count.
-    page = _PAGE.replace("<h1>%(title)s</h1>\n", "")
+    page = _PAGE.replace("<h1>%(heading)s</h1>\n", "")
     return page % {"title": _html.escape(config["title"]), "fragment": fragment, "head": head}
 
 

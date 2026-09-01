@@ -116,6 +116,7 @@ class EditorServer(ThreadingHTTPServer):
         title: str = "SymPy editor",
         options: Optional[Dict[str, Any]] = None,
         urls: Optional[Dict[str, str]] = None,
+        logo: str = "",
         verbose: bool = False,
     ):
         super().__init__((host, port), _Handler)
@@ -126,7 +127,7 @@ class EditorServer(ThreadingHTTPServer):
         self.working: Optional[int] = None
         self.closing = False
         self.verbose = verbose
-        self._page_args = (options, urls, title)
+        self._page_args = (options, urls, title, logo)
 
     def interrupt(self) -> bool:
         """Interrupt the message being processed, if any (see
@@ -150,9 +151,9 @@ class EditorServer(ThreadingHTTPServer):
 
     def render_page(self) -> str:
         """The editor page for the document's current state."""
-        options, urls, title = self._page_args
+        options, urls, title, logo = self._page_args
         config = build_config(self.document, backend="http", options=options, urls=urls, api_url="/api", token=self.token)
-        return render_page(config, title)
+        return render_page(config, title, logo=logo)
 
     @property
     def page(self) -> str:

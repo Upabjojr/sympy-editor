@@ -3007,37 +3007,41 @@ def test_the_slideshow_runs_at_the_speed_it_is_told(browser, tmp_path):
     page.close()
 
 
-def test_the_app_wears_its_own_icon_in_the_corner(browser, serve_expr):
+def test_the_app_wears_its_own_icon_beside_its_name(browser, serve_expr):
     """A page in a WebView has no title bar to say whose window it is, so the
-    apps put their icon where a window would carry it: the top left corner,
-    ahead of the tools and outside the strip that scrolls sideways on a
-    narrow screen."""
+    apps put their icon where a window would carry it: on the line of the
+    title, as tall as the words - not among the tools, which are for doing
+    things to the formula."""
     logo = ('<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">'
             '<rect width="16" height="16" rx="3" fill="#f7f3e6"/>'
             '<circle cx="8" cy="8" r="4" fill="#3b82f6"/></svg>')
-    srv, doc = serve_expr(x + y, options={"logo": logo})
+    srv, doc = serve_expr(x + y, logo=logo)
     page = _open(browser, srv.url)
-    brand = page.locator(".se-brand")
-    assert brand.count() == 1 and brand.locator("svg").count() == 1
+    assert page.locator("h1 .page-logo svg").count() == 1
+    assert page.locator(".se-toolbar svg.se-icon").count() > 0        # the arrows, and no mark
+    assert page.locator(".sympy-editor .page-logo").count() == 0
     where = page.evaluate("""() => {
-        const b = document.querySelector('.se-brand').getBoundingClientRect();
-        const block = document.querySelector('.se-block').getBoundingClientRect();
+        const mark = document.querySelector('h1 .page-logo').getBoundingClientRect();
+        const h1 = document.querySelector('h1').getBoundingClientRect();
         const bar = document.querySelector('.se-toolbar').getBoundingClientRect();
-        return {brand: [b.x, b.y, b.width, b.height], block: [block.x, block.y], bar: [bar.x, bar.y]};
+        const text = document.querySelector('h1').textContent.trim();
+        return {mark: [mark.x, mark.y, mark.height], h1: [h1.x, h1.y, h1.height], bar: [bar.y], text};
     }""")
-    assert where["brand"][0] < where["block"][0]                 # to the left of the first tools
-    assert where["brand"][1] <= where["block"][1] + 2            # and on the first row
-    assert abs(where["brand"][0] - where["bar"][0]) < 8          # in the corner of the bar itself
-    assert 20 < where["brand"][2] < 44 and 20 < where["brand"][3] < 44
-    # it belongs to the bar, not to the tools: those scroll sideways when they
-    # do not fit, and the mark must not go with them
-    assert page.evaluate("() => !document.querySelector('.se-tools').contains(document.querySelector('.se-brand'))")
+    assert where["text"] == "SymPy editor"
+    # on the title's line: same left edge as the heading, centred on it, and
+    # about as tall as the words rather than a picture of its own
+    assert abs(where["mark"][0] - where["h1"][0]) < 2
+    middle = lambda box: box[1] + box[2] / 2
+    assert abs(middle(where["mark"]) - middle(where["h1"])) < 3
+    assert 1.2 < where["mark"][2] / 16 < 2.6                          # 16px is the page's font size
+    assert where["mark"][1] < where["bar"][0]                         # above the tools, not in them
 
-    # a page that asks for no logo has none, and nothing shifts to make room
+    # and a page that asks for no icon has none: the title stands alone
     srv2, doc2 = serve_expr(x + y)
     page.goto(srv2.url)
     page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
-    assert page.locator(".se-brand").count() == 0
+    assert page.locator(".page-logo").count() == 0
+    assert page.locator("h1").inner_text() == "SymPy editor"
     assert page.errors == []
 
 
@@ -3202,6 +3206,10 @@ def test_the_arrows_walk_the_listing_when_nothing_is_playing(browser, tmp_path):
     page.goto(path.as_uri())
     page.wait_for_selector(".se-history-frame", timeout=30000)
     assert _wait(lambda: page.locator(".se-play").is_visible())
+    # The controls are enabled by the report answering, which is also when the
+    # iframe has finished replacing its blank document: take hold of the frame
+    # before that and the next call into it finds the context gone.
+    page.wait_for_function("() => !document.querySelector('.se-play').disabled", timeout=30000)
     doc = page.frames[1]
     scroll = lambda: doc.evaluate("document.scrollingElement.scrollTop")
     playing = lambda: doc.evaluate("document.body.classList.contains('slides')")

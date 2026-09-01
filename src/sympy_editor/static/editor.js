@@ -37,7 +37,6 @@ var SympyEditor = (function () {
     workingAfter: 400,   // ms a request may take before the spinner overlay appears
     interruptAfter: 2000, // ms after which the overlay offers to interrupt the computation
     sessions: false,     // a list of sessions (expressions with their own history) kept in localStorage
-    logo: "",            // SVG markup shown in the corner of the toolbar: the app's own icon (the mobile apps and the web app set it)
     unevaluated: false,  // the "unevaluated" toggle starts on: transformations build Determinant(M), Integral(f, x)... rather than computing
     animate: true,       // animate a change: the old parts in red turn into the new ones in green
     animateDuration: 1600 // ms: a quarter to show what goes (red), the rest to move it and fade the new in (green)
@@ -941,14 +940,6 @@ var SympyEditor = (function () {
       this.root = root;
       this.buttons = {};
       this.toolbar = h("div", { class: "se-toolbar", role: "toolbar" });
-      // The application's mark, in the corner the eye starts from.  It is
-      // outside the strip of tools, which scrolls sideways on a narrow
-      // screen: the mark stays where it is while the tools go past.
-      if (o.logo) {
-        this.brand = h("span", { class: "se-brand", title: "SymPy editor", "aria-hidden": "true" });
-        this.brand.innerHTML = o.logo;
-        this.toolbar.appendChild(this.brand);
-      }
       // The tools sit in their own strip: on a narrow screen it scrolls
       // sideways instead of wrapping onto several rows.
       this.tools = h("div", { class: "se-tools" });

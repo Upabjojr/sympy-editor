@@ -138,10 +138,10 @@ def build(out: Path, *, cdn: bool = False, cache: Path | None = None, expr=None,
     page = to_html(expr if expr is not None else demo_expression(), urls=urls, title=title, head=head,
                    backend="native" if native else None,
                    element_id="sympy-editor-app",                         # reproducible: the web app's cache is keyed by content
-                   # an app keeps its zoom and sessions between launches, and wears
-                   # its own icon: in a WebView there is no title bar to say
-                   # whose window this is
-                   options={"rememberZoom": True, "sessions": True, "logo": app_logo()})
+                   # the app wears its own icon beside the title: in a WebView
+                   # there is no title bar to say whose window this is
+                   logo=app_logo(),
+                   options={"rememberZoom": True, "sessions": True})   # an app keeps its zoom and sessions between launches
     (out / "index.html").write_text(page, encoding="utf-8")
     return out
 

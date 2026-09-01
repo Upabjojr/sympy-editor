@@ -192,10 +192,11 @@ def test_the_app_view_wears_the_icon_and_is_the_same_on_both_phones():
     assert logo in (ROOT / "mobile/icon/icon.svg").read_text(encoding="utf-8")   # the launcher's own art
 
     page = mod.build(ROOT / "mobile" / "www", cdn=True).joinpath("index.html").read_text(encoding="utf-8")
-    # in the page's own options, with every "<" escaped: markup in a JSON
-    # string must not be able to end the script tag it travels in
-    assert '"logo": "\\u003csvg' in page
-    assert "\\u003c/svg>" in page and "<svg" not in page.split('"logo"')[1][:4000]
+    # on the title's line, in the page itself - not in the editor's options:
+    # the mark belongs to the window, not to the tools
+    assert '<h1><span class="page-logo"><svg' in page
+    assert "</svg></span>SymPy editor</h1>" in page
+    assert '"logo"' not in page.split("</h1>", 1)[1]
 
     # neither app puts anything of its own around the page
     manifest = (ROOT / "mobile/android/app/src/main/AndroidManifest.xml").read_text(encoding="utf-8")
