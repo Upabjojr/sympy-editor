@@ -106,6 +106,14 @@ signing asks for the keychain in a dialog; *Always Allow* answers it for
 good.  (`security import` refuses a `.p12` written by a recent OpenSSL:
 `openssl pkcs12 -in it.p12 -nodes | openssl pkcs12 -export -legacy -out legacy.p12` re-encodes it.)
 
+`CFBundleVersion`, which the store wants new at every upload, is the number
+of commits in the checkout (`IOS_BUILD_NUMBER` overrides it).  Two modules of
+the standard library are left out of the app, `_ssl` and `_hashlib`: they carry
+OpenSSL, which App Store review treats as a third-party SDK owing a privacy
+manifest (ITMS-91061).  The app opens no socket, and `hashlib` falls back on
+CPython's own digests; the same lets `Info.plist` declare no non-exempt
+encryption, so the export-compliance question is never asked.
+
 The first build downloads the interpreter (~40 MB, cached in
 `~/.cache/sympy-editor`) and installs SymPy for the app; the app comes to
 about 95 MB, most of it the standard library and SymPy.

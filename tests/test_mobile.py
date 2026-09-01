@@ -208,7 +208,9 @@ def test_the_ios_app_is_configured_for_its_own_python():
     # the standard library is installed into the bundle by the script the
     # support package ships, and every extension module made into a framework
     script = "\n".join(s["script"] for s in target["postBuildScripts"])
-    assert "install_python Python.xcframework app app_packages" in script
+    assert "install_stdlib Python.xcframework" in script
+    for folder in ("lib-dynload", "app", "app_packages"):
+        assert folder in script[script.index("process_dylibs") - 200:]     # each of them made into frameworks
 
     swift = (ROOT / "mobile" / "ios" / "SymPyEditor" / "EditorView.swift").read_text(encoding="utf-8")
     assert "SympyEditorPy" in swift and "__sympyEditorNative" in swift
@@ -379,3 +381,20 @@ def test_make_icons_draws_every_size(tmp_path):
         side = image.size[0]
         box = [v * 108 / side for v in image.split()[-1].getbbox()]
     assert box[0] >= 18 and box[1] >= 18 and box[2] <= 90 and box[3] <= 90, box
+
+
+def test_the_ios_app_leaves_openssl_behind():
+    """App Store review reads OpenSSL, in CPython's _ssl and _hashlib, as a
+    third-party SDK owing a privacy manifest (ITMS-91061): the build phase
+    drops both before they become frameworks, and says it must not encrypt."""
+    project = (ROOT / "mobile" / "ios" / "project.yml").read_text(encoding="utf-8")
+    script = project[project.index("install_stdlib"):project.index("process_dylibs")]
+    assert "_ssl" in script and "_hashlib" in script and "Frameworks" in script
+    assert "install_python" not in project.replace("# install_python", "")
+    assert "ITSAppUsesNonExemptEncryption: false" in project
+    assert "CFBundleVersion: ${IOS_BUILD_NUMBER}" in project
+
+
+def test_the_ios_build_number_counts_the_commits():
+    import mobile.build as build
+    assert build.build_number().isdigit()

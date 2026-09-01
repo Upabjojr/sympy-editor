@@ -33,7 +33,10 @@ targets:
       properties:
         CFBundleDisplayName: SymPy editor
         CFBundleShortVersionString: "0.1.0"
-        CFBundleVersion: "1"
+        CFBundleVersion: ${IOS_BUILD_NUMBER}
+        # No cryptography of the app's own, and no OpenSSL either (see the
+        # build phase): the store's export-compliance question is answered here.
+        ITSAppUsesNonExemptEncryption: false
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
@@ -60,4 +63,18 @@ targets:
           # to sign the frameworks this makes: ad-hoc is what the simulator wants.
           export EXPANDED_CODE_SIGN_IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:--}"
           source "$PROJECT_DIR/Python.xcframework/build/utils.sh"
-          install_python Python.xcframework app app_packages
+          # install_python, in its three steps, with one thing between them:
+          # _ssl and _hashlib go, before they become frameworks.  They carry
+          # OpenSSL, which App Store review takes for a third-party SDK that
+          # must bring a privacy manifest (ITMS-91061); the app never opens a
+          # socket, and hashlib has CPython's own digests (_md5, _sha2...) to
+          # fall back on.
+          install_stdlib Python.xcframework
+          PYTHON_VER=$(ls -1 "$CODESIGNING_FOLDER_PATH/python/lib" | grep -E "^python3\.[0-9]+$")
+          rm -rf "$CODESIGNING_FOLDER_PATH/python/lib/$PYTHON_VER/lib-dynload"/_ssl.* \
+                 "$CODESIGNING_FOLDER_PATH/python/lib/$PYTHON_VER/lib-dynload"/_hashlib.* \
+                 "$CODESIGNING_FOLDER_PATH/Frameworks"/_ssl.framework \
+                 "$CODESIGNING_FOLDER_PATH/Frameworks"/_hashlib.framework
+          for folder in python/lib/$PYTHON_VER/lib-dynload app app_packages; do
+            process_dylibs Python.xcframework $folder
+          done

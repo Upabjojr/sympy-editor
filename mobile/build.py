@@ -13,7 +13,8 @@ Environment for signing:
   Android release:  ANDROID_KEYSTORE (path), ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
   iOS:              IOS_TEAM_ID (Apple developer team), optional IOS_EXPORT_METHOD (development, ad-hoc, app-store-connect);
                     without an Apple ID in Xcode, IOS_API_KEY_ID + IOS_API_ISSUER_ID (App Store Connect API key) and,
-                    to sign with a certificate of the keychain, IOS_PROVISIONING_PROFILE (the name of an installed profile)
+                    to sign with a certificate of the keychain, IOS_PROVISIONING_PROFILE (the name of an installed profile);
+                    IOS_BUILD_NUMBER (CFBundleVersion, default: the number of commits)
 """
 
 from __future__ import annotations
@@ -271,7 +272,8 @@ def ios_build(simulator: bool, cdn: bool, method: str, launch: bool = False) -> 
     make_icons(IOS / "SymPyEditor/Assets.xcassets/AppIcon.appiconset/icon-1024.png")
     if not shutil.which("xcodegen"):
         sys.exit("xcodegen not found: brew install xcodegen (or create the project by hand, see mobile/README.md)")
-    env = dict(os.environ, IOS_TEAM_ID=os.environ.get("IOS_TEAM_ID", ""))
+    env = dict(os.environ, IOS_TEAM_ID=os.environ.get("IOS_TEAM_ID", ""),
+               IOS_BUILD_NUMBER=os.environ.get("IOS_BUILD_NUMBER") or build_number())
     run(["xcodegen", "generate"], cwd=IOS, env=env)
     out = IOS / "build"
     if simulator:
@@ -347,6 +349,16 @@ def export_options(method: str, team: str, profile: str | None = None) -> bytes:
     else:
         options["signingStyle"] = "automatic"
     return plistlib.dumps(options)
+
+
+def build_number() -> str:
+    """CFBundleVersion: the store wants every upload's to be new, and the
+    count of commits only grows (1 outside a checkout: set IOS_BUILD_NUMBER)."""
+    try:
+        out = subprocess.run(["git", "rev-list", "--count", "HEAD"], cwd=HERE, capture_output=True, text=True, check=True).stdout
+        return str(int(out.strip()))
+    except (OSError, subprocess.CalledProcessError, ValueError):
+        return "1"
 
 
 def api_key_arguments() -> list[str]:
