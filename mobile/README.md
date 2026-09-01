@@ -121,6 +121,11 @@ A simulator build is made for one architecture, this Mac's own: the standard
 library that travels with the interpreter is per architecture, and the script
 that installs it takes a single `ARCHS`.
 
+`python mobile/screenshots.py` takes the store's screenshots (1242 x 2688,
+the 6.5" iPhone) from the app's own page in Playwright's WebKit, bridged
+to the app's Python: `mobile/ios/build/screenshots/raw/` is the screen
+alone, `framed/` the same under a caption on a coloured ground.
+
 ## 4. Without a Mac or an Android SDK: GitHub Actions
 
 `.github/workflows/mobile.yml` (manual trigger, or on `v*` tags) builds the

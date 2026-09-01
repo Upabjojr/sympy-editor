@@ -294,7 +294,7 @@ def test_the_app_has_an_icon_of_its_own():
     assert (ROOT / "mobile/make_icons.py").is_file()
 
 
-def test_the_app_view_wears_the_icon_and_is_the_same_on_both_phones():
+def test_the_app_view_wears_the_icon_and_is_the_same_on_both_phones(tmp_path):
     """A page in a WebView has no title bar to say whose window it is, so the
     bundle carries the app's own icon and shows it in the corner of the
     toolbar.  And there is one bundle: both apps are a bare WebView over it,
@@ -305,7 +305,7 @@ def test_the_app_view_wears_the_icon_and_is_the_same_on_both_phones():
     assert logo.startswith("<svg") and "SymPy editor" in logo      # the icon, inline, no XML header
     assert logo in (ROOT / "mobile/icon/icon.svg").read_text(encoding="utf-8")   # the launcher's own art
 
-    page = mod.build(ROOT / "mobile" / "www", cdn=True).joinpath("index.html").read_text(encoding="utf-8")
+    page = mod.build(tmp_path / "www", cdn=True).joinpath("index.html").read_text(encoding="utf-8")
     # on the title's line, in the page itself - not in the editor's options:
     # the mark belongs to the window, not to the tools
     assert '<h1><span class="page-logo" aria-hidden="true"><svg' in page
