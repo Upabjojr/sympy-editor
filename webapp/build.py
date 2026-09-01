@@ -193,40 +193,86 @@ SHELF = """<!DOCTYPE html>
 <style>
 {editor_css}
 :root {{ color-scheme: light dark; }}
-body {{ margin: 0; padding: 0 1.2rem 5rem; background: #ffffff; color: #1f2328;
+body {{ margin: 0; padding: 0 1.2rem 5rem; color: #1f2328;
+       background: #f6f8fa linear-gradient(180deg, #eef2f7 0%, #f9fafb 22rem, #f6f8fa 100%);
        font: 16px/1.65 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }}
 main {{ max-width: 58rem; margin: 0 auto; }}
 header {{ padding: 3.5rem 0 2.5rem; }}
-h1 {{ font-size: 2rem; margin: 0 0 0.4rem; letter-spacing: -0.01em;
-      display: flex; align-items: center; gap: 0.7rem; }}
-h1 img {{ border-radius: 0.8rem; }}
-header p {{ margin: 0 0 1rem; color: #656d76; max-width: 42rem; }}
-header .actions {{ display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 1.4rem; }}
-header a.button {{ display: inline-block; padding: 0.5rem 1.1rem; border-radius: 0.4rem;
-                  border: 1px solid #d0d7de; text-decoration: none; color: inherit; font-size: 0.95rem; }}
-header a.primary {{ background: #3b82f6; border-color: #3b82f6; color: #ffffff; }}
-header a.button:hover {{ border-color: #3b82f6; }}
-h2.shelf {{ font-size: 1.1rem; text-transform: uppercase; letter-spacing: 0.06em; color: #656d76;
-           border-top: 1px solid #d0d7de; padding-top: 1.4rem; margin: 2rem 0 0; }}
-.card {{ margin: 2.4rem 0 0; }}
+p.eyebrow {{ margin: 0 0 0.6rem; font-size: 0.8rem; font-weight: 600; letter-spacing: 0.09em;
+            text-transform: uppercase; color: #3b82f6; }}
+h1 {{ font-size: 2.2rem; margin: 0 0 0.5rem; letter-spacing: -0.015em;
+      display: flex; align-items: center; gap: 0.8rem; }}
+h1 img {{ border-radius: 0.9rem; box-shadow: 0 1px 2px rgba(27, 31, 36, 0.12), 0 10px 24px -12px rgba(27, 31, 36, 0.35); }}
+header p {{ margin: 0 0 1rem; color: #57606a; max-width: 42rem; }}
+header .actions {{ display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 1.5rem; }}
+header a.button {{ display: inline-block; padding: 0.55rem 1.15rem; border-radius: 0.55rem;
+                  border: 1px solid #d0d7de; text-decoration: none; color: inherit; font-size: 0.95rem;
+                  background: #ffffff; box-shadow: 0 1px 2px rgba(27, 31, 36, 0.06);
+                  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease; }}
+header a.primary {{ background: linear-gradient(180deg, #4f8ef7, #2e6fe3); border-color: #2e6fe3; color: #ffffff;
+                   box-shadow: 0 1px 2px rgba(46, 111, 227, 0.25), 0 6px 16px -8px rgba(46, 111, 227, 0.6); }}
+header a.button:hover {{ border-color: #3b82f6; transform: translateY(-1px);
+                        box-shadow: 0 2px 4px rgba(27, 31, 36, 0.08), 0 10px 20px -10px rgba(27, 31, 36, 0.25); }}
+h2.shelf {{ font-size: 0.95rem; text-transform: uppercase; letter-spacing: 0.08em; color: #57606a;
+           display: flex; align-items: center; gap: 0.8rem; margin: 2.6rem 0 0; }}
+h2.shelf::after {{ content: ""; flex: 1; height: 1px;
+                  background: linear-gradient(90deg, #d0d7de, rgba(208, 215, 222, 0)); }}
+.card {{ margin: 1.8rem 0 0; padding: 1.3rem 1.4rem 1.1rem; background: #ffffff;
+        border: 1px solid #d8dee4; border-radius: 1rem;
+        box-shadow: 0 1px 2px rgba(27, 31, 36, 0.04), 0 12px 28px -22px rgba(27, 31, 36, 0.4); }}
 .card h3 {{ font-size: 1.15rem; margin: 0 0 0.15rem; }}
-.card p {{ margin: 0 0 0.8rem; color: #656d76; font-size: 0.95rem; }}
-.card .steps {{ float: right; font-size: 0.85rem; color: #656d76; }}
-.card .se-history-page {{ height: 30rem; min-height: 18rem; }}
+.card p {{ margin: 0 0 0.9rem; color: #57606a; font-size: 0.95rem; }}
+.card .steps {{ float: right; font-size: 0.8rem; font-variant-numeric: tabular-nums;
+               color: #2e6fe3; background: rgba(59, 130, 246, 0.1);
+               border-radius: 1rem; padding: 0.15rem 0.65rem; margin: 0.1rem 0 0 0.8rem; }}
+.card .se-history-page {{ height: 30rem; min-height: 18rem; border: 1px solid #e4e8ec; border-radius: 0.6rem; }}
+.snippets {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(21rem, 1fr));
+             gap: 1.2rem; margin-top: 1.8rem; }}
+.snippet {{ background: #ffffff; border: 1px solid #d8dee4; border-radius: 1rem; padding: 1.2rem 1.3rem;
+           box-shadow: 0 1px 2px rgba(27, 31, 36, 0.04), 0 12px 28px -22px rgba(27, 31, 36, 0.4); }}
+.snippet h3 {{ font-size: 1.02rem; margin: 0 0 0.2rem; }}
+.snippet p {{ margin: 0 0 0.8rem; color: #57606a; font-size: 0.92rem; }}
+.snippet pre {{ margin: 0; padding: 0.9rem 1rem; border-radius: 0.6rem; overflow-x: auto;
+               background: #0e1116; color: #d6dde6; font-size: 0.83rem; line-height: 1.6; }}
+.snippet pre + p {{ margin-top: 0.8rem; }}
+.snippet .k {{ color: #7cadf8; }} .snippet .s {{ color: #8ddb8c; }}
+.snippet .c {{ color: #768390; font-style: italic; }} .snippet .f {{ color: #e3b341; }}
+figure.shot {{ margin: 1.8rem 0 0; padding: 0.8rem 0.8rem 0.6rem; background: #ffffff;
+              border: 1px solid #d8dee4; border-radius: 1rem;
+              box-shadow: 0 1px 2px rgba(27, 31, 36, 0.04), 0 12px 28px -22px rgba(27, 31, 36, 0.4); }}
+figure.shot img {{ display: block; width: 100%; height: auto; border-radius: 0.6rem;
+                  border: 1px solid #e4e8ec; }}
+figure.shot figcaption {{ padding: 0.7rem 0.4rem 0.2rem; color: #57606a; font-size: 0.9rem; }}
 footer {{ margin-top: 4rem; padding-top: 1.4rem; border-top: 1px solid #d0d7de;
-         color: #656d76; font-size: 0.9rem; }}
+         color: #57606a; font-size: 0.9rem; }}
 footer code {{ font-size: 0.85em; }}
+footer nav.legal {{ margin-top: 0.7rem; }}
+footer nav.legal a {{ color: inherit; }}
+header a.button code {{ font-size: 0.85em; }}
 @media (prefers-color-scheme: dark) {{
-  body {{ background: #1e1e1e; color: #e6e6e6; }}
-  header p, .card p, .card .steps, footer, h2.shelf {{ color: #a0a0a0; }}
-  header a.button {{ border-color: #444; }} header a.primary {{ border-color: #3b82f6; }}
-  h2.shelf, footer {{ border-color: #444; }}
+  body {{ color: #e6e6e6; background: #1b1d20 linear-gradient(180deg, #202329 0%, #1c1e22 22rem, #1b1d20 100%); }}
+  header p, .card p, footer {{ color: #a0a0a0; }}
+  p.eyebrow {{ color: #7cadf8; }}
+  h2.shelf {{ color: #a0a0a0; }}
+  h2.shelf::after {{ background: linear-gradient(90deg, #3a3f45, rgba(58, 63, 69, 0)); }}
+  header a.button {{ background: #24272c; border-color: #3a3f45; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); }}
+  header a.primary {{ background: linear-gradient(180deg, #3f7cec, #2a62c9); border-color: #2a62c9; color: #ffffff; }}
+  .card {{ background: #212429; border-color: #363b41;
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 14px 30px -22px rgba(0, 0, 0, 0.8); }}
+  .card .steps {{ color: #7cadf8; background: rgba(59, 130, 246, 0.16); }}
+  .card .se-history-page {{ border-color: #33383e; }}
+  .snippet, figure.shot {{ background: #212429; border-color: #363b41;
+                          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 14px 30px -22px rgba(0, 0, 0, 0.8); }}
+  .snippet p, figure.shot figcaption {{ color: #a0a0a0; }}
+  figure.shot img {{ border-color: #33383e; }}
+  footer {{ border-color: #444; }}
 }}
 </style>
 </head>
 <body>
 <main>
 <header>
+  <p class="eyebrow">Free &amp; open source \u00b7 BSD 3-Clause</p>
   <h1><img src="icon.svg" alt="" width="56" height="56"> SymPy editor</h1>
   <p>A click-to-edit editor for SymPy expressions: select a piece of a formula
   and change it in place - type over it, apply any SymPy function to it, pull
@@ -239,14 +285,61 @@ footer code {{ font-size: 0.85em; }}
   <div class="actions">
     <a class="button primary" href="{editor_href}">Open the editor</a>
     <a class="button" href="https://github.com/Upabjojr/sympy-editor">Source on GitHub</a>
+    <a class="button" href="https://pypi.org/project/sympy-editor/"><code>pip install sympy-editor</code></a>
   </div>
 </header>
+<h2 class="shelf">Use it</h2>
+<div class="snippets">
+<section class="snippet">
+  <h3>In a Jupyter notebook</h3>
+  <p>The widget runs every edit in the kernel's own SymPy: <code>w.expr</code>
+  is the live, edited expression.</p>
+  <pre><code>pip install <span class="s">"sympy-editor[jupyter]"</span></code></pre>
+  <p></p>
+  <pre><code><span class="k">from</span> sympy <span class="k">import</span> symbols, sin
+<span class="k">from</span> sympy_editor <span class="k">import</span> edit
+
+x = <span class="f">symbols</span>(<span class="s">"x"</span>)
+w = <span class="f">edit</span>(<span class="f">sin</span>(x) / x)  <span class="c"># click it, edit in place</span>
+w.expr                <span class="c"># what it is now, live</span>
+w.<span class="f">on_change</span>(<span class="k">lambda</span> e: <span class="f">print</span>(<span class="s">"now:"</span>, e))</code></pre>
+</section>
+<section class="snippet">
+  <h3>A page of its own</h3>
+  <p>One self-contained file whose edits run in the browser \u2014 or a local
+  server that hands the result back to Python.</p>
+  <pre><code><span class="k">from</span> sympy_editor <span class="k">import</span> save_html, serve
+
+<span class="f">save_html</span>(expr, <span class="s">"expr.html"</span>)  <span class="c"># one file, no server</span>
+new = <span class="f">serve</span>(expr)             <span class="c"># blocks until Done</span></code></pre>
+</section>
+<section class="snippet">
+  <h3>A history from plain Python</h3>
+  <p>The viewer on this page needs no editor: a list of expressions and a
+  word about each step is enough.</p>
+  <pre><code><span class="k">from</span> sympy_editor <span class="k">import</span> History
+<span class="k">from</span> sympy_editor <span class="k">import</span> save_history_html
+
+steps = <span class="f">History</span>([
+    <span class="f">Integral</span>(x * <span class="f">sin</span>(x), x),
+    (-x * <span class="f">cos</span>(x)
+     + <span class="f">Integral</span>(<span class="f">cos</span>(x), x), <span class="s">"by parts"</span>),
+    (-x * <span class="f">cos</span>(x) + <span class="f">sin</span>(x), <span class="s">"the last integral"</span>),
+])
+<span class="f">save_history_html</span>(steps, <span class="s">"steps.html"</span>)</code></pre>
+</section>
+</div>
+{figures}
 <h2 class="shelf">Worked derivations</h2>
 {cards}
 <footer>Each one is a <code>sympy_editor.History</code>: a list of expressions
 and a word about what turned each into the next (<code>examples/derivations/</code>
 in the repository). Press <b>Play</b> on any of them, or <b>Save</b> to keep it
-as a single file that works offline.</footer>
+as a single file that works offline.
+<nav class="legal"><a href="https://github.com/Upabjojr/sympy-editor">GitHub</a> \u00b7
+<a href="https://pypi.org/project/sympy-editor/">PyPI</a> \u00b7
+<a href="license.html">License (BSD 3-Clause)</a> \u00b7
+<a href="privacy.html">Privacy</a></nav></footer>
 </main>
 <script>
 {editor_js}
@@ -257,6 +350,143 @@ as a single file that works offline.</footer>
 </body>
 </html>
 """
+
+#: The frame of a document page (the licence, the privacy statement): the
+#: shelf's own dress - the mark beside the title, cards with a drawn icon
+#: each, the same colours in the light and in the dark.
+DOC_PAGE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title} \u2014 SymPy editor</title>
+<meta name="description" content="{description}">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>
+:root {{ color-scheme: light dark; }}
+body {{ margin: 0; padding: 0 1.2rem 5rem; background: #ffffff; color: #1f2328;
+       font: 16px/1.65 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }}
+main {{ max-width: 46rem; margin: 0 auto; }}
+header {{ padding: 3rem 0 1.6rem; }}
+h1 {{ font-size: 1.7rem; margin: 0 0 0.3rem; letter-spacing: -0.01em;
+      display: flex; align-items: center; gap: 0.6rem; }}
+h1 img {{ border-radius: 0.7rem; }}
+header p.lead {{ margin: 0.4rem 0 0; color: #656d76; }}
+a {{ color: #3b82f6; }}
+nav.crumbs {{ font-size: 0.9rem; margin: 0 0 0.8rem; }}
+nav.crumbs a {{ text-decoration: none; }}
+.card {{ border: 1px solid #d0d7de; border-radius: 0.8rem; padding: 1.1rem 1.3rem;
+        margin: 1.1rem 0; display: flex; gap: 1rem; align-items: flex-start; }}
+.card svg {{ flex: 0 0 auto; width: 2.1rem; height: 2.1rem; margin-top: 0.15rem;
+            stroke: #3b82f6; }}
+.card h2 {{ font-size: 1.05rem; margin: 0 0 0.3rem; }}
+.card p {{ margin: 0 0 0.5rem; }} .card p:last-child {{ margin-bottom: 0; }}
+.card ul {{ margin: 0.3rem 0 0.5rem; padding-left: 1.1rem; }}
+pre.licence {{ border: 1px solid #d0d7de; border-radius: 0.8rem; padding: 1.2rem 1.4rem;
+              overflow-x: auto; font-size: 0.85rem; line-height: 1.55; }}
+footer {{ margin-top: 3rem; padding-top: 1.2rem; border-top: 1px solid #d0d7de;
+         color: #656d76; font-size: 0.9rem; }}
+@media (prefers-color-scheme: dark) {{
+  body {{ background: #1e1e1e; color: #e6e6e6; }}
+  header p.lead, footer {{ color: #a0a0a0; }}
+  .card, pre.licence, footer {{ border-color: #444; }}
+}}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <nav class="crumbs"><a href="index.html">\u2190 SymPy editor</a></nav>
+  <h1><img src="icon.svg" alt="" width="44" height="44"> {title}</h1>
+  <p class="lead">{lead}</p>
+</header>
+{body}
+<footer>{footer}</footer>
+</main>
+</body>
+</html>
+"""
+
+#: Small drawn icons for the cards, in the flat stroke style of the editor's
+#: own (fill none, round caps, currentColor-free: the accent is set in CSS).
+DOC_ICONS = {
+    "device": '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+              '<rect x="7" y="2.5" width="10" height="19" rx="2.2"/><path d="M10.5 18.5h3"/></svg>',
+    "store": '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+             '<path d="M4.5 9.5 5.6 4h12.8l1.1 5.5"/><path d="M4.5 9.5h15V19a1.8 1.8 0 0 1-1.8 1.8H6.3A1.8 1.8 0 0 1 4.5 19Z"/>'
+             '<path d="M9.5 13.5h5"/></svg>',
+    "globe": '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+             '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.6 2.3 3.9 5.1 3.9 8.5s-1.3 6.2-3.9 8.5c-2.6-2.3-3.9-5.1-3.9-8.5S9.4 5.8 12 3.5Z"/></svg>',
+    "mail": '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+            '<rect x="3" y="5.5" width="18" height="13" rx="2"/><path d="m4 7 8 6 8-6"/></svg>',
+    "scale": '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+             '<path d="M12 4v16M7 20h10M12 4 5.5 7M12 4l6.5 3"/><path d="M3 12.5 5.5 7 8 12.5a2.7 2.7 0 0 1-5 0ZM16 12.5 18.5 7 21 12.5a2.7 2.7 0 0 1-5 0Z"/></svg>',
+}
+
+PRIVACY_CARDS = [
+    ("device", "Everything stays on your device", """
+<p>The editor computes where it runs. Expressions, sessions, their histories
+and the zoom are kept in the app's own storage on your device (the browser's
+local storage); deleting a session, or the app or the site data, removes
+them. There are no accounts, no cookies, no analytics and no telemetry
+&mdash; the source is public, and none of that is in it.</p>"""),
+    ("store", "The apps and the stores", """
+<p>The Android and iOS apps carry everything they need and make no network
+requests: nothing you type ever leaves the phone. Installing them through
+Google Play or the App Store means Google or Apple collect their own data
+&mdash; downloads, crashes, device statistics &mdash; under
+<a href="https://policies.google.com/privacy">Google's</a> and
+<a href="https://www.apple.com/legal/privacy/">Apple's</a> privacy policies;
+of that, the developer only ever sees aggregate statistics.</p>"""),
+    ("globe", "This website", """
+<p>These pages are served by GitHub Pages, which logs visits (your IP
+address) as any web host does &mdash; see the
+<a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">GitHub
+Privacy Statement</a>. The derivations on the front page carry their own
+rendering and load nothing else. The <em>editor</em> page fetches its
+Python runtime (Pyodide, SymPy) from public CDNs &mdash; jsDelivr and
+PyPI's file host &mdash; the way any download does, so those services see
+that request; what you then type in the editor still stays in your
+browser.</p>"""),
+    ("mail", "If you write to us", """
+<p>The project has no chat and collects no messages. If you open an issue or
+a discussion on the
+<a href="https://github.com/Upabjojr/sympy-editor">GitHub repository</a>,
+that is public and processed by GitHub under its own terms, and we see what
+you chose to post &mdash; nothing more.</p>"""),
+]
+
+
+def doc_pages(folder: Path) -> None:
+    """Write the licence and the privacy statement beside the shelf:
+    ``license.html`` and ``privacy.html`` in its dress, and ``LICENSE.txt``
+    verbatim.  The pages a store listing and a curious visitor both ask
+    for, kept where the site is built so a rebuild never loses them."""
+    licence = (ROOT / "LICENSE").read_text(encoding="utf-8")
+    (folder / "LICENSE.txt").write_text(licence, encoding="utf-8")
+    card = lambda icon, title, body: f'<section class="card">{DOC_ICONS[icon]}<div><h2>{title}</h2>{body}</div></section>'
+    (folder / "license.html").write_text(DOC_PAGE.replace("\\u2014", "\u2014").replace("\\u2190", "\u2190").format(
+        title="License", description="SymPy editor is free software under the BSD 3-Clause License.",
+        lead="SymPy editor is free software, under the BSD 3-Clause License.",
+        body=card("scale", "In short",
+                  """<p>Use it, copy it, change it, redistribute it &mdash; commercially or
+not &mdash; as long as the copyright notice travels with it, and without
+using the author's name to promote what you make from it. It comes with no
+warranty. The short version is not the licence; the licence is:</p>""")
+             + f'<pre class="licence">{html.escape(licence)}</pre>',
+        footer='The same text as a plain file: <a href="LICENSE.txt">LICENSE.txt</a>. '
+               'The rendering (KaTeX) and the in-browser Python (Pyodide, SymPy) have free licences of their own, '
+               'listed in <a href="https://github.com/Upabjojr/sympy-editor">the repository</a>.'),
+        encoding="utf-8")
+    cards = "".join(card(icon, title, body) for icon, title, body in PRIVACY_CARDS)
+    (folder / "privacy.html").write_text(DOC_PAGE.replace("\\u2014", "\u2014").replace("\\u2190", "\u2190").format(
+        title="Privacy", description="SymPy editor collects no data: the mathematics stays on your device.",
+        lead="The short version: the editor computes on your device, and nothing you type is sent anywhere by us.",
+        body=cards,
+        footer="This page describes SymPy editor 0.1.0 (September 2026). "
+               "If the facts change, this page changes with them."),
+        encoding="utf-8")
+
 
 CARD = """<section class="card" id="{slug}">
   <span class="steps">{steps} steps</span>
@@ -311,13 +541,31 @@ def derivations_page(folder: Path, *, urls: dict | None = None,
         config["heading"] = "Steps"
         mounts.append(f'SympyEditor.mountHistory(document.getElementById("{element}"), '
                       f"{json.dumps(config, ensure_ascii=False).replace('<', chr(92) + 'u003c')});")
+    # Screenshots are content, not build products: they are taken from a
+    # live JupyterLab and live beside the page.  The section appears only
+    # where they do, so a bare rebuild is never a page of broken images.
+    shots = [("jupyter-widget.png",
+              "The widget in JupyterLab: the formula is the interface \u2014 click a piece to select it, "
+              "type over it, or apply any SymPy function; the kernel computes, and <code>w.expr</code> follows."),
+             ("jupyter-plot.png",
+              "Two widgets wired together in a notebook: every edit committed in the editor redraws the plot "
+              "(<code>examples/plot_alongside.ipynb</code> in the repository).")]
+    figures = "\n".join(f'<figure class="shot"><img src="{name}" alt="" loading="lazy">'
+                        f"<figcaption>{caption}</figcaption></figure>"
+                        for name, caption in shots if (folder / name).is_file())
+    if figures:
+        figures = '<h2 class="shelf">In the notebook</h2>\n' + figures
     page = SHELF.format(
         katex_css=html.escape(urls["katexCss"] if urls else default_urls()["katexCss"], quote=True),
-        editor_css=read_static("editor.css"), cards="\n".join(cards),
+        editor_css=read_static("editor.css"), cards="\n".join(cards), figures=figures,
         editor_js=read_static("editor.js"), mounts="\n".join(mounts), count=len(cards),
         editor_href=html.escape(editor_href, quote=True))
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "index.html").write_text(page, encoding="utf-8")
+    doc_pages(folder)
+    icon = ROOT / "mobile" / "icon" / "icon.svg"     # the pages' mark, where write_icons did not run (dist/derivations)
+    if icon.is_file() and not (folder / "icon.svg").exists():
+        shutil.copyfile(icon, folder / "icon.svg")
     return folder / "index.html"
 
 
