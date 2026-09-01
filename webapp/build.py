@@ -216,6 +216,9 @@ h2.shelf {{ font-size: 1.1rem; text-transform: uppercase; letter-spacing: 0.06em
 footer {{ margin-top: 4rem; padding-top: 1.4rem; border-top: 1px solid #d0d7de;
          color: #656d76; font-size: 0.9rem; }}
 footer code {{ font-size: 0.85em; }}
+footer nav.legal {{ margin-top: 0.7rem; }}
+footer nav.legal a {{ color: inherit; }}
+header a.button code {{ font-size: 0.85em; }}
 @media (prefers-color-scheme: dark) {{
   body {{ background: #1e1e1e; color: #e6e6e6; }}
   header p, .card p, .card .steps, footer, h2.shelf {{ color: #a0a0a0; }}
@@ -239,6 +242,7 @@ footer code {{ font-size: 0.85em; }}
   <div class="actions">
     <a class="button primary" href="{editor_href}">Open the editor</a>
     <a class="button" href="https://github.com/Upabjojr/sympy-editor">Source on GitHub</a>
+    <a class="button" href="https://pypi.org/project/sympy-editor/"><code>pip install sympy-editor</code></a>
   </div>
 </header>
 <h2 class="shelf">Worked derivations</h2>
@@ -246,7 +250,11 @@ footer code {{ font-size: 0.85em; }}
 <footer>Each one is a <code>sympy_editor.History</code>: a list of expressions
 and a word about what turned each into the next (<code>examples/derivations/</code>
 in the repository). Press <b>Play</b> on any of them, or <b>Save</b> to keep it
-as a single file that works offline.</footer>
+as a single file that works offline.
+<nav class="legal"><a href="https://github.com/Upabjojr/sympy-editor">GitHub</a> \u00b7
+<a href="https://pypi.org/project/sympy-editor/">PyPI</a> \u00b7
+<a href="license.html">License (BSD 3-Clause)</a> \u00b7
+<a href="privacy.html">Privacy</a></nav></footer>
 </main>
 <script>
 {editor_js}
@@ -257,6 +265,143 @@ as a single file that works offline.</footer>
 </body>
 </html>
 """
+
+#: The frame of a document page (the licence, the privacy statement): the
+#: shelf's own dress - the mark beside the title, cards with a drawn icon
+#: each, the same colours in the light and in the dark.
+DOC_PAGE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title} \u2014 SymPy editor</title>
+<meta name="description" content="{description}">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>
+:root {{ color-scheme: light dark; }}
+body {{ margin: 0; padding: 0 1.2rem 5rem; background: #ffffff; color: #1f2328;
+       font: 16px/1.65 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }}
+main {{ max-width: 46rem; margin: 0 auto; }}
+header {{ padding: 3rem 0 1.6rem; }}
+h1 {{ font-size: 1.7rem; margin: 0 0 0.3rem; letter-spacing: -0.01em;
+      display: flex; align-items: center; gap: 0.6rem; }}
+h1 img {{ border-radius: 0.7rem; }}
+header p.lead {{ margin: 0.4rem 0 0; color: #656d76; }}
+a {{ color: #3b82f6; }}
+nav.crumbs {{ font-size: 0.9rem; margin: 0 0 0.8rem; }}
+nav.crumbs a {{ text-decoration: none; }}
+.card {{ border: 1px solid #d0d7de; border-radius: 0.8rem; padding: 1.1rem 1.3rem;
+        margin: 1.1rem 0; display: flex; gap: 1rem; align-items: flex-start; }}
+.card svg {{ flex: 0 0 auto; width: 2.1rem; height: 2.1rem; margin-top: 0.15rem;
+            stroke: #3b82f6; }}
+.card h2 {{ font-size: 1.05rem; margin: 0 0 0.3rem; }}
+.card p {{ margin: 0 0 0.5rem; }} .card p:last-child {{ margin-bottom: 0; }}
+.card ul {{ margin: 0.3rem 0 0.5rem; padding-left: 1.1rem; }}
+pre.licence {{ border: 1px solid #d0d7de; border-radius: 0.8rem; padding: 1.2rem 1.4rem;
+              overflow-x: auto; font-size: 0.85rem; line-height: 1.55; }}
+footer {{ margin-top: 3rem; padding-top: 1.2rem; border-top: 1px solid #d0d7de;
+         color: #656d76; font-size: 0.9rem; }}
+@media (prefers-color-scheme: dark) {{
+  body {{ background: #1e1e1e; color: #e6e6e6; }}
+  header p.lead, footer {{ color: #a0a0a0; }}
+  .card, pre.licence, footer {{ border-color: #444; }}
+}}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <nav class="crumbs"><a href="index.html">\u2190 SymPy editor</a></nav>
+  <h1><img src="icon.svg" alt="" width="44" height="44"> {title}</h1>
+  <p class="lead">{lead}</p>
+</header>
+{body}
+<footer>{footer}</footer>
+</main>
+</body>
+</html>
+"""
+
+#: Small drawn icons for the cards, in the flat stroke style of the editor's
+#: own (fill none, round caps, currentColor-free: the accent is set in CSS).
+DOC_ICONS = {
+    "device": '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+              '<rect x="7" y="2.5" width="10" height="19" rx="2.2"/><path d="M10.5 18.5h3"/></svg>',
+    "store": '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+             '<path d="M4.5 9.5 5.6 4h12.8l1.1 5.5"/><path d="M4.5 9.5h15V19a1.8 1.8 0 0 1-1.8 1.8H6.3A1.8 1.8 0 0 1 4.5 19Z"/>'
+             '<path d="M9.5 13.5h5"/></svg>',
+    "globe": '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+             '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.6 2.3 3.9 5.1 3.9 8.5s-1.3 6.2-3.9 8.5c-2.6-2.3-3.9-5.1-3.9-8.5S9.4 5.8 12 3.5Z"/></svg>',
+    "mail": '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+            '<rect x="3" y="5.5" width="18" height="13" rx="2"/><path d="m4 7 8 6 8-6"/></svg>',
+    "scale": '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+             '<path d="M12 4v16M7 20h10M12 4 5.5 7M12 4l6.5 3"/><path d="M3 12.5 5.5 7 8 12.5a2.7 2.7 0 0 1-5 0ZM16 12.5 18.5 7 21 12.5a2.7 2.7 0 0 1-5 0Z"/></svg>',
+}
+
+PRIVACY_CARDS = [
+    ("device", "Everything stays on your device", """
+<p>The editor computes where it runs. Expressions, sessions, their histories
+and the zoom are kept in the app's own storage on your device (the browser's
+local storage); deleting a session, or the app or the site data, removes
+them. There are no accounts, no cookies, no analytics and no telemetry
+&mdash; the source is public, and none of that is in it.</p>"""),
+    ("store", "The apps and the stores", """
+<p>The Android and iOS apps carry everything they need and make no network
+requests: nothing you type ever leaves the phone. Installing them through
+Google Play or the App Store means Google or Apple collect their own data
+&mdash; downloads, crashes, device statistics &mdash; under
+<a href="https://policies.google.com/privacy">Google's</a> and
+<a href="https://www.apple.com/legal/privacy/">Apple's</a> privacy policies;
+of that, the developer only ever sees aggregate statistics.</p>"""),
+    ("globe", "This website", """
+<p>These pages are served by GitHub Pages, which logs visits (your IP
+address) as any web host does &mdash; see the
+<a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">GitHub
+Privacy Statement</a>. The derivations on the front page carry their own
+rendering and load nothing else. The <em>editor</em> page fetches its
+Python runtime (Pyodide, SymPy) from public CDNs &mdash; jsDelivr and
+PyPI's file host &mdash; the way any download does, so those services see
+that request; what you then type in the editor still stays in your
+browser.</p>"""),
+    ("mail", "If you write to us", """
+<p>The project has no chat and collects no messages. If you open an issue or
+a discussion on the
+<a href="https://github.com/Upabjojr/sympy-editor">GitHub repository</a>,
+that is public and processed by GitHub under its own terms, and we see what
+you chose to post &mdash; nothing more.</p>"""),
+]
+
+
+def doc_pages(folder: Path) -> None:
+    """Write the licence and the privacy statement beside the shelf:
+    ``license.html`` and ``privacy.html`` in its dress, and ``LICENSE.txt``
+    verbatim.  The pages a store listing and a curious visitor both ask
+    for, kept where the site is built so a rebuild never loses them."""
+    licence = (ROOT / "LICENSE").read_text(encoding="utf-8")
+    (folder / "LICENSE.txt").write_text(licence, encoding="utf-8")
+    card = lambda icon, title, body: f'<section class="card">{DOC_ICONS[icon]}<div><h2>{title}</h2>{body}</div></section>'
+    (folder / "license.html").write_text(DOC_PAGE.replace("\\u2014", "\u2014").replace("\\u2190", "\u2190").format(
+        title="License", description="SymPy editor is free software under the BSD 3-Clause License.",
+        lead="SymPy editor is free software, under the BSD 3-Clause License.",
+        body=card("scale", "In short",
+                  """<p>Use it, copy it, change it, redistribute it &mdash; commercially or
+not &mdash; as long as the copyright notice travels with it, and without
+using the author's name to promote what you make from it. It comes with no
+warranty. The short version is not the licence; the licence is:</p>""")
+             + f'<pre class="licence">{html.escape(licence)}</pre>',
+        footer='The same text as a plain file: <a href="LICENSE.txt">LICENSE.txt</a>. '
+               'The rendering (KaTeX) and the in-browser Python (Pyodide, SymPy) have free licences of their own, '
+               'listed in <a href="https://github.com/Upabjojr/sympy-editor">the repository</a>.'),
+        encoding="utf-8")
+    cards = "".join(card(icon, title, body) for icon, title, body in PRIVACY_CARDS)
+    (folder / "privacy.html").write_text(DOC_PAGE.replace("\\u2014", "\u2014").replace("\\u2190", "\u2190").format(
+        title="Privacy", description="SymPy editor collects no data: the mathematics stays on your device.",
+        lead="The short version: the editor computes on your device, and nothing you type is sent anywhere by us.",
+        body=cards,
+        footer="This page describes SymPy editor 0.1.0 (September 2026). "
+               "If the facts change, this page changes with them."),
+        encoding="utf-8")
+
 
 CARD = """<section class="card" id="{slug}">
   <span class="steps">{steps} steps</span>
@@ -318,6 +463,10 @@ def derivations_page(folder: Path, *, urls: dict | None = None,
         editor_href=html.escape(editor_href, quote=True))
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "index.html").write_text(page, encoding="utf-8")
+    doc_pages(folder)
+    icon = ROOT / "mobile" / "icon" / "icon.svg"     # the pages' mark, where write_icons did not run (dist/derivations)
+    if icon.is_file() and not (folder / "icon.svg").exists():
+        shutil.copyfile(icon, folder / "icon.svg")
     return folder / "index.html"
 
 

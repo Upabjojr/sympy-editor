@@ -106,3 +106,30 @@ def test_the_web_app_wears_the_app_s_own_icon(tmp_path):
             assert image.size == (size, size)
     manifest = build.manifest()
     assert [i["src"] for i in manifest["icons"]] == ["icon.svg", "icon-192.png", "icon-512.png"]
+
+
+def test_the_shelf_carries_the_licence_and_the_privacy_statement(tmp_path):
+    """A store listing and a curious visitor both ask for these pages, and
+    they must say only what is true: no collection by the app, the stores'
+    own collection under their policies, the CDN fetches of the editor page,
+    and GitHub for anyone who writes."""
+    build = _load()
+    out = build.derivations_page(tmp_path / "shelf", urls=None, editor_href="editor.html")
+    folder = out.parent
+    licence = (folder / "license.html").read_text(encoding="utf-8")
+    assert "BSD 3-Clause License" in licence and "Redistribution and use" in licence
+    assert (folder / "LICENSE.txt").read_text(encoding="utf-8") == (build.ROOT / "LICENSE").read_text(encoding="utf-8")
+    privacy = (folder / "privacy.html").read_text(encoding="utf-8")
+    for said in ("no accounts, no cookies, no analytics", "make no network\nrequests",
+                 "Google Play or the App Store", "GitHub Pages", "jsDelivr",
+                 "no chat and collects no messages", "github.com/Upabjojr/sympy-editor"):
+        assert said in privacy, said
+    # both wear the mark and the shelf's dress
+    for page in (licence, privacy):
+        assert '<img src="icon.svg"' in page and "prefers-color-scheme: dark" in page
+        assert '<svg viewBox="0 0 24 24"' in page                        # a drawn icon per card
+    # and the shelf links to them, to the repository and to PyPI
+    index = out.read_text(encoding="utf-8")
+    for href in ('href="license.html"', 'href="privacy.html"',
+                 'href="https://github.com/Upabjojr/sympy-editor"', 'href="https://pypi.org/project/sympy-editor/"'):
+        assert href in index, href
