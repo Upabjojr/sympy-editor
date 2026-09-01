@@ -13,6 +13,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple as Typin
 
 import io
 import keyword
+import logging
 import tokenize
 
 import sympy
@@ -162,6 +163,47 @@ def _over_contents(fn, target, args):
             except Exception:
                 continue
         raise
+
+
+def _as_basic(result: Any) -> Any:
+    """A call's result as one SymPy object, containers included: a tuple
+    becomes a ``Tuple`` (``as_numer_denom`` is an ordered pair), a list or a
+    set a ``FiniteSet`` (``solve`` gives the set of solutions), a dict a
+    ``Dict`` - all the way down.  ``factor_list`` returns a tuple holding a
+    list of tuples: sympified as it came, that was a ``Tuple`` with a plain
+    list inside, which nothing could print."""
+    if isinstance(result, Basic):
+        return result
+    if isinstance(result, dict):
+        return sympy.Dict({_as_basic(k): _as_basic(v) for k, v in result.items()})
+    if isinstance(result, (set, frozenset)):
+        return sympy.FiniteSet(*[_as_basic(r) for r in result])
+    if isinstance(result, list):
+        return sympy.FiniteSet(*[_as_basic(r) for r in result])
+    if isinstance(result, tuple):
+        return Tuple(*[_as_basic(r) for r in result])
+    return sympify(result)
+
+
+def _rebuilt(expr: Basic) -> Basic:
+    """``expr`` built again from the leaves up through its constructors, as
+    SymPy would have built it (``xreplace`` skips them)."""
+    if not isinstance(expr, Basic) or not expr.args:
+        return expr
+    return rebuild(expr, [_rebuilt(a) for a in expr.args])
+
+
+def _well_formed(expr: Basic) -> None:
+    """Refuse the mixtures SymPy's operators refuse but its constructors let
+    through: a matrix among the terms of a plain ``Add`` (``M + 1``), a
+    matrix as an exponent (``2**M``)."""
+    from sympy import preorder_traversal
+    matrixish = lambda a: isinstance(a, (MatrixBase, MatrixExpr))
+    for node in preorder_traversal(expr):
+        if isinstance(node, Add) and not isinstance(node, sympy.MatAdd) and any(matrixish(a) for a in node.args):
+            raise TypeError("a matrix cannot be added to a scalar")
+        if isinstance(node, sympy.Pow) and matrixish(node.exp):
+            raise TypeError("a matrix cannot be an exponent")
 
 
 def render_step(expr: Basic, printer_settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -366,7 +408,10 @@ class Document:
                 obj = sympify(obj, locals={"Str": Str})
             self.declared[self._symbol_name(obj)] = obj
         if history:
-            self._history = [self._coerce(e) for e in history][-self.max_history:]
+            steps = [self._coerce(e) for e in history]
+            if labels is not None and len(labels) > len(steps):
+                raise ValueError(f"{len(labels)} labels for {len(steps)} history steps")
+            self._history = steps[-self.max_history:]
             given = list(labels or [])[-len(self._history):]
             self._labels = [None] * (len(self._history) - len(given)) + [None if not l else str(l) for l in given]
             self._index = len(self._history) - 1 if index is None else max(0, min(int(index), len(self._history) - 1))
@@ -863,9 +908,7 @@ class Document:
             result = attr(*args) if callable(attr) else attr
         else:
             raise ValueError(f"Unknown SymPy function or method: {name!r}")
-        if isinstance(result, (list, tuple, set, frozenset)):
-            result = sympy.FiniteSet(*result) if all(isinstance(r, Basic) for r in result) else sympify(result)
-        result = sympify(result)
+        result = _as_basic(result)
         if not isinstance(result, Basic):
             raise ValueError(f"{name} returned {type(result).__name__}, not an expression")
         if children is not None:
@@ -1193,8 +1236,14 @@ class Document:
         new_expr = self._coerce(self.expr.xreplace({old: new}))
         # xreplace rebuilds without the constructors' checks, so a matrix
         # turned back into a scalar can leave a Transpose(Symbol) behind - a
-        # tree nothing can print.  Refuse it rather than commit it.
+        # tree nothing can print - and a scalar turned into a matrix a
+        # ``1 + Matrix`` that prints but that SymPy would never have built
+        # (``M + 1`` is a TypeError), on which every transformation is then
+        # a silent no-op.  Rebuild it through the constructors and refuse
+        # what they refuse, and what they merely tolerate.
         try:
+            new_expr = _rebuilt(new_expr)
+            _well_formed(new_expr)
             plain_latex(new_expr, **self.printer_settings)
         except Exception as exc:
             raise ValueError(f"{name} cannot become a {kind} where it is used: {exc}") from None
@@ -1266,9 +1315,15 @@ class Document:
         """A snapshot of ``src`` parsed as the whole expression, without
         committing it (the source line shows it while it is typed; Enter
         commits with ``set``).  Flagged ``preview``; a string that does not
-        parse gives the current snapshot with ``error`` and the flag."""
+        parse gives the current snapshot with ``error`` and the flag.
+
+        Parsed exactly as ``set`` will parse it - in the context of the
+        expression it replaces, so that over a matrix new names are matrices
+        in the preview as they will be in the result.  The two used to
+        differ: ``a*b + c`` typed over a matrix previewed as a scalar sum
+        and committed as a sum of matrix symbols."""
         try:
-            snap = self.snapshot(expr=self.parse(src))
+            snap = self.snapshot(expr=self.parse(src, context=self.expr))
         except Exception as exc:
             snap = self.snapshot(error=f"{type(exc).__name__}: {exc}")
         snap["preview"] = True
@@ -1327,7 +1382,7 @@ class Document:
                 return snap
             if action == "goto":
                 self.goto(message.get("index", 0))
-            if action == "replace":
+            elif action == "replace":
                 self.replace(path, str(message.get("src", "")), children=children)
             elif action == "retype":
                 self.retype(str(message.get("name", "")), str(message.get("type", "")),
@@ -1455,7 +1510,22 @@ class Document:
             raise TypeError(f"Cannot edit {type(expr).__name__} objects")
         return result
 
+    def _showable(self, expr: Basic) -> None:
+        """Refuse an expression the front end could not render.  Every
+        message answers with a snapshot of the current expression, so a head
+        of the history that does not print would fail every request after
+        the one that put it there - the document would be dead.  The
+        annotated render done here is kept for the history list."""
+        try:
+            self._render_cache_get(expr)
+            annotate_str(expr)
+            plain_latex(expr, **self.printer_settings)
+        except Exception as exc:
+            raise ValueError(f"The result cannot be shown ({type(exc).__name__}: {exc}); "
+                             "the expression is unchanged") from None
+
     def _commit(self, expr: Basic) -> Basic:
+        self._showable(expr)
         del self._history[self._index + 1:]
         del self._labels[self._index + 1:]
         self._history.append(expr)
@@ -1468,8 +1538,13 @@ class Document:
         return expr
 
     def _notify(self) -> None:
+        # The edit is committed by now: a callback that fails must not make
+        # it look as if it had not been.  Its traceback goes to the log.
         for cb in list(self._listeners):
-            cb(self.expr)
+            try:
+                cb(self.expr)
+            except Exception:
+                logging.getLogger(__name__).exception("on_change callback %r failed", cb)
 
     def __repr__(self) -> str:
         return f"Document({self.expr!r})"
