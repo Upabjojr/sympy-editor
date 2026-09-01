@@ -2904,8 +2904,9 @@ def test_the_history_can_be_resized(browser, tmp_path):
 
 def test_the_slideshow_runs_at_the_speed_it_is_told(browser, tmp_path):
     """A slideshow at one pace suits nobody: the strip halves and doubles it.
-    The buttons say \u00bd\u00d7 and 2\u00d7 rather than - and +, which two groups
-    along already mean the size of the formulas."""
+    The two buttons are dials with nothing written on them - the speed is on
+    the button between them - and they stand well clear of the zoom, whose
+    - and + mean something else."""
     from sympy import Integral, cos
     from sympy_editor import History, to_history_html
 
@@ -2969,6 +2970,39 @@ def test_the_slideshow_runs_at_the_speed_it_is_told(browser, tmp_path):
     assert _wait(lambda: count.inner_text() == "3 / 3", 3.0)
     # and it stops there, one interval later - a short one, at this speed
     assert _wait(lambda: page.locator(".se-play").inner_text().endswith("Play"), 2.0)
+
+    # "," and "." do the same from the keyboard, but only while it plays:
+    # the keys belong to the slideshow, not to the page around it
+    rate.click()
+    for _ in range(2):
+        slower.click()                                       # 0.25x: slow enough to type into
+    # (the keys reach the report, so the reader has to be in it: a click on
+    # the steps is how anyone gets there)
+    page.frame_locator(".se-history-frame").locator("body").click(position={"x": 5, "y": 5})
+    page.keyboard.press(",")
+    assert rate.inner_text() == "0.25\u00d7"                  # not playing: the key is not ours
+    page.locator(".se-play").click()
+    assert _wait(lambda: page.locator(".se-play").inner_text().endswith("Pause"))
+    page.frame_locator(".se-history-frame").locator("body").click(position={"x": 5, "y": 5})
+    page.keyboard.press(".")
+    assert _wait(lambda: rate.inner_text() == "0.5\u00d7"), rate.inner_text()
+    page.keyboard.press(",")
+    assert _wait(lambda: rate.inner_text() == "0.25\u00d7"), rate.inner_text()
+    page.locator(".se-play").click()                          # pause
+
+    # The bar inside the report drives the same engine: a page saved with
+    # "Save as web page" has no strip around it and plays from these.
+    page.frames[1].evaluate("() => document.body.classList.remove('hosted')")
+    own = page.frame_locator(".se-history-frame")
+    own.locator(".speed-faster").click()
+    assert _wait(lambda: rate.inner_text() == "0.5\u00d7"), rate.inner_text()
+    assert own.locator(".speed-level").inner_text() == "0.5\u00d7"     # both readouts agree
+    own.locator(".speed-level").click()
+    assert _wait(lambda: rate.inner_text() == "1\u00d7")
+    own.locator(".speed-slower").click()
+    assert _wait(lambda: rate.inner_text() == "0.5\u00d7")
+    assert own.locator(".speed-slower svg").count() == 1               # dials there too
+    assert own.locator(".speed-faster").inner_text().strip() == ""
     assert errors == []
     page.close()
 
