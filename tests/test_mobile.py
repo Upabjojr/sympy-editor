@@ -98,6 +98,28 @@ def test_the_ios_export_options_name_the_profile_and_its_certificate():
         export_options("enterprise", "T")
 
 
+def test_the_app_plist_leads_the_ipa(tmp_path):
+    """altool reads the bundle id from the first Info.plist of the archive."""
+    import zipfile
+    sys.path.insert(0, str(ROOT / "mobile"))
+    from build import app_plist_first
+    ipa = tmp_path / "x.ipa"
+    with zipfile.ZipFile(ipa, "w") as z:
+        z.writestr("Payload/X.app/Frameworks/_socket.framework/Info.plist", "socket")
+        z.writestr("Payload/X.app/Frameworks/_socket.framework/_socket", "bits")
+        z.writestr("Payload/X.app/Info.plist", "app")
+        z.writestr("Payload/X.app/X", "main")
+    app_plist_first(ipa)
+    with zipfile.ZipFile(ipa) as z:
+        names = z.namelist()
+        assert names[0] == "Payload/X.app/Info.plist" and z.read(names[0]) == b"app"
+        assert sorted(names) == sorted(["Payload/X.app/Frameworks/_socket.framework/Info.plist",
+                                        "Payload/X.app/Frameworks/_socket.framework/_socket",
+                                        "Payload/X.app/Info.plist", "Payload/X.app/X"])
+        assert names[1:] == ["Payload/X.app/Frameworks/_socket.framework/Info.plist",
+                             "Payload/X.app/Frameworks/_socket.framework/_socket", "Payload/X.app/X"]
+
+
 def _load_app_module():
     """The module both apps run (mobile/app, staged into each by build.py)."""
     path = ROOT / "mobile" / "app" / "sympy_editor_app.py"

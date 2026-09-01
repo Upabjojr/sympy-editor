@@ -27,6 +27,7 @@ import subprocess
 import sys
 import tarfile
 import urllib.request
+import zipfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -301,7 +302,27 @@ def ios_build(simulator: bool, cdn: bool, method: str, launch: bool = False) -> 
     plist.write_bytes(export_options(method, env["IOS_TEAM_ID"], profile))
     run(["xcodebuild", "-exportArchive", "-archivePath", str(archive), "-exportOptionsPlist", str(plist),
          "-exportPath", str(out / "ipa"), *signing], cwd=IOS, env=env)
-    return sorted((out / "ipa").glob("*.ipa"))
+    made = sorted((out / "ipa").glob("*.ipa"))
+    for ipa in made:
+        app_plist_first(ipa)
+    return made
+
+
+def app_plist_first(ipa: Path) -> None:
+    """Put the app's Info.plist ahead of the frameworks' in the archive.
+
+    altool takes the bundle identifier of an .ipa from the first Info.plist
+    it meets, and Xcode zips ``Frameworks/`` before the app's own: with
+    sixty-odd extension modules, each a framework, the upload was refused
+    as ``org.sympy.editor.-socket``.  The order of the entries is nothing
+    to the signature.
+    """
+    first = next(name for name in zipfile.ZipFile(ipa).namelist() if name.count("/") == 2 and name.endswith("/Info.plist"))
+    ordered = ipa.with_suffix(".ordered")
+    with zipfile.ZipFile(ipa) as src, zipfile.ZipFile(ordered, "w") as dst:
+        for info in sorted(src.infolist(), key=lambda i: i.filename != first):
+            dst.writestr(info, src.read(info))
+    ordered.replace(ipa)
 
 
 def export_options(method: str, team: str, profile: str | None = None) -> bytes:
