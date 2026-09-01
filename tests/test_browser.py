@@ -3028,6 +3028,10 @@ def test_the_app_wears_its_own_icon_beside_its_name(browser, serve_expr):
         return {mark: [mark.x, mark.y, mark.height], h1: [h1.x, h1.y, h1.height], bar: [bar.y], text};
     }""")
     assert where["text"] == "SymPy editor"
+    # the mark is decorative: the words beside it are the heading, and the
+    # licence note inside the drawing is not part of what the heading says
+    assert page.locator("h1 .page-logo").get_attribute("aria-hidden") == "true"
+    assert page.locator("h1").inner_text() == "SymPy editor"
     # on the title's line: same left edge as the heading, centred on it, and
     # about as tall as the words rather than a picture of its own
     assert abs(where["mark"][0] - where["h1"][0]) < 2

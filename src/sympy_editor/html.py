@@ -207,7 +207,10 @@ def render_page(config: Dict[str, Any], title: str = "SymPy editor", head: str =
     ``logo`` is SVG markup shown beside the title (the applications put their
     own icon there, having no title bar to carry it)."""
     name = _html.escape(title)
-    heading = f'<span class="page-logo">{logo}</span>{name}' if logo else name
+    # aria-hidden: the heading beside it already says the name, and the mark's
+    # own <title>/<desc> - the note that lets us use SymPy's logo - would
+    # otherwise be read out as part of the heading.
+    heading = f'<span class="page-logo" aria-hidden="true">{logo}</span>{name}' if logo else name
     return _PAGE % {"title": name, "heading": heading,
                     "fragment": render_fragment(config, element_id), "head": head}
 

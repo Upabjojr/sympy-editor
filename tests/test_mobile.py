@@ -194,7 +194,7 @@ def test_the_app_view_wears_the_icon_and_is_the_same_on_both_phones():
     page = mod.build(ROOT / "mobile" / "www", cdn=True).joinpath("index.html").read_text(encoding="utf-8")
     # on the title's line, in the page itself - not in the editor's options:
     # the mark belongs to the window, not to the tools
-    assert '<h1><span class="page-logo"><svg' in page
+    assert '<h1><span class="page-logo" aria-hidden="true"><svg' in page
     assert "</svg></span>SymPy editor</h1>" in page
     assert '"logo"' not in page.split("</h1>", 1)[1]
 
