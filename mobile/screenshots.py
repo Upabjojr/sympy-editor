@@ -57,6 +57,9 @@ class Screen:
     def __init__(self, pw, expr, work: Path, out: Path):
         folder = work / "www"
         build_www.build(folder, native=True, expr=expr)
+        # the shots must show the app, which computes in its own Python: a
+        # page that loaded Pyodide instead would be a picture of a spinner
+        assert not (folder / "vendor" / "pyodide").exists(), "the bundle carries Pyodide: not the apps' page"
         self.srv, self.out = serve(folder), out
         self.browser = pw.webkit.launch()
         ctx = self.browser.new_context(viewport={"width": W, "height": H}, device_scale_factor=SCALE, is_mobile=True, has_touch=True)
@@ -66,6 +69,7 @@ class Screen:
         self.page.on("pageerror", lambda e: print("page error:", e))
         self.page.goto(f"http://127.0.0.1:{self.srv.server_address[1]}/index.html")
         self.page.wait_for_selector(".sympy-editor .katex", timeout=60000)
+        assert self.ev("!!window.SympyEditorPy && !window.pyodide && !window.loadPyodide"), "the page is not on the native backend"
         self.page.wait_for_timeout(600)
         self.page.evaluate("document.activeElement && document.activeElement.blur()")
 
