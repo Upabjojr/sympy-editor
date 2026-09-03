@@ -108,6 +108,19 @@ def test_the_web_app_wears_the_app_s_own_icon(tmp_path):
     assert [i["src"] for i in manifest["icons"]] == ["icon.svg", "icon-192.png", "icon-512.png"]
 
 
+def test_the_shelf_s_editor_wears_the_mark_beside_its_title(tmp_path):
+    """The editor the site links to is the project's own page, and shows it:
+    the mark sits on the title's line, as it does in the apps.  It was the one
+    page built without a logo, and the site showed a bare heading."""
+    build = _load()
+    out = build.shelf_site(tmp_path / "shelf", cdn=True)
+    page = (out / "editor.html").read_text(encoding="utf-8")
+    assert '<h1><span class="page-logo" aria-hidden="true"><svg' in page
+    mark = (ROOT / "mobile/icon/icon.svg").read_text(encoding="utf-8").split("?>", 1)[-1].strip()
+    assert mark in page                                          # the same drawing the launcher shows
+    assert page.index(mark) < page.index("SymPy editor</h1>")     # beside the title, not after it
+
+
 def test_the_shelf_carries_the_licence_and_the_privacy_statement(tmp_path):
     """A store listing and a curious visitor both ask for these pages, and
     they must say only what is true: no collection by the app, the stores'

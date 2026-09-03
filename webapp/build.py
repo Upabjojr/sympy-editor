@@ -610,7 +610,10 @@ def shelf_site(out: Path, *, cache: Path | None = None, cdn: bool = False) -> Pa
     from sympy_editor import to_html
 
     icon = '<link rel="icon" href="icon.svg" type="image/svg+xml">\n<link rel="apple-touch-icon" href="icon-192.png">\n'
-    editor = to_html(build_www.demo_expression(), title=NAME, head=icon)   # Pyodide from the CDN, ~0.5 MB
+    # the mark beside the title, as the apps wear it: this page is the project's
+    # own, and says so where a plain page would say nothing
+    editor = to_html(build_www.demo_expression(), title=NAME, head=icon,
+                     logo=build_www.app_logo())   # Pyodide from the CDN, ~0.5 MB
     (out / "editor.html").write_text(editor, encoding="utf-8")
     derivations_page(out, urls=urls, editor_href="editor.html")
     return out
