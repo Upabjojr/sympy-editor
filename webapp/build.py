@@ -234,11 +234,12 @@ section.try .sympy-editor {{ box-shadow: 0 1px 2px rgba(27, 31, 36, 0.04), 0 12p
 /* Every example is a slideshow waiting to be started, and a still page does
  * not say so: the Play buttons breathe - a little larger, a little bluer, and
  * back - about once a second, so nobody takes the derivations for pictures.
- * The pulse holds still under the pointer (a target that moves is a poor one)
- * and stops for good once somebody has pressed one: the point is made.  The
- * colours come from the editor's own variables, so it dresses for the dark
- * like everything around it, and a visitor who asked for less motion gets the
- * blue without the movement. */
+ * It never stops: a visitor who arrives at the tenth card has been told
+ * nothing by a pulse the first one used up.  Only the pointer and the
+ * keyboard's focus hold it still, and only while they are on it - a target
+ * that moves is a poor one.  The colours come from the editor's own
+ * variables, so it dresses for the dark like everything around it, and a
+ * visitor who asked for less motion gets the blue without the movement. */
 @keyframes se-play-notice {{
   0%, 100% {{ transform: scale(1); border-color: var(--se-border); background: var(--se-btn);
              color: inherit; box-shadow: var(--se-btn-edge), var(--se-btn-shadow); }}
@@ -249,7 +250,6 @@ section.try .sympy-editor {{ box-shadow: 0 1px 2px rgba(27, 31, 36, 0.04), 0 12p
 .card .se-history-head .se-play:not(:disabled) {{ animation: se-play-notice 1.1s ease-in-out infinite; }}
 .card .se-history-head .se-play:hover,
 .card .se-history-head .se-play:focus-visible {{ animation: none; }}
-body.se-played .card .se-history-head .se-play {{ animation: none; }}
 @media (prefers-reduced-motion: reduce) {{
   .card .se-history-head .se-play:not(:disabled) {{ animation: none;
     border-color: rgba(var(--se-accent), 0.85); color: rgb(var(--se-accent)); }}
@@ -391,14 +391,6 @@ as a single file that works offline.
 </script>
 <script>
 {mounts}
-</script>
-<script>
-// The Play buttons pulse until one is used: pressing any of them tells the
-// page it has been understood, and they all go quiet (a reload asks again).
-document.addEventListener("click", function (ev) {{
-  var target = ev.target;
-  if (target && target.closest && target.closest(".se-play")) document.body.classList.add("se-played");
-}}, true);
 </script>
 </body>
 </html>
