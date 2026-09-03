@@ -121,6 +121,32 @@ def test_the_shelf_s_editor_wears_the_mark_beside_its_title(tmp_path):
     assert page.index(mark) < page.index("SymPy editor</h1>")     # beside the title, not after it
 
 
+def test_the_shelf_opens_with_an_editor_of_its_own(tmp_path):
+    """The page is about an editor, so it starts with one: a live editor above
+    everything else, sharing the copy of editor.js the viewers already carry,
+    and the button beside the title now says which editor it opens instead.
+    Python is not loaded until somebody edits something (`preload` false), so
+    a visitor who only reads pays nothing for it."""
+    build = _load()
+    out = build.shelf_site(tmp_path / "shelf", cdn=True)
+    page = (out / "index.html").read_text(encoding="utf-8")
+    assert page.index("</header>") < page.index('<h2 class="shelf">Try it</h2>') < page.index(">Use it<")
+    assert '<div id="try-the-editor"></div>' in page
+    mount = 'SympyEditor.mount(document.getElementById("try-the-editor"), '
+    assert mount in page
+    line = page.split(mount, 1)[1].splitlines()[0]              # the config is one line of JSON
+    cfg = json.loads(line.removesuffix(");").replace("\\u003c", "<"))
+    assert cfg["backend"] == "pyodide" and cfg["options"]["preload"] is False
+    assert cfg["sources"] and cfg["srepr"]                       # it computes, and knows what to start from
+    assert ">Open standalone editor</a>" in page                 # the button names the other one
+    assert "Open the editor" not in page
+    # one copy of the editor's code for the whole page, embedded editor included
+    assert page.count(mount) == 1 and page.count("function mountHistory(") == 1
+    # ...and the application's own derivations page keeps its neighbour instead
+    bare = build.derivations_page(tmp_path / "bare", urls=None, editor_href="../index.html")
+    assert "try-the-editor" not in bare.read_text(encoding="utf-8")
+
+
 def test_the_shelf_carries_the_licence_and_the_privacy_statement(tmp_path):
     """A store listing and a curious visitor both ask for these pages, and
     they must say only what is true: no collection by the app, the stores'

@@ -226,6 +226,11 @@ h2.shelf::after {{ content: ""; flex: 1; height: 1px;
                color: #2e6fe3; background: rgba(59, 130, 246, 0.1);
                border-radius: 1rem; padding: 0.15rem 0.65rem; margin: 0.1rem 0 0 0.8rem; }}
 .card .se-history-page {{ height: 30rem; min-height: 18rem; border: 1px solid #e4e8ec; border-radius: 0.6rem; }}
+section.try {{ margin: 1.4rem 0 0; }}
+section.try > p {{ margin: 0 0 0.9rem; color: #57606a; font-size: 0.95rem; max-width: 42rem; }}
+/* the editor brings its own panel (border, background, dark mode): the page
+ * only has to give it the width and keep it off the text above */
+section.try .sympy-editor {{ box-shadow: 0 1px 2px rgba(27, 31, 36, 0.04), 0 12px 28px -22px rgba(27, 31, 36, 0.4); }}
 .snippets {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(21rem, 1fr));
              gap: 1.2rem; margin-top: 1.8rem; }}
 .snippet {{ background: #ffffff; border: 1px solid #d8dee4; border-radius: 1rem; padding: 1.2rem 1.3rem;
@@ -266,7 +271,7 @@ footer nav.legal a {{ color: inherit; }}
 header a.button code {{ font-size: 0.85em; }}
 @media (prefers-color-scheme: dark) {{
   body {{ color: #e6e6e6; background: #1b1d20 linear-gradient(180deg, #202329 0%, #1c1e22 22rem, #1b1d20 100%); }}
-  header p, .card p, footer {{ color: #a0a0a0; }}
+  header p, .card p, section.try > p, footer {{ color: #a0a0a0; }}
   p.eyebrow {{ color: #7cadf8; }}
   h2.shelf {{ color: #a0a0a0; }}
   h2.shelf::after {{ background: linear-gradient(90deg, #3a3f45, rgba(58, 63, 69, 0)); }}
@@ -294,15 +299,16 @@ header a.button code {{ font-size: 0.85em; }}
   it apart - with the formula drawn as mathematics the whole time, never as
   code. It runs in the browser, in a Jupyter notebook, or as an app.</p>
   <p>Every edit is a step, and the steps make a <b>history</b>: what changed,
-  what produced it, and what it became. The viewer below is that history,
-  and it does not need the editor at all - a derivation computed in Python
+  what produced it, and what it became. The viewers further down are that
+  history, and they do not need the editor at all - a derivation computed in Python
   is shown the same way. Here are {count} of them.</p>
   <div class="actions">
-    <a class="button primary" href="{editor_href}">Open the editor</a>
+    <a class="button primary" href="{editor_href}">Open standalone editor</a>
     <a class="button" href="https://github.com/Upabjojr/sympy-editor">Source on GitHub</a>
     <a class="button" href="https://pypi.org/project/sympy-editor/"><code>pip install sympy-editor</code></a>
   </div>
 </header>
+{try_editor}
 <h2 class="shelf">Use it</h2>
 <div class="snippets">
 <section class="snippet">
@@ -504,6 +510,18 @@ warranty. The short version is not the licence; the licence is:</p>""")
         encoding="utf-8")
 
 
+#: The editor itself, at the top of the shelf: the first thing the page offers
+#: is the thing it is about.  Python starts at the first edit (`preload`
+#: false), so a visitor who only reads pays nothing for it.
+TRY = """<h2 class="shelf">Try it</h2>
+<section class="try">
+  <p>Click any piece of the formula and change it in place \u2014 type over it,
+  apply a SymPy function to it, pull it apart. Python starts in your browser at
+  the first edit, and every result is computed on your device.</p>
+  <div id="{element}"></div>
+</section>"""
+
+
 CARD = """<section class="card" id="{slug}">
   <span class="steps">{steps} steps</span>
   <h3>{title}</h3>
@@ -526,13 +544,17 @@ def manifest() -> dict:
 
 
 def derivations_page(folder: Path, *, urls: dict | None = None,
-                     editor_href: str = "../index.html") -> Path | None:
+                     editor_href: str = "../index.html",
+                     editor: dict | None = None) -> Path | None:
     """The project introduced, then the whole shelf of worked derivations,
     each with its own player, as `folder/index.html`.
 
     Every viewer on the page shares one copy of the editor's code - a page of
     ten separate exports would carry ten copies of it - so the whole thing is
-    about the size of a single one.
+    about the size of a single one.  `editor` is a config from
+    `sympy_editor.html.build_config`: given one, a live editor is embedded at
+    the top of the page (the shelf's own; the app's derivations page has the
+    editor for a neighbour already).
     """
     import importlib.util
 
@@ -544,8 +566,13 @@ def derivations_page(folder: Path, *, urls: dict | None = None,
     shelf = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(shelf)
 
-    from sympy_editor.html import build_history_config, read_static
+    from sympy_editor.html import _script_json, build_history_config, read_static
     cards, mounts = [], []
+    try_editor = ""
+    if editor is not None:
+        element = "try-the-editor"
+        try_editor = TRY.format(element=element)
+        mounts.append(f'SympyEditor.mount(document.getElementById("{element}"), {_script_json(editor)});')
     for i, (slug, make) in enumerate(shelf.DERIVATIONS):
         history = make()
         why = (make.__doc__ or "").strip().splitlines()[0]
@@ -588,7 +615,7 @@ def derivations_page(folder: Path, *, urls: dict | None = None,
         katex_css=html.escape(urls["katexCss"] if urls else default_urls()["katexCss"], quote=True),
         editor_css=read_static("editor.css"), cards="\n".join(cards), figures=figures,
         editor_js=read_static("editor.js"), mounts="\n".join(mounts), count=len(cards),
-        editor_href=html.escape(editor_href, quote=True))
+        editor_href=html.escape(editor_href, quote=True), try_editor=try_editor)
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "index.html").write_text(page, encoding="utf-8")
     doc_pages(folder)
@@ -615,7 +642,15 @@ def shelf_site(out: Path, *, cache: Path | None = None, cdn: bool = False) -> Pa
     editor = to_html(build_www.demo_expression(), title=NAME, head=icon,
                      logo=build_www.app_logo())   # Pyodide from the CDN, ~0.5 MB
     (out / "editor.html").write_text(editor, encoding="utf-8")
-    derivations_page(out, urls=urls, editor_href="editor.html")
+    # ...and the same editor embedded at the top of the page itself, sharing
+    # the copy of editor.js the viewers already carry.  Pyodide is not
+    # vendored here (`pyodide=False` above), so it comes from the CDN either
+    # way, and only once somebody edits something.
+    from sympy_editor import Document
+    from sympy_editor.html import build_config
+    live = build_config(Document(build_www.demo_expression()), backend="pyodide",
+                        urls=urls, options={"preload": False})
+    derivations_page(out, urls=urls, editor_href="editor.html", editor=live)
     return out
 
 
