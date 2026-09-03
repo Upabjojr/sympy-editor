@@ -147,6 +147,34 @@ def test_the_shelf_opens_with_an_editor_of_its_own(tmp_path):
     assert "try-the-editor" not in bare.read_text(encoding="utf-8")
 
 
+def test_the_shelf_s_play_buttons_ask_to_be_pressed(tmp_path):
+    """A shelf of still viewers reads as pictures: the Play buttons pulse -
+    larger and bluer and back, about once a second - until somebody presses
+    one.  Under the pointer they hold still (a target that moves is a poor
+    one), and a visitor who asked for less motion gets the colour without the
+    movement."""
+    build = _load()
+    page = build.derivations_page(tmp_path / "shelf", urls=None, editor_href="editor.html").read_text(encoding="utf-8")
+    assert "@keyframes se-play-notice" in page
+    assert "transform: scale(1)" in page and "transform: scale(1.07)" in page
+    assert ".card .se-history-head .se-play:not(:disabled) { animation: se-play-notice 1.1s ease-in-out infinite; }" in page
+    for still in (".card .se-history-head .se-play:hover",           # not under the pointer
+                  ".card .se-history-head .se-play:focus-visible",   # nor under the keyboard
+                  "body.se-played .card .se-history-head .se-play"): # nor once one has been played
+        assert still in page, still
+    # (the editor's own stylesheet has a reduced-motion block too: take the shelf's, below it)
+    reduced = (page.split("body.se-played", 1)[1]
+               .split("@media (prefers-reduced-motion: reduce) {", 1)[1].split("}\n}", 1)[0])
+    assert "animation: none" in reduced and "border-color: rgba(var(--se-accent)" in reduced
+    # and the press that quiets them: any Play button, however it is reached
+    assert 'target.closest(".se-play")) document.body.classList.add("se-played")' in page
+    # the colours are the editor's own variables, so the strip dresses for the dark with it
+    notice = page.split("@keyframes se-play-notice {", 1)[1].split("}\n}", 1)[0]
+    for token in ("var(--se-border)", "var(--se-btn)", "rgba(var(--se-accent)", "rgb(var(--se-accent))"):
+        assert token in notice, token
+    assert "#3b82f6" not in notice                       # no colour of its own to go stale
+
+
 def test_the_shelf_carries_the_licence_and_the_privacy_statement(tmp_path):
     """A store listing and a curious visitor both ask for these pages, and
     they must say only what is true: no collection by the app, the stores'

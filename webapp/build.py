@@ -231,6 +231,29 @@ section.try > p {{ margin: 0 0 0.9rem; color: #57606a; font-size: 0.95rem; max-w
 /* the editor brings its own panel (border, background, dark mode): the page
  * only has to give it the width and keep it off the text above */
 section.try .sympy-editor {{ box-shadow: 0 1px 2px rgba(27, 31, 36, 0.04), 0 12px 28px -22px rgba(27, 31, 36, 0.4); }}
+/* Every example is a slideshow waiting to be started, and a still page does
+ * not say so: the Play buttons breathe - a little larger, a little bluer, and
+ * back - about once a second, so nobody takes the derivations for pictures.
+ * The pulse holds still under the pointer (a target that moves is a poor one)
+ * and stops for good once somebody has pressed one: the point is made.  The
+ * colours come from the editor's own variables, so it dresses for the dark
+ * like everything around it, and a visitor who asked for less motion gets the
+ * blue without the movement. */
+@keyframes se-play-notice {{
+  0%, 100% {{ transform: scale(1); border-color: var(--se-border); background: var(--se-btn);
+             color: inherit; box-shadow: var(--se-btn-edge), var(--se-btn-shadow); }}
+  50% {{ transform: scale(1.07); border-color: rgba(var(--se-accent), 0.85);
+        background: rgba(var(--se-accent), 0.16); color: rgb(var(--se-accent));
+        box-shadow: 0 0 0 4px rgba(var(--se-accent), 0.14); }}
+}}
+.card .se-history-head .se-play:not(:disabled) {{ animation: se-play-notice 1.1s ease-in-out infinite; }}
+.card .se-history-head .se-play:hover,
+.card .se-history-head .se-play:focus-visible {{ animation: none; }}
+body.se-played .card .se-history-head .se-play {{ animation: none; }}
+@media (prefers-reduced-motion: reduce) {{
+  .card .se-history-head .se-play:not(:disabled) {{ animation: none;
+    border-color: rgba(var(--se-accent), 0.85); color: rgb(var(--se-accent)); }}
+}}
 .snippets {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(21rem, 1fr));
              gap: 1.2rem; margin-top: 1.8rem; }}
 .snippet {{ background: #ffffff; border: 1px solid #d8dee4; border-radius: 1rem; padding: 1.2rem 1.3rem;
@@ -368,6 +391,14 @@ as a single file that works offline.
 </script>
 <script>
 {mounts}
+</script>
+<script>
+// The Play buttons pulse until one is used: pressing any of them tells the
+// page it has been understood, and they all go quiet (a reload asks again).
+document.addEventListener("click", function (ev) {{
+  var target = ev.target;
+  if (target && target.closest && target.closest(".se-play")) document.body.classList.add("se-played");
+}}, true);
 </script>
 </body>
 </html>
