@@ -2,6 +2,7 @@
 """Store screenshots of the app, taken from the app's own page.
 
     python mobile/screenshots.py            # -> mobile/ios/build/screenshots/{iphone,ipad}/{raw,framed}/*.png
+    python mobile/screenshots.py --set examples   # ... /{iphone,ipad}/examples/{raw,framed}: the app's own examples
 
 The page is the bundle the apps show (``build_www.build`` with the native
 backend) opened in Playwright's WebKit - the engine of the iOS WebView -
@@ -27,6 +28,7 @@ sys.path[:0] = [str(HERE.parent / "src"), str(HERE / "app"), str(HERE)]
 
 import build_www  # noqa: E402
 import sympy_editor_app as app  # noqa: E402
+from sympy_editor.examples import EXAMPLES  # noqa: E402
 from sympy import Derivative, Eq, Function, I, Integral, Limit, Matrix, Sum, cos, exp, oo, pi, sin, sqrt, symbols  # noqa: E402
 
 #: points, scale, and how much larger than on the phone a formula may be
@@ -88,7 +90,11 @@ class Screen:
         self.page.wait_for_timeout(900)          # the change animation
 
     def path(self, src):
-        return next(k for k, v in self.ev(f"{ED}.state.nodes").items() if v["src"] == src)
+        """The path of the node whose source is ``src`` (or begins with it, when ``src`` ends in ``...``)."""
+        nodes = self.ev(f"{ED}.state.nodes").items()
+        if src.endswith("..."):
+            return next(k for k, v in nodes if v["src"].startswith(src[:-3]))
+        return next(k for k, v in nodes if v["src"] == src)
 
     def select(self, src=None):
         """Select the node whose source is ``src`` (a path, if it starts with ``/``), or nothing."""
@@ -109,6 +115,14 @@ class Screen:
                 break
             zoom = round(zoom - 0.05, 2)
         self.ev("document.querySelector('.se-view').scrollLeft = 0")
+
+    def picker(self):
+        """The sessions drawer, with the chooser of a new session open on the examples."""
+        self.ev(f"{ED}.openDrawer()")
+        self.page.wait_for_timeout(400)
+        self.page.click(".se-session-new")
+        self.page.wait_for_selector(".se-session-picker")
+        self.page.wait_for_timeout(400)
 
     def full(self):
         """The full-screen view: the formula alone, as large as the screen."""
@@ -202,6 +216,95 @@ def take(work: Path, out: Path, device: str) -> None:
         s.close()
 
 
+#: the second set: what "New session..." offers, each with what one does with it
+EXAMPLE_SHOTS = [
+    ("01-examples", "Start from an example"),
+    ("02-gaussian", "Tap the integral"),
+    ("03-erf", "SymPy evaluates it in place"),
+    ("04-quadratic", "The quadratic formula"),
+    ("05-limit", "A limit, and its value"),
+    ("06-trig", "Either side of an equation"),
+    ("07-rational", "Over a common denominator"),
+    ("08-rotation", "A rotation, applied"),
+    ("09-inverse", "A matrix inverted"),
+    ("10-symbols", "Matrix symbols, transposed"),
+    ("11-determinant", "Determinant and trace, evaluated"),
+    ("12-array", "Arrays of any rank"),
+]
+
+
+def take_examples(work: Path, out: Path, device: str) -> None:
+    from playwright.sync_api import sync_playwright
+
+    ex = dict(EXAMPLES)
+    with sync_playwright() as pw:
+        s = Screen(pw, ex["Gaussian integral and a series"], work, out, device)
+        s.fit(1.2)
+        s.picker()
+        s.shot("01-examples")
+        s.close()
+        s = Screen(pw, ex["Gaussian integral and a series"], work, out, device)
+        s.fit(1.2)
+        s.select("Integral(...")
+        s.shot("02-gaussian")
+        s.send({"action": "call", "path": s.path("Integral(..."), "func": "doit"})
+        s.select()
+        s.fit(1.2)
+        s.shot("03-erf")
+        s.close()
+        s = Screen(pw, ex["Quadratic formula"], work, out, device)
+        s.fit(1.6)
+        s.select("-4*a*c + b**2")
+        s.shot("04-quadratic")
+        s.close()
+        s = Screen(pw, ex["A limit"], work, out, device)
+        s.send({"action": "call", "path": "/", "func": "doit"})
+        s.history()
+        s.shot("05-limit")
+        s.close()
+        s = Screen(pw, ex["Trigonometric identity"], work, out, device)
+        s.fit(1.6)
+        s.select("/0")
+        s.shot("06-trig")
+        s.close()
+        s = Screen(pw, ex["Rational arithmetic"], work, out, device)
+        s.send({"action": "apply", "path": "/", "op": "together"})
+        s.select()
+        s.fit(1.7)
+        s.shot("07-rational")
+        s.close()
+        s = Screen(pw, ex["Rotation matrix times a vector"], work, out, device)
+        s.send({"action": "call", "path": "/", "func": "doit"})
+        s.select()
+        s.fit(1.5)
+        s.symbols()
+        s.shot("08-rotation")
+        s.close()
+        s = Screen(pw, ex["Dense matrix"], work, out, device)
+        s.send({"action": "call", "path": "/", "func": "inv"})
+        s.select()
+        s.fit(1.5)
+        s.shot("09-inverse")
+        s.close()
+        s = Screen(pw, ex["Matrix symbols"], work, out, device)
+        s.send({"action": "call", "path": "/", "func": "T"})
+        s.select()
+        s.fit(1.7)
+        s.symbols()
+        s.shot("10-symbols")
+        s.close()
+        s = Screen(pw, ex["Determinant and trace"], work, out, device)
+        s.send({"action": "call", "path": "/", "func": "doit"})
+        s.select()
+        s.fit(1.6)
+        s.shot("11-determinant")
+        s.close()
+        s = Screen(pw, ex["3-D array"], work, out, device)
+        s.fit(2.0)
+        s.shot("12-array")
+        s.close()
+
+
 def frame(raw: Path, caption: str, out: Path, device: str) -> None:
     """The screen under its caption, on a green ground, in the store's size."""
     from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -254,18 +357,22 @@ def main(argv=None) -> int:
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--device", choices=sorted(DEVICES), action="append", help="one of them only (default: all)")
+    ap.add_argument("--set", choices=("story", "examples"), default="story",
+                    help="story: famous equations worked (default); examples: the app's own examples, under examples/")
     args = ap.parse_args(argv)
+    shots, taker = (EXAMPLE_SHOTS, take_examples) if args.set == "examples" else (SHOTS, take)
     out = HERE / "ios" / "build" / "screenshots"
     for device in args.device or sorted(DEVICES):
-        raw, framed, work = out / device / "raw", out / device / "framed", out / "work"
+        base = out / device / ("examples" if args.set == "examples" else "")
+        raw, framed, work = base / "raw", base / "framed", out / "work"
         for folder in (raw, framed, work):
             folder.mkdir(parents=True, exist_ok=True)
         w, h, scale, _ = DEVICES[device]
-        print(f"Taking the {device} screens ({w * scale} x {h * scale})")
-        take(work, raw, device)
-        for i, (name, caption) in enumerate(SHOTS, 1):
+        print(f"Taking the {device} screens ({w * scale} x {h * scale}), the {args.set} set")
+        taker(work, raw, device)
+        for i, (name, caption) in enumerate(shots, 1):
             frame(raw / f"{name}.png", caption, framed / f"{i}-{name.split('-', 1)[1]}.png", device)
-        print(f"Wrote {out}/{device}/raw and {out}/{device}/framed ({len(SHOTS)} each)")
+        print(f"Wrote {raw} and {framed} ({len(shots)} each)")
     return 0
 
 

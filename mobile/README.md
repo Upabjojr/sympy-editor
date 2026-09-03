@@ -137,7 +137,9 @@ sum, Euler's formula worked into his identity, the limit that defines e, a
 rotation matrix inverted...) rather than a mock-up.
 `mobile/ios/build/screenshots/<device>/raw/` is the screen alone, as the
 Play Store listing has them; `framed/` the same under a caption on a
-coloured ground.  `--device iphone` (or `ipad`) takes one set only.
+coloured ground.  `--device iphone` (or `ipad`) takes one set only, and
+`--set examples` a second set, under `examples/`: the chooser of a new
+session, then each of the app's own examples with what one does with it.
 
 ## 4. Without a Mac or an Android SDK: GitHub Actions
 
