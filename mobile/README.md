@@ -129,10 +129,15 @@ A simulator build is made for one architecture, this Mac's own: the standard
 library that travels with the interpreter is per architecture, and the script
 that installs it takes a single `ARCHS`.
 
-`python mobile/screenshots.py` takes the store's screenshots (1242 x 2688,
-the 6.5" iPhone) from the app's own page in Playwright's WebKit, bridged
-to the app's Python: `mobile/ios/build/screenshots/raw/` is the screen
-alone, `framed/` the same under a caption on a coloured ground.
+`python mobile/screenshots.py` takes the store's screenshots - 1242 x 2688
+for the 6.5" iPhone and 2064 x 2752 for the 13" iPad, the two sizes App
+Store Connect asks for - from the app's own page in Playwright's WebKit,
+bridged to the app's Python, so they show the app computing (the Basel
+sum, Euler's formula worked into his identity, the limit that defines e, a
+rotation matrix inverted...) rather than a mock-up.
+`mobile/ios/build/screenshots/<device>/raw/` is the screen alone, as the
+Play Store listing has them; `framed/` the same under a caption on a
+coloured ground.  `--device iphone` (or `ipad`) takes one set only.
 
 ## 4. Without a Mac or an Android SDK: GitHub Actions
 
