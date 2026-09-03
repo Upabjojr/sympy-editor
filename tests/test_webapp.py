@@ -149,21 +149,26 @@ def test_the_shelf_opens_with_an_editor_of_its_own(tmp_path):
 
 def test_the_shelf_s_play_buttons_ask_to_be_pressed(tmp_path):
     """A shelf of still viewers reads as pictures: the Play buttons pulse -
-    larger and bluer and back, about once a second - and never stop, so the
-    tenth card asks as plainly as the first.  Only the pointer and the
-    keyboard's focus hold one still, and only while they are on it (a target
-    that moves is a poor one); a visitor who asked for less motion gets the
-    colour without the movement."""
+    larger and bluer and back, about once a second - and go on doing it, so
+    the tenth card asks as plainly as the first.  A button that is playing
+    holds still (it says Pause, and a Pause has nothing to ask for), and so
+    does the one under the pointer or the keyboard's focus while it is
+    there; a visitor who asked for less motion gets the colour without the
+    movement."""
     build = _load()
     page = build.derivations_page(tmp_path / "shelf", urls=None, editor_href="editor.html").read_text(encoding="utf-8")
     assert "@keyframes se-play-notice" in page
     assert "transform: scale(1)" in page and "transform: scale(1.07)" in page
-    assert ".card .se-history-head .se-play:not(:disabled) { animation: se-play-notice 1.1s ease-in-out infinite; }" in page
+    assert (".card .se-history-head .se-play:not(:disabled):not(.se-playing)"
+            " { animation: se-play-notice 1.1s ease-in-out infinite; }") in page
     for still in (".card .se-history-head .se-play:hover",           # not under the pointer
                   ".card .se-history-head .se-play:focus-visible"):  # nor under the keyboard
         assert still in page, still
-    # ...and nothing else ever stops it: pressing Play used to quiet the page,
-    # which left every card below it saying nothing.
+    # The class the strip puts on a button that is playing, and reads back off
+    # it when the slideshow ends: what the label says, said where CSS can see.
+    assert 'play.classList.toggle("se-playing", !!st.playing);' in page
+    # ...and nothing else ever stops it: pressing Play used to quiet the whole
+    # page, which left every card below it saying nothing.
     assert "se-played" not in page
     # (the editor's own stylesheet has a reduced-motion block too: take the shelf's, below it)
     reduced = (page.split(".se-play:focus-visible", 1)[1]

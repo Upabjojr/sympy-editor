@@ -819,6 +819,10 @@ var SympyEditor = (function () {
       pressable.forEach(function (el) { el.disabled = false; });
       api.subscribe(function (st) {
         play.textContent = st.playing ? "\u23f8 Pause" : "\u25b6 Play";
+        // What the button says, said in a class as well: a page around the
+        // viewer can dress a Play differently from a Pause without reading
+        // the label (the site pulses the ones that are waiting).
+        play.classList.toggle("se-playing", !!st.playing);
         count.textContent = (st.index + 1) + " / " + st.total;
         level.textContent = Math.round(st.zoom * 100) + "%";
         rate.textContent = (Math.round((st.speed || 1) * 100) / 100) + "\u00d7";

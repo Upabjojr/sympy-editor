@@ -234,12 +234,15 @@ section.try .sympy-editor {{ box-shadow: 0 1px 2px rgba(27, 31, 36, 0.04), 0 12p
 /* Every example is a slideshow waiting to be started, and a still page does
  * not say so: the Play buttons breathe - a little larger, a little bluer, and
  * back - about once a second, so nobody takes the derivations for pictures.
- * It never stops: a visitor who arrives at the tenth card has been told
- * nothing by a pulse the first one used up.  Only the pointer and the
- * keyboard's focus hold it still, and only while they are on it - a target
- * that moves is a poor one.  The colours come from the editor's own
- * variables, so it dresses for the dark like everything around it, and a
- * visitor who asked for less motion gets the blue without the movement. */
+ * It is the page's standing offer and never wears out: a visitor who arrives
+ * at the tenth card has been told nothing by a pulse the first one used up.
+ * Only a button that is actually playing goes quiet - a Pause has nothing
+ * left to ask for, and gets its Play back the moment the slideshow ends -
+ * along with whichever one is under the pointer or the keyboard's focus,
+ * and only while it is (a target that moves is a poor one).  The colours
+ * come from the editor's own variables, so it dresses for the dark like
+ * everything around it, and a visitor who asked for less motion gets the
+ * blue without the movement. */
 @keyframes se-play-notice {{
   0%, 100% {{ transform: scale(1); border-color: var(--se-border); background: var(--se-btn);
              color: inherit; box-shadow: var(--se-btn-edge), var(--se-btn-shadow); }}
@@ -247,11 +250,11 @@ section.try .sympy-editor {{ box-shadow: 0 1px 2px rgba(27, 31, 36, 0.04), 0 12p
         background: rgba(var(--se-accent), 0.16); color: rgb(var(--se-accent));
         box-shadow: 0 0 0 4px rgba(var(--se-accent), 0.14); }}
 }}
-.card .se-history-head .se-play:not(:disabled) {{ animation: se-play-notice 1.1s ease-in-out infinite; }}
+.card .se-history-head .se-play:not(:disabled):not(.se-playing) {{ animation: se-play-notice 1.1s ease-in-out infinite; }}
 .card .se-history-head .se-play:hover,
 .card .se-history-head .se-play:focus-visible {{ animation: none; }}
 @media (prefers-reduced-motion: reduce) {{
-  .card .se-history-head .se-play:not(:disabled) {{ animation: none;
+  .card .se-history-head .se-play:not(:disabled):not(.se-playing) {{ animation: none;
     border-color: rgba(var(--se-accent), 0.85); color: rgb(var(--se-accent)); }}
 }}
 .snippets {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(21rem, 1fr));
