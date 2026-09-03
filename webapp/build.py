@@ -231,6 +231,31 @@ section.try > p {{ margin: 0 0 0.9rem; color: #57606a; font-size: 0.95rem; max-w
 /* the editor brings its own panel (border, background, dark mode): the page
  * only has to give it the width and keep it off the text above */
 section.try .sympy-editor {{ box-shadow: 0 1px 2px rgba(27, 31, 36, 0.04), 0 12px 28px -22px rgba(27, 31, 36, 0.4); }}
+/* The editor's own invitation: the formula's box - the part that is there to
+ * be clicked - swells and glows, about once a second, so it is plain that the
+ * mathematics is the interface and not a picture of one.  The pulse is drawn
+ * on a ring laid over the box, not on the box itself: scaling the formula
+ * would soften the type it is made of.  It holds still while the pointer or
+ * the keyboard is on it, and once the first edit lands it goes for good - the
+ * invitation has been taken, and a reload is what asks again. */
+@keyframes se-view-notice {{
+  0%, 100% {{ transform: scale(1); border-color: rgba(var(--se-accent), 0); box-shadow: none; }}
+  50% {{ transform: scale(1.012); border-color: rgba(var(--se-accent), 0.8);
+        box-shadow: 0 0 0 5px rgba(var(--se-accent), 0.12); }}
+}}
+section.try .se-stage::after {{
+  content: ""; position: absolute; inset: 0; border: 1px solid transparent;
+  border-radius: 0.4rem; pointer-events: none;      /* a ring over the box: the clicks go through it */
+  animation: se-view-notice 1.2s ease-in-out infinite;
+}}
+/* under the pointer it holds still - and only there: a click that focuses the
+ * box is not an edit, and the invitation stands until one lands */
+section.try .se-stage:hover::after,
+section.try .se-edited .se-stage::after {{ animation: none; }}
+@media (prefers-reduced-motion: reduce) {{
+  section.try .se-stage::after {{ animation: none; border-color: rgba(var(--se-accent), 0.55); }}
+  section.try .se-edited .se-stage::after {{ border-color: transparent; }}
+}}
 /* Every example is a slideshow waiting to be started, and a still page does
  * not say so: the Play buttons breathe - a little larger, a little bluer, and
  * back - about once a second, so nobody takes the derivations for pictures.
@@ -395,7 +420,7 @@ as a single file that works offline.
 <script>
 {mounts}
 </script>
-</body>
+{try_watch}</body>
 </html>
 """
 
@@ -536,6 +561,40 @@ warranty. The short version is not the licence; the licence is:</p>""")
         encoding="utf-8")
 
 
+#: The watch that ends the editor's invitation (see TRY).
+TRY_SCRIPT = """<script>
+// The editor's box asks to be used until it has been: undo comes alive with
+// the first edit, which is the moment the page has been understood, so the
+// pulse ends there and does not come back.  The button is born enabled and
+// is turned off by the first state the editor draws - so nothing counts
+// until it has been seen off, or the invitation would end before it began.
+(function () {
+  var host = document.getElementById("try-the-editor");
+  if (!host) return;
+  var undo = null, armed = false;
+  function look() {
+    if (undo.disabled) { armed = true; return false; }     // waiting: nothing to undo yet
+    if (!armed) return false;                              // ...or not yet drawn for the first time
+    host.classList.add("se-edited");
+    return true;
+  }
+  function watch() {
+    undo = host.querySelector('[data-cmd="undo"]');
+    if (!undo) return false;
+    look();
+    new MutationObserver(function (changes, obs) { if (look()) obs.disconnect(); })
+      .observe(undo, { attributes: true, attributeFilter: ["disabled"] });
+    return true;
+  }
+  if (!watch()) {      // mounted a moment later than this script: wait for the toolbar
+    var obs = new MutationObserver(function () { if (watch()) obs.disconnect(); });
+    obs.observe(host, { childList: true, subtree: true });
+  }
+})();
+</script>
+"""
+
+
 #: The editor itself, at the top of the shelf: the first thing the page offers
 #: is the thing it is about.  Python starts at the first edit (`preload`
 #: false), so a visitor who only reads pays nothing for it.
@@ -594,10 +653,10 @@ def derivations_page(folder: Path, *, urls: dict | None = None,
 
     from sympy_editor.html import _script_json, build_history_config, read_static
     cards, mounts = [], []
-    try_editor = ""
+    try_editor = try_watch = ""
     if editor is not None:
         element = "try-the-editor"
-        try_editor = TRY.format(element=element)
+        try_editor, try_watch = TRY.format(element=element), TRY_SCRIPT
         mounts.append(f'SympyEditor.mount(document.getElementById("{element}"), {_script_json(editor)});')
     for i, (slug, make) in enumerate(shelf.DERIVATIONS):
         history = make()
@@ -641,7 +700,8 @@ def derivations_page(folder: Path, *, urls: dict | None = None,
         katex_css=html.escape(urls["katexCss"] if urls else default_urls()["katexCss"], quote=True),
         editor_css=read_static("editor.css"), cards="\n".join(cards), figures=figures,
         editor_js=read_static("editor.js"), mounts="\n".join(mounts), count=len(cards),
-        editor_href=html.escape(editor_href, quote=True), try_editor=try_editor)
+        editor_href=html.escape(editor_href, quote=True), try_editor=try_editor,
+        try_watch=try_watch)
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "index.html").write_text(page, encoding="utf-8")
     doc_pages(folder)

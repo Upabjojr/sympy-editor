@@ -147,6 +147,41 @@ def test_the_shelf_opens_with_an_editor_of_its_own(tmp_path):
     assert "try-the-editor" not in bare.read_text(encoding="utf-8")
 
 
+def test_the_shelf_s_editor_asks_to_be_touched_once(tmp_path):
+    """The formula is the interface, and a still box does not say so: the
+    editing area wears a ring that swells and glows until the first edit
+    lands, and then never again (a reload asks once more).  The pulse is on a
+    ring laid over the box - scaling the formula would soften the type - and
+    it lets the clicks through."""
+    build = _load()
+    out = build.shelf_site(tmp_path / "shelf", cdn=True)
+    page = (out / "index.html").read_text(encoding="utf-8")
+    assert "@keyframes se-view-notice" in page
+    ring = page.split("section.try .se-stage::after {", 1)[1].split("}", 1)[0]
+    for said in ("position: absolute", "inset: 0", "pointer-events: none",   # over the box, not in its way
+                 "animation: se-view-notice 1.2s ease-in-out infinite"):
+        assert said in ring, said
+    assert "section.try .se-stage:hover::after" in page          # still under the pointer
+    assert "section.try .se-edited .se-stage::after" in page     # and over, once it has been used
+    reduced = (page.split("section.try .se-edited .se-stage::after", 1)[1]
+               .split("@media (prefers-reduced-motion: reduce) {", 1)[1].split("}\n}", 1)[0])
+    assert "animation: none" in reduced
+    # The end of it: undo comes alive with the first edit and nothing else.
+    # It is born enabled and turned off by the first state the editor draws,
+    # so that first switch must not count - the invitation would never show.
+    script = page.split('// The editor\'s box asks to be used', 1)[1].split("</script>", 1)[0]
+    assert 'document.getElementById("try-the-editor")' in script   # the editor this page embeds
+    assert "if (undo.disabled) { armed = true; return false; }" in script
+    assert "if (!armed) return false;" in script
+    assert 'host.classList.add("se-edited");' in script
+    assert 'attributeFilter: ["disabled"]' in script
+    # ...and no watch at all on a page with no editor to invite anybody into
+    # (the keyframes come with the stylesheet either way, and match nothing there)
+    bare = build.derivations_page(tmp_path / "bare", urls=None, editor_href="../index.html").read_text(encoding="utf-8")
+    assert "The editor's box asks to be used" not in bare
+    assert 'classList.add("se-edited")' not in bare
+
+
 def test_the_shelf_s_play_buttons_ask_to_be_pressed(tmp_path):
     """A shelf of still viewers reads as pictures: the Play buttons pulse -
     larger and bluer and back, about once a second - and go on doing it, so
