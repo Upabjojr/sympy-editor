@@ -22,8 +22,8 @@ module is not involved.
 - With more than one free symbol nothing is drawn until the others have a
   value: each gets a field and a slider, the values are substituted on the way
   to the plot and the formula stays symbolic.  No value is guessed.
-- Zoom or pan in the picture: the *from*/*to* fields take the range on show,
-  *shown* reads it out, and the curve is sampled again over that range.
+- Zoom or pan in the picture: the *from*/*to* fields take the visible range,
+  *visible range* reads it out, and the curve is sampled again over it.
 - An equation plots both sides.
 
 See `addons/README.md` in the sympy-editor repository for how add-ons work.

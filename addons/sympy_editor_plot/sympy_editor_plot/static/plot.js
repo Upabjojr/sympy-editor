@@ -21,7 +21,7 @@ SympyEditor.registerAddon("plot", {
     };
     var from = numField(opts.span ? opts.span[0] : -6, "Left end of the axis (a zoom in the picture changes it too)");
     var to = numField(opts.span ? opts.span[1] : 6, "Right end of the axis (a zoom in the picture changes it too)");
-    var shown = h("span", { class: "plot-shown", title: "The range on show, after a zoom or a pan in the picture" });
+    var shown = h("span", { class: "plot-shown", title: "The visible range of the axis: it follows a zoom or a pan in the picture" });
     var follow = h("input", { type: "checkbox", checked: "" });
     var sliders = h("div", { class: "plot-sliders" });
     var bar = h("div", { class: "plot-bar" }, [
@@ -37,7 +37,7 @@ SympyEditor.registerAddon("plot", {
     var sampled = null;     // [from, to] of the samples on show
 
     function fmt(v) { return Number(v).toPrecision(4).replace(/\.?0+$/, ""); }
-    function showRange(a, b) { shown.textContent = a === null ? "" : "shown: " + fmt(a) + " \u2026 " + fmt(b); }
+    function showRange(a, b) { shown.textContent = a === null ? "" : "visible range: " + fmt(a) + " \u2026 " + fmt(b); }
 
     function target() {
       if (!follow.checked) return { path: "/" };
@@ -127,7 +127,10 @@ SympyEditor.registerAddon("plot", {
     }
 
     function clearPlot() {
+      // purge takes Plotly's event API off the element, our zoom listener
+      // with it: the next draw registers it again (listenZoom).
       if (plotly && area.querySelector(".js-plotly-plot, .plot-container")) { try { plotly.purge(area); } catch (e) { /* ignore */ } }
+      area._seRelayout = false;
       area.textContent = "";
       showRange(null);
     }
@@ -166,27 +169,33 @@ SympyEditor.registerAddon("plot", {
       showRange(sampled[0], sampled[1]);
     }
 
-    /** Once Plotly has drawn (its event API is on the element only then). */
+    /** A zoom or a pan in the picture (Plotly.react itself emits no
+     *  relayout): the fields take the visible range and the curve is
+     *  sampled again over it, so that zooming in brings detail rather than
+     *  stretching the same points.  A double-click resets to the options'
+     *  span. */
+    function onRelayout(ev) {
+      if (!ev) return;
+      if (ev["xaxis.autorange"]) { from.value = String(opts.span ? opts.span[0] : -6); to.value = String(opts.span ? opts.span[1] : 6); request(); return; }
+      var a = ev["xaxis.range[0]"], b = ev["xaxis.range[1]"];
+      if (ev["xaxis.range"]) { a = ev["xaxis.range"][0]; b = ev["xaxis.range"][1]; }
+      if (typeof a !== "number" || typeof b !== "number" || !(a < b)) return;
+      if (sampled && Math.abs(a - sampled[0]) < 1e-12 && Math.abs(b - sampled[1]) < 1e-12) return;   // the range we drew
+      from.value = fmt(a); to.value = fmt(b);
+      showRange(a, b);
+      request();
+    }
+
+    /** After every draw (Plotly's event API is on the element only once it
+     *  has drawn, and a purge takes it off again): listen for zooms, once,
+     *  and read the visible range back from the axis itself. */
     function listenZoom() {
-      if (!area._seRelayout && typeof area.on === "function") {
-          // A zoom or a pan in the picture (Plotly.react itself emits no
-          // relayout): the fields take the range on show and the curve is
-          // sampled again over it, so that zooming in brings detail rather
-          // than stretching the same points.  A double-click resets to the
-          // options' span.
-          area._seRelayout = true;
-          area.on("plotly_relayout", function (ev) {
-            if (!ev) return;
-            if (ev["xaxis.autorange"]) { from.value = String(opts.span ? opts.span[0] : -6); to.value = String(opts.span ? opts.span[1] : 6); request(); return; }
-            var a = ev["xaxis.range[0]"], b = ev["xaxis.range[1]"];
-            if (ev["xaxis.range"]) { a = ev["xaxis.range"][0]; b = ev["xaxis.range"][1]; }
-            if (typeof a !== "number" || typeof b !== "number" || !(a < b)) return;
-            if (sampled && Math.abs(a - sampled[0]) < 1e-12 && Math.abs(b - sampled[1]) < 1e-12) return;   // the range we drew
-            from.value = fmt(a); to.value = fmt(b);
-            showRange(a, b);
-            request();
-          });
-      }
+      if (typeof area.on !== "function") return;
+      if (typeof area.removeListener === "function") area.removeListener("plotly_relayout", onRelayout);
+      area.on("plotly_relayout", onRelayout);
+      area._seRelayout = true;
+      var ax = area._fullLayout && area._fullLayout.xaxis;
+      if (ax && ax.range && ax.range.length === 2) showRange(ax.range[0], ax.range[1]);
     }
 
     /** The fallback: axes and a polyline per curve, the vertical range from
@@ -242,7 +251,7 @@ SympyEditor.registerAddon("plot", {
       "<section><h3>Controls</h3><ul>",
       "<li><b>variable</b>: the symbol on the horizontal axis (the first free symbol to begin with); <b>from</b>/<b>to</b>: the span.</li>",
       "<li>With more than one free symbol nothing is drawn until the others have a value: each gets a field and a slider, and the value is substituted on the way to the plot \u2014 the formula stays symbolic. No value is ever guessed.</li>",
-      "<li>Zoom or pan in the picture (drag a box, turn the mouse wheel over it, drag an axis; double-click to reset): the <b>from</b>/<b>to</b> fields take the range on show, <i>shown</i> reads it out, and the curve is sampled again over it \u2014 zooming in brings detail.</li>",
+      "<li>Zoom or pan in the picture (drag a box, turn the mouse wheel over it, drag an axis; double-click to reset): the <b>from</b>/<b>to</b> fields take the visible range, <i>visible range</i> reads it out, and the curve is sampled again over it \u2014 zooming in brings detail.</li>",
       "<li>The picture follows every committed change \u2014 an edit, a transformation, an undo \u2014 and the selection.</li>",
       "</ul></section>"
     ].join("");

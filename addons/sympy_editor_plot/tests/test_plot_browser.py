@@ -70,7 +70,7 @@ def test_fields_values_zoom_and_guide():
         page.evaluate("Plotly.relayout(document.querySelector('.plot-area'), {'xaxis.range': [0, 1]})")
         page.wait_for_function("document.querySelector('.se-addon-plot .plot-bar .plot-num').value === '0'")
         assert page.locator(".se-addon-plot .plot-bar .plot-num").nth(1).input_value() == "1"
-        page.wait_for_function("document.querySelector('.plot-shown').textContent === 'shown: 0 … 1'")
+        page.wait_for_function("document.querySelector('.plot-shown').textContent === 'visible range: 0 … 1'")
         # the gestures a person uses: a box dragged in the picture, and the wheel
         box = page.locator(".plot-area .nsewdrag").first.bounding_box()
         x0, x1, ym = box["x"] + box["width"] * 0.3, box["x"] + box["width"] * 0.6, box["y"] + box["height"] * 0.5
@@ -78,7 +78,7 @@ def test_fields_values_zoom_and_guide():
         near = "(() => { const v = parseFloat(document.querySelector('.se-addon-plot .plot-bar .plot-num').value); return Math.abs(v - %s) < 0.06; })()"
         page.wait_for_function(near % 0.3)                                    # the box's left edge, 30% of [0, 1]
         shown = page.locator(".plot-shown").inner_text()
-        assert shown.startswith("shown: 0.2") or shown.startswith("shown: 0.3")
+        assert shown.startswith("visible range: 0.2") or shown.startswith("visible range: 0.3")
         page.mouse.move(box["x"] + box["width"] * 0.5, ym)
         for _ in range(3):                                                     # three notches: zooms in around the pointer
             page.mouse.wheel(0, -120)
@@ -86,7 +86,19 @@ def test_fields_values_zoom_and_guide():
         page.wait_for_function("parseFloat(document.querySelector('.se-addon-plot .plot-bar .plot-num').value) > 0.31")
         assert page.locator(".plot-shown").inner_text() != shown
         page.mouse.dblclick(x0, ym)                                            # back to the whole span
-        page.wait_for_function("document.querySelector('.plot-shown').textContent === 'shown: -6 … 6'")
+        page.wait_for_function("document.querySelector('.plot-shown').textContent === 'visible range: -6 … 6'")
+        # a plot cleared for a missing value and drawn again still follows a zoom
+        # (Plotly's purge took the listener away once, and the label stayed at -6 … 6)
+        page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.send({action: 'set', src: 'a*sin(x) + b'})")
+        page.wait_for_selector(".se-addon-plot .plot-note.error", timeout=15000)
+        page.locator('.plot-sliders [data-sym="b"] .plot-value').fill("1")
+        page.wait_for_selector(".plot-area svg.main-svg", timeout=30000)
+        page.wait_for_function("document.querySelector('.plot-area')._seRelayout === true")
+        box = page.locator(".plot-area .nsewdrag").first.bounding_box()
+        x0, x1, ym = box["x"] + box["width"] * 0.3, box["x"] + box["width"] * 0.6, box["y"] + box["height"] * 0.5
+        page.mouse.move(x0, ym); page.mouse.down(); page.mouse.move(x0 + 5, ym + 5); page.mouse.move(x1, ym + 40, steps=8); page.mouse.up()
+        page.wait_for_function("document.querySelector('.plot-shown').textContent !== 'visible range: -6 … 6'")
+        assert page.locator(".se-addon-plot .plot-bar .plot-num").first.input_value().startswith("-2.")
         # the guide
         page.locator(".se-addon-plot .se-addon-help").click()
         assert "zoom" in page.locator(".se-help-view").inner_text().lower()
