@@ -146,7 +146,7 @@ class MatchingAddon(Addon):
                     doc="Replace every piece of the selection a rule of the panel matches, outermost first, "
                         "in one pass - what a rule produced is not rewritten again."),
             make_op("rewrite_all", self._op_rewrite_all, label="Rewrite all (until no rule matches)", context=True,
-                    doc="One pass after another until no rule matches any more."),
+                    doc="One pass after another until no rule matches any more; refused when it never settles."),
             make_op("rule_swap", lambda r: RewriteRule(r.replacement, r.pattern, r.condition), label="Swap sides",
                     kinds=("rule",), doc="The rule the other way round."),
         ]
@@ -249,16 +249,17 @@ class MatchingAddon(Addon):
 
     def rewrite_all(self, doc, node: Basic) -> Basic:
         """:meth:`rewrite_once` again and again until nothing matches (the
-        ``ReplaceRepeated`` of term rewriting), or ``max_rounds`` passes -
-        a rule whose result it matches again (``x -> x**2``) never settles."""
+        ``ReplaceRepeated`` of term rewriting).  A rule whose result it
+        matches again (``x -> x**2``) never settles: after ``max_rounds``
+        passes this raises, and the expression stays as it was - whatever
+        the fiftieth pass left is not an answer."""
         for _ in range(self.max_rounds):
             new = self.rewrite_once(doc, node)
             if new is None or new == node:
                 return node
             node = new
-        doc.last_note = (f"Rewrite all stopped after {self.max_rounds} passes: a rule keeps matching "
-                         "what it produces (x -> x**2 grows for ever); Rewrite does one pass")
-        return node
+        raise ValueError(f"Rewrite all did not settle in {self.max_rounds} passes: a rule keeps matching what it "
+                         "produces (x -> x**2 grows for ever); nothing changed. Rewrite does one pass.")
 
     def _op_rewrite(self, expr, doc=None):
         new = self.rewrite_once(doc, expr)

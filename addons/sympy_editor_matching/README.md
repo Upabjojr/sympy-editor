@@ -22,8 +22,8 @@ w = edit(sin(x)**2 + cos(x)**2, addons=["matching"])
   piece a rule matches and leaving what a rule produced alone (`x -> x**2` on
   `x + sin(x)` gives `x**2 + sin(x**2)`, once - the *ReplaceAll* of term
   rewriting); *Rewrite all* repeats the pass until nothing matches
-  (*ReplaceRepeated*; a rule that matches its own result stops after 50 passes,
-  with a note).
+  (*ReplaceRepeated*; a rule that matches its own result never settles: after
+  50 passes it is refused, with a message, and nothing changes).
 - A rule can be changed: the pencil (or a double-click on it) turns it into
   its text form to edit in place, and ↗ opens it in the formula editor as a
   `Rule(...)` node - edit its sides there like any formula, then *Save as

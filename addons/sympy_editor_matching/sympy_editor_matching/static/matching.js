@@ -14,7 +14,7 @@ SympyEditor.registerAddon("matching", {
     var add = h("button", { type: "button", title: "Add the rule to the set" }, ["Add rule"]);
     var use = h("button", { type: "button", title: "The selected Rule(...) node joins the set", disabled: "" }, ["Use selection as rule"]);
     var once = h("button", { type: "button", title: "One pass over the selection: every piece a rule matches is replaced, outermost first; what a rule produced is not rewritten again" }, ["Rewrite"]);
-    var all = h("button", { type: "button", title: "Pass after pass until no rule matches any more (a rule that matches its own result never settles: it stops after 50 passes)" }, ["Rewrite all"]);
+    var all = h("button", { type: "button", title: "Pass after pass until no rule matches any more (a rule that matches its own result never settles: after 50 passes this is refused and nothing changes)" }, ["Rewrite all"]);
     var hits = h("div", { class: "mt-hits" });
     var element = h("div", { class: "mt-panel" }, [
       h("div", { class: "mt-head" }, [h("strong", {}, ["Rules"]), use]),
@@ -181,7 +181,7 @@ SympyEditor.registerAddon("matching", {
       "<section><h3>Matching and rewriting</h3><ul>",
       "<li><b>Matching the selection</b> lists the rules whose pattern matches the selected piece at its root, with what each wildcard bound and the result; <b>Apply</b> rewrites that piece with that rule.</li>",
       "<li><b>Rewrite</b> makes one pass over the selection (the whole expression when nothing is selected), outermost first: every piece a rule matches is replaced, and what a rule produced is left alone in that pass \u2014 <code>x -&gt; x**2</code> on <code>x + sin(x)</code> gives <code>x**2 + sin(x**2)</code>, once.</li>",
-      "<li><b>Rewrite all</b> repeats the pass until no rule matches. A rule that matches its own result never settles; it stops after 50 passes and says so.</li>",
+      "<li><b>Rewrite all</b> repeats the pass until no rule matches. A rule that matches its own result never settles: after 50 passes it is refused, with a message, and the expression stays as it was.</li>",
       "<li>The same two are in the <b>Transform \u25be</b> menu. Every rewrite is a step of the history: <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes it back.</li>",
       "</ul></section>"
     ].join("");

@@ -81,8 +81,9 @@ def test_the_guard_is_honoured_and_the_transform_menu_rewrites_inside():
     assert doc.expr == 1 / x + x ** 4 / 4
     doc.apply("/", "rewrite")                       # 1/x is x**-1: the guard refuses it, x**4 matches again
     assert doc.expr == 1 / x + x ** 5 / 20
-    doc.apply("/", "rewrite_all")
-    assert doc.expr.has(x ** 103) or doc.last_note
+    with pytest.raises(ValueError, match="did not settle"):
+        doc.apply("/", "rewrite_all")                 # it never settles: refused, nothing changed
+    assert doc.expr == 1 / x + x ** 5 / 20
     n = len(doc.snapshot()["ops"])
     assert n > 3
 
@@ -137,9 +138,11 @@ def test_rewrite_is_one_pass_over_every_match():
     assert doc.expr == x ** 2 + sin(x ** 2) + y
     doc.apply("/", "rewrite")
     assert doc.expr == x ** 4 + sin(x ** 4) + y
-    doc.apply("/", "rewrite_all")
-    assert doc.last_note and "passes" in doc.last_note      # it never settles: said so
-    doc.undo(); doc.undo(); doc.undo()
+    snap = doc.handle({"action": "apply", "path": "/", "op": "rewrite_all"})
+    assert "did not settle" in snap["error"] and doc.expr == x ** 4 + sin(x ** 4) + y   # refused, untouched
+    snap = doc.handle({"action": "addon", "addon": "matching", "method": "rewrite", "path": "/", "all": True})
+    assert "did not settle" in snap["error"] and doc.expr == x ** 4 + sin(x ** 4) + y
+    doc.undo(); doc.undo()
     # the panel's Rewrite does the same one pass at the selection
     snap = doc.handle({"action": "addon", "addon": "matching", "method": "rewrite", "path": "/"})
     assert not snap["error"] and doc.expr == x ** 2 + sin(x ** 2) + y
