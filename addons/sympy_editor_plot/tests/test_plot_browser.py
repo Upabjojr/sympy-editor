@@ -71,6 +71,22 @@ def test_fields_values_zoom_and_guide():
         page.wait_for_function("document.querySelector('.se-addon-plot .plot-bar .plot-num').value === '0'")
         assert page.locator(".se-addon-plot .plot-bar .plot-num").nth(1).input_value() == "1"
         page.wait_for_function("document.querySelector('.plot-shown').textContent === 'shown: 0 … 1'")
+        # the gestures a person uses: a box dragged in the picture, and the wheel
+        box = page.locator(".plot-area .nsewdrag").first.bounding_box()
+        x0, x1, ym = box["x"] + box["width"] * 0.3, box["x"] + box["width"] * 0.6, box["y"] + box["height"] * 0.5
+        page.mouse.move(x0, ym); page.mouse.down(); page.mouse.move(x0 + 5, ym + 5); page.mouse.move(x1, ym + 40, steps=8); page.mouse.up()
+        near = "(() => { const v = parseFloat(document.querySelector('.se-addon-plot .plot-bar .plot-num').value); return Math.abs(v - %s) < 0.06; })()"
+        page.wait_for_function(near % 0.3)                                    # the box's left edge, 30% of [0, 1]
+        shown = page.locator(".plot-shown").inner_text()
+        assert shown.startswith("shown: 0.2") or shown.startswith("shown: 0.3")
+        page.mouse.move(box["x"] + box["width"] * 0.5, ym)
+        for _ in range(3):                                                     # three notches: zooms in around the pointer
+            page.mouse.wheel(0, -120)
+            page.wait_for_timeout(200)
+        page.wait_for_function("parseFloat(document.querySelector('.se-addon-plot .plot-bar .plot-num').value) > 0.31")
+        assert page.locator(".plot-shown").inner_text() != shown
+        page.mouse.dblclick(x0, ym)                                            # back to the whole span
+        page.wait_for_function("document.querySelector('.plot-shown').textContent === 'shown: -6 … 6'")
         # the guide
         page.locator(".se-addon-plot .se-addon-help").click()
         assert "zoom" in page.locator(".se-help-view").inner_text().lower()

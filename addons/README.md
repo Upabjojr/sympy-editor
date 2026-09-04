@@ -247,9 +247,14 @@ mine = "my_package:ADDON"
 ```
 
 Tests: `tests/test_addons.py` in the editor exercises the contract with a
-small in-place add-on; `tests/test_browser.py::test_addon_panel_tools_and_calls`
-drives a panel in Chromium; each add-on here has `tests/` of its own
-(`pytest addons/`).
+small in-place add-on, and `tests/test_browser.py` drives a panel and the
+Add-ons menu in Chromium.  **Every add-on has tests of its own** in its
+`tests/`: unit tests of its Python (`test_<name>.py`) and browser tests of
+its panel (`test_<name>_browser.py`, Playwright, skipped without Chromium).
+A fix to an add-on comes with a test in that add-on's suite - the bug it
+fixes, reproduced - not in the editor's.  `pytest addons/` runs them all,
+`addons/tests/test_demo_page.py` included, which refuses a stale
+`demo.html`.
 
 ## The three drafts
 

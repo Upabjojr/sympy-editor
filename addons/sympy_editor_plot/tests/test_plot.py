@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sympy_editor import Document  # noqa: E402
 from sympy_editor_plot import ADDON, sample  # noqa: E402
 
-x, y = symbols("x y")
+x, y, a = symbols("x y a")
 
 
 def _samples(doc, **payload):
@@ -51,3 +51,22 @@ def test_a_selection_and_an_equation():
     assert [c["label"] for c in res["curves"]] == ["lhs", "rhs"]
     res = _samples(doc, path="/1", span=[0, 2], n=3)
     assert res["src"] == "x**2" and res["curves"][0]["y"] == [0.0, 1.0, 4.0]
+
+
+def test_free_symbols_are_reported_before_substitution():
+    """The panel keeps a row per symbol besides the axis; a symbol given a
+    value must stay in ``free`` (it used to vanish once substituted, and
+    the panel dropped its slider the moment it got a value)."""
+    doc = Document(a * sin(x), addons=[ADDON])
+    res = _samples(doc, path="/", span=[0, 1], n=3, var="x", values={"a": 2})
+    assert res["free"] == ["a", "x"] and res["needs"] == [] and res["var"] == "x"
+    assert abs(res["curves"][0]["y"][2] - 2 * sin(1)) < 1e-9
+    # a value for the axis variable itself is ignored, not substituted
+    res = _samples(doc, path="/", span=[0, 1], n=3, var="x", values={"a": 2, "x": 7})
+    assert res["needs"] == [] and len(res["curves"][0]["y"]) == 3
+
+
+def test_no_value_is_guessed():
+    doc = Document(a * sin(x), addons=[ADDON])
+    res = _samples(doc, path="/", span=[0, 1], n=3)
+    assert res["var"] == "a" and res["needs"] == ["x"] and res["curves"] == []

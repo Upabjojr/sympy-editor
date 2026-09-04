@@ -688,9 +688,14 @@ and unmounts (`_mountAddon`/`_unmountAddon`) to match each snapshot, and
 (`data-block="addons"`, `.se-addons-menu`).  Rules: the add-on packages in
 `addons/` are separate distributions, never imported by `sympy_editor`; a
 change to the contract comes with `tests/test_addons.py`, and to the front
-end hooks with `test_addon_panel_tools_and_calls`; the mobile bundles do not
-carry add-ons.  Rebuilders and printer methods are process-wide
-registries: activation adds, nothing removes; kinds are not.
+end hooks with `test_addon_panel_tools_and_calls`; every add-on has tests
+of its own under `addons/<pkg>/tests/` (unit and Playwright), and a fix to
+an add-on comes with a test there - `pytest addons/` runs them all,
+including `addons/tests/test_demo_page.py`, which refuses a stale
+`addons/demo.html` (rebuild with `python addons/demo.py` after any change);
+the mobile bundles do not carry add-ons.  Rebuilders and printer methods
+are process-wide registries: activation adds, nothing removes; kinds are
+not.
 
 ## Backends at a glance
 

@@ -89,3 +89,33 @@ def test_a_rule_can_be_edited_as_text_and_in_the_editor():
         browser.close()
     srv.shutdown()
     srv.server_close()
+
+
+def test_rewrite_is_one_pass_and_rewrite_all_is_refused_when_it_never_settles():
+    doc = Document(x + sin(x) / x, addons=[ADDON])
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    with playwright.sync_playwright() as p:
+        try:
+            browser = p.chromium.launch()
+        except Exception as exc:
+            pytest.skip(f"chromium not available: {exc}")
+        page = browser.new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(srv.url)
+        page.wait_for_selector(".se-addon-matching .mt-field", timeout=30000)
+        page.locator(".mt-field").fill("x -> x**2")
+        page.locator(".mt-field").press("Enter")
+        page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1")
+        buttons = page.locator(".se-addon-matching .mt-head button")
+        buttons.filter(has_text="Rewrite").nth(0).click()                       # one pass: every x, once
+        page.wait_for_function("document.querySelector('.se-source').textContent === 'x**2 + sin(x**2)/x**2'")
+        assert doc.expr == x ** 2 + sin(x ** 2) / x ** 2
+        buttons.filter(has_text="Rewrite all").click()                           # never settles: refused
+        page.wait_for_function("!document.querySelector('.se-error').hidden && document.querySelector('.se-error').textContent.includes('did not settle')")
+        assert doc.expr == x ** 2 + sin(x ** 2) / x ** 2
+        assert errors == []
+        browser.close()
+    srv.shutdown()
+    srv.server_close()
