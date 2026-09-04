@@ -144,3 +144,12 @@ def test_rewrite_is_one_pass_over_every_match():
     snap = doc.handle({"action": "addon", "addon": "matching", "method": "rewrite", "path": "/"})
     assert not snap["error"] and doc.expr == x ** 2 + sin(x ** 2) + y
     assert doc.history_labels()["actions"][-1] == "Rewrite: one pass"
+
+
+def test_the_panel_gets_latex_katex_can_draw():
+    """sympy.latex writes a wildcard as ``_b_{}``, which KaTeX refuses; the
+    panel's LaTeX comes from the editor's printer, wildcards underlined."""
+    doc = Document(x, addons=[ADDON])
+    res = _q(doc, "add_rule", src="_b_ * x -> z")
+    tex = res["rules"][0]["latex"]
+    assert r"\underline{b}" in tex and "_b_" not in tex and r"\rightarrow" in tex

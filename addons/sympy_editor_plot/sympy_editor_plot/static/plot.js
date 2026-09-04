@@ -156,7 +156,7 @@ SympyEditor.registerAddon("plot", {
           font: { color: dark ? "#e6e6e6" : "#1f2328", size: 11 },
           xaxis: { title: res.var, zeroline: true, gridcolor: dark ? "#333" : "#eee" },
           yaxis: { zeroline: true, gridcolor: dark ? "#333" : "#eee" }
-        }, { responsive: true, displayModeBar: false }).then(listenZoom, function () { /* drawn or not, nothing to listen to */ });
+        }, { responsive: true, displayModeBar: false, scrollZoom: true }).then(listenZoom, function () { /* drawn or not, nothing to listen to */ });
         sampled = [xs[0], xs[xs.length - 1]];
         showRange(sampled[0], sampled[1]);
         return;
@@ -242,7 +242,7 @@ SympyEditor.registerAddon("plot", {
       "<section><h3>Controls</h3><ul>",
       "<li><b>variable</b>: the symbol on the horizontal axis (the first free symbol to begin with); <b>from</b>/<b>to</b>: the span.</li>",
       "<li>With more than one free symbol nothing is drawn until the others have a value: each gets a field and a slider, and the value is substituted on the way to the plot \u2014 the formula stays symbolic. No value is ever guessed.</li>",
-      "<li>Zoom or pan in the picture (drag a box, double-click to reset): the <b>from</b>/<b>to</b> fields take the range on show, <i>shown</i> reads it out, and the curve is sampled again over it \u2014 zooming in brings detail.</li>",
+      "<li>Zoom or pan in the picture (drag a box, turn the mouse wheel over it, drag an axis; double-click to reset): the <b>from</b>/<b>to</b> fields take the range on show, <i>shown</i> reads it out, and the curve is sampled again over it \u2014 zooming in brings detail.</li>",
       "<li>The picture follows every committed change \u2014 an edit, a transformation, an undo \u2014 and the selection.</li>",
       "</ul></section>"
     ].join("");

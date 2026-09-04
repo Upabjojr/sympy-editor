@@ -52,6 +52,10 @@ def test_a_rule_can_be_edited_as_text_and_in_the_editor():
         page.locator(".mt-field").fill("sin(a_)**2 -> 1 - cos(a_)**2")
         page.locator(".mt-field").press("Enter")
         page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1")
+        # the rule is drawn as a formula (KaTeX), the wildcard underlined - not shown as Rule(...)
+        page.wait_for_selector(".mt-rules li .mt-formula .katex", timeout=10000)
+        assert "Rule(" not in page.locator(".mt-rules li .mt-formula").inner_text()
+        assert page.locator(".mt-rules li .mt-formula .underline").count() >= 1
         # in place: the pencil shows the text form, Enter saves it
         page.locator(".mt-rules li .mt-edit").click()
         field = page.locator(".mt-rules li input")

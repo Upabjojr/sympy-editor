@@ -30,12 +30,12 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from sympy import Basic, S, Symbol, sympify, latex
+from sympy import Basic, S, Symbol, sympify
 from sympy.printing.latex import LatexPrinter
 
 from sympy_editor.addons import Addon
 from sympy_editor.ops import make_op
-from sympy_editor.printer import rebuild
+from sympy_editor.printer import AnnotatedLatexPrinter, rebuild
 
 try:
     from sympy_matching import (IDENTITY_ELEMENT, SymPyReplacementPattern, WildSymbol, build_replacer,
@@ -273,9 +273,13 @@ class MatchingAddon(Addon):
     # -- methods -------------------------------------------------------------------------
 
     def _rules_answer(self, doc) -> Dict[str, Any]:
+        # The editor's printer, not sympy.latex: it knows how a wildcard is
+        # drawn (sympy's own gives KaTeX "x _b_{}", which it refuses, and the
+        # panel then showed the source instead of the formula).
+        printer = AnnotatedLatexPrinter(dict(doc.printer_settings))
         out = []
         for i, rule in enumerate(self.rules(doc)):
-            out.append({"index": i, "src": str(rule), "text": rule_text(rule), "latex": latex(rule)})
+            out.append({"index": i, "src": str(rule), "text": rule_text(rule), "latex": printer.doprint(rule)})
         return {"rules": out}
 
     def describe(self, method: str, payload: Dict[str, Any]) -> Optional[str]:
