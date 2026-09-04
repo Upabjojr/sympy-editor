@@ -683,7 +683,7 @@ def derivations_page(folder: Path, *, urls: dict | None = None,
                      f"<figcaption>{caption}</figcaption></figure>"
                      for name, caption in shots if (folder / name).is_file())
     if figs:
-        sections.append('<h2 class="shelf">In the notebook</h2>\n' + figs)
+        sections.append('<h2 class="shelf" id="in-the-notebook">In the notebook</h2>\n' + figs)
     # ...and on a phone: the Android app, photographed running.  The images
     # are content beside the page, like the notebook's.
     phones = [("android-editor.png", "The editor on Android: the Gaussian integral selected"),
@@ -691,7 +691,7 @@ def derivations_page(folder: Path, *, urls: dict | None = None,
     have = [(n, alt) for n, alt in phones if (folder / n).is_file()]
     if have:
         imgs = "".join(f'<span class="phone"><img src="{n}" alt="{alt}" loading="lazy"></span>' for n, alt in have)
-        sections.append('<h2 class="shelf">On a phone</h2>\n<figure class="shot phones">' + imgs
+        sections.append('<h2 class="shelf" id="on-a-phone">On a phone</h2>\n<figure class="shot phones">' + imgs
                         + "<figcaption>The Android app: the same editor with CPython and SymPy packaged"
                         " inside, so every edit \u2014 and every step of a history \u2014 is computed on"
                         " the phone, offline.</figcaption></figure>")

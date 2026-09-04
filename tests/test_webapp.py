@@ -260,7 +260,7 @@ def test_the_shelf_teaches_and_shows_the_notebook_only_when_it_can(tmp_path):
     page = build.derivations_page(shot, urls=None, editor_href="editor.html").read_text(encoding="utf-8")
     assert '<img src="jupyter-widget.png"' in page and "In the notebook" in page
     assert "jupyter-plot.png" not in page                       # only the images that are there
-    heading = '<h2 class="shelf">On a phone</h2>'
+    heading = '<h2 class="shelf" id="on-a-phone">On a phone</h2>'   # the README links to this anchor
     assert heading not in page                                  # and no phone section without its shots
     (shot / "android-editor.png").write_bytes(b"\x89PNG\r\n\x1a\n")
     page = build.derivations_page(shot, urls=None, editor_href="editor.html").read_text(encoding="utf-8")
