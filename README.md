@@ -11,6 +11,15 @@ Works as a **Jupyter widget** and as **standalone HTML** (self-contained file, o
 a local server).  Pure Python + plain JavaScript: no node.js, no bundler, no
 GPL dependencies.
 
+**[Try it in the browser](https://upabjojr.github.io/sympy-editor/)** - a live
+editor and a shelf of worked derivations, computed on your own machine.
+
+[![The widget in JupyterLab: the integral inside a larger expression is selected, with the toolbar ready to transform that piece](https://upabjojr.github.io/sympy-editor/jupyter-widget.png)](https://upabjojr.github.io/sympy-editor/)
+
+*Click any piece of the formula to select it - here the integral inside a larger
+expression - then type over it, or apply a SymPy function to that piece alone.
+The kernel computes; `w.expr` is the edited expression, live.*
+
 ## Install
 
 ```bash
@@ -46,6 +55,8 @@ committed edit redraws it, and every free symbol but `x` grows a slider —
 and `examples/plot_surface.ipynb` does the same to a `plotly` surface you can
 turn around while you edit, updated in place.  Both are examples: the wire is
 a callback and a traitlet, and the library knows nothing about plotting.
+
+[![An editor and a plot in one notebook: editing the formula redraws the graph, and each free symbol has grown a slider](https://upabjojr.github.io/sympy-editor/jupyter-plot.png)](https://upabjojr.github.io/sympy-editor/)
 
 ### Standalone HTML file
 
@@ -205,6 +216,13 @@ and the same SymPy as on the desktop.  Android 7.0 (API 24) and iOS 15.
 Only the web app still runs Python in the page, with Pyodide.  See
 `mobile/README.md`.
 
+[![The editor on Android, the Gaussian integral selected](https://upabjojr.github.io/sympy-editor/android-editor.png)](https://upabjojr.github.io/sympy-editor/)
+[![A derivation's history on Android, each step's change marked in red and green](https://upabjojr.github.io/sympy-editor/android-history.png)](https://upabjojr.github.io/sympy-editor/)
+
+*The same editor on a phone, and the history of a session read back step by
+step - what each step changed in red and green.  Both computed on the device,
+offline.*
+
 ### Web app
 
 `python webapp/build.py` builds the same page as an installable, offline-capable
@@ -331,7 +349,8 @@ one offline file.  `examples/demo_history.py` builds one.
 `python webapp/build.py --shelf DIR` writes that shelf as a page that
 introduces the project with every derivation embedded in it, an editor
 beside it and KaTeX with them: about 1.5 MB, a folder to drop into any site.
-The full web app build puts the same page at `dist/derivations/`.
+That page is what <https://upabjojr.github.io/sympy-editor/> serves.  The full
+web app build puts the same page at `dist/derivations/`.
 
 `examples/derivations/` is a shelf of worked derivations built this way -
 the quadratic formula by completing the square, the Gaussian integral, the
