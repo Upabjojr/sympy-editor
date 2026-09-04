@@ -367,6 +367,18 @@ class MatchingAddon(Addon):
             state["name"] = name
             self._checkpoint(doc)
             return self._rules_answer(doc)
+        if method == "name_ruleset":
+            # The panel's name field: a name puts the set in the library under
+            # it (as save_ruleset does); an empty one leaves the set unnamed,
+            # the library entry of the old name kept as it was.
+            name = str(payload.get("name") or "").strip()
+            if name:
+                state["library"][name] = list(state["rules"])
+                state["name"] = name
+                self._checkpoint(doc)
+            else:
+                state["name"] = None
+            return self._rules_answer(doc)
         if method == "load_ruleset":
             name = str(payload.get("name") or "")
             if name not in state["library"]:

@@ -236,3 +236,16 @@ def test_a_named_set_saves_itself_and_revert_restore_step_back():
     assert res["dirty"] is True and res["library"] == []
     res = _q(fresh, "revert")
     assert res["rules"] == [] and res["can_restore"] is True
+
+
+def test_the_name_field_is_the_saving():
+    doc = Document(x, addons=[ADDON])
+    _q(doc, "add_rule", src="sin(a_)**2 -> 1 - cos(a_)**2")
+    res = _q(doc, "name_ruleset", name=" trig ")
+    assert res["name"] == "trig" and res["library"] == ["trig"] and res["dirty"] is False
+    _q(doc, "add_rule", src="x -> x**2")                          # saved by itself
+    assert len(doc.addon_state["matching"]["library"]["trig"]) == 2
+    res = _q(doc, "name_ruleset", name="")                        # unnamed again: the library keeps trig
+    assert res["name"] is None and res["library"] == ["trig"]
+    _q(doc, "add_rule", src="y -> y**3")                          # no longer saved into trig
+    assert len(doc.addon_state["matching"]["library"]["trig"]) == 2

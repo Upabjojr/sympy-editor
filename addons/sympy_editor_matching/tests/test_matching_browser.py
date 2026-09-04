@@ -139,7 +139,8 @@ def test_rule_sets_are_saved_in_the_browser_and_come_back_after_a_reload():
         page.locator(".mt-field").press("Enter")
         page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1")
         page.locator(".mt-name").fill("trig")
-        page.locator(".mt-name").press("Enter")                       # Save
+        page.locator(".mt-name").press("Enter")                       # the name is the saving: no Save button
+        assert page.locator(".se-addon-matching .mt-sets button", has_text="Save").count() == 0
         page.wait_for_function("document.querySelector('.mt-lib').options.length === 2")
         assert doc.addon_state["matching"]["name"] == "trig"
         stored = page.evaluate("JSON.parse(localStorage.getItem('sympy-editor:matching'))")
