@@ -216,8 +216,12 @@ and the same SymPy as on the desktop.  Android 7.0 (API 24) and iOS 15.
 Only the web app still runs Python in the page, with Pyodide.  See
 `mobile/README.md`.
 
-[![The editor on Android, the Gaussian integral selected](https://upabjojr.github.io/sympy-editor/android-editor.png)](https://upabjojr.github.io/sympy-editor/#on-a-phone)
-[![A derivation's history on Android, each step's change marked in red and green](https://upabjojr.github.io/sympy-editor/android-history.png)](https://upabjojr.github.io/sympy-editor/#on-a-phone)
+<p>
+<a href="https://upabjojr.github.io/sympy-editor/#on-a-phone"><img src="https://upabjojr.github.io/sympy-editor/android-editor-framed.png" width="330"
+   alt="The editor on Android, the Gaussian integral selected"></a>
+<a href="https://upabjojr.github.io/sympy-editor/#on-a-phone"><img src="https://upabjojr.github.io/sympy-editor/android-history-framed.png" width="330"
+   alt="A derivation's history on Android, each step's change marked in red and green"></a>
+</p>
 
 *The same editor on a phone, and the history of a session read back step by
 step - what each step changed in red and green.  Both computed on the device,
