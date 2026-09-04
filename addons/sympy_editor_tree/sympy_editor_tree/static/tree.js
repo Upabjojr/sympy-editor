@@ -35,7 +35,21 @@ SympyEditor.registerAddon("tree", {
     var hint = h("span", { class: "tree-hint" }, ["click: select \u00b7 double-click: edit \u00b7 right-click: menu \u00b7 drag onto a node: move \u00b7 Del: remove"]);
     var bar = h("div", { class: "tree-bar" }, [nodeBtn, headSel, argField, wrapField, hint]);
     var menu = h("div", { class: "tree-menu", hidden: "", role: "menu" });
-    var element = h("div", { class: "tree-panel" }, [bar, scroller, note, editField, menu]);
+    // The quick actions: a small bar under the clicked node with the few
+    // things one does most; the "\u22ef" opens the full menu.
+    var quick = h("div", { class: "tree-quick", hidden: "", role: "toolbar", "aria-label": "Node actions" });
+    var element = h("div", { class: "tree-panel" }, [bar, scroller, note, editField, menu, quick]);
+
+    /** A refused transformation: the error in the editor's line, and half
+     *  a second of red flicker over the whole panel, so that it is not
+     *  missed. */
+    function flashError(text) {
+      api.error(text);
+      element.classList.remove("tree-flash");
+      void element.offsetWidth;                          // restart the animation
+      element.classList.add("tree-flash");
+      setTimeout(function () { element.classList.remove("tree-flash"); }, 600);
+    }
 
     var tree = null;       // the last snapshot's tree
     var nodes = [];        // laid-out nodes: {data, x, y, w, el}
@@ -229,6 +243,7 @@ SympyEditor.registerAddon("tree", {
 
     function showMenu(n, x, y) {
       hideMenu();
+      hideQuick();
       selectNode(n);
       var d = n.data, view = viewPathOf(n), own = view === d.view;
       var item = function (label, fn, title) {
@@ -289,6 +304,7 @@ SympyEditor.registerAddon("tree", {
     });
     document.addEventListener("pointerdown", function (ev) {
       if (!menu.hidden && !menu.contains(ev.target) && ev.target !== nodeBtn) hideMenu();
+      if (!quick.hidden && !quick.contains(ev.target) && !svg.contains(ev.target)) hideQuick();
     });
     nodeBtn.addEventListener("click", function () {
       var n = selectedNode();
@@ -356,12 +372,58 @@ SympyEditor.registerAddon("tree", {
 
     function call(method, payload) {
       return api.call(method, payload).then(function () { api.status("Tree: " + method + " done"); },
-                                            function (e) { api.error(String(e && e.message || e)); });
+                                            function (e) { flashError(String(e && e.message || e)); });
+    }
+
+    /* ---- the quick actions under a clicked node ---- */
+
+    function hideQuick() { quick.hidden = true; quick.textContent = ""; }
+
+    function showQuick(n) {
+      hideQuick();
+      var d = n.data;
+      var btn = function (label, title, fn, disabled) {
+        var b = h("button", { type: "button", title: title }, [label]);
+        if (disabled) b.disabled = true;
+        b.addEventListener("click", function (ev) { ev.stopPropagation(); fn(); });
+        quick.appendChild(b);
+        return b;
+      };
+      btn(d.atom ? "Edit" : "Head", d.atom ? "Type a new value over it" : "Type another head over it", function () { beginEdit(n); });
+      btn("Delete", d.path.length ? (d.removable ? "Take this node out of its parent (Del)" : d.head + " cannot leave " + parentSrc(n) + ": it is needed there")
+                                  : "The root cannot be deleted: type a new expression instead",
+          function () { call("delete", { path: d.path }); }, !d.path.length || !d.removable);
+      btn("Wrap", "Put it inside a function: type the name in the field", function () { wrapField.focus(); });
+      if (!d.atom) btn("+ arg", "Add an argument: type it in the field", function () { argField.focus(); });
+      btn("\u22ef", "Everything that can be done with this node: transformations, methods", function () {
+        var r = n.el.getBoundingClientRect();
+        showMenu(n, r.left, r.bottom + 4);
+      });
+      var box = n.el.getBoundingClientRect(), host = element.getBoundingClientRect();
+      quick.hidden = false;
+      quick.style.left = Math.max(0, Math.min(box.left - host.left, host.width - quick.offsetWidth - 4)) + "px";
+      quick.style.top = (box.bottom - host.top + 3) + "px";
+    }
+
+    function parentSrc(n) {
+      var p = byKey(n.data.path.slice(0, -1).join("/"));
+      return p ? p.data.src.slice(0, 30) : "its parent";
+    }
+
+    /** Whether `from` may be dropped onto `over`, and why not. */
+    function dropVerdict(from, over) {
+      if (!over || over === from) return null;
+      if (!from.data.path.length) return "The root cannot be moved";
+      var fk = key(from.data.path), ok = key(over.data.path);
+      if (ok === fk || ok.indexOf(fk + "/") === 0) return "A node cannot be moved into itself";
+      if (!from.data.removable) return from.data.src.slice(0, 30) + " cannot be taken out of " + parentSrc(from) + ": it is needed there";
+      if (over.data.atom) return over.data.src.slice(0, 30) + " is a leaf and takes no argument; drop onto an inner node";
+      return "";                                        // allowed
     }
 
     svg.addEventListener("click", function (ev) {
       var n = nodeOf(ev.target);
-      if (n) selectNode(n);
+      if (n) { selectNode(n); showQuick(n); } else hideQuick();
     });
     svg.addEventListener("dblclick", function (ev) {
       var n = nodeOf(ev.target);
@@ -372,7 +434,9 @@ SympyEditor.registerAddon("tree", {
       if (!n) return;
       if (ev.key === "Delete" || ev.key === "Backspace") {
         ev.preventDefault(); ev.stopPropagation();
-        if (n.data.path.length) call("delete", { path: n.data.path });
+        if (!n.data.path.length) flashError("The root cannot be deleted: type a new expression instead");
+        else if (!n.data.removable) flashError(n.data.src.slice(0, 30) + " cannot be taken out of " + parentSrc(n) + ": it is needed there");
+        else call("delete", { path: n.data.path });
       } else if (ev.key === "Enter" || ev.key === "F2") {
         ev.preventDefault(); ev.stopPropagation();
         beginEdit(n);
@@ -397,20 +461,28 @@ SympyEditor.registerAddon("tree", {
         // retargeted to the SVG and miss the node.
         try { svg.setPointerCapture(drag.pointer); } catch (e) { /* ignore */ }
       }
+      if (!drag.moved) hideQuick();
       drag.moved = true;
       drag.from.el.classList.add("tree-dragging");
       var under = document.elementFromPoint(ev.clientX, ev.clientY);
       var over = nodeOf(under);
-      if (drag.over && drag.over !== over) drag.over.el.classList.remove("tree-drop");
-      drag.over = over && over !== drag.from && !over.data.atom && key(over.data.path).indexOf(key(drag.from.data.path)) !== 0 ? over : null;
-      if (drag.over) drag.over.el.classList.add("tree-drop");
+      if (drag.over && drag.over !== over) drag.over.el.classList.remove("tree-drop", "tree-drop-no");
+      drag.over = over && over !== drag.from ? over : null;
+      if (drag.over) {
+        // Said before the drop: green where it may land, red where not.
+        var why = dropVerdict(drag.from, drag.over);
+        drag.over.el.classList.add(why ? "tree-drop-no" : "tree-drop");
+      }
     });
     function endDrag(ev) {
       if (!drag) return;
       var d = drag; drag = null;
       d.from.el.classList.remove("tree-dragging");
-      if (d.over) d.over.el.classList.remove("tree-drop");
-      if (d.moved && d.over) call("move", { from: d.from.data.path, to: d.over.data.path });
+      if (d.over) d.over.el.classList.remove("tree-drop", "tree-drop-no");
+      if (!d.moved || !d.over) return;
+      var why = dropVerdict(d.from, d.over);
+      if (why) { flashError(why); return; }
+      call("move", { from: d.from.data.path, to: d.over.data.path });
     }
     svg.addEventListener("pointerup", endDrag);
     svg.addEventListener("pointercancel", endDrag);
@@ -441,7 +513,7 @@ SympyEditor.registerAddon("tree", {
       "<li>The formula shows the printer's view: a fraction hides a <code>Pow(…, -1)</code>, a minus a <code>Mul(-1, …)</code>. Those nodes are here, but have no piece of their own in the formula: selecting one selects the nearest piece that is there.</li>",
       "</ul></section>",
       "<section><h3>Selecting</h3><ul>",
-      "<li>Click a node to select the same piece in the formula; select in the formula and the node lights up here.</li>",
+      "<li>Click a node to select the same piece in the formula (and the node lights up here when you select in the formula); a bar of quick actions appears under it: edit, delete, wrap, add an argument, and \u22ef for everything else.</li>",
       "<li><kbd>Space</kbd> selects the focused node, <kbd>Tab</kbd> moves between nodes.</li>",
       "</ul></section>",
       "<section><h3>In the history</h3><ul>",
@@ -451,7 +523,8 @@ SympyEditor.registerAddon("tree", {
       "<section><h3>Editing</h3><ul>",
       "<li>Double-click a node (or <kbd>Enter</kbd> on it) to type over it: a new value for a leaf, a new head for an inner node \u2014 <b>Mul</b> over the arguments of an <b>Add</b> turns the sum into a product.</li>",
       "<li>Right-click a node, or press <b>Node \u25be</b> for the selected one: edit, delete, wrap, add an argument, then the editor's <b>Transform</b> entries for that kind of node and the <b>Methods</b> of its class.</li>",
-      "<li>Drag a subtree onto another node: it becomes that node's last argument. <kbd>Del</kbd> removes the focused node.</li>",
+      "<li>Drag a subtree onto another node: it becomes that node's last argument. While you drag, a node lights up green where the drop may land and red where it may not \u2014 a node that its parent needs (the x of sin(x), the base of a power) cannot be taken out, a leaf takes no argument, nothing goes into itself. <kbd>Del</kbd> removes the focused node.</li>",
+      "<li>A transformation that is not allowed is refused: the error shows in the editor's line and the panel flickers red for half a second.</li>",
       "<li>The fields add an argument to the selected node or wrap it in a function; <b>Head \u25be</b> changes its head.</li>",
       "<li>Every change is a step of the editor's history: <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes it back. SymPy evaluates as it does for any edit, so moving <code>y</code> under an <b>Add</b> of <code>x</code> gives <code>x + y</code>.</li>",
       "</ul></section>"
@@ -486,6 +559,7 @@ SympyEditor.registerAddon("tree", {
         if (snap.preview || !snap.tree) return;
         tree = snap.tree;
         endEdit(false);
+        hideQuick();
         draw();
       },
       onSelect: function () { markSelection(); },

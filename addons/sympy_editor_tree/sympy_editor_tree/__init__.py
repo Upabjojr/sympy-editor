@@ -26,7 +26,7 @@ from sympy import Basic, Function, Tuple, sympify
 from sympy import Pow
 
 from sympy_editor.addons import Addon
-from sympy_editor.printer import delete_at, get_at, parse_path, rebuild, replace_at
+from sympy_editor.printer import delete_at, get_at, is_insertable, parse_path, rebuild, replace_at
 
 __all__ = ["TreeAddon", "ADDON", "tree_of"]
 
@@ -87,17 +87,27 @@ def _view_for(node: Basic, path: List[int], shown: Dict[str, Basic], parent_view
     return None
 
 
+def removable(parent: Optional[Basic]) -> bool:
+    """Whether an argument of ``parent`` can be taken out and the rest still
+    stand: a sum or a product loses a term, an undefined function an
+    argument; ``sin(x)`` without its ``x`` or ``x**2`` without its base is
+    nothing.  The root has no parent and cannot be removed."""
+    return parent is not None and is_insertable(parent)
+
+
 def tree_of(expr: Basic, max_nodes: int = 400, view_paths=None, shown: Optional[Dict[str, Basic]] = None) -> Dict[str, Any]:
     """The argument tree of ``expr`` as JSON: ``{"head", "label", "atom",
     "path": [ints], "view": the editor's path for the same node or None,
-    "children": [...]}``; ``{"too_big": count}`` beyond ``max_nodes``.
+    "removable": whether it can be taken out of its parent (see
+    :func:`removable`), "children": [...]}``; ``{"too_big": count}`` beyond
+    ``max_nodes``.
     ``shown`` (from :func:`view_objects`) maps the formula's pieces to
     nodes whose argument path is not a formula path - the factors of a
     fraction."""
     count = 0
     shown = shown if shown is not None else ({p: None for p in view_paths} if view_paths else {})
 
-    def walk(node: Basic, path: List[int], parent_view: Optional[str]) -> Optional[Dict[str, Any]]:
+    def walk(node: Basic, path: List[int], parent_view: Optional[str], parent: Optional[Basic]) -> Optional[Dict[str, Any]]:
         nonlocal count
         count += 1
         if count > max_nodes:
@@ -108,16 +118,16 @@ def tree_of(expr: Basic, max_nodes: int = 400, view_paths=None, shown: Optional[
             view = _view_for(node, path, shown, parent_view)
         out: Dict[str, Any] = {
             "head": type(node).__name__, "label": _label(node), "atom": not node.args,
-            "path": list(path), "src": str(node), "view": view, "children": [],
+            "path": list(path), "src": str(node), "view": view, "removable": removable(parent), "children": [],
         }
         for i, arg in enumerate(node.args):
-            child = walk(arg, path + [i], view if view is not None else parent_view)
+            child = walk(arg, path + [i], view if view is not None else parent_view, node)
             if child is None:
                 return None
             out["children"].append(child)
         return out
 
-    root = walk(expr, [], None)
+    root = walk(expr, [], None, None)
     if root is None:
         return {"too_big": count, "max": max_nodes}
     return root
@@ -211,6 +221,9 @@ class TreeAddon(Addon):
             path = _ipath(payload.get("path"))
             if not path:
                 raise ValueError("The root cannot be deleted: type a new expression instead")
+            parent = get_at(expr, path[:-1])
+            if not removable(parent):
+                raise ValueError(f"{get_at(expr, path)} cannot be taken out of {parent}: {type(parent).__name__} needs it")
             return delete_at(expr, path)
         if method == "insert":
             path = _ipath(payload.get("path"))
@@ -243,6 +256,9 @@ class TreeAddon(Addon):
         if dst[:len(src)] == src:
             raise ValueError("A node cannot be moved into itself")
         subtree = get_at(expr, src)
+        parent = get_at(expr, src[:-1])
+        if not removable(parent):
+            raise ValueError(f"{subtree} cannot be taken out of {parent}: {type(parent).__name__} needs it")
         target = get_at(expr, dst)
         if not target.args:
             raise ValueError(f"{target} is a leaf and takes no argument; drop onto an inner node")

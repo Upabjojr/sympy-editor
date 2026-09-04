@@ -9,8 +9,9 @@ from sympy_editor import edit
 w = edit(x + y*z, addons=["tree"])          # or addons=["sympy_editor_tree"]
 ```
 
-- A click on a node selects the same piece in the formula, and a selection in
-  the formula marks the node in the tree.
+- A click on a node selects the same piece in the formula (a selection in the
+  formula marks the node in the tree) and shows a bar of quick actions under
+  it: edit, delete, wrap, add an argument, and ⋯ for everything else.
 - A double-click on a node edits it: a new value for a leaf, a new head for an
   inner node (`Mul` over `Add`'s arguments turns the sum into a product).
 - A right-click on a node - or the **Node ▾** button for the selected one -
@@ -24,6 +25,13 @@ w = edit(x + y*z, addons=["tree"])          # or addons=["sympy_editor_tree"]
   in green: how the tree evolved, step by step.  A click on a box's heading
   folds or unfolds it; *Expand trees* / *Collapse trees* do all at once.
 - Drag a subtree onto another node to make it that node's last argument.
+  While dragging, the node under the pointer lights up green where the drop
+  may land and red where it may not: a node its parent needs (the `x` of
+  `sin(x)`, the base of a power) cannot be taken out, a leaf takes no
+  argument, nothing goes into itself.  Python checks the same before
+  changing anything.
+- A transformation that is not allowed is refused: the error shows in the
+  editor's line and the panel flickers red for half a second.
 - `Delete` removes the focused node; the panel's fields add an argument to the
   selected node or wrap it in a function; the *Head* menu changes its head.
 

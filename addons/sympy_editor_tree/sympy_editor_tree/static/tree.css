@@ -36,3 +36,16 @@
 .sympy-editor .tree-history .tree-head-node rect { fill: rgba(var(--se-accent), 0.12); stroke: rgba(var(--se-accent), 0.6); }
 .sympy-editor .tree-history .tree-node.tree-added rect { fill: rgba(var(--se-added-rgb), 0.15); stroke: var(--se-added); stroke-width: 1.5; }
 .sympy-editor .tree-history .tree-node.tree-added text { fill: var(--se-added); font-weight: bold; }
+/* the quick actions under a clicked node */
+.se-addon-tree .tree-quick { position: absolute; z-index: 30; display: flex; gap: 2px; padding: 2px; background: var(--se-bg); border: 1px solid var(--se-border); border-radius: 0.35rem; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15); }
+.se-addon-tree .tree-quick[hidden] { display: none; }
+.se-addon-tree .tree-quick button { font-size: 11px; padding: 1px 6px; }
+/* where a drag may not land */
+.se-addon-tree .tree-node.tree-drop-no rect { stroke: var(--se-removed); stroke-width: 2.4; stroke-dasharray: 4 2; fill: rgba(var(--se-removed-rgb), 0.15); }
+/* a refused transformation: half a second of red over the panel */
+.se-addon-tree .tree-panel.tree-flash { animation: tree-flash 0.5s steps(1, end); }
+@keyframes tree-flash {
+  0%, 40%, 80% { background: rgba(var(--se-removed-rgb), 0.28); }
+  20%, 60%, 100% { background: transparent; }
+}
+@media (prefers-reduced-motion: reduce) { .se-addon-tree .tree-panel.tree-flash { animation: none; background: rgba(var(--se-removed-rgb), 0.2); } }

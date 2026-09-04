@@ -169,3 +169,70 @@ def test_the_history_view_shows_a_tree_under_every_step(page_and_doc):
     page.wait_for_function("Array.from(document.querySelector('.se-history-frame').contentDocument.querySelectorAll('details.tree-history')).every(d => !d.open)")
     page.keyboard.press("Escape")
     assert page.errors == []
+
+
+def _drag(page, src, dst):
+    a, b = src.bounding_box(), dst.bounding_box()
+    page.mouse.move(a["x"] + a["width"] / 2, a["y"] + a["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(a["x"] + a["width"] / 2 + 8, a["y"] + a["height"] / 2 + 8)
+    page.mouse.move(b["x"] + b["width"] / 2, b["y"] + b["height"] / 2, steps=10)
+
+
+def test_quick_actions_drag_verdicts_and_the_red_flicker():
+    """A click shows a bar of quick actions; a drag lights the target green
+    or red before the drop; a refused transformation shows its error and
+    flickers the panel red; Delete on a needed node is refused."""
+    from sympy import cos
+    doc = Document(sin(x) + y * z, addons=[ADDON])
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    with playwright.sync_playwright() as p:
+        try:
+            browser = p.chromium.launch()
+        except Exception as exc:
+            pytest.skip(f"chromium not available: {exc}")
+        page = browser.new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(srv.url)
+        page.wait_for_selector(".se-addon-tree .tree-node", timeout=30000)
+        # the quick actions
+        _node(page, "Mul").click()
+        bar = page.locator(".tree-quick")
+        assert bar.is_visible()
+        labels = [b.text_content() for b in bar.locator("button").all()]
+        assert labels[:3] == ["Head", "Delete", "Wrap"] and "+ arg" in labels and "⋯" in labels
+        assert bar.locator("button", has_text="Delete").is_enabled()
+        # the x of sin(x) is needed there: Delete disabled, and the key refused with a flicker
+        _node(page, "x").click()
+        assert bar.locator("button", has_text="Delete").is_disabled()
+        page.keyboard.press("Delete")
+        page.wait_for_selector(".tree-panel.tree-flash", timeout=2000)
+        page.wait_for_function("!document.querySelector('.se-error').hidden && document.querySelector('.se-error').textContent.includes('cannot be taken out of sin(x)')")
+        assert doc.expr == sin(x) + y * z
+        # a drag: red over a forbidden target (a leaf), green over an allowed one, and the move
+        _drag(page, _node(page, "y"), _node(page, "z"))
+        page.wait_for_selector(".tree-node.tree-drop-no", timeout=2000)
+        page.mouse.up()
+        page.wait_for_selector(".tree-panel.tree-flash", timeout=2000)
+        page.wait_for_function("document.querySelector('.se-error').textContent.includes('leaf')")
+        assert doc.expr == sin(x) + y * z
+        _drag(page, _node(page, "sin"), _node(page, "Mul"))             # sin(x) becomes a factor of y*z
+        page.wait_for_selector(".tree-node.tree-drop", timeout=2000)
+        page.mouse.up()
+        page.wait_for_function("document.querySelector('.se-source').textContent === 'y*z*sin(x)'")
+        assert doc.expr == y * z * sin(x)
+        # a drop Python refuses (sin takes one argument) flickers too
+        _drag(page, _node(page, "z"), _node(page, "sin"))
+        page.mouse.up()
+        page.wait_for_selector(".tree-panel.tree-flash", timeout=5000)
+        assert doc.expr == y * z * sin(x)
+        # the quick bar's Delete does delete
+        _node(page, "z").click()
+        page.locator(".tree-quick button", has_text="Delete").click()
+        page.wait_for_function("document.querySelector('.se-source').textContent === 'y*sin(x)'")
+        assert errors == []
+        browser.close()
+    srv.shutdown()
+    srv.server_close()

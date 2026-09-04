@@ -116,3 +116,19 @@ def test_every_step_of_the_history_carries_its_tree():
     steps = doc.history_labels()["steps"]
     assert [s["tree"]["head"] for s in steps] == ["Add", "Mul"]
     assert steps[1]["tree"]["view"] == "/" and "nodes" in steps[1]
+
+
+def test_removable_says_what_can_leave_its_parent():
+    doc = Document(sin(x) + y * z, addons=[ADDON])
+    tree = doc.snapshot()["tree"]
+    assert tree["removable"] is False                                 # the root
+    by_src = {c["src"]: c for c in tree["children"]}
+    assert by_src["sin(x)"]["removable"] and by_src["y*z"]["removable"]       # terms of a sum
+    assert by_src["sin(x)"]["children"][0]["removable"] is False              # the x of sin(x)
+    assert all(g["removable"] for g in by_src["y*z"]["children"])            # factors of a product
+    # the server refuses the same, with words
+    path = by_src["sin(x)"]["path"] + [0]
+    snap = doc.handle({"action": "addon", "addon": "tree", "method": "delete", "path": path})
+    assert "cannot be taken out of sin(x)" in snap["error"] and doc.expr == sin(x) + y * z
+    snap = doc.handle({"action": "addon", "addon": "tree", "method": "move", "from": path, "to": by_src["y*z"]["path"]})
+    assert "cannot be taken out of sin(x)" in snap["error"] and doc.expr == sin(x) + y * z
