@@ -27,7 +27,7 @@ sessions::
     save_history_html(steps, "steps.html")
 """
 
-from .addons import Addon, load_addon
+from .addons import Addon, installed_addons, load_addon
 from .document import Document
 from .history import History
 from .html import (display_history, display_html, save_history_html, save_html,
@@ -67,6 +67,7 @@ __all__ = [
     "format_path",
     "get_at",
     "get_ops",
+    "installed_addons",
     "load_addon",
     "make_op",
     "parse_path",

@@ -9,6 +9,7 @@ Nothing here is installed with `sympy-editor`.
 ```
 addons/
   README.md                 this document: the architecture and the contract
+  template/                 an add-on to copy: every hook once, in 60 lines of Python and 40 of JavaScript
   sympy_editor_tree/        the expression tree as an editable graph      (no dependency)
   sympy_editor_plot/        the graph of the selection, drawn by Plotly.js (numpy optional)
   sympy_editor_matching/    rewrite rules matched many-to-one              (sympy-matching)
@@ -17,7 +18,64 @@ addons/
 
 All three are **drafts**: they work end to end (each has tests, and the
 editor's browser test drives a panel), but their interfaces are the first
-version of an idea, not a promise.
+version of an idea, not a promise.  They live in this repository for
+convenience only: an add-on is an **external project** - any package, in
+any repository, by anyone - and the editor learns of it through a Python
+entry point, the way pytest learns of its plugins.
+
+## Starting the editor with add-ons
+
+1. **Install the add-on** - it is a normal package.  For the drafts, from
+   the checkout:
+
+   ```sh
+   pip install -e addons/sympy_editor_tree
+   pip install -e addons/sympy_editor_plot        # numpy is optional: pip install -e "addons/sympy_editor_plot[fast]"
+   pip install -e addons/sympy_editor_matching    # pulls sympy-matching
+   ```
+
+   A published add-on is `pip install sympy-editor-whatever`.  The editor
+   itself is unchanged by any of this: `installed_addons()` lists what it
+   can find (`{'matching': 'sympy_editor_matching:ADDON', 'plot': ..., 'tree': ...}`).
+
+2. **Name it when starting the editor.**  Every entry point takes `addons=`,
+   because all of them build a `Document`:
+
+   ```python
+   from sympy_editor import edit, save_html, serve, Document, to_html
+
+   edit(expr, addons=["tree", "plot", "matching"])     # the Jupyter widget (or the Pyodide fallback)
+   save_html(expr, "page.html", addons=["tree"])       # a self-contained page; the add-on's package goes with it
+   serve(expr, addons=["matching"])                    # the local HTTP server
+   Document(expr, addons=["plot"])                     # from Python, no browser
+   ```
+
+   Names are entry-point names.  Without installing, a module name works
+   when the package is importable (`addons=["sympy_editor_tree"]`,
+   `"my_pkg.addons:PLOT"` for an object under another name), and so does the
+   object itself (`addons=[sympy_editor_tree.ADDON]`).  Several editors may
+   share one add-on object; state is kept per document.
+
+3. **Or try the page**: `python addons/demo.py` writes `addons/demo.html`
+   with the three drafts (no install needed, it reads them from the
+   checkout), `python addons/demo.py --serve` runs them on the local server.
+
+There is no configuration file and no global switch: an add-on is on for
+the documents that name it, and off elsewhere.
+
+## Writing an add-on of your own
+
+Copy `addons/template/` to a repository of yours - it is a complete package:
+`pyproject.toml` with the entry point, `__init__.py` with one op, one query,
+one change and one contribution, `static/panel.js` with a panel and a
+toolbar button, a test.  Rename it (its README says where), `pip install -e .`,
+and `edit(expr, addons=["yours"])` finds it.  The contract is
+`sympy_editor.addons.Addon` (documented in the module); `API_VERSION` says
+which version of it this editor speaks, and an add-on that sets
+`api_version` higher is refused with a message.  Nothing in an add-on is
+imported by `sympy_editor`, and nothing of `sympy_editor`'s internals is
+needed beyond the documented helpers (`make_op`, the path helpers in
+`printer`, the document's `get`/`replace`/`parse`).
 
 ## What an add-on can do
 
@@ -133,7 +191,7 @@ installed add-on registers under the `sympy_editor.addons` group: `tree`,
 `plot`, `matching`) or module names (`sympy_editor_tree`), which is how a
 Pyodide page names them again.
 
-## Writing one
+## The contract in one example
 
 ```python
 from sympy_editor import Addon, make_op
@@ -164,7 +222,8 @@ edit(expr, addons=[ADDON])                  # Jupyter
 save_html(expr, "page.html", addons=[ADDON])   # a Pyodide page: the add-on's package goes with it
 ```
 
-To ship it, make it a package with an entry point:
+To ship it, make it a package with an entry point (`addons/template/`
+already has one):
 
 ```toml
 [project.entry-points."sympy_editor.addons"]

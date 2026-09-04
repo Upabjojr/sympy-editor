@@ -43,11 +43,16 @@ from .printer import AnnotatedLatexPrinter, register_rebuild
 if TYPE_CHECKING:  # pragma: no cover
     from .document import Document
 
-__all__ = ["Addon", "load_addon", "load_addons", "ENTRY_POINT_GROUP"]
+__all__ = ["Addon", "load_addon", "load_addons", "installed", "ENTRY_POINT_GROUP", "API_VERSION"]
 
 #: Installed add-ons announce themselves under this entry-point group:
 #: ``[project.entry-points."sympy_editor.addons"] tree = "sympy_editor_tree:ADDON"``.
 ENTRY_POINT_GROUP = "sympy_editor.addons"
+
+#: The version of this contract.  An add-on may set :attr:`Addon.api_version`
+#: to the one it was written for; a later, incompatible contract refuses it
+#: with a clear message rather than failing somewhere inside.
+API_VERSION = 1
 
 NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 #: What of an add-on's ``static/`` goes into a Pyodide page with its Python.
@@ -66,6 +71,8 @@ class Addon:
     #: Identifier: ``[a-z][a-z0-9_]*``.  The front end part registers under
     #: the same name, and messages carry it.
     name: str = ""
+    #: The contract version the add-on was written for (:data:`API_VERSION`).
+    api_version: int = API_VERSION
     #: What the panel and the history call it.
     label: str = ""
     #: pip distributions the add-on needs at run time besides sympy-editor
@@ -209,9 +216,20 @@ def _entry_points(group: str):
     return list(eps.get(group, []))  # type: ignore[union-attr]
 
 
+def installed() -> Dict[str, str]:
+    """The add-ons installed in this environment, by entry-point name ->
+    ``"module:object"``: what ``Document(addons=[name])`` can take."""
+    return {ep.name: ep.value for ep in sorted(_entry_points(ENTRY_POINT_GROUP), key=lambda e: e.name)}
+
+
+installed_addons = installed
+
+
 def load_addon(spec: Union[str, Addon]) -> Addon:
-    """An :class:`Addon` from an instance, an entry-point name (``"tree"``)
-    or a module name (``"sympy_editor_tree"``: its ``ADDON``)."""
+    """An :class:`Addon` from an instance, an entry-point name (``"tree"``,
+    see :func:`installed`), a module name (``"sympy_editor_tree"``: its
+    ``ADDON``) or ``"module:object"`` (``"my_pkg.addons:PLOT"``).  A class is
+    instantiated with no arguments."""
     if isinstance(spec, Addon):
         addon = spec
     elif isinstance(spec, str):
@@ -221,13 +239,16 @@ def load_addon(spec: Union[str, Addon]) -> Addon:
                 addon = ep.load()
                 break
         if addon is None:
+            mod_name, _, attr = spec.partition(":")
             try:
-                mod = importlib.import_module(spec)
+                mod = importlib.import_module(mod_name)
             except ImportError as exc:
-                raise ValueError(f"No add-on {spec!r}: not an installed add-on's name, and not an importable module ({exc})") from None
-            addon = getattr(mod, "ADDON", None)
+                names = ", ".join(installed()) or "none"
+                raise ValueError(f"No add-on {spec!r}: not an installed add-on's name (installed: {names}), "
+                                 f"and not an importable module ({exc})") from None
+            addon = getattr(mod, attr or "ADDON", None)
             if addon is None:
-                raise ValueError(f"Module {spec!r} defines no ADDON")
+                raise ValueError(f"Module {mod_name!r} defines no {attr or 'ADDON'}")
         if isinstance(addon, type):
             addon = addon()
     else:
@@ -236,6 +257,8 @@ def load_addon(spec: Union[str, Addon]) -> Addon:
         raise TypeError(f"{spec!r} is not an Addon")
     if not NAME_RE.match(addon.name or ""):
         raise ValueError(f"Add-on name {addon.name!r} is not [a-z][a-z0-9_]*")
+    if int(getattr(addon, "api_version", API_VERSION)) > API_VERSION:
+        raise ValueError(f"Add-on {addon.name!r} needs add-on API version {addon.api_version}; this sympy-editor has {API_VERSION}")
     return addon
 
 

@@ -434,12 +434,24 @@ the graph of the selection drawn by Plotly.js, and rewrite rules with
 wildcards matched many-to-one by
 [sympy-matching](https://github.com/Upabjojr/sympy-matching).
 
+An add-on is a package of its own, made by anyone, found by the editor
+once it is installed (`pip install -e addons/sympy_editor_tree` for a
+draft; a published one with plain `pip install`).  Then every way of
+starting the editor takes `addons=`:
+
 ```python
-from sympy_editor import edit
-w = edit(sin(x)**2 / x, addons=["tree", "plot", "matching"])   # installed add-ons, by name
+from sympy_editor import edit, save_html, serve, installed_addons
+installed_addons()                                       # {'matching': ..., 'plot': ..., 'tree': ...}
+w = edit(sin(x)**2 / x, addons=["tree", "plot", "matching"])          # Jupyter, by name
+save_html(expr, "page.html", addons=["tree", "plot"])                  # a self-contained page
+serve(expr, addons=["matching"])                                       # the local server
 ```
 
-`addons/README.md` describes the architecture and how to write one.
+Not installed?  A module name (`addons=["sympy_editor_tree"]`) or the
+object itself (`addons=[ADDON]`) work too; `python addons/demo.py` builds
+a page with the three drafts straight from the checkout.
+`addons/README.md` describes the architecture, and `addons/template/` is
+an add-on to copy when writing your own.
 
 ## How it works
 

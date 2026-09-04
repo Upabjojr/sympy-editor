@@ -170,3 +170,25 @@ def test_the_widget_passes_the_front_end():
     w.wait(5)
     snap = json.loads(w.snapshot)
     assert snap["query"]["result"] == {"n": 2} and snap["_req"] == 7
+
+
+def test_installed_lists_entry_points_and_specs_name_objects(tmp_path, monkeypatch):
+    """An add-on is an external package: the loader reads the entry points
+    of whatever is installed, and a ``module:object`` spec names an object
+    under any name."""
+    from sympy_editor import installed_addons
+    from sympy_editor import addons as mod
+    assert isinstance(installed_addons(), dict)
+    # a module with the add-on under a name of its own
+    pkg = tmp_path / "somebody_elses_addon.py"
+    pkg.write_text("from sympy_editor import Addon\nclass A(Addon):\n    name = 'elsewhere'\nTHING = A()\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    assert load_addon("somebody_elses_addon:THING").name == "elsewhere"
+    with pytest.raises(ValueError, match="defines no ADDON"):
+        load_addon("somebody_elses_addon")
+    # a contract from the future is refused with a message
+    class Future(Addon):
+        name = "future"
+        api_version = mod.API_VERSION + 1
+    with pytest.raises(ValueError, match="API version"):
+        load_addon(Future())
