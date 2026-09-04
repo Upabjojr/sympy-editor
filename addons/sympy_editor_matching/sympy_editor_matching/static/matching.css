@@ -13,3 +13,6 @@
 .se-addon-matching .mt-num { color: var(--se-muted); min-width: 3.5em; }
 .se-addon-matching .mt-bind, .se-addon-matching .mt-result { font-family: var(--se-mono); }
 .se-addon-matching .mt-result { color: var(--se-added); }
+.se-addon-matching .mt-edit, .se-addon-matching .mt-open { padding: 0 6px; line-height: 1.4; }
+.se-addon-matching .mt-inline { flex: 1 1 auto; }
+.se-addon-matching .mt-rules li.mt-editing { background: rgba(var(--se-accent), 0.1); border-radius: 0.3rem; }

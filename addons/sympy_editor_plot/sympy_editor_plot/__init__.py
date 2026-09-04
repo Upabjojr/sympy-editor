@@ -93,23 +93,28 @@ class PlotAddon(Addon):
         path = payload.get("path") or "/"
         children = payload.get("children")
         node = doc._extract_range(doc.expr, doc._path(path), children) if children is not None else doc.get(path)
+        # The node's own free symbols, before any value goes in: the panel
+        # keeps a row per symbol besides the axis, whether it has a value yet
+        # or not.  Values are matched by name (the sliders know names; the
+        # expression may carry assumptions on its symbols).
+        free = sorted(node.free_symbols, key=str)
+        by_name = {str(s): s for s in free}
+        var_name = payload.get("var")
+        var = by_name.get(str(var_name)) if var_name else None
+        if var is None:
+            var = free[0] if free else Symbol("x")
         values = {}
         for name, value in (payload.get("values") or {}).items():
-            values[Symbol(str(name))] = sympify(value)
-        # Substitute by name: the sliders know names, the expression may
-        # carry assumptions on its symbols.
-        by_name = {str(s): s for s in node.free_symbols}
-        node = node.subs({by_name[str(s)]: v for s, v in values.items() if str(s) in by_name})
-        free = sorted(node.free_symbols, key=str)
-        var_name = payload.get("var")
-        var = next((s for s in free if str(s) == var_name), None) or (free[0] if free else Symbol("x"))
-        others = [str(s) for s in free if s != var]
+            if str(name) in by_name and by_name[str(name)] != var:
+                values[by_name[str(name)]] = sympify(value)
+        others = [str(s) for s in free if s != var and s not in values]
         span = payload.get("span") or self.span
         n = int(payload.get("n") or self.samples)
         answer: Dict[str, Any] = {"var": str(var), "free": [str(s) for s in free], "needs": others,
                                   "span": [float(span[0]), float(span[1])], "src": str(node), "curves": []}
         if others:
-            return answer                            # the panel makes sliders and asks again
+            return answer                            # the panel says which values are missing
+        node = node.subs(values)
         sides = [("lhs", node.lhs), ("rhs", node.rhs)] if isinstance(node, Relational) else [("", node)]
         xs = [float(span[0]) + (float(span[1]) - float(span[0])) * i / (n - 1) for i in range(max(2, n))]
         answer["x"] = xs

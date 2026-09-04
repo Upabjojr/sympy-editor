@@ -1,7 +1,7 @@
 /* sympy-editor add-on "plot". */
 .se-addon-plot .plot-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.3rem; font-size: 12px; }
-.se-addon-plot .plot-bar select, .se-addon-plot .plot-bar input[type=number] { font: inherit; font-size: 12px; padding: 2px 4px; }
-.se-addon-plot .plot-bar input[type=number] { width: 5em; }
+.se-addon-plot .plot-bar select, .se-addon-plot .plot-num { font: inherit; font-size: 12px; padding: 2px 4px; }
+.se-addon-plot .plot-num { width: 5.5em; font-family: var(--se-mono); }
 .se-addon-plot .plot-sliders { display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; font-size: 12px; margin-bottom: 0.3rem; }
 .se-addon-plot .plot-sliders label { display: inline-flex; align-items: center; gap: 0.3rem; }
 .se-addon-plot .plot-sliders input[type=range] { width: 8em; }
@@ -13,3 +13,5 @@
 .se-addon-plot .plot-svg .curve.second { stroke: var(--se-added); }
 .se-addon-plot .plot-note { color: var(--se-muted); font-size: 12px; }
 .se-addon-plot .plot-note.error { color: var(--se-error); }
+.se-addon-plot .plot-shown { color: var(--se-muted); font-family: var(--se-mono); }
+.se-addon-plot .plot-sliders label.plot-unset { color: var(--se-error); }

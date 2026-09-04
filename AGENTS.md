@@ -668,7 +668,10 @@ carries it unchanged.  The front end part is a plain script (`Addon.js`,
 `loadAddons` puts the CSS in the page and runs the script once,
 `Editor._mountAddons` gives each a box under the source line (`.se-addons`,
 `.se-addon-<name>`) and a toolbar block (`data-block="addon:<name>"`), and
-`onState`/`onSelect`/`destroy` follow the editor.  `api.call(method, payload)`
+`onState`/`onSelect`/`destroy` follow the editor; a `help` (HTML) on the
+definition or the instance puts a "?" in the box's summary that opens it in
+the editor's help overlay (`showHelp(html, title)`, the same page as the
+toolbar's "?") - every add-on with a panel should have one.  `api.call(method, payload)`
 is the promise of a query's result or the new snapshot.  A Pyodide page
 carries the add-ons' packages (`cfg["packages"]`, written under
 `/sympy_editor_pkg/<module>/`) and `micropip`-installs their `requires`

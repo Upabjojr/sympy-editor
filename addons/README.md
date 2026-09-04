@@ -184,8 +184,10 @@ api.h(tag, attrs, children)  // the editor's element helper; api.katex(); api.lo
 api.editor                   // the Editor itself, for what the above does not cover
 ```
 
-`def.mount(api)` returns `{element, title, onState(snap), onSelect(path, range),
-commands: {cmd: fn}, destroy()}`, all optional; `def.tools` is a list of
+`def.mount(api)` returns `{element, title, help, onState(snap), onSelect(path,
+range), commands: {cmd: fn}, destroy()}`, all optional (`help` is HTML for the
+guide behind the panel's "?", shown as the editor's own guide is - write one:
+a feature that is not in it does not exist for the user); `def.tools` is a list of
 `{cmd, label, title, run(api)}` toolbar buttons, which the editor puts in a
 block of their own (`data-block="addon:<name>"`) and disables while it is busy.
 The panel goes in a collapsible box under the source line

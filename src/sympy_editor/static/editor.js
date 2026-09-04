@@ -1333,8 +1333,21 @@ var SympyEditor = (function () {
       }
       var el = entry.inst.element;
       if (el) {
+        var self = this;
+        var guide = entry.inst.help || def.help || null;
+        var summary = h("summary", {}, [entry.inst.title || entry.label]);
+        if (guide) {
+          // The add-on's own guide, in the editor's help overlay - the "?"
+          // every panel has, like the toolbar's.
+          var helpBtn = h("button", { type: "button", class: "se-addon-help", title: "How " + (entry.inst.title || entry.label) + " works" }, ["?"]);
+          helpBtn.addEventListener("click", function (ev) {
+            ev.preventDefault(); ev.stopPropagation();     // not the <details> toggle
+            self.showHelp(guide, entry.inst.title || entry.label);
+          });
+          summary.appendChild(helpBtn);
+        }
         var box = entry.inst.bare ? el : h("details", { class: "se-addon", "data-addon": d.name, open: "" }, [
-          h("summary", {}, [entry.inst.title || entry.label]),
+          summary,
           h("div", { class: "se-addon-body" }, [el])
         ]);
         box.classList.add("se-addon-" + d.name);
@@ -1448,6 +1461,7 @@ var SympyEditor = (function () {
         call: function (method, payload) { return self._addonCall(entry.name, method, payload); },
         status: function (text) { self._setStatus(text); },
         error: function (text) { self._showError(text); },
+        showHelp: function (html, title) { self.showHelp(html, title || entry.label); },
         busy: function () { return self.busy; }
       };
     }
@@ -4372,17 +4386,24 @@ var SympyEditor = (function () {
 
     /** The guide in a box: what showHelp shows the toolbar's "?" opens.
      *  Static content (HELP_HTML), same overlay dress as the history view. */
-    showHelp() {
-      if (this.helpView) { this.closeHelp(); return; }    // the button toggles it
+    /** The guide: the editor's own (HELP_HTML), or an add-on's `html`
+     *  under `title` - the same overlay, so every "?" opens the same kind of
+     *  page.  The button toggles it; opening another guide replaces it. */
+    showHelp(html, title) {
+      var same = this.helpView && this._helpTitle === (title || "");
+      if (this.helpView) this.closeHelp();
+      if (same) return;
       var self = this;
       this.closeDrawer();
       this.closeHistory();
+      var heading = title || "How to use the editor";
+      this._helpTitle = title || "";
       var close = h("button", { type: "button", class: "se-history-close", title: "Close (Esc)", "aria-label": "Close" }, ["\u00d7"]);
       var head = h("div", { class: "se-history-head" }, [
-        h("span", { class: "se-history-title" }, ["How to use the editor"]), close]);
+        h("span", { class: "se-history-title" }, [heading]), close]);
       var body = h("div", { class: "se-help-body" });
-      body.innerHTML = HELP_HTML;
-      var view = h("div", { class: "se-history-view se-help-view", role: "dialog", "aria-label": "How to use the editor" }, [head, body]);
+      body.innerHTML = html || HELP_HTML;
+      var view = h("div", { class: "se-history-view se-help-view", role: "dialog", "aria-label": heading }, [head, body]);
       close.addEventListener("click", function () { self.closeHelp(); });
       this._helpKey = function (ev) { if (ev.key === "Escape") { ev.preventDefault(); self.closeHelp(); } };
       view.addEventListener("keydown", this._helpKey);           // (the editor's own handler stops Esc from reaching the document)
@@ -5166,9 +5187,11 @@ var SympyEditor = (function () {
 
   /** Register the front end of an add-on: `def.mount(api)` is called by each
    *  editor whose document has the add-on and returns `{element, title,
-   *  onState(snap), onSelect(path, range), commands: {cmd: fn}, destroy()}`
-   *  (all optional); `def.tools` lists toolbar buttons `{cmd, label, title,
-   *  run(api)}`.  See sympy_editor/addons.py for the Python side. */
+   *  help, onState(snap), onSelect(path, range), commands: {cmd: fn},
+   *  destroy()}` (all optional); `def.tools` lists toolbar buttons `{cmd,
+   *  label, title, run(api)}`; `def.help` (or the instance's) is HTML for
+   *  the guide behind the panel's "?", shown as the editor's own guide is.
+   *  See sympy_editor/addons.py for the Python side. */
   function registerAddon(name, def) {
     addonDefs[name] = def;
   }

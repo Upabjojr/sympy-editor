@@ -13,20 +13,31 @@ SympyEditor.registerAddon("plot", {
     var area = h("div", { class: "plot-area" });
     var note = h("div", { class: "plot-note" });
     var varSel = h("select", { title: "The variable on the horizontal axis" });
-    var from = h("input", { type: "number", value: String(opts.span ? opts.span[0] : -6), step: "any", title: "Left end of the axis" });
-    var to = h("input", { type: "number", value: String(opts.span ? opts.span[1] : 6), step: "any", title: "Right end of the axis" });
+    // Text fields, not number inputs: a number input offers no text selection
+    // to speak of (no selectionStart, no double-click to select) in some
+    // browsers; a text field with a decimal keyboard does.
+    var numField = function (value, title) {
+      return h("input", { type: "text", inputmode: "decimal", class: "plot-num", value: String(value), title: title, spellcheck: "false", autocomplete: "off" });
+    };
+    var from = numField(opts.span ? opts.span[0] : -6, "Left end of the axis (a zoom in the picture changes it too)");
+    var to = numField(opts.span ? opts.span[1] : 6, "Right end of the axis (a zoom in the picture changes it too)");
+    var shown = h("span", { class: "plot-shown", title: "The range on show, after a zoom or a pan in the picture" });
     var follow = h("input", { type: "checkbox", checked: "" });
     var sliders = h("div", { class: "plot-sliders" });
     var bar = h("div", { class: "plot-bar" }, [
       h("label", {}, ["variable ", varSel]),
-      h("label", {}, ["from ", from]), h("label", {}, ["to ", to]),
+      h("label", {}, ["from ", from]), h("label", {}, ["to ", to]), shown,
       h("label", { title: "Plot the selected piece of the formula; unticked, the whole expression" }, [follow, " follow the selection"])
     ]);
     var element = h("div", { class: "plot-panel" }, [bar, sliders, area, note]);
 
-    var values = {};        // slider values by symbol name
+    var values = {};        // the values given to the other free symbols, by name (none until the user gives one)
     var seq = 0, timer = null, plotly = null, plotlyFailed = false;
     var lastVar = null;
+    var sampled = null;     // [from, to] of the samples on show
+
+    function fmt(v) { return Number(v).toPrecision(4).replace(/\.?0+$/, ""); }
+    function showRange(a, b) { shown.textContent = a === null ? "" : "shown: " + fmt(a) + " \u2026 " + fmt(b); }
 
     function target() {
       if (!follow.checked) return { path: "/" };
@@ -56,7 +67,15 @@ SympyEditor.registerAddon("plot", {
         if (my !== seq) return;
         fillVars(res);
         fillSliders(res);
-        if (res.needs && res.needs.length) { ask(); return; }    // the sliders now have values: again
+        if (res.needs && res.needs.length) {
+          // More than one free symbol and no value for the others: say so
+          // and draw nothing, rather than guess.
+          clearPlot();
+          note.className = "plot-note error";
+          note.textContent = res.src + " has " + res.free.length + " free symbols (" + res.free.join(", ") + "): "
+            + res.var + " is on the axis; give a value to " + res.needs.join(", ") + " below, or pick another variable.";
+          return;
+        }
         draw(res);
       }, function (e) {
         if (my !== seq) return;
@@ -80,22 +99,26 @@ SympyEditor.registerAddon("plot", {
 
     function fillSliders(res) {
       var wanted = (res.free || []).filter(function (n) { return n !== res.var; });
-      // One slider per free symbol besides the axis: new ones appear with a
-      // value of 1, vanished ones go, the rest keep their value.
+      // A field and a slider per free symbol besides the axis: a value is
+      // the user's to give (none is guessed); new symbols get an empty row,
+      // vanished ones lose theirs, the rest keep their value.
       var seen = {};
       wanted.forEach(function (name) {
         seen[name] = true;
-        if (!(name in values)) values[name] = 1;
         var row = sliders.querySelector('[data-sym="' + name + '"]');
         if (row) return;
-        var out = h("output", {}, [String(values[name])]);
-        var range = h("input", { type: "range", min: "-3", max: "3", step: "0.05", value: String(values[name]) });
-        range.addEventListener("input", function () {
-          values[name] = parseFloat(range.value);
-          out.textContent = String(values[name]);
+        var has = name in values;
+        var num = h("input", { type: "text", inputmode: "decimal", class: "plot-num plot-value", placeholder: "value", title: "The value of " + name + " for the plot",
+                               value: has ? String(values[name]) : "", spellcheck: "false", autocomplete: "off" });
+        var range = h("input", { type: "range", min: "-3", max: "3", step: "0.05", value: has ? String(values[name]) : "0", title: "Slide to change " + name });
+        var set = function (v) {
+          if (!isFinite(v)) { delete values[name]; request(); return; }
+          values[name] = v;
           request();
-        });
-        sliders.appendChild(h("label", { "data-sym": name }, [name + " ", range, out]));
+        };
+        range.addEventListener("input", function () { num.value = range.value; set(parseFloat(range.value)); });
+        num.addEventListener("input", function () { var v = parseFloat(num.value); if (isFinite(v)) range.value = String(Math.max(-3, Math.min(3, v))); set(v); });
+        sliders.appendChild(h("label", { "data-sym": name, class: has ? "" : "plot-unset" }, [name + " = ", num, range]));
       });
       Array.prototype.slice.call(sliders.children).forEach(function (row) {
         var name = row.getAttribute("data-sym");
@@ -103,9 +126,16 @@ SympyEditor.registerAddon("plot", {
       });
     }
 
+    function clearPlot() {
+      if (plotly && area.querySelector(".js-plotly-plot, .plot-container")) { try { plotly.purge(area); } catch (e) { /* ignore */ } }
+      area.textContent = "";
+      showRange(null);
+    }
+
     function draw(res) {
       note.className = "plot-note";
       note.textContent = res.src + (res.curves.length > 1 ? "  (both sides)" : "");
+      Array.prototype.slice.call(sliders.children).forEach(function (row) { row.classList.remove("plot-unset"); });
       var xs = res.x;
       if (!plotly && !plotlyFailed && opts.plotlyJs) {
         api.loadScript(opts.plotlyJs).then(function () {
@@ -126,10 +156,37 @@ SympyEditor.registerAddon("plot", {
           font: { color: dark ? "#e6e6e6" : "#1f2328", size: 11 },
           xaxis: { title: res.var, zeroline: true, gridcolor: dark ? "#333" : "#eee" },
           yaxis: { zeroline: true, gridcolor: dark ? "#333" : "#eee" }
-        }, { responsive: true, displayModeBar: false });
+        }, { responsive: true, displayModeBar: false }).then(listenZoom, function () { /* drawn or not, nothing to listen to */ });
+        sampled = [xs[0], xs[xs.length - 1]];
+        showRange(sampled[0], sampled[1]);
         return;
       }
       drawSvg(res);
+      sampled = [xs[0], xs[xs.length - 1]];
+      showRange(sampled[0], sampled[1]);
+    }
+
+    /** Once Plotly has drawn (its event API is on the element only then). */
+    function listenZoom() {
+      if (!area._seRelayout && typeof area.on === "function") {
+          // A zoom or a pan in the picture (Plotly.react itself emits no
+          // relayout): the fields take the range on show and the curve is
+          // sampled again over it, so that zooming in brings detail rather
+          // than stretching the same points.  A double-click resets to the
+          // options' span.
+          area._seRelayout = true;
+          area.on("plotly_relayout", function (ev) {
+            if (!ev) return;
+            if (ev["xaxis.autorange"]) { from.value = String(opts.span ? opts.span[0] : -6); to.value = String(opts.span ? opts.span[1] : 6); request(); return; }
+            var a = ev["xaxis.range[0]"], b = ev["xaxis.range[1]"];
+            if (ev["xaxis.range"]) { a = ev["xaxis.range"][0]; b = ev["xaxis.range"][1]; }
+            if (typeof a !== "number" || typeof b !== "number" || !(a < b)) return;
+            if (sampled && Math.abs(a - sampled[0]) < 1e-12 && Math.abs(b - sampled[1]) < 1e-12) return;   // the range we drew
+            from.value = fmt(a); to.value = fmt(b);
+            showRange(a, b);
+            request();
+          });
+      }
     }
 
     /** The fallback: axes and a polyline per curve, the vertical range from
@@ -176,9 +233,24 @@ SympyEditor.registerAddon("plot", {
     to.addEventListener("change", request);
     follow.addEventListener("change", request);
 
+    var HELP = [
+      "<section><h3>What it draws</h3><ul>",
+      "<li>The graph of the selected piece of the formula \u2014 the whole expression when nothing is selected, or when <i>follow the selection</i> is off.</li>",
+      "<li>Python samples the function (<code>lambdify</code>; a value that is not a real number leaves a gap), and the curve is drawn by Plotly.js \u2014 by a plain SVG line when its CDN cannot be reached.</li>",
+      "<li>An equation gives two curves, one per side.</li>",
+      "</ul></section>",
+      "<section><h3>Controls</h3><ul>",
+      "<li><b>variable</b>: the symbol on the horizontal axis (the first free symbol to begin with); <b>from</b>/<b>to</b>: the span.</li>",
+      "<li>With more than one free symbol nothing is drawn until the others have a value: each gets a field and a slider, and the value is substituted on the way to the plot \u2014 the formula stays symbolic. No value is ever guessed.</li>",
+      "<li>Zoom or pan in the picture (drag a box, double-click to reset): the <b>from</b>/<b>to</b> fields take the range on show, <i>shown</i> reads it out, and the curve is sampled again over it \u2014 zooming in brings detail.</li>",
+      "<li>The picture follows every committed change \u2014 an edit, a transformation, an undo \u2014 and the selection.</li>",
+      "</ul></section>"
+    ].join("");
+
     return {
       element: element,
       title: "Plot",
+      help: HELP,
       onState: function (snap) { if (!snap.preview) request(); },
       onSelect: function () { if (follow.checked) request(); },
       destroy: function () { clearTimeout(timer); seq++; }

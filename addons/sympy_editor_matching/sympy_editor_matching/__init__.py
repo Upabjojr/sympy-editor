@@ -35,7 +35,7 @@ from sympy.printing.latex import LatexPrinter
 
 from sympy_editor.addons import Addon
 from sympy_editor.ops import make_op
-from sympy_editor.printer import get_at, replace_at
+from sympy_editor.printer import rebuild
 
 try:
     from sympy_matching import (IDENTITY_ELEMENT, SymPyReplacementPattern, WildSymbol, build_replacer,
@@ -45,7 +45,7 @@ except ImportError:  # pragma: no cover - the add-on is still importable, activa
     AVAILABLE = False
     WildSymbol = None  # type: ignore[assignment,misc]
 
-__all__ = ["MatchingAddon", "RewriteRule", "ADDON", "parse_rule_text"]
+__all__ = ["MatchingAddon", "RewriteRule", "ADDON", "parse_rule_text", "rule_text"]
 
 STATIC = Path(__file__).parent / "static"
 
@@ -118,6 +118,16 @@ def parse_rule_text(text: str, parse) -> RewriteRule:
     return RewriteRule(pattern, replacement, condition)
 
 
+def rule_text(rule: RewriteRule) -> str:
+    """The text form :func:`parse_rule_text` reads: ``pattern -> replacement``,
+    ``if condition`` appended when there is one - what the panel shows in
+    the field when a rule is edited in place."""
+    out = f"{rule.pattern} -> {rule.replacement}"
+    if rule.condition is not S.true:
+        out += f" if {rule.condition}"
+    return out
+
+
 class MatchingAddon(Addon):
     name = "matching"
     label = "Rewrite rules"
@@ -126,16 +136,17 @@ class MatchingAddon(Addon):
     kind_labels = {"rule": "Rule"}
     js = (STATIC / "matching.js").read_text(encoding="utf-8")
     css = (STATIC / "matching.css").read_text(encoding="utf-8")
-    #: How many times *Rewrite all* may fire before it gives up.
-    max_rounds = 100
+    #: How many passes *Rewrite all* makes before it gives up.
+    max_rounds = 50
 
     def __init__(self, rules=()):
         self.initial_rules: List[RewriteRule] = [self._as_rule(r) for r in rules]
         self.ops = [
-            make_op("rewrite", self._op_rewrite, label="Rewrite (first matching rule)", context=True,
-                    doc="Apply the first rule of the panel that matches the selection, or a piece inside it."),
+            make_op("rewrite", self._op_rewrite, label="Rewrite (one pass of the rules)", context=True,
+                    doc="Replace every piece of the selection a rule of the panel matches, outermost first, "
+                        "in one pass - what a rule produced is not rewritten again."),
             make_op("rewrite_all", self._op_rewrite_all, label="Rewrite all (until no rule matches)", context=True,
-                    doc="Apply the rules of the panel again and again until none matches."),
+                    doc="One pass after another until no rule matches any more."),
             make_op("rule_swap", lambda r: RewriteRule(r.replacement, r.pattern, r.condition), label="Swap sides",
                     kinds=("rule",), doc="The rule the other way round."),
         ]
@@ -221,24 +232,32 @@ class MatchingAddon(Addon):
         return None
 
     def rewrite_once(self, doc, node: Basic, index: Optional[int] = None) -> Optional[Basic]:
-        """The first rewrite available: at the root of ``node``, else in the
-        first argument (depth first) where a rule matches; None if none."""
+        """One pass, outermost first: every piece of ``node`` a rule matches
+        is replaced, and what a rule produced is left alone in this pass
+        (the ``ReplaceAll`` of term rewriting: ``x -> x**2`` on ``x + sin(x)``
+        gives ``x**2 + sin(x**2)``, and no more).  None when nothing matched.
+        ``index`` restricts it to one rule."""
         done = self._apply(doc, node, index)
         if done is not None:
             return done
-        for i, arg in enumerate(node.args):
-            inner = self.rewrite_once(doc, arg, index)
-            if inner is not None:
-                return replace_at(node, (i,), inner)
-        return None
+        if not node.args:
+            return None
+        new_args = [self.rewrite_once(doc, arg, index) for arg in node.args]
+        if all(new is None for new in new_args):
+            return None
+        return sympify(rebuild(node, [new if new is not None else old for new, old in zip(new_args, node.args)]))
 
     def rewrite_all(self, doc, node: Basic) -> Basic:
+        """:meth:`rewrite_once` again and again until nothing matches (the
+        ``ReplaceRepeated`` of term rewriting), or ``max_rounds`` passes -
+        a rule whose result it matches again (``x -> x**2``) never settles."""
         for _ in range(self.max_rounds):
             new = self.rewrite_once(doc, node)
             if new is None or new == node:
                 return node
             node = new
-        doc.last_note = f"Rewrite all stopped after {self.max_rounds} rounds"
+        doc.last_note = (f"Rewrite all stopped after {self.max_rounds} passes: a rule keeps matching "
+                         "what it produces (x -> x**2 grows for ever); Rewrite does one pass")
         return node
 
     def _op_rewrite(self, expr, doc=None):
@@ -256,13 +275,15 @@ class MatchingAddon(Addon):
     def _rules_answer(self, doc) -> Dict[str, Any]:
         out = []
         for i, rule in enumerate(self.rules(doc)):
-            out.append({"index": i, "src": str(rule), "latex": latex(rule)})
+            out.append({"index": i, "src": str(rule), "text": rule_text(rule), "latex": latex(rule)})
         return {"rules": out}
 
     def describe(self, method: str, payload: Dict[str, Any]) -> Optional[str]:
         if method == "rewrite":
-            which = f"rule {payload['index'] + 1}" if payload.get("index") is not None else ("all rules" if payload.get("all") else "first matching rule")
+            which = f"rule {payload['index'] + 1}" if payload.get("index") is not None else ("until nothing matches" if payload.get("all") else "one pass")
             return f"Rewrite: {which}"
+        if method == "open_rule":
+            return f"Rules: open rule {int(payload.get('index', 0)) + 1} in the editor"
         return f"Rules: {method}"
 
     def handle(self, doc, method: str, payload: Dict[str, Any]):
@@ -272,6 +293,30 @@ class MatchingAddon(Addon):
             rule = parse_rule_text(str(payload.get("src", "")), doc.parse)
             self.rules(doc).append(rule)
             return self._rules_answer(doc)
+        if method == "update_rule":
+            # A rule changed in place: from its text form (``src``), or from
+            # the Rule node at ``path`` in the expression (a rule opened in
+            # the editor, edited there, and saved back over its entry).
+            rules = self.rules(doc)
+            index = int(payload.get("index", -1))
+            if not 0 <= index < len(rules):
+                raise ValueError(f"No rule {index + 1}")
+            if payload.get("src") is not None:
+                rules[index] = parse_rule_text(str(payload["src"]), doc.parse)
+            else:
+                node = doc.get(payload.get("path") or "/")
+                if not isinstance(node, RewriteRule):
+                    raise ValueError(f"{node} is not a rule: select a Rule(pattern, replacement)")
+                rules[index] = node
+            return self._rules_answer(doc)
+        if method == "open_rule":
+            # The rule as the expression, to edit it structurally; undoable.
+            rules = self.rules(doc)
+            index = int(payload.get("index", -1))
+            if not 0 <= index < len(rules):
+                raise ValueError(f"No rule {index + 1}")
+            doc.replace("/", rules[index])
+            return None
         if method == "remove_rule":
             rules = self.rules(doc)
             index = int(payload.get("index", -1))

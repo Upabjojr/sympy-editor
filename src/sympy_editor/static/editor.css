@@ -515,7 +515,12 @@
   background: var(--se-surface);
   padding: 0.25rem 0.5rem 0.4rem;
 }
-.se-addon > summary { cursor: pointer; user-select: none; font-weight: 600; color: var(--se-muted); }
+.se-addon > summary { cursor: pointer; user-select: none; font-weight: 600; color: var(--se-muted); display: flex; align-items: center; gap: 0.5rem; }
+.se-addon > summary::before { content: "\25B8"; font-size: 0.8em; }
+.se-addon[open] > summary::before { content: "\25BE"; }
+.se-addon > summary { list-style: none; }
+.se-addon > summary::-webkit-details-marker { display: none; }
+.se-addon-help { margin-left: auto; font-size: 11px; line-height: 1.2; padding: 1px 7px; }
 .se-addon-body { padding-top: 0.3rem; min-width: 0; }
 .sympy-editor.se-full > .se-addons { display: none; }
 

@@ -25,6 +25,8 @@ SympyEditor.registerAddon("template", {
     return {
       element: element,                                // shown in a box under the formula
       title: "Template",                               // the box's heading
+      help: "<section><h3>What this add-on does</h3><ul><li>The guide behind the panel's \"?\": HTML, shown like the editor's own.</li>"
+          + "<li>Say what each control does and what the add-on changes.</li></ul></section>",
       onState: function (snap) {                       // every snapshot (previews too)
         if (!snap.preview && snap.template) info.textContent = api.options.greeting + " - " + snap.template.args + " argument(s), " + snap.template.atoms + " atom(s)";
       },

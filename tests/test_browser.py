@@ -3574,6 +3574,7 @@ SympyEditor.registerAddon("demo", {
     el.appendChild(btn);
     return {
       element: el,
+      help: "<section><h3>Demo</h3><p>This panel counts arguments.</p></section>",
       onState: function (snap) { if (!snap.preview) el.setAttribute("data-src", snap.src); },
       onSelect: function (path) { el.setAttribute("data-sel", path || ""); }
     };
@@ -3604,7 +3605,7 @@ def test_addon_panel_tools_and_calls(browser):
         page = _open(browser, srv.url)
         panel = page.locator(".se-addon-demo .demo-panel")
         assert panel.count() == 1
-        assert page.locator(".se-addon-demo summary").inner_text() == "Demo panel"
+        assert page.locator(".se-addon-demo summary").inner_text().startswith("Demo panel")   # then the "?"
         assert page.locator('style[data-se-addon="demo"]').count() == 1
         assert panel.get_attribute("data-src") == "x + y"
         # the selection reaches the add-on
@@ -3622,6 +3623,17 @@ def test_addon_panel_tools_and_calls(browser):
         assert page.locator(".se-view .katex .fbox, .se-view .katex .boxed").count() >= 1
         page.keyboard.press("Control+z")
         page.wait_for_function("document.querySelector('.se-source').textContent === 'x + y'")
+        # the panel's "?" opens the add-on's guide in the editor's help overlay, Esc closes it
+        page.locator(".se-addon-demo .se-addon-help").click()
+        guide = page.locator(".se-help-view")
+        assert guide.is_visible() and "counts arguments" in guide.inner_text()
+        assert page.locator(".se-help-view .se-history-title").inner_text() == "Demo panel"
+        assert page.locator(".se-addon-demo").get_attribute("open") is not None   # the box did not fold
+        page.keyboard.press("Escape")
+        assert page.locator(".se-help-view").count() == 0
+        page.locator('.se-toolbar [data-cmd="help"]').click()                  # the editor's own guide still opens
+        assert "selecting" in page.locator(".se-help-view").inner_text().lower()
+        page.keyboard.press("Escape")
         assert page.errors == []
     finally:
         srv.shutdown()

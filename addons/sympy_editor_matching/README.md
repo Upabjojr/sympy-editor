@@ -18,12 +18,20 @@ w = edit(sin(x)**2 + cos(x)**2, addons=["matching"])
   `x**m_ -> x**(m_ + 1)/(m_ + 1) if Ne(m_, -1)` for a guarded rule.
 - Select a piece of the formula: the panel lists the rules that match it,
   with what each wildcard bound, and a button applies the one you pick.
-  *Rewrite* applies the first rule that matches at the selection or inside it;
-  *Rewrite all* repeats until nothing matches.
+  *Rewrite* makes one pass over the selection, outermost first, replacing every
+  piece a rule matches and leaving what a rule produced alone (`x -> x**2` on
+  `x + sin(x)` gives `x**2 + sin(x**2)`, once - the *ReplaceAll* of term
+  rewriting); *Rewrite all* repeats the pass until nothing matches
+  (*ReplaceRepeated*; a rule that matches its own result stops after 50 passes,
+  with a note).
+- A rule can be changed: the pencil (or a double-click on it) turns it into
+  its text form to edit in place, and ↗ opens it in the formula editor as a
+  `Rule(...)` node - edit its sides there like any formula, then *Save as
+  rule N* puts it back over the same entry.
 - A rule is also a node: `Rule(sin(a_)**2, 1 - cos(a_)**2)` typed in the
   editor is shown as `sin²(a) → 1 − cos²(a)`, its sides are selectable and
-  editable like anything else, and *Use as rule* puts the selected rule in the
-  set.  The type menu on a rule offers to swap its sides.
+  editable like anything else, and *Use selection as rule* puts the selected
+  rule in the set.  The type menu on a rule offers to swap its sides.
 
 The rules matter to sympy-matching's design in one way: they are compiled into
 one matcher when they change, and every query walks that matcher once, so a

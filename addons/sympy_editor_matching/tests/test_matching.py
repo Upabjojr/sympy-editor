@@ -102,3 +102,45 @@ def test_rule_text():
     assert isinstance(r, RewriteRule) and r.condition != True  # noqa: E712
     with pytest.raises(ValueError):
         parse_rule_text("no arrow here", doc.parse)
+
+
+def test_rules_can_be_edited_in_place_and_through_the_editor():
+    doc = Document(sin(x) ** 2, addons=[ADDON])
+    _q(doc, "add_rule", src="sin(a_)**2 -> 1 - cos(a_)**2")
+    rules = _q(doc, "rules")["rules"]
+    assert rules[0]["text"] == "sin(a_)**2 -> 1 - cos(a_)**2"
+    # as text: the field shows the text form, and what is typed replaces the rule
+    res = _q(doc, "update_rule", index=0, src="sin(a_)**2 -> (1 - cos(2*a_))/2")
+    assert res["rules"][0]["text"] == "sin(a_)**2 -> 1/2 - cos(2*a_)/2"
+    hits = _q(doc, "matches", path="/")["matches"]
+    assert hits[0]["result"] == "1/2 - cos(2*x)/2"
+    res = _q(doc, "update_rule", index=0, src="sin(a_)**2 -> 1/2 - cos(2*a_)/2 if Ne(a_, 0)")
+    assert res["rules"][0]["text"].endswith(" if Ne(a_, 0)")     # a guard survives the text form
+    # structurally: the rule becomes the expression, edited there, saved back
+    snap = _q(doc, "open_rule", index=0)
+    assert isinstance(doc.expr, RewriteRule) and doc.can_undo and snap["addon"]["method"] == "open_rule"
+    doc.replace("/1", "1 - cos(a_)**2")                 # the replacement side, in the formula
+    res = _q(doc, "update_rule", index=0, path="/")
+    assert res["rules"][0]["text"] == "sin(a_)**2 -> 1 - cos(a_)**2 if Ne(a_, 0)"
+    doc.undo(); doc.undo()
+    assert doc.expr == sin(x) ** 2
+    snap = doc.handle({"action": "addon", "addon": "matching", "method": "update_rule", "index": 3, "src": "a_ -> a_"})
+    assert "No rule 4" in snap["error"]
+    snap = doc.handle({"action": "addon", "addon": "matching", "method": "update_rule", "index": 0, "path": "/"})
+    assert "not a rule" in snap["error"]
+
+
+def test_rewrite_is_one_pass_over_every_match():
+    """x -> x**2 replaces every x once - and does not feed on its result."""
+    doc = Document(x + sin(x) + y, addons=[MatchingAddon(rules=[(x, x ** 2)])])
+    doc.apply("/", "rewrite")
+    assert doc.expr == x ** 2 + sin(x ** 2) + y
+    doc.apply("/", "rewrite")
+    assert doc.expr == x ** 4 + sin(x ** 4) + y
+    doc.apply("/", "rewrite_all")
+    assert doc.last_note and "passes" in doc.last_note      # it never settles: said so
+    doc.undo(); doc.undo(); doc.undo()
+    # the panel's Rewrite does the same one pass at the selection
+    snap = doc.handle({"action": "addon", "addon": "matching", "method": "rewrite", "path": "/"})
+    assert not snap["error"] and doc.expr == x ** 2 + sin(x ** 2) + y
+    assert doc.history_labels()["actions"][-1] == "Rewrite: one pass"

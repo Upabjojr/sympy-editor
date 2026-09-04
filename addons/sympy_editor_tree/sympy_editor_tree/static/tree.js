@@ -361,9 +361,28 @@ SympyEditor.registerAddon("tree", {
     onEnter(argField, "insert", "src");
     onEnter(wrapField, "wrap", "head");
 
+    var HELP = [
+      "<section><h3>What it shows</h3><ul>",
+      "<li>The expression as SymPy holds it: <code>x + y*z</code> is <b>Add</b> over <code>x</code> and <b>Mul</b>, <b>Mul</b> over <code>y</code> and <code>z</code>. Inner nodes carry the class (the head), leaves their value.</li>",
+      "<li>The formula shows the printer's view: a fraction hides a <code>Pow(…, -1)</code>, a minus a <code>Mul(-1, …)</code>. Those nodes are here, but have no piece of their own in the formula: selecting one selects the nearest piece that is there.</li>",
+      "</ul></section>",
+      "<section><h3>Selecting</h3><ul>",
+      "<li>Click a node to select the same piece in the formula; select in the formula and the node lights up here.</li>",
+      "<li><kbd>Space</kbd> selects the focused node, <kbd>Tab</kbd> moves between nodes.</li>",
+      "</ul></section>",
+      "<section><h3>Editing</h3><ul>",
+      "<li>Double-click a node (or <kbd>Enter</kbd> on it) to type over it: a new value for a leaf, a new head for an inner node \u2014 <b>Mul</b> over the arguments of an <b>Add</b> turns the sum into a product.</li>",
+      "<li>Right-click a node, or press <b>Node \u25be</b> for the selected one: edit, delete, wrap, add an argument, then the editor's <b>Transform</b> entries for that kind of node and the <b>Methods</b> of its class.</li>",
+      "<li>Drag a subtree onto another node: it becomes that node's last argument. <kbd>Del</kbd> removes the focused node.</li>",
+      "<li>The fields add an argument to the selected node or wrap it in a function; <b>Head \u25be</b> changes its head.</li>",
+      "<li>Every change is a step of the editor's history: <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes it back. SymPy evaluates as it does for any edit, so moving <code>y</code> under an <b>Add</b> of <code>x</code> gives <code>x + y</code>.</li>",
+      "</ul></section>"
+    ].join("");
+
     return {
       element: element,
       title: "Expression tree",
+      help: HELP,
       onState: function (snap) {
         if (snap.preview || !snap.tree) return;
         tree = snap.tree;

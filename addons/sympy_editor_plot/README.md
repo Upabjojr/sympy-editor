@@ -19,8 +19,11 @@ module is not involved.
 - The panel plots the selection when *follow the selection* is on (the default),
   the whole expression otherwise.
 - The variable on the axis is the first free symbol; pick another in the menu.
-- Every other free symbol gets a slider; the values are substituted on the way
-  to the plot and the formula stays symbolic.
+- With more than one free symbol nothing is drawn until the others have a
+  value: each gets a field and a slider, the values are substituted on the way
+  to the plot and the formula stays symbolic.  No value is guessed.
+- Zoom or pan in the picture: the *from*/*to* fields take the range on show,
+  *shown* reads it out, and the curve is sampled again over that range.
 - An equation plots both sides.
 
 See `addons/README.md` in the sympy-editor repository for how add-ons work.
