@@ -446,6 +446,7 @@ SympyEditor.registerAddon("tree", {
       "</ul></section>",
       "<section><h3>In the history</h3><ul>",
       "<li>While this add-on is on, every step of the history \u2014 the drawer's list and the History view \u2014 carries the tree of its expression in a collapsible box, the nodes the previous step did not have in green: how the tree evolved, step by step. The saved web page keeps them.</li>",
+      "<li>A click on a box's heading folds or unfolds that tree (the step opens on a click elsewhere); <b>Expand trees</b> and <b>Collapse trees</b>, in the History view's strip and the drawer, do all of them at once.</li>",
       "</ul></section>",
       "<section><h3>Editing</h3><ul>",
       "<li>Double-click a node (or <kbd>Enter</kbd> on it) to type over it: a new value for a leaf, a new head for an inner node \u2014 <b>Mul</b> over the arguments of an <b>Add</b> turns the sum into a product.</li>",
@@ -466,6 +467,21 @@ SympyEditor.registerAddon("tree", {
         return box ? box.outerHTML : "";
       },
       historyCss: HISTORY_CSS,
+      historyTools: function (target) {
+        // Expand or collapse every tree of the history at once (the view's
+        // strip, or the drawer's list).
+        var all = function (open) {
+          var root = target.getDoc() || target.root;
+          if (!root) return;
+          var boxes = root.querySelectorAll("details.tree-history");
+          for (var i = 0; i < boxes.length; i++) boxes[i].open = open;
+        };
+        var expand = h("button", { type: "button", class: "se-addon-tool tree-expand-all", title: "Show the expression tree of every step" }, ["Expand trees"]);
+        var collapse = h("button", { type: "button", class: "se-addon-tool tree-collapse-all", title: "Hide the expression trees" }, ["Collapse trees"]);
+        expand.addEventListener("click", function () { all(true); });
+        collapse.addEventListener("click", function () { all(false); });
+        return [expand, collapse];
+      },
       onState: function (snap) {
         if (snap.preview || !snap.tree) return;
         tree = snap.tree;

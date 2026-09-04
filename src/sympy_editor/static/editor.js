@@ -914,6 +914,7 @@ var SympyEditor = (function () {
           var steps = d.querySelectorAll(".step[data-index]");
           for (var i = 0; i < steps.length; i++) {
             steps[i].addEventListener("click", function (ev) {
+              if (ev.target.closest && ev.target.closest(".extra")) return;
               var index = parseInt(ev.currentTarget.getAttribute("data-index"), 10);
               if (!isNaN(index)) cfg.onStep(index);
             });
@@ -4208,9 +4209,11 @@ var SympyEditor = (function () {
         }
         var extras = this._addonsStepElements(step, i, prev);
         if (extras.length) {
-          var holder = h("span", { class: "se-step-extra" });
+          // Under the row, not in it: the row is a button (a click goes to
+          // the step), and what an add-on draws has clicks of its own.
+          var holder = h("div", { class: "se-step-extra" });
           extras.forEach(function (el) { holder.appendChild(el); });
-          formulas.parentNode.insertBefore(holder, formulas.nextSibling);
+          row.parentNode.insertBefore(holder, row.nextSibling);
         }
         row.setAttribute("data-rendered", "1");
       }
@@ -4288,6 +4291,21 @@ var SympyEditor = (function () {
         if (css) out.push(css);
       }
       return out.join("\n");
+    }
+
+    /** Buttons an add-on puts beside the history (historyTools): in the
+     *  History view's strip and the drawer's list.  `target.getDoc()` is the
+     *  report's document (the view), `target.root` the list (the drawer). */
+    _addonsHistoryTools(target) {
+      var out = [];
+      for (var a = 0; a < this._addons.length; a++) {
+        var inst = this._addons[a].inst, def = this._addons[a].def;
+        var fn = (inst && inst.historyTools) || def.historyTools;
+        if (typeof fn !== "function") continue;
+        try { (fn.call(inst, target) || []).forEach(function (b) { if (b) out.push(b); }); }
+        catch (e) { if (window.console) console.error("sympy-editor: add-on " + this._addons[a].name + " failed on the history tools", e); }
+      }
+      return out;
     }
 
     _addonsStepElements(step, i, prev) {
@@ -4374,9 +4392,11 @@ var SympyEditor = (function () {
         h("option", { value: "py", title: "A Python script rebuilding every step with SymPy" }, ["as a Python script"])
       ]);
       var close = h("button", { type: "button", class: "se-history-close", title: "Close (Esc)", "aria-label": "Close" }, ["\u00d7"]);
+      var addonTools = this._addonsHistoryTools({ getDoc: function () { return frame.contentDocument; }, root: null, where: "view" });
       var head = h("div", { class: "se-history-head" },
         [h("span", { class: "se-history-title" }, ["History", h("small", {}, ["tap a step to open it"])])]
           .concat(playerControls(frame, ((this._history && this._history.steps) || []).length),
+                  addonTools.length ? [h("span", { class: "se-head-group se-head-addons" }, addonTools)] : [],
                   [h("span", { class: "se-head-group" }, [save]),
                    h("span", { class: "se-head-group se-head-close" }, [close])]));
       var view = h("div", { class: "se-history-view", role: "dialog", "aria-label": "History" }, [head, frame]);
@@ -4401,6 +4421,7 @@ var SympyEditor = (function () {
         var steps = d.querySelectorAll(".step[data-index]");
         for (var i = 0; i < steps.length; i++) {
           steps[i].addEventListener("click", function (ev) {
+            if (ev.target.closest && ev.target.closest(".extra")) return;   // an add-on's box: its own click (a summary toggles)
             var index = parseInt(ev.currentTarget.getAttribute("data-index"), 10);
             self.closeHistory();
             if (!isNaN(index)) self.gotoStep(index);
@@ -4644,6 +4665,7 @@ var SympyEditor = (function () {
       var report = h("button", { type: "button", class: "se-history-report", title: "View the whole history with what each step changed; save it as a web page or a Python script" }, ["View\u2026"]);
       report.addEventListener("click", function () { self.showHistory(); });
       tools.appendChild(report);
+      this._addonsHistoryTools({ getDoc: function () { return null; }, root: hist, where: "drawer" }).forEach(function (b) { tools.appendChild(b); });
       hist.appendChild(tools);
       if (!h_ || !h_.labels) { hist.appendChild(h("div", { class: "se-step se-step-note" }, ["(open the drawer again after an edit)"])); return; }
       h_.labels.forEach(function (label, i) {
@@ -5245,7 +5267,9 @@ var SympyEditor = (function () {
    *  the history in the drawer's list, `historyStepHtml(step, i, prev)`
    *  static markup for the same step in the self-contained report (no
    *  script runs there), with `historyCss` for its styles; the step carries
-   *  what the Python side's contribute_step put there.
+   *  what the Python side's contribute_step put there.  `historyTools(target)`
+   *  returns buttons for the history's strip and the drawer's list (`target.getDoc()`
+   *  is the report's document there, `target.root` the list in the drawer).
    *  See sympy_editor/addons.py for the Python side. */
   function registerAddon(name, def) {
     addonDefs[name] = def;

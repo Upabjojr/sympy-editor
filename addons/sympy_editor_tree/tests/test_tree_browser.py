@@ -157,5 +157,15 @@ def test_the_history_view_shows_a_tree_under_every_step(page_and_doc):
     added = frame.locator("section.step").nth(1).locator(".tree-node.tree-added text")
     assert "1" in [t.text_content() for t in added.all()]
     assert frame.locator("section.step").nth(0).locator(".tree-node.tree-added").count() == 0
+    # a click on a box's heading folds it and does not open the step (the view stays)
+    frame.locator("section.step details.tree-history summary").first.click()
+    page.wait_for_timeout(300)
+    assert page.locator(".se-history-view").count() == 1
+    assert frame.locator("section.step details.tree-history").first.get_attribute("open") is None
+    # the strip's buttons do all of them at once
+    page.locator(".se-history-head .tree-expand-all").click()
+    page.wait_for_function("Array.from(document.querySelector('.se-history-frame').contentDocument.querySelectorAll('details.tree-history')).every(d => d.open)")
+    page.locator(".se-history-head .tree-collapse-all").click()
+    page.wait_for_function("Array.from(document.querySelector('.se-history-frame').contentDocument.querySelectorAll('details.tree-history')).every(d => !d.open)")
     page.keyboard.press("Escape")
     assert page.errors == []

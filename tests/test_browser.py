@@ -3646,6 +3646,7 @@ def test_addon_panel_tools_and_calls(browser):
         assert frame.locator("section.step .demo-step").count() == 2
         assert frame.locator("section.step .demo-step").first.text_content() == "step 1: 5"      # len("x + y")
         assert page.evaluate("document.querySelector('.se-history-frame').contentDocument.head.innerHTML.includes('rebeccapurple')")
+        assert page.locator(".se-history-head .se-head-addons").count() == 0      # no historyTools: no group of theirs
         page.keyboard.press("Escape")
         assert page.errors == []
     finally:

@@ -21,7 +21,8 @@ w = edit(x + y*z, addons=["tree"])          # or addons=["sympy_editor_tree"]
 - While the add-on is on, every step of the history - the drawer's list and
   the History view, saved web page included - carries the tree of its
   expression in a collapsible box, the nodes the previous step did not have
-  in green: how the tree evolved, step by step.
+  in green: how the tree evolved, step by step.  A click on a box's heading
+  folds or unfolds it; *Expand trees* / *Collapse trees* do all at once.
 - Drag a subtree onto another node to make it that node's last argument.
 - `Delete` removes the focused node; the panel's fields add an argument to the
   selected node or wrap it in a function; the *Head* menu changes its head.
