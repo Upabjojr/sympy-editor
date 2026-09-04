@@ -164,10 +164,14 @@ def test_named_rule_sets_and_the_library():
     res = _q(doc, "save_ruleset", name="trig")
     assert res["name"] == "trig" and res["library"] == ["trig"]
     assert res["state"] == {"name": "trig", "rules": ["sin(a_)**2 -> 1 - cos(a_)**2"], "library": {"trig": ["sin(a_)**2 -> 1 - cos(a_)**2"]}}
+    # a named set saves itself at every change: to keep "trig" as it is, the
+    # new set gets its name first, then its rules
+    res = _q(doc, "save_ruleset", name="square")
+    assert res["library"] == ["square", "trig"] and res["name"] == "square"
     _q(doc, "remove_rule", index=0)
     _q(doc, "add_rule", src="x -> x**2")
-    res = _q(doc, "save_ruleset", name="square")
-    assert res["library"] == ["square", "trig"]
+    assert [rule_text(r) for r in doc.addon_state["matching"]["library"]["square"]] == ["x -> x**2"]
+    assert [rule_text(r) for r in doc.addon_state["matching"]["library"]["trig"]] == ["sin(a_)**2 -> 1 - cos(a_)**2"]
     res = _q(doc, "load_ruleset", name="trig")
     assert res["name"] == "trig" and [r["text"] for r in res["rules"]] == ["sin(a_)**2 -> 1 - cos(a_)**2"]
     res = _q(doc, "delete_ruleset", name="trig")
@@ -201,3 +205,34 @@ def test_rules_travel_with_a_session_and_come_back_from_the_browsers_storage():
     res = _q(fresh, "restore", state={"rules": ["y -> y**3"], "library": {"trig": ["a_ -> a_"]}})
     assert [r["text"] for r in res["rules"]] == ["x -> x**2"]
     assert [rule_text(r) for r in fresh.addon_state["matching"]["library"]["trig"]] == ["sin(a_)**2 -> 1 - cos(a_)**2"]
+
+
+def test_a_named_set_saves_itself_and_revert_restore_step_back():
+    doc = Document(x, addons=[ADDON])
+    _q(doc, "add_rule", src="sin(a_)**2 -> 1 - cos(a_)**2")
+    res = _q(doc, "save_ruleset", name="trig")
+    assert res["dirty"] is False and res["can_restore"] is False
+    # a change saves itself into the library under the set's name
+    res = _q(doc, "add_rule", src="x -> x**2")
+    assert res["dirty"] is True
+    assert [rule_text(r) for r in doc.addon_state["matching"]["library"]["trig"]] == ["sin(a_)**2 -> 1 - cos(a_)**2", "x -> x**2"]
+    assert res["state"]["library"]["trig"] == ["sin(a_)**2 -> 1 - cos(a_)**2", "x -> x**2"]     # what the browser keeps
+    # Revert: back to the saved rules, the library follows; Restore: the change again
+    res = _q(doc, "revert")
+    assert [r["text"] for r in res["rules"]] == ["sin(a_)**2 -> 1 - cos(a_)**2"] and res["dirty"] is False and res["can_restore"] is True
+    assert [rule_text(r) for r in doc.addon_state["matching"]["library"]["trig"]] == ["sin(a_)**2 -> 1 - cos(a_)**2"]
+    res = _q(doc, "restore_reverted")
+    assert [r["text"] for r in res["rules"]] == ["sin(a_)**2 -> 1 - cos(a_)**2", "x -> x**2"] and res["can_restore"] is False
+    snap = doc.handle({"action": "addon", "addon": "matching", "method": "restore_reverted"})
+    assert "Nothing to restore" in snap["error"]
+    # Save again: the checkpoint moves, nothing to revert
+    res = _q(doc, "save_ruleset", name="trig")
+    assert res["dirty"] is False
+    snap = doc.handle({"action": "addon", "addon": "matching", "method": "revert"})
+    assert "Nothing to revert" in snap["error"]
+    # an unnamed set has a checkpoint too (the rules at mount), and saves into no library
+    fresh = Document(x, addons=[ADDON])
+    res = _q(fresh, "add_rule", src="y -> y**2")
+    assert res["dirty"] is True and res["library"] == []
+    res = _q(fresh, "revert")
+    assert res["rules"] == [] and res["can_restore"] is True

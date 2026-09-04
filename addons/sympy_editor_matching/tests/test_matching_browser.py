@@ -154,6 +154,19 @@ def test_rule_sets_are_saved_in_the_browser_and_come_back_after_a_reload():
         assert page.locator(".mt-name").input_value() == "trig"
         assert [o.text_content() for o in page.locator(".mt-lib option").all()][1:] == ["trig"]
         assert [str(r) for r in doc.addon_state["matching"]["rules"]] == ["Rule(sin(a_)**2, 1 - cos(a_)**2)"]
+        # a change to the named set saves itself; Revert steps back, Restore forward
+        assert page.locator(".mt-revert").is_disabled() and page.locator(".mt-restore").is_disabled()
+        page.locator(".mt-field").fill("x -> x**2")
+        page.locator(".mt-field").press("Enter")
+        page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 2")
+        assert page.evaluate("JSON.parse(localStorage.getItem('sympy-editor:matching')).library.trig.length") == 2
+        page.locator(".mt-revert").click()
+        page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1")
+        assert page.evaluate("JSON.parse(localStorage.getItem('sympy-editor:matching')).library.trig.length") == 1
+        page.locator(".mt-restore").click()
+        page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 2")
+        page.locator(".mt-revert").click()
+        page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1")
         page.locator(".mt-lib-del").click()                            # delete it: gone from the store too
         page.wait_for_function("document.querySelector('.mt-lib').options.length === 1")
         assert page.evaluate("JSON.parse(localStorage.getItem('sympy-editor:matching')).library") == {}

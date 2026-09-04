@@ -199,7 +199,28 @@ class MatchingAddon(Addon):
             state["compiled"] = None
         state.setdefault("name", None)
         state.setdefault("library", {})
+        #: The rules as they were saved, loaded or restored last (Revert goes
+        #: back to it), and what Revert discarded (Restore brings it back).
+        state.setdefault("checkpoint", list(state["rules"]))
+        state.setdefault("reverted", None)
         return state
+
+    @staticmethod
+    def _texts(rules) -> List[str]:
+        return [rule_text(r) for r in rules]
+
+    def _changed(self, doc) -> None:
+        """After any change to the rules: a named set saves itself into the
+        library (the panel mirrors the library to the browser's storage)."""
+        state = self._state(doc)
+        state["compiled"] = None
+        if state["name"]:
+            state["library"][state["name"]] = list(state["rules"])
+
+    def _checkpoint(self, doc) -> None:
+        state = self._state(doc)
+        state["checkpoint"] = list(state["rules"])
+        state["reverted"] = None
 
     # -- sessions and storage --------------------------------------------------------
 
@@ -217,6 +238,7 @@ class MatchingAddon(Addon):
         state["name"] = data.get("name") or None
         for name, texts in (data.get("library") or {}).items():
             state["library"][str(name)] = self._parse_all(doc, texts)
+        self._checkpoint(doc)
 
     @staticmethod
     def _parse_all(doc, texts) -> List[RewriteRule]:
@@ -318,6 +340,8 @@ class MatchingAddon(Addon):
         for i, rule in enumerate(state["rules"]):
             out.append({"index": i, "src": str(rule), "text": rule_text(rule), "latex": printer.doprint(rule)})
         return {"rules": out, "name": state["name"], "library": sorted(state["library"]),
+                "dirty": self._texts(state["rules"]) != self._texts(state["checkpoint"]),   # Revert has something to go back to
+                "can_restore": state["reverted"] is not None,
                 "state": self.export_state(doc)}      # what the panel mirrors to the browser's storage
 
     def describe(self, method: str, payload: Dict[str, Any]) -> Optional[str]:
@@ -334,12 +358,14 @@ class MatchingAddon(Addon):
             return self._rules_answer(doc)
         if method == "save_ruleset":
             # The current set under a name, in the library (over an old one
-            # of that name); the set is called that from now on.
+            # of that name); the set is called that from now on, and keeps
+            # itself saved there at every change.
             name = str(payload.get("name") or "").strip()
             if not name:
                 raise ValueError("A rule set needs a name to be saved under")
             state["library"][name] = list(state["rules"])
             state["name"] = name
+            self._checkpoint(doc)
             return self._rules_answer(doc)
         if method == "load_ruleset":
             name = str(payload.get("name") or "")
@@ -348,6 +374,23 @@ class MatchingAddon(Addon):
             state["rules"] = list(state["library"][name])
             state["compiled"] = None
             state["name"] = name
+            self._checkpoint(doc)
+            return self._rules_answer(doc)
+        if method == "revert":
+            # Back to the rules as they were saved, loaded or restored last;
+            # what changed since is kept for Restore.
+            if self._texts(state["rules"]) == self._texts(state["checkpoint"]):
+                raise ValueError("Nothing to revert: the rules are as they were saved")
+            state["reverted"] = list(state["rules"])
+            state["rules"] = list(state["checkpoint"])
+            self._changed(doc)
+            return self._rules_answer(doc)
+        if method == "restore_reverted":
+            if state["reverted"] is None:
+                raise ValueError("Nothing to restore: nothing was reverted")
+            state["rules"] = list(state["reverted"])
+            state["reverted"] = None
+            self._changed(doc)
             return self._rules_answer(doc)
         if method == "delete_ruleset":
             name = str(payload.get("name") or "")
@@ -367,10 +410,12 @@ class MatchingAddon(Addon):
                 state["rules"] = self._parse_all(doc, data["rules"])
                 state["compiled"] = None
                 state["name"] = data.get("name") or None
+                self._checkpoint(doc)
             return self._rules_answer(doc)
         if method == "add_rule":
             rule = parse_rule_text(str(payload.get("src", "")), doc.parse)
             self.rules(doc).append(rule)
+            self._changed(doc)
             return self._rules_answer(doc)
         if method == "update_rule":
             # A rule changed in place: from its text form (``src``), or from
@@ -387,6 +432,7 @@ class MatchingAddon(Addon):
                 if not isinstance(node, RewriteRule):
                     raise ValueError(f"{node} is not a rule: select a Rule(pattern, replacement)")
                 rules[index] = node
+            self._changed(doc)
             return self._rules_answer(doc)
         if method == "open_rule":
             # The rule as the expression, to edit it structurally; undoable.
@@ -402,12 +448,14 @@ class MatchingAddon(Addon):
             if not 0 <= index < len(rules):
                 raise ValueError(f"No rule {index + 1}")
             del rules[index]
+            self._changed(doc)
             return self._rules_answer(doc)
         if method == "use_selection":
             node = doc.get(payload.get("path") or "/")
             if not isinstance(node, RewriteRule):
                 raise ValueError(f"{node} is not a rule: select a Rule(pattern, replacement)")
             self.rules(doc).append(node)
+            self._changed(doc)
             return self._rules_answer(doc)
         if method == "matches":
             node = doc.get(payload.get("path") or "/")

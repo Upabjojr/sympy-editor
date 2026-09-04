@@ -25,7 +25,10 @@ w = edit(sin(x)**2 + cos(x)**2, addons=["matching"])
   (*ReplaceRepeated*; a rule that matches its own result never settles: after
   50 passes it is refused, with a message, and nothing changes).
 - A rule set has a name and is kept: type a name and press *Save* and the set
-  joins a library of named sets, to load again from the menu or delete.  The
+  joins a library of named sets, to load again from the menu or delete.  A
+  named set saves itself at every change; *Revert* goes back to the rules as
+  they were when the set was saved, loaded or restored last, and *Restore*
+  brings back what Revert discarded.  The
   library and the current set are kept in the browser's storage, so they are
   there again after a reload - in a page, in the apps and in JupyterLab
   alike - and a set is saved with the editor's sessions.  In Jupyter the same

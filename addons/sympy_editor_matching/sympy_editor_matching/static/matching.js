@@ -24,9 +24,12 @@ SympyEditor.registerAddon("matching", {
     var save = h("button", { type: "button", title: "Save the current rules under this name (over a saved set of the same name)" }, ["Save"]);
     var libSel = h("select", { class: "mt-lib", title: "The saved rule sets: pick one to load it" });
     var del = h("button", { type: "button", class: "mt-lib-del", title: "Delete the saved set of this name" }, ["Delete"]);
+    // A named set saves itself at every change; these step back from that.
+    var revert = h("button", { type: "button", class: "mt-revert", disabled: "", title: "Back to the rules as they were when the set was saved, loaded or restored last; what changed since is kept for Restore" }, ["Revert"]);
+    var restore = h("button", { type: "button", class: "mt-restore", disabled: "", title: "Bring back the rules Revert discarded" }, ["Restore"]);
     var element = h("div", { class: "mt-panel" }, [
       h("div", { class: "mt-head" }, [h("strong", {}, ["Rules"]), use]),
-      h("div", { class: "mt-row mt-sets" }, [nameField, save, libSel, del]),
+      h("div", { class: "mt-row mt-sets" }, [nameField, save, libSel, del, revert, restore]),
       empty, list,
       h("div", { class: "mt-row" }, [field, add]),
       h("div", { class: "mt-head" }, [h("strong", {}, ["Matching the selection"]), once, all]),
@@ -35,7 +38,7 @@ SympyEditor.registerAddon("matching", {
 
     var rules = [], seq = 0, timer = null, katex = null;
     var editing = null;      // the index of the rule opened in the formula editor, until it is saved or dropped
-    var library = [], setName = null;
+    var library = [], setName = null, dirty = false, canRestore = false;
 
     function readStore() {
       try { return JSON.parse(localStorage.getItem(STORE) || "null"); } catch (e) { return null; }
@@ -50,6 +53,8 @@ SympyEditor.registerAddon("matching", {
       library.forEach(function (name) { libSel.appendChild(h("option", { value: name }, [name])); });
       libSel.disabled = !library.length;
       del.disabled = !(setName && library.indexOf(setName) >= 0);
+      revert.disabled = !dirty;
+      restore.disabled = !canRestore;
     }
     api.katex().then(function (k) { katex = k; renderRules(); }, function () { /* the sources are shown instead */ });
 
@@ -126,6 +131,7 @@ SympyEditor.registerAddon("matching", {
       return api.call(method, payload || {}).then(function (res) {
         if (res && res.rules) {
           rules = res.rules; library = res.library || []; setName = res.name || null;
+          dirty = !!res.dirty; canRestore = !!res.can_restore;
           renderRules(); renderSets(); askMatches();
           if (res.state) writeStore(res.state);     // the mirror: after every change, as Python has it
         }
@@ -208,6 +214,8 @@ SympyEditor.registerAddon("matching", {
     del.addEventListener("click", function () {
       if (setName) query("delete_ruleset", { name: setName });
     });
+    revert.addEventListener("click", function () { query("revert"); });
+    restore.addEventListener("click", function () { query("restore_reverted"); });
 
     // At mount: what the browser kept - the library, and the last current
     // set for an empty document - goes to Python, which answers with the
@@ -223,7 +231,7 @@ SympyEditor.registerAddon("matching", {
       "<li>The condition is a SymPy Boolean over the wildcards, checked after the structure matches.</li>",
       "</ul></section>",
       "<section><h3>The set</h3><ul>",
-      "<li>A set has a name: type one and press <b>Save</b>, and the set joins the library of saved sets \u2014 load one from the menu, delete the current one. The library and the current set are kept by the browser, so they are there again after a reload, and a set is saved with the editor's sessions. In Jupyter the same state is Python: <code>w.addon_state[\"matching\"][\"rules\"]</code>.</li>",
+      "<li>A set has a name: type one and press <b>Save</b>, and the set joins the library of saved sets \u2014 load one from the menu, delete the current one. A named set saves itself at every change; <b>Revert</b> goes back to the rules as they were when the set was saved, loaded or restored last, and <b>Restore</b> brings back what Revert discarded. The library and the current set are kept by the browser, so they are there again after a reload, and a set is saved with the editor's sessions. In Jupyter the same state is Python: <code>w.addon_state[\"matching\"][\"rules\"]</code>.</li>",
       "<li>Type a rule in the field and press <kbd>Enter</kbd> or <b>Add rule</b>. The pencil (or a double-click on a rule) edits it as text; <b>\u2197</b> opens it in the formula editor as a <code>Rule(…)</code> node \u2014 edit its sides there, then <b>Save as rule N</b> puts it back. <b>\u00d7</b> removes it.</li>",
       "<li>A <code>Rule(pattern, replacement[, condition])</code> typed in the editor is a node like any other: <b>Use selection as rule</b> adds the selected one to the set; its type menu can swap its sides.</li>",
       "<li>All the rules are compiled into one many-to-one matcher (sympy-matching, OmniMatch) when the set changes: a query walks it once whatever the number of rules.</li>",
