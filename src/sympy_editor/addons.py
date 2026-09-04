@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional,
 
 from sympy import Basic
 
-from .ops import KINDS, Op, add_kind
+from .ops import Op
 from .printer import AnnotatedLatexPrinter, register_rebuild
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -80,9 +80,10 @@ class Addon:
     #: otherwise).
     requires: Tuple[str, ...] = ()
 
-    #: Kinds this add-on adds to :data:`~sympy_editor.ops.KINDS` - name ->
-    #: SymPy types - and their menu labels.  Added before "scalar" (first
-    #: match wins), once, when the add-on is first activated.
+    #: Kinds this add-on adds - name -> SymPy types - and their menu labels.
+    #: A document that has the add-on on puts them in its own kind table
+    #: ahead of "scalar" (first match wins), and takes them out again when
+    #: the add-on is switched off.
     kinds: Dict[str, Tuple[type, ...]] = {}
     kind_labels: Dict[str, str] = {}
     #: Transformations (:class:`~sympy_editor.ops.Op`, see
@@ -124,12 +125,10 @@ class Addon:
     # -- the document ---------------------------------------------------------
 
     def activate(self) -> None:
-        """Called when a document takes the add-on: register the kinds.
-        Override to check the add-on's requirements (raise ImportError with
-        a pip hint) - and call ``super().activate()``."""
-        for kind, types in self.kinds.items():
-            if kind not in KINDS:
-                add_kind(kind, types, label=self.kind_labels.get(kind))
+        """Called each time a document switches the add-on on: install what
+        is process-wide (rebuilders, printer methods - they only touch the
+        add-on's own classes).  Override to check the add-on's requirements
+        (raise ImportError with a pip hint) - and call ``super().activate()``."""
         for cls, func in self.rebuilders.items():
             register_rebuild(cls, func)
         for cls_name, func in self.latex_printers.items():
@@ -263,12 +262,11 @@ def load_addon(spec: Union[str, Addon]) -> Addon:
 
 
 def load_addons(specs: Iterable[Union[str, Addon]]) -> Dict[str, Addon]:
-    """The add-ons of ``specs`` by name, activated, in order."""
+    """The add-ons of ``specs`` by name, loaded (not activated), in order."""
     out: Dict[str, Addon] = {}
     for spec in specs or ():
         addon = load_addon(spec)
         if addon.name in out:
             raise ValueError(f"Two add-ons named {addon.name!r}")
-        addon.activate()
         out[addon.name] = addon
     return out

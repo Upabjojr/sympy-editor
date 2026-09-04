@@ -133,10 +133,21 @@ def build_config(
         "parser": doc.parser,
         "symbols": [srepr(obj) for obj in doc.declared.values()],
     }
+    # The add-ons the page can switch on: the ones that are on and the rest of
+    # the document's catalogue, as far as it loads - by module name, which is
+    # what the Python that makes the document again (a Pyodide page, the
+    # host application) can import.
+    catalog = []
+    for entry in doc.available_addons():
+        if "error" in entry:
+            continue
+        addon = doc._load(entry["name"])
+        if addon not in catalog:
+            catalog.append(addon)
     if doc.addons:
-        # By module name: the Python that makes the document elsewhere (a
-        # Pyodide page, the host application) imports them again.
         document["addons"] = [addon.module for addon in doc.addons.values()]
+    if catalog:
+        document["available"] = [addon.module for addon in catalog]
     if backend == "pyodide":
         cfg.update(
             pyodideJs=all_urls["pyodideJs"],
@@ -146,11 +157,12 @@ def build_config(
             srepr=srepr(doc.expr),
             document=document,
         )
-        if doc.addons:
+        if catalog:
             # Each add-on's package, written beside sympy_editor's in the
-            # Pyodide file system, and what micropip must install first.
-            cfg["packages"] = {addon.module: addon.python_sources() for addon in doc.addons.values()}
-            cfg["micropip"] = sorted({pkg for addon in doc.addons.values() for pkg in addon.pyodide_packages()})
+            # Pyodide file system, and what micropip must install first -
+            # for what is on and what may be switched on later.
+            cfg["packages"] = {addon.module: addon.python_sources() for addon in catalog}
+            cfg["micropip"] = sorted({pkg for addon in catalog for pkg in addon.pyodide_packages()})
     elif backend == "native":
         # The host application runs Python itself (the Android app ships
         # CPython and SymPy); it only needs to know which expression to start

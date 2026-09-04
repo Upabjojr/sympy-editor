@@ -18,3 +18,10 @@
 .se-addon-tree .tree-note { color: var(--se-muted); font-size: 12px; padding: 0.3rem 0; }
 .se-addon-tree .tree-edit { position: absolute; font: 12px var(--se-mono); padding: 2px 4px; z-index: 3; }
 .se-addon-tree .tree-edit[hidden] { display: none; }
+.se-addon-tree .tree-menu { position: absolute; z-index: 40; min-width: 12rem; max-width: 22rem; max-height: 18rem; overflow-y: auto;
+  background: var(--se-bg); color: var(--se-fg); border: 1px solid var(--se-border); border-radius: 0.4rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18); padding: 0.25rem; display: flex; flex-direction: column; font-size: 12px; }
+.se-addon-tree .tree-menu[hidden] { display: none; }
+.se-addon-tree .tree-menu-head { color: var(--se-muted); font-weight: 600; padding: 0.3rem 0.4rem 0.1rem; font-family: var(--se-mono); }
+.se-addon-tree .tree-item { text-align: left; background: none; border: 0; box-shadow: none; padding: 0.2rem 0.5rem; border-radius: 0.3rem; cursor: pointer; color: inherit; font: inherit; }
+.se-addon-tree .tree-item:hover, .se-addon-tree .tree-item:focus { background: rgba(var(--se-accent), 0.14); outline: none; }

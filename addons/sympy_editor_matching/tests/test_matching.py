@@ -46,7 +46,7 @@ def test_a_typed_name_ending_in_underscore_is_a_wildcard():
 def test_a_rule_is_a_node_with_its_own_kind():
     doc = Document("Rule(sin(a_)**2, 1 - cos(a_)**2)", addons=[ADDON])
     rule = doc.expr
-    assert isinstance(rule, RewriteRule) and node_kind(rule) == "rule"
+    assert isinstance(rule, RewriteRule) and node_kind(rule, doc.kinds) == "rule"
     snap = doc.snapshot()
     assert r"\rightarrow" in snap["latex"] and "/0" in snap["nodes"] and "/1" in snap["nodes"]
     assert "rule_swap" in [op["name"] for op in snap["ops"] if op["kinds"] == ["rule"]]

@@ -60,8 +60,19 @@ entry point, the way pytest learns of its plugins.
    with the three drafts (no install needed, it reads them from the
    checkout), `python addons/demo.py --serve` runs them on the local server.
 
-There is no configuration file and no global switch: an add-on is on for
-the documents that name it, and off elsewhere.
+4. **Switch them while editing.**  The toolbar's **Add-ons ▾** menu lists
+   what the document can run - what it started with plus what `available=`
+   named, and by default every installed add-on - with a check box each.
+   Ticking one mounts its panel and tools on the spot, unticking takes them
+   down; the same from Python is `doc.enable("plot")` / `doc.disable("plot")`,
+   or the message `{"action": "addons", "enable": [...], "disable": [...]}`.
+   A switch is not a step of the history, and an add-on's per-document state
+   (a rule set) waits for it to be switched on again.  A self-contained page
+   carries the packages of every add-on it may switch on
+   (`save_html(expr, ..., addons=["tree"], available=["plot"])`).
+
+There is no configuration file and no build: an add-on is on for the
+documents that have it on, and off elsewhere.
 
 ## Writing an add-on of your own
 
@@ -107,11 +118,14 @@ message travels.  Add-ons keep that shape.  They do not get a second channel:
     ├─ ops table += addon.ops                           ├─ loadAddons(cfg.addons)   (css once, js once)
     ├─ namespace() += addon.namespace()                 └─ new Editor(...)
     ├─ snapshot():  addon.contribute(doc, snap, expr)        └─ _mountAddons(): def.mount(api) per add-on
-    └─ handle({"action": "addon", "addon", "method", ...})        ├─ element  → a box under the formula
-         └─ addon.handle(doc, method, payload)                     ├─ tools    → a block in the toolbar
-              dict  → snap["query"] (nothing changed)              ├─ onState(snap), onSelect(path, range)
-              Basic → committed as the whole expression            └─ api.call(method, payload) → Promise
-              None  → whatever doc.replace(...) did
+    ├─ handle({"action": "addon", "addon", "method", ...})        ├─ element  → a box under the formula
+    │    └─ addon.handle(doc, method, payload)                     ├─ tools    → a block in the toolbar
+    │         dict  → snap["query"] (nothing changed)              ├─ onState(snap), onSelect(path, range)
+    │         Basic → committed as the whole expression            └─ api.call(method, payload) → Promise
+    │         None  → whatever doc.replace(...) did
+    └─ handle({"action": "addons", "enable": [...], "disable": [...]})
+         └─ enable()/disable(): kinds, ops, methods on or off    _syncAddons(snap): mount / unmount to match
+            snap["addons_available"] → the Add-ons ▾ menu
 ```
 
 * **One message.**  `{"action": "addon", "addon": name, "method": m, ...}` goes
@@ -275,10 +289,10 @@ These are the decisions this PR leaves open on purpose:
    rule set does not survive switching sessions in the Pyodide page.  The
    natural fix is an `Addon.export(doc)` / `restore(doc, data)` pair carried
    under `export["addons"]`.
-2. **Global registries.**  Kinds, rebuilders and printer methods are process
-   wide (as `ops.KINDS` always was): once an add-on is activated its node types
-   are classified everywhere.  Harmless while the classes only occur where the
-   add-on is used; a per-document `KINDS` would be the alternative.
+2. **Global registries.**  Kinds are per document (`doc.kinds`), so a
+   switched-off add-on leaves no classification behind; rebuilders and printer
+   methods for foreign classes are still process wide, which only shows when
+   such a class occurs in a document that has the add-on off.
 3. **Ordering of ops.**  An add-on's ops come after the built-in ones and an
    add-on cannot remove or rename one; `Document(ops=...)` still can.
 4. **Mobile bundles.**  Out of scope here (the apps ship their own Python).

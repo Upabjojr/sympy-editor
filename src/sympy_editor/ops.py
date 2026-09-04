@@ -40,7 +40,7 @@ from sympy.tensor.array.expressions.array_expressions import _ArrayExpr, _Codege
 ARRAY_EXPR = (_ArrayExpr, _CodegenArrayAbstract)
 
 __all__ = ["Op", "make_op", "register_op", "get_ops", "default_ops", "KINDS", "KIND_LABELS", "add_kind",
-           "node_kind", "node_kinds"]
+           "with_kind", "node_kind", "node_kinds"]
 
 #: Kind name -> SymPy types, in order of precedence (a ``MatrixExpr`` is an
 #: ``Expr`` too, so "matrix" must come before "scalar").
@@ -80,16 +80,26 @@ def add_kind(name: str, types: Tuple[type, ...], label: Optional[str] = None, be
     KIND_LABELS[name] = label or name.capitalize()
 
 
-def node_kinds(expr) -> list:
-    """All kinds of ``expr`` (keys of :data:`KINDS`), most specific first -
+def node_kinds(expr, kinds: "Optional[Dict[str, Tuple[type, ...]]]" = None) -> list:
+    """All kinds of ``expr`` (keys of :data:`KINDS`, or of ``kinds`` - a
+    document's own table, with its add-ons' kinds), most specific first -
     an ``Integral`` is ``["integral", "scalar"]``; ``["other"]`` if none."""
-    kinds = [kind for kind, types in KINDS.items() if isinstance(expr, types)]
-    return kinds or ["other"]
+    table = KINDS if kinds is None else kinds
+    found = [kind for kind, types in table.items() if isinstance(expr, types)]
+    return found or ["other"]
 
 
-def node_kind(expr) -> str:
+def node_kind(expr, kinds: "Optional[Dict[str, Tuple[type, ...]]]" = None) -> str:
     """The most specific kind of ``expr`` (a key of :data:`KINDS`), or ``"other"``."""
-    return node_kinds(expr)[0]
+    return node_kinds(expr, kinds)[0]
+
+
+def with_kind(table: "Dict[str, Tuple[type, ...]]", name: str, types: Tuple[type, ...], before: str = "scalar") -> "OrderedDict[str, Tuple[type, ...]]":
+    """``table`` with the kind ``name`` ahead of ``before`` (a new table)."""
+    items = [(k, v) for k, v in table.items() if k != name]
+    at = next((i for i, (k, _v) in enumerate(items) if k == before), len(items))
+    items.insert(at, (name, tuple(types)))
+    return OrderedDict(items)
 
 
 class Op(NamedTuple):

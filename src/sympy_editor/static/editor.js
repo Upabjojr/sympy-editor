@@ -146,6 +146,7 @@ var SympyEditor = (function () {
     "</ul></section>",
     "<section><h3>Applying functions</h3><ul>",
     "<li><b>Transform \u25be</b> holds the general operations; a second menu appears with operations for the selection's type (Matrix, Integral, Equation\u2026). Picking one applies it at once, to the selection or, with nothing selected, to the whole expression.</li>",
+    "<li><b>Add-ons \u25be</b> switches on or off the add-ons installed beside the editor \u2014 a panel under the formula, tools, node types from other packages \u2014 without restarting anything; what an add-on kept waits for it to come back.</li>",
     "<li><b>Methods \u25be</b> lists everything the selected object's class can do \u2014 .det(), .T, .diff()\u2026 \u2014 one pick calls it. A Lambda is itself a function: <b>( ) apply</b> evaluates it at the arguments you give.</li>",
     "<li>The <b>function box</b> searches all of SymPy: pick a function and fill the parameters it asks for; \u201cdiff(x)\u201d, \u201c.T\u201d, \u201cdet()\u201d typed in full apply as written. A container takes the selection as its contents: <i>Matrix</i> over x + y gives the 1\u00d71 matrix holding it.</li>",
     "<li><b>unevaluated</b> builds the symbolic form (Determinant, Integral, sin(0)\u2026) instead of computing it; <i>Evaluate (doit)</i> computes it later.</li>",
@@ -1084,6 +1085,17 @@ var SympyEditor = (function () {
         this._fnSigs = {};
         this._fnActive = -1;
       }
+      // 8. the add-ons that can be switched on or off: a menu of check boxes
+      //    (shown only when the document's snapshot lists any, see _fillAddonsMenu)
+      this.addonsBlock = null;
+      this.addonsMenu = null;
+      if (!o.readOnly) {
+        this.addonsBlock = h("div", { class: "se-block", "data-block": "addons", hidden: "" });
+        this.addonsBtn = h("button", { type: "button", "data-cmd": "addons", title: "Switch add-ons on or off: panels and tools from other packages" }, ["Add-ons \u25be"]);
+        this.addonsBlock.appendChild(this.addonsBtn);
+        this.tools.appendChild(this.addonsBlock);
+        this.addonsMenu = h("div", { class: "se-addons-menu", hidden: "", role: "menu" });
+      }
       this.status = h("span", { class: "se-status", "aria-live": "polite" });
       this.toolbar.appendChild(this.status);
       if (o.toolbar) root.appendChild(this.toolbar);
@@ -1271,6 +1283,7 @@ var SympyEditor = (function () {
       ]);
       this.committed = null;   // the last snapshot that is not a preview (see _previewSource)
       if (this.fnMenu) { root.appendChild(this.fnMenu); root.appendChild(this.fnForm); }
+      if (this.addonsMenu) root.appendChild(this.addonsMenu);
       root.appendChild(this.overlay);
       this.host.appendChild(root);
       root.__sympyEditor = this;   // handy for debugging and tests
@@ -1287,48 +1300,131 @@ var SympyEditor = (function () {
      *  (`onState`, `onSelect`, `destroy`).  A missing or failing add-on is
      *  reported in the console and skipped: the editor works without it. */
     _mountAddons() {
-      var self = this;
+      this._addonClients = {};       // descriptors by name: from the options, then from the snapshots
       var list = this.opts.addons || [];
       for (var i = 0; i < list.length; i++) {
-        var d = list[i];
-        var def = addonDefs[d.name];
-        if (!def) {
-          if (window.console) console.warn("sympy-editor: add-on " + d.name + " has no front end registered (SympyEditor.registerAddon)");
-          continue;
-        }
-        var entry = { name: d.name, label: d.label || d.name, def: def, api: null, inst: null, tools: [] };
-        entry.api = this._addonApi(entry, d.options || {});
-        try {
-          entry.inst = (def.mount && def.mount(entry.api)) || {};
-        } catch (e) {
-          if (window.console) console.error("sympy-editor: add-on " + d.name + " failed to mount", e);
-          continue;
-        }
-        var el = entry.inst.element;
-        if (el) {
-          var box = entry.inst.bare ? el : h("details", { class: "se-addon", "data-addon": d.name, open: "" }, [
-            h("summary", {}, [entry.inst.title || entry.label]),
-            h("div", { class: "se-addon-body" }, [el])
-          ]);
-          box.classList.add("se-addon-" + d.name);
-          this.addonHost.appendChild(box);
-          this.addonHost.hidden = false;
-        }
-        var tools = def.tools || entry.inst.tools || [];
-        if (tools.length && this.tools && !this.opts.readOnly) {
-          var block = h("div", { class: "se-block", "data-block": "addon:" + d.name });
-          for (var t = 0; t < tools.length; t++) {
-            var tool = tools[t];
-            var cmd = "addon:" + d.name + ":" + tool.cmd;
-            var b = h("button", { type: "button", "data-cmd": cmd, title: tool.title || "" }, [tool.label || tool.cmd]);
-            block.appendChild(b);
-            this.buttons[cmd] = b;
-            entry.tools.push({ cmd: tool.cmd, button: b, fn: tool.run });
-          }
-          this.tools.appendChild(block);
-        }
-        this._addons.push(entry);
+        this._addonClients[list[i].name] = list[i];
+        this._mountAddon(list[i]);
       }
+    }
+
+    _mountedAddon(name) {
+      for (var i = 0; i < this._addons.length; i++) if (this._addons[i].name === name) return this._addons[i];
+      return null;
+    }
+
+    /** Mount one add-on from its descriptor {name, label, options}: its
+     *  panel goes in a box under the formula, its tools in a block of the
+     *  toolbar.  Nothing happens when it is mounted already. */
+    _mountAddon(d) {
+      if (this._mountedAddon(d.name)) return;
+      var def = addonDefs[d.name];
+      if (!def) {
+        if (window.console) console.warn("sympy-editor: add-on " + d.name + " has no front end registered (SympyEditor.registerAddon)");
+        return;
+      }
+      var entry = { name: d.name, label: d.label || d.name, def: def, api: null, inst: null, tools: [], box: null, block: null };
+      entry.api = this._addonApi(entry, d.options || {});
+      try {
+        entry.inst = (def.mount && def.mount(entry.api)) || {};
+      } catch (e) {
+        if (window.console) console.error("sympy-editor: add-on " + d.name + " failed to mount", e);
+        return;
+      }
+      var el = entry.inst.element;
+      if (el) {
+        var box = entry.inst.bare ? el : h("details", { class: "se-addon", "data-addon": d.name, open: "" }, [
+          h("summary", {}, [entry.inst.title || entry.label]),
+          h("div", { class: "se-addon-body" }, [el])
+        ]);
+        box.classList.add("se-addon-" + d.name);
+        this.addonHost.appendChild(box);
+        this.addonHost.hidden = false;
+        entry.box = box;
+      }
+      var tools = def.tools || entry.inst.tools || [];
+      if (tools.length && this.tools && !this.opts.readOnly) {
+        var block = h("div", { class: "se-block", "data-block": "addon:" + d.name });
+        for (var t = 0; t < tools.length; t++) {
+          var tool = tools[t];
+          var cmd = "addon:" + d.name + ":" + tool.cmd;
+          var b = h("button", { type: "button", "data-cmd": cmd, title: tool.title || "" }, [tool.label || tool.cmd]);
+          block.appendChild(b);
+          this.buttons[cmd] = b;
+          entry.tools.push({ cmd: tool.cmd, button: b, fn: tool.run });
+        }
+        // before the add-ons menu, so that the menu stays last
+        this.tools.insertBefore(block, this.addonsBlock || null);
+        entry.block = block;
+      }
+      this._addons.push(entry);
+      if (this.state) {
+        // It arrives with a state already on screen: tell it at once.
+        try { if (entry.inst.onState) entry.inst.onState(this.state); if (entry.inst.onSelect) entry.inst.onSelect(this.selected, this.range); }
+        catch (e) { if (window.console) console.error("sympy-editor: add-on " + d.name + " failed on mount", e); }
+      }
+    }
+
+    /** Take an add-on off the page: its panel, its tools, its hooks. */
+    _unmountAddon(name) {
+      var entry = this._mountedAddon(name);
+      if (!entry) return;
+      try { if (entry.inst && entry.inst.destroy) entry.inst.destroy(); }
+      catch (e) { if (window.console) console.error("sympy-editor: add-on " + name + " failed to destroy", e); }
+      if (entry.box && entry.box.parentNode) entry.box.parentNode.removeChild(entry.box);
+      if (entry.block && entry.block.parentNode) entry.block.parentNode.removeChild(entry.block);
+      for (var t = 0; t < entry.tools.length; t++) delete this.buttons["addon:" + name + ":" + entry.tools[t].cmd];
+      this._addons.splice(this._addons.indexOf(entry), 1);
+      if (!this.addonHost.querySelector(".se-addon, [data-addon]") && !this.addonHost.firstChild) this.addonHost.hidden = true;
+    }
+
+    /** Follow the snapshot: the add-ons it says are on are mounted (their
+     *  front ends come with the answer to a switch, `addon_clients`), the
+     *  others taken down; the menu lists what can be switched. */
+    _syncAddons(snap) {
+      var clients = snap.addon_clients || [];
+      if (clients.length) loadAddons(clients);
+      for (var c = 0; c < clients.length; c++) this._addonClients[clients[c].name] = clients[c];
+      var on = snap.addons || [];
+      var mounted = this._addons.slice();
+      for (var i = 0; i < mounted.length; i++) if (on.indexOf(mounted[i].name) < 0) this._unmountAddon(mounted[i].name);
+      for (var j = 0; j < on.length; j++) {
+        if (!this._mountedAddon(on[j]) && this._addonClients[on[j]]) this._mountAddon(this._addonClients[on[j]]);
+      }
+      this._fillAddonsMenu(snap.addons_available || []);
+    }
+
+    _fillAddonsMenu(available) {
+      if (!this.addonsBlock) return;
+      this.addonsBlock.hidden = !available.length;
+      if (!this.addonsMenu) return;
+      var self = this;
+      this.addonsMenu.textContent = "";
+      for (var i = 0; i < available.length; i++) {
+        (function (a) {
+          var box = h("input", { type: "checkbox", id: "se-addon-" + a.name + "-" + self._stateCount });
+          box.checked = !!a.on;
+          if (a.error) box.disabled = true;
+          box.addEventListener("change", function () {
+            var msg = { action: "addons" };
+            msg[box.checked ? "enable" : "disable"] = [a.name];
+            self.send(msg);
+          });
+          var text = [a.label || a.name];
+          if (a.requires && a.requires.length) text.push(h("small", {}, [" needs " + a.requires.join(", ")]));
+          if (a.error) text.push(h("small", { class: "se-addon-error" }, [" " + a.error]));
+          self.addonsMenu.appendChild(h("label", { class: "se-addon-row", title: a.error || "" }, [box].concat(text)));
+        })(available[i]);
+      }
+    }
+
+    toggleAddonsMenu() {
+      if (!this.addonsMenu) return;
+      if (!this.addonsMenu.hidden) { this.addonsMenu.hidden = true; return; }
+      this.addonsMenu.hidden = false;
+      this._placeUnder(this.addonsMenu, this.addonsBtn);
+      var first = this.addonsMenu.querySelector("input");
+      if (first) first.focus({ preventScroll: true });
     }
 
     /** What an add-on's front end can do with this editor. */
@@ -1513,6 +1609,8 @@ var SympyEditor = (function () {
       this.root.addEventListener("keydown", function (ev) {
         if (self.drawer && self.drawer.contains(ev.target)) return;   // Esc is handled at the document level while it is open
         if (self.symbols && self.symbols.contains(ev.target)) return;
+        if (self.addonHost && self.addonHost.contains(ev.target)) return;   // an add-on's panel owns its keys
+        if (self.addonsMenu && self.addonsMenu.contains(ev.target)) return;
         if (ev.target === self.source || ev.target === self.fnInput || (self.fnForm && self.fnForm.contains(ev.target))) return;
         if (self.loading) { ev.preventDefault(); return; }
         var t = ev.target;
@@ -1545,6 +1643,15 @@ var SympyEditor = (function () {
       this._docListeners = [];
       var onDocument = function (kind, fn) { document.addEventListener(kind, fn); self._docListeners.push([kind, fn]); };
       onDocument("selectionchange", function () { self._onSourceSelection(); });
+      // The Add-ons menu closes on a click anywhere else, and on Escape.
+      onDocument("pointerdown", function (ev) {
+        if (self.addonsMenu && !self.addonsMenu.hidden && !self.addonsMenu.contains(ev.target) && !(self.addonsBtn && self.addonsBtn.contains(ev.target))) self.addonsMenu.hidden = true;
+      });
+      if (this.addonsMenu) {
+        this.addonsMenu.addEventListener("keydown", function (ev) {
+          if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); self.addonsMenu.hidden = true; self.addonsBtn.focus({ preventScroll: true }); }
+        });
+      }
       // Copy / cut / paste while the formula has the focus (no clipboard permission needed).
       ["copy", "cut", "paste"].forEach(function (kind) {
         onDocument(kind, function (ev) { self._onClipboard(ev, kind); });
@@ -1675,6 +1782,7 @@ var SympyEditor = (function () {
         this._setStatus("Session closed – the expression was returned to Python.");
       }
       this._updateToolbar();
+      this._syncAddons(snap);
       this._addonsNotify("onState", snap);
     }
 
@@ -3800,6 +3908,7 @@ var SympyEditor = (function () {
         case "zoomout": return this.setZoom(this.zoom / ZOOM_STEP);
         case "zoomreset": return this.setZoom(1);
         case "finish": return this.send({ action: "close" });
+        case "addons": return this.toggleAddonsMenu();
         default:
           if (cmd && cmd.indexOf("addon:") === 0) return this._addonCommand(cmd);
       }
@@ -4662,6 +4771,7 @@ var SympyEditor = (function () {
       set("zoomreset", this.zoom === 1);
       if (this.fnInput) this.fnInput.disabled = dis;
       set("finish", dis);
+      set("addons", dis);
       if (this.opsSelect) this.opsSelect.disabled = dis;
       if (this.typeMenu) this.typeMenu.disabled = dis;
       for (var a = 0; a < this._addons.length; a++) {

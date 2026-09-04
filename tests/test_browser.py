@@ -3626,3 +3626,46 @@ def test_addon_panel_tools_and_calls(browser):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_addons_can_be_switched_on_and_off_while_editing(browser):
+    addon, Boxed = _demo_addon()
+    doc = Document(x + y, available=[addon])        # known to the document, off
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        page = _open(browser, srv.url)
+        assert page.locator(".se-addon-demo").count() == 0
+        assert page.locator('.se-toolbar [data-cmd="addon:demo:boxit"]').count() == 0
+        menu_btn = page.locator('.se-toolbar [data-cmd="addons"]')
+        assert menu_btn.is_visible()
+
+        def open_menu():                                  # the button toggles: open it only when it is closed
+            if not page.locator(".se-addons-menu").is_visible():
+                menu_btn.click()
+        open_menu()
+        box = page.locator(".se-addons-menu input")
+        assert box.count() == 1 and not box.is_checked()
+        assert "Demo panel" in page.locator(".se-addons-menu").inner_text()
+        box.check()                                       # on: the panel and the tools appear
+        page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)
+        assert page.locator('.se-toolbar [data-cmd="addon:demo:boxit"]').count() == 1
+        assert list(doc.addons) == ["demo"] and not doc.can_undo
+        page.wait_for_function("document.querySelector('.demo-panel').getAttribute('data-src') === 'x + y'")
+        page.locator('.se-toolbar [data-cmd="addon:demo:boxit"]').click()
+        page.wait_for_function("document.querySelector('.se-source').textContent.startsWith('Box(')")
+        # off: everything of it goes, the expression stays
+        open_menu()
+        page.locator(".se-addons-menu input").uncheck()
+        page.wait_for_function("!document.querySelector('.se-addon-demo')", timeout=10000)
+        assert page.locator('.se-toolbar [data-cmd="addon:demo:boxit"]').count() == 0
+        assert doc.addons == {} and isinstance(doc.expr, Boxed)
+        assert page.locator(".se-source").inner_text().startswith("Box(")
+        # and on again
+        open_menu()
+        page.locator(".se-addons-menu input").check()
+        page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)
+        assert page.errors == []
+    finally:
+        srv.shutdown()
+        srv.server_close()

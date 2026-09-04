@@ -37,7 +37,9 @@ def main(argv=None) -> int:
     ap.add_argument("--out", type=Path, default=HERE / "demo.html")
     args = ap.parse_args(argv)
     x = symbols("x")
-    doc = Document(sin(x) ** 2 / x + cos(x) ** 2, addons=addons())
+    tree, plot, matching = addons()
+    # Two on to start with, the third a click away in the Add-ons menu.
+    doc = Document(sin(x) ** 2 / x + cos(x) ** 2, addons=[tree, plot], available=[matching])
     if args.serve:
         serve(doc, title="SymPy editor - add-ons")
         return 0

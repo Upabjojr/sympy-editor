@@ -672,13 +672,22 @@ carries it unchanged.  The front end part is a plain script (`Addon.js`,
 is the promise of a query's result or the new snapshot.  A Pyodide page
 carries the add-ons' packages (`cfg["packages"]`, written under
 `/sympy_editor_pkg/<module>/`) and `micropip`-installs their `requires`
-(`cfg["micropip"]`); `document["addons"]` names them by module for the
-Python that makes the document again.  Rules: the add-on packages in
+(`cfg["micropip"]`); `document["addons"]` / `document["available"]` name them by module for
+the Python that makes the document again.  **Switching**: a document keeps
+a catalogue (`available=`; every installed add-on by default), `enable()` /
+`disable()` and `{"action": "addons", "enable", "disable"}` switch at any
+time - kinds are per document (`doc.kinds`, `with_kind`), ops come and go,
+`addon_state` stays - and every snapshot carries `addons` (on) and
+`addons_available`; the answer to a switch adds `addon_clients` so the
+editor can load a front end it has not seen.  `Editor._syncAddons` mounts
+and unmounts (`_mountAddon`/`_unmountAddon`) to match each snapshot, and
+`_fillAddonsMenu` builds the toolbar's **Add-ons ▾** menu
+(`data-block="addons"`, `.se-addons-menu`).  Rules: the add-on packages in
 `addons/` are separate distributions, never imported by `sympy_editor`; a
 change to the contract comes with `tests/test_addons.py`, and to the front
 end hooks with `test_addon_panel_tools_and_calls`; the mobile bundles do not
-carry add-ons.  Kinds, rebuilders and printer methods are process-wide
-registries (as `KINDS` always was): activation adds, nothing removes.
+carry add-ons.  Rebuilders and printer methods are process-wide
+registries: activation adds, nothing removes; kinds are not.
 
 ## Backends at a glance
 

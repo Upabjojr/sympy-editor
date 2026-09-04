@@ -31,9 +31,11 @@ SympyEditor.registerAddon("tree", {
       title: "Add this as a last argument of the selected node (Enter)", spellcheck: "false", autocomplete: "off" });
     var wrapField = h("input", { type: "text", class: "tree-field", placeholder: "wrap in…",
       title: "Put the selected node inside this function (Enter)", spellcheck: "false", autocomplete: "off" });
-    var hint = h("span", { class: "tree-hint" }, ["click: select · double-click: edit · drag onto a node: move · Del: remove"]);
-    var bar = h("div", { class: "tree-bar" }, [headSel, argField, wrapField, hint]);
-    var element = h("div", { class: "tree-panel" }, [bar, scroller, note, editField]);
+    var nodeBtn = h("button", { type: "button", class: "tree-node-btn", title: "What can be done with the selected node: edit, delete, wrap, transform, its methods (also a right-click on a node)", disabled: "" }, ["Node \u25be"]);
+    var hint = h("span", { class: "tree-hint" }, ["click: select \u00b7 double-click: edit \u00b7 right-click: menu \u00b7 drag onto a node: move \u00b7 Del: remove"]);
+    var bar = h("div", { class: "tree-bar" }, [nodeBtn, headSel, argField, wrapField, hint]);
+    var menu = h("div", { class: "tree-menu", hidden: "", role: "menu" });
+    var element = h("div", { class: "tree-panel" }, [bar, scroller, note, editField, menu]);
 
     var tree = null;       // the last snapshot's tree
     var nodes = [];        // laid-out nodes: {data, x, y, w, el}
@@ -132,7 +134,101 @@ SympyEditor.registerAddon("tree", {
       headSel.selectedIndex = 0;
       wrapField.disabled = !n;
       argField.disabled = !n;
+      nodeBtn.disabled = !n;
     }
+
+    /* ---- the node menu: everything that can be done with one node ---- */
+
+    /** The view path the editor knows the node by - its own, or the
+     *  nearest ancestor's (a node hidden inside a fraction). */
+    function viewPathOf(n) {
+      var k = n.data.path.slice();
+      while (true) {
+        var cand = byKey(k.join("/"));
+        if (cand && cand.data.view) return cand.data.view;
+        if (!k.length) return "/";
+        k.pop();
+      }
+    }
+
+    function hideMenu() { menu.hidden = true; menu.textContent = ""; }
+
+    function showMenu(n, x, y) {
+      hideMenu();
+      selectNode(n);
+      var d = n.data, view = viewPathOf(n), own = view === d.view;
+      var item = function (label, fn, title) {
+        var b = h("button", { type: "button", class: "tree-item", title: title || "" }, [label]);
+        b.addEventListener("click", function () { hideMenu(); fn(); });
+        menu.appendChild(b);
+        return b;
+      };
+      var head = function (text) { menu.appendChild(h("div", { class: "tree-menu-head" }, [text])); };
+      head((d.atom ? "Leaf " : d.head + " ") + d.src.slice(0, 40));
+      item(d.atom ? "Edit value\u2026" : "Change head\u2026", function () { beginEdit(n); }, "Type over it (double-click does the same)");
+      if (d.path.length) item("Delete", function () { call("delete", { path: d.path }); }, "Remove this node from its parent (Del)");
+      item("Wrap in\u2026", function () { wrapField.focus(); }, "Put it inside a function: type the name in the field");
+      if (!d.atom) item("Add argument\u2026", function () { argField.focus(); }, "Type a new argument in the field");
+      // The editor's own tools for the same node: its transformations (by
+      // kind) and the methods of its class, applied through the editor so
+      // that parameters are asked for as usual.
+      var state = api.state() || {};
+      var node = own ? api.node(view) : null;
+      if (node) {
+        var kinds = node.kinds || [node.kind];
+        var ops = (state.ops || []).filter(function (op) {
+          return !op.kinds || op.kinds.some(function (k) { return kinds.indexOf(k) >= 0; });
+        });
+        if (ops.length) head("Transform");
+        ops.forEach(function (op) {
+          item(op.label || op.name, function () {
+            if (op.params && op.params.length) api.editor._askOpParams(op, view, n.el);
+            else api.send({ action: "apply", path: view, op: op.name, lazy: api.editor.lazy() });
+          }, op.doc || "");
+        });
+        var methods = (api.editor._methodsCache || {})[node.type] || [];
+        if (methods.length) head("Methods of " + node.type);
+        methods.slice(0, 40).forEach(function (m) {
+          item(m.label || (m.property ? "." + m.name : "." + m.name + "()"), function () { api.editor._pickFn("." + m.name); }, m.doc || "");
+        });
+      } else if (!own) {
+        head("Shown as part of " + view + " in the formula: the tools apply there");
+      }
+      var host = element.getBoundingClientRect();
+      menu.style.left = Math.max(0, x - host.left) + "px";
+      menu.style.top = Math.max(0, y - host.top) + "px";
+      menu.hidden = false;
+      var first = menu.querySelector("button");
+      if (first) first.focus({ preventScroll: true });
+    }
+
+    menu.addEventListener("keydown", function (ev) {
+      ev.stopPropagation();
+      var items = menu.querySelectorAll("button");
+      var at = Array.prototype.indexOf.call(items, document.activeElement);
+      if (ev.key === "Escape") { ev.preventDefault(); hideMenu(); }
+      else if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+        ev.preventDefault();
+        var next = (at + (ev.key === "ArrowDown" ? 1 : items.length - 1) + items.length) % items.length;
+        if (items[next]) items[next].focus({ preventScroll: true });
+      }
+    });
+    document.addEventListener("pointerdown", function (ev) {
+      if (!menu.hidden && !menu.contains(ev.target) && ev.target !== nodeBtn) hideMenu();
+    });
+    nodeBtn.addEventListener("click", function () {
+      var n = selectedNode();
+      if (!n) return;
+      if (!menu.hidden) { hideMenu(); return; }
+      var r = nodeBtn.getBoundingClientRect();
+      showMenu(n, r.left, r.bottom + 4);
+    });
+    svg.addEventListener("contextmenu", function (ev) {
+      var n = nodeOf(ev.target);
+      if (!n) return;
+      ev.preventDefault();
+      showMenu(n, ev.clientX, ev.clientY);
+    });
 
     /* ---- editing ---- */
 
@@ -216,12 +312,17 @@ SympyEditor.registerAddon("tree", {
     svg.addEventListener("pointerdown", function (ev) {
       var n = nodeOf(ev.target);
       if (!n || !n.data.path.length || ev.button !== 0) return;
-      drag = { from: n, x: ev.clientX, y: ev.clientY, moved: false, over: null };
-      try { svg.setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ }
+      drag = { from: n, x: ev.clientX, y: ev.clientY, moved: false, over: null, pointer: ev.pointerId };
     });
     svg.addEventListener("pointermove", function (ev) {
       if (!drag) return;
       if (!drag.moved && Math.abs(ev.clientX - drag.x) + Math.abs(ev.clientY - drag.y) < 5) return;
+      if (!drag.moved) {
+        // Capture only once it is a drag: captured from the start, the
+        // click and double-click that follow a plain press would be
+        // retargeted to the SVG and miss the node.
+        try { svg.setPointerCapture(drag.pointer); } catch (e) { /* ignore */ }
+      }
       drag.moved = true;
       drag.from.el.classList.add("tree-dragging");
       var under = document.elementFromPoint(ev.clientX, ev.clientY);
@@ -270,7 +371,7 @@ SympyEditor.registerAddon("tree", {
         draw();
       },
       onSelect: function () { markSelection(); },
-      destroy: function () { drag = null; }
+      destroy: function () { drag = null; hideMenu(); }
     };
   }
 });

@@ -10,7 +10,7 @@ from sympy import Basic, Function, Integer, cos, sin, symbols
 from sympy_editor import Addon, Document, load_addon, make_op, to_html
 from sympy_editor.addons import load_addons
 from sympy_editor.html import build_config
-from sympy_editor.ops import KINDS, KIND_LABELS, node_kind
+from sympy_editor.ops import KINDS, node_kind
 from sympy_editor.printer import REBUILDERS, rebuild
 
 x, y = symbols("x y")
@@ -72,11 +72,14 @@ ADDON = DemoAddon()
 
 def test_activation_adds_the_kind_and_the_ops():
     doc = Document(Boxed(x + y), addons=[ADDON])
-    assert "box" in KINDS and list(KINDS).index("box") < list(KINDS).index("scalar")
-    assert KIND_LABELS["box"] == "Box"
-    assert node_kind(doc.expr) == "box"
+    # the kind is the document's, not the process's
+    assert "box" in doc.kinds and list(doc.kinds).index("box") < list(doc.kinds).index("scalar")
+    assert "box" not in KINDS and doc.kind_labels["box"] == "Box"
+    assert node_kind(doc.expr, doc.kinds) == "box" and node_kind(doc.expr) == "other"
     snap = doc.snapshot()
     assert snap["addons"] == ["demo"]
+    # (only the demo entry: the environment may have add-ons installed too)
+    assert [a for a in snap["addons_available"] if a["name"] == "demo"] == [{"name": "demo", "label": "Demo", "on": True, "requires": []}]
     names = [op["name"] for op in snap["ops"]]
     assert "unbox" in names and "count_terms" in names and "simplify" in names
     assert snap["nodes"]["/"]["kind"] == "box" and snap["nodes"]["/0"]["src"] == "x + y"
@@ -192,3 +195,49 @@ def test_installed_lists_entry_points_and_specs_name_objects(tmp_path, monkeypat
         api_version = mod.API_VERSION + 1
     with pytest.raises(ValueError, match="API version"):
         load_addon(Future())
+
+
+def test_switching_on_and_off_at_run_time():
+    doc = Document(Boxed(x + y), available=[ADDON])           # known, off
+    snap = doc.snapshot()
+    assert snap["addons"] == [] and snap["addons_available"][0]["on"] is False
+    assert snap["nodes"]["/"]["kind"] == "other" and "unbox" not in [op["name"] for op in snap["ops"]]
+    assert "demo" not in snap
+    snap = doc.handle({"action": "addons", "enable": ["demo"]})
+    assert not snap["error"] and snap["addons"] == ["demo"] and snap["addons_available"][0]["on"] is True
+    assert snap["nodes"]["/"]["kind"] == "box" and "unbox" in [op["name"] for op in snap["ops"]]
+    assert snap["addon_clients"][0]["name"] == "demo" and snap["demo"]["boxes"] == 1
+    assert not doc.can_undo                                   # a switch is not a step
+    doc.addon_state["demo"]["kept"] = 1
+    snap = doc.handle({"action": "addons", "disable": ["demo"]})
+    assert snap["addons"] == [] and snap["nodes"]["/"]["kind"] == "other"
+    assert "unbox" not in doc.ops and "box" not in doc.kinds and "demo" not in snap
+    snap = doc.handle({"action": "addon", "addon": "demo", "method": "count"})
+    assert "No add-on 'demo'" in snap["error"]
+    doc.enable("demo")
+    assert doc.addon_state["demo"] == {"kept": 1}             # state survives being off
+    doc.disable("demo"); doc.disable("never")                 # idempotent, unknown is fine
+    assert doc.addons == {}
+
+
+def test_an_addon_that_cannot_load_is_listed_with_its_error():
+    class Broken(Addon):
+        name = "broken"
+
+        def activate(self):
+            raise ImportError("pip install something")
+    doc = Document(x, available=[Broken()])
+    snap = doc.handle({"action": "addons", "enable": ["broken"]})
+    assert "pip install something" in snap["error"] and doc.addons == {}
+    assert doc.available_addons()[0]["on"] is False
+    snap = doc.handle({"action": "addons", "enable": ["no_such_addon_anywhere"]})
+    assert "No add-on" in snap["error"]
+    snap = doc.handle({"action": "addons", "enable": ["no_such_addon_anywhere"]})   # the failure is remembered
+    assert "No add-on" in snap["error"]
+
+
+def test_the_page_carries_what_can_be_switched_on():
+    doc = Document(x, available=[ADDON])
+    cfg = build_config(doc)
+    assert cfg["addons"] == [] and cfg["document"]["available"] == [ADDON.module] and "addons" not in cfg["document"]
+    assert ADDON.module in cfg["packages"]

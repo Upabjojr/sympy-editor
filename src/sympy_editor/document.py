@@ -29,8 +29,10 @@ from sympy.parsing.sympy_parser import (
     standard_transformations,
 )
 
-from .addons import Addon, load_addons
-from .ops import KIND_LABELS, Op, get_ops, node_kind, node_kinds
+from collections import OrderedDict
+
+from .addons import Addon, installed, load_addon
+from .ops import KINDS, KIND_LABELS, Op, get_ops, node_kind, node_kinds, with_kind
 from .printer import (
     Path,
     annotate,
@@ -371,10 +373,15 @@ class Document:
         step, as given by :meth:`export`; ``expr`` is ignored when a history
         is given.
     addons
-        :class:`~sympy_editor.addons.Addon` objects, or the names of installed
-        add-ons (``"tree"``) or of their modules (``"sympy_editor_tree"``):
-        node types, transformations, data and methods of their own, and a
-        front end each (see ``sympy_editor.addons``).
+        The add-ons switched *on* to start with: :class:`~sympy_editor.addons.Addon`
+        objects, names of installed add-ons (``"tree"``) or module names
+        (``"sympy_editor_tree"``): node types, transformations, data and
+        methods of their own, and a front end each (see
+        ``sympy_editor.addons``).  :meth:`enable` and :meth:`disable` switch
+        them at any time.
+    available
+        What can be switched on besides: the same kinds of specs, off to
+        start with.  None (the default) means every installed add-on.
     """
 
     def __init__(
@@ -390,19 +397,34 @@ class Document:
         index: Optional[int] = None,
         labels=None,
         addons=(),
+        available=None,
     ):
         if parser not in ("strict", "implicit"):
             raise ValueError("parser must be 'strict' or 'implicit'")
         self.printer_settings = dict(printer_settings or {})
         self.parser = parser
         self.ops: Dict[str, Op] = dict(ops) if ops is not None else get_ops()
-        #: The add-ons by name (activated: their kinds are in KINDS), and a
-        #: dict per add-on for whatever it keeps about this document.
-        self.addons: Dict[str, Addon] = load_addons(addons)
-        self.addon_state: Dict[str, Dict[str, Any]] = {name: {} for name in self.addons}
-        for addon in self.addons.values():
-            for op in addon.ops:
-                self.ops.setdefault(op.name, op)
+        #: This document's kind table and labels: the global ones plus the
+        #: kinds of the add-ons that are on (see :meth:`enable`).
+        self.kinds: "OrderedDict[str, tuple]" = OrderedDict(KINDS)
+        self.kind_labels: Dict[str, str] = dict(KIND_LABELS)
+        #: The add-ons that are on, by name; a dict per add-on (on or off)
+        #: for whatever it keeps about this document.
+        self.addons: Dict[str, Addon] = {}
+        self.addon_state: Dict[str, Dict[str, Any]] = {}
+        #: What can be switched on: name -> spec, loaded on demand into
+        #: ``_loaded`` (name -> Addon, or the error that loading raised).
+        self._catalog: Dict[str, Any] = {}
+        self._loaded: Dict[str, Any] = {}
+        if available is None:
+            self._catalog.update(installed())
+        else:
+            for spec in available:
+                addon = load_addon(spec)
+                self._catalog[addon.name] = addon
+                self._loaded[addon.name] = addon
+        for spec in addons or ():
+            self.enable(spec)
         self.max_history = max_history
         #: Type names whose method lists snapshots have already carried.
         self._methods_sent: set = set()
@@ -438,6 +460,78 @@ class Document:
         session's editing history, kept by the front end)."""
         return {"history": [srepr(e) for e in self._history], "index": self._index, "labels": list(self._labels),
                 "symbols": [srepr(obj) for obj in self.declared.values()]}
+
+    # -- add-ons --------------------------------------------------------------
+
+    def _load(self, spec) -> Addon:
+        """The Addon a spec (a catalogue name, a module name or an object)
+        stands for, cached by name; a failure is cached too and re-raised."""
+        if isinstance(spec, str) and spec in self._loaded:
+            got = self._loaded[spec]
+            if isinstance(got, Exception):
+                raise got
+            return got
+        if isinstance(spec, str) and spec in self._catalog and not isinstance(self._catalog[spec], str):
+            return self._catalog[spec]
+        try:
+            addon = load_addon(self._catalog.get(spec, spec) if isinstance(spec, str) else spec)
+        except Exception as exc:
+            if isinstance(spec, str):
+                self._loaded[spec] = exc
+            raise
+        self._loaded[addon.name] = addon
+        self._catalog.setdefault(addon.name, addon)
+        return addon
+
+    def enable(self, spec) -> Addon:
+        """Switch an add-on on: a catalogue name (see :meth:`available_addons`),
+        a module name or an :class:`Addon`.  Its kinds join this document's
+        table, its ops the menus, and its methods answer; the state it kept
+        while off (``addon_state``) is still there."""
+        addon = self._load(spec)
+        if addon.name in self.addons:
+            return addon
+        addon.activate()
+        for kind, types in addon.kinds.items():
+            self.kinds = with_kind(self.kinds, kind, types)
+            self.kind_labels[kind] = addon.kind_labels.get(kind) or kind.capitalize()
+        for op in addon.ops:
+            self.ops.setdefault(op.name, op)
+        self.addons[addon.name] = addon
+        self.addon_state.setdefault(addon.name, {})
+        self._catalog.setdefault(addon.name, addon)
+        return addon
+
+    def disable(self, name: str) -> None:
+        """Switch an add-on off: its ops, kinds and methods go; its state
+        stays for the next :meth:`enable`.  Unknown or off already: nothing."""
+        addon = self.addons.pop(name, None)
+        if addon is None:
+            return
+        for op in addon.ops:
+            if self.ops.get(op.name) is op:
+                del self.ops[op.name]
+        still = {k for a in self.addons.values() for k in a.kinds}
+        for kind in addon.kinds:
+            if kind not in still and kind not in KINDS:
+                self.kinds.pop(kind, None)
+                self.kind_labels.pop(kind, None)
+
+    def available_addons(self) -> List[Dict[str, Any]]:
+        """The add-ons this document can switch on or off: ``[{"name",
+        "label", "on", "requires"[, "error"]}]`` - the ones it started
+        with, plus what ``available`` named (every installed add-on by
+        default).  One that cannot be loaded is listed with its error."""
+        out = []
+        for name in list(self._catalog):
+            try:
+                addon = self._load(name)
+            except Exception as exc:
+                out.append({"name": name, "label": name, "on": False, "requires": [], "error": f"{type(exc).__name__}: {exc}"})
+                continue
+            out.append({"name": addon.name, "label": addon.label or addon.name, "on": addon.name in self.addons,
+                        "requires": list(addon.requires)})
+        return out
 
     # -- state --------------------------------------------------------------
 
@@ -1310,9 +1404,10 @@ class Document:
             "ops": [{"name": op.name, "label": op.label, "kinds": list(op.kinds) if op.kinds else None,
                      "params": [dict(prm) for prm in op.params], "doc": op.doc, "lazy": op.lazy is not None}
                     for op in self.ops.values()],
-            "kind_labels": dict(KIND_LABELS),
+            "kind_labels": dict(self.kind_labels),
             "methods": methods,
             "addons": list(self.addons),
+            "addons_available": self.available_addons(),
             "error": error,
         }
         for addon in self.addons.values():
@@ -1326,8 +1421,8 @@ class Document:
         neither ``insertable`` nor ``rangeable`` (its arguments are not what
         is shown - the parts are, and they may be)."""
         parts = self._parts(node)
-        info: Dict[str, Any] = {"src": str(node), "type": type(node).__name__, "kind": node_kind(node),
-                                "kinds": node_kinds(node),
+        info: Dict[str, Any] = {"src": str(node), "type": type(node).__name__, "kind": node_kind(node, self.kinds),
+                                "kinds": node_kinds(node, self.kinds),
                                 "nargs": len(node.args), "insertable": is_insertable(node) and not parts,
                                 "rangeable": is_rangeable(node) and not parts,
                                 "free": sorted(str(s) for s in getattr(node, "free_symbols", ()))[:12]}
@@ -1385,8 +1480,10 @@ class Document:
         not committed), ``{"action": "undo"}``, ``{"action": "redo"}``,
         ``{"action": "snapshot"}``, ``{"action": "addon", "addon": name,
         "method": ..., ...}`` (a method of one of the document's add-ons: a
-        query answers under ``"query"``, a change like any edit).  Errors are
-        reported in the snapshot's ``"error"`` field.
+        query answers under ``"query"``, a change like any edit),
+        ``{"action": "addons", "enable": [names], "disable": [names]}``
+        (switch add-ons on or off; see :meth:`available_addons`).  Errors
+        are reported in the snapshot's ``"error"`` field.
         """
         self.last_note = None
         try:
@@ -1398,6 +1495,17 @@ class Document:
                 return self.preview(str(message.get("src", "")))
             if action == "addon":
                 return self._handle_addon(message)
+            if action == "addons":
+                # Switch add-ons on or off; not a step of the history.  The
+                # answer carries the front ends of the ones that are on, so
+                # the editor can mount what it has not seen yet.
+                for name in message.get("disable") or []:
+                    self.disable(str(name))
+                for name in message.get("enable") or []:
+                    self.enable(str(name))
+                snap = self.snapshot()
+                snap["addon_clients"] = [addon.client() for addon in self.addons.values()]
+                return snap
             if action == "export":
                 snap = self.snapshot()
                 snap["export"] = self.export()
