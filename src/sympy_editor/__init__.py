@@ -27,11 +27,12 @@ sessions::
     save_history_html(steps, "steps.html")
 """
 
+from .addons import Addon, load_addon
 from .document import Document
 from .history import History
 from .html import (display_history, display_html, save_history_html, save_html,
                    to_history_html, to_html)
-from .ops import get_ops, register_op
+from .ops import get_ops, make_op, register_op
 from .printer import (
     AnnotatedLatexPrinter,
     AnnotatedStrPrinter,
@@ -50,6 +51,7 @@ from .server import EditorServer, serve
 __version__ = "0.1.0"
 
 __all__ = [
+    "Addon",
     "AnnotatedLatexPrinter",
     "AnnotatedStrPrinter",
     "annotate_str",
@@ -65,6 +67,8 @@ __all__ = [
     "format_path",
     "get_at",
     "get_ops",
+    "load_addon",
+    "make_op",
     "parse_path",
     "register_op",
     "replace_at",

@@ -29,6 +29,7 @@ from sympy.parsing.sympy_parser import (
     standard_transformations,
 )
 
+from .addons import Addon, load_addons
 from .ops import KIND_LABELS, Op, get_ops, node_kind, node_kinds
 from .printer import (
     Path,
@@ -369,6 +370,11 @@ class Document:
         the position of the current expression in it and what produced each
         step, as given by :meth:`export`; ``expr`` is ignored when a history
         is given.
+    addons
+        :class:`~sympy_editor.addons.Addon` objects, or the names of installed
+        add-ons (``"tree"``) or of their modules (``"sympy_editor_tree"``):
+        node types, transformations, data and methods of their own, and a
+        front end each (see ``sympy_editor.addons``).
     """
 
     def __init__(
@@ -383,12 +389,20 @@ class Document:
         history=None,
         index: Optional[int] = None,
         labels=None,
+        addons=(),
     ):
         if parser not in ("strict", "implicit"):
             raise ValueError("parser must be 'strict' or 'implicit'")
         self.printer_settings = dict(printer_settings or {})
         self.parser = parser
         self.ops: Dict[str, Op] = dict(ops) if ops is not None else get_ops()
+        #: The add-ons by name (activated: their kinds are in KINDS), and a
+        #: dict per add-on for whatever it keeps about this document.
+        self.addons: Dict[str, Addon] = load_addons(addons)
+        self.addon_state: Dict[str, Dict[str, Any]] = {name: {} for name in self.addons}
+        for addon in self.addons.values():
+            for op in addon.ops:
+                self.ops.setdefault(op.name, op)
         self.max_history = max_history
         #: Type names whose method lists snapshots have already carried.
         self._methods_sent: set = set()
@@ -849,7 +863,7 @@ class Document:
             missing = [prm["name"] for prm in spec.params[len(values):] if not prm.get("optional")]
             if missing:
                 raise ValueError(f"{spec.label} needs {', '.join(missing)}")
-        result = sympify(func(target, *values))
+        result = sympify(func(target, *values, doc=self) if spec is not None and spec.context else func(target, *values))
         if children is not None:
             return self._commit(self._replace_range(self.expr, p, children, result))
         return self._commit(self._replace_at(self.expr, p, result))
@@ -1053,6 +1067,9 @@ class Document:
         ns = self.used_symbols()
         for name, obj in self.declared.items():
             ns.setdefault(name, obj)
+        for addon in self.addons.values():
+            for name, obj in addon.namespace().items():
+                ns.setdefault(name, obj)
         return ns
 
     @staticmethod
@@ -1085,9 +1102,17 @@ class Document:
             local.setdefault(name, Symbol(name))
         src = re.sub(r"`([A-Za-z_][A-Za-z_0-9]*)`", r"\1", src)
         shape = getattr(context, "shape", None) if isinstance(context, (MatrixExpr, MatrixBase)) else None
-        if shape is not None and len(shape) == 2:
-            for name in self._new_names(src, local):
+        new_names = self._new_names(src, local) if (shape is not None and len(shape) == 2) or self.addons else []
+        for name in new_names:
+            if shape is not None and len(shape) == 2:
                 local[name] = MatrixSymbol(name, *shape)
+                continue
+            # An add-on may read a new name as a node of its own (a wildcard).
+            for addon in self.addons.values():
+                made = addon.make_symbol(name)
+                if made is not None:
+                    local[name] = made
+                    break
         self.last_note = self._collision_note(src, local)
         try:
             return sympify(parse_expr(src, local_dict=local, transformations=transformations))
@@ -1270,7 +1295,7 @@ class Document:
             if cls.__name__ not in self._methods_sent:
                 self._methods_sent.add(cls.__name__)
                 methods[cls.__name__] = type_methods(cls)
-        return {
+        snap = {
             "seq": self._seq,
             "latex": tex,
             "latex_plain": plain_latex(expr, **self.printer_settings),
@@ -1287,8 +1312,12 @@ class Document:
                     for op in self.ops.values()],
             "kind_labels": dict(KIND_LABELS),
             "methods": methods,
+            "addons": list(self.addons),
             "error": error,
         }
+        for addon in self.addons.values():
+            addon.contribute(self, snap, expr)
+        return snap
 
     def _node_info(self, path: Path, node: Basic, expr: Optional[Basic] = None) -> Dict[str, Any]:
         """A node's entry in the snapshot.  ``node`` is the view-tree node
@@ -1354,8 +1383,10 @@ class Document:
         ``{"action": "undeclare", "name": "A"}``,
         ``{"action": "preview", "src": ...}`` (a snapshot of the parsed source,
         not committed), ``{"action": "undo"}``, ``{"action": "redo"}``,
-        ``{"action": "snapshot"}``.  Errors are reported in the snapshot's
-        ``"error"`` field.
+        ``{"action": "snapshot"}``, ``{"action": "addon", "addon": name,
+        "method": ..., ...}`` (a method of one of the document's add-ons: a
+        query answers under ``"query"``, a change like any edit).  Errors are
+        reported in the snapshot's ``"error"`` field.
         """
         self.last_note = None
         try:
@@ -1365,6 +1396,8 @@ class Document:
             self._action_label = self._describe(message)
             if action == "preview":
                 return self.preview(str(message.get("src", "")))
+            if action == "addon":
+                return self._handle_addon(message)
             if action == "export":
                 snap = self.snapshot()
                 snap["export"] = self.export()
@@ -1447,6 +1480,31 @@ class Document:
         finally:
             self._action_label = None
 
+    def _handle_addon(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        """One of an add-on's methods (see :meth:`Addon.handle`): a dict
+        answer is a query, put under ``snap["query"]`` with nothing changed;
+        a SymPy object is committed as the whole expression; None leaves the
+        document as the method left it."""
+        name = str(message.get("addon", ""))
+        method = str(message.get("method", ""))
+        addon = self.addons.get(name)
+        if addon is None:
+            raise ValueError(f"No add-on {name!r} in this document (it has {', '.join(self.addons) or 'none'})")
+        payload = {k: v for k, v in message.items() if k not in ("action", "addon", "method", "_req")}
+        self._action_label = addon.describe(method, payload) or f"{addon.label or name}: {method}"
+        result = addon.handle(self, method, payload)
+        if isinstance(result, dict):
+            snap = self.snapshot()
+            snap["query"] = {"addon": name, "method": method, "result": result}
+            return snap
+        if result is not None:
+            self._commit(self._coerce(result))
+        snap = self.snapshot()
+        snap["addon"] = {"name": name, "method": method}
+        if self.last_note:
+            snap["note"] = self.last_note
+        return snap
+
     def _describe(self, message: Dict[str, Any]) -> Optional[str]:
         """What a message does, for the history ("Transform: Simplify",
         "SymPy: diff(x)", "Edit: y → cos(y)"...)."""
@@ -1500,12 +1558,20 @@ class Document:
     def _path(path: PathLike) -> Path:
         return parse_path(path) if isinstance(path, str) else tuple(path)
 
-    @staticmethod
-    def _coerce(expr) -> Basic:
+    def _coerce(self, expr) -> Basic:
         # srepr output names Str (a MatrixSymbol's name) which SymPy < 1.14
         # does not export: without it in scope, sympify reads Str('A') as an
         # undefined function of A, and the matrix symbol's name becomes "Str".
-        result = sympify(expr, locals={"Str": Str}) if isinstance(expr, str) else sympify(expr)
+        # An add-on's node types are named in its namespace, so its srepr
+        # strings read back too.
+        if isinstance(expr, str):
+            local: Dict[str, Any] = {"Str": Str}
+            for addon in getattr(self, "addons", {}).values():
+                for name, obj in addon.namespace().items():
+                    local.setdefault(name, obj)
+            result = sympify(expr, locals=local)
+        else:
+            result = sympify(expr)
         if not isinstance(result, Basic):
             raise TypeError(f"Cannot edit {type(expr).__name__} objects")
         return result

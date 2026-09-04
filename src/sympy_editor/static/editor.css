@@ -499,6 +499,20 @@
 .se-busy .se-view { opacity: 0.6; }
 .se-closed .se-view { opacity: 0.7; }
 
+/* Add-on panels: a box each under the formula, collapsible, on the
+ * editing area's own surface (see Editor._mountAddons). */
+.se-addons { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.4rem; }
+.se-addons[hidden] { display: none; }
+.se-addon {
+  border: 1px solid var(--se-rule);
+  border-radius: 0.4rem;
+  background: var(--se-surface);
+  padding: 0.25rem 0.5rem 0.4rem;
+}
+.se-addon > summary { cursor: pointer; user-select: none; font-weight: 600; color: var(--se-muted); }
+.se-addon-body { padding-top: 0.3rem; min-width: 0; }
+.sympy-editor.se-full > .se-addons { display: none; }
+
 /* symbols panel: what each name stands for, and controls to change it */
 .se-symbols {
   margin-top: 0.3rem;

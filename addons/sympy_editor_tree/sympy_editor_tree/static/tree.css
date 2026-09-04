@@ -1,0 +1,20 @@
+/* sympy-editor add-on "tree" - scoped under the panel the editor gives it. */
+.se-addon-tree .tree-panel { position: relative; }
+.se-addon-tree .tree-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; margin-bottom: 0.3rem; }
+.se-addon-tree .tree-bar select, .se-addon-tree .tree-field { font: inherit; font-size: 12px; padding: 2px 6px; }
+.se-addon-tree .tree-field { width: 9em; }
+.se-addon-tree .tree-hint { color: var(--se-muted); font-size: 11px; margin-left: auto; }
+.se-addon-tree .tree-scroll { overflow: auto; max-width: 100%; }
+.se-addon-tree .tree-svg { display: block; font: 12px var(--se-mono); }
+.se-addon-tree .tree-edges line { stroke: var(--se-muted); stroke-width: 1.2; }
+.se-addon-tree .tree-node { cursor: pointer; outline: none; }
+.se-addon-tree .tree-node rect { fill: var(--se-bg); stroke: var(--se-border); stroke-width: 1.2; }
+.se-addon-tree .tree-node text { fill: var(--se-fg); pointer-events: none; user-select: none; }
+.se-addon-tree .tree-head-node rect { fill: rgba(var(--se-accent), 0.12); stroke: rgba(var(--se-accent), 0.6); }
+.se-addon-tree .tree-node:hover rect, .se-addon-tree .tree-node:focus rect { stroke: rgb(var(--se-accent)); stroke-width: 1.8; }
+.se-addon-tree .tree-node.tree-selected rect { stroke: rgb(var(--se-accent)); stroke-width: 2.4; fill: rgba(var(--se-accent), 0.22); }
+.se-addon-tree .tree-node.tree-dragging { opacity: 0.5; }
+.se-addon-tree .tree-node.tree-drop rect { stroke: var(--se-added); stroke-width: 2.4; stroke-dasharray: 4 2; }
+.se-addon-tree .tree-note { color: var(--se-muted); font-size: 12px; padding: 0.3rem 0; }
+.se-addon-tree .tree-edit { position: absolute; font: 12px var(--se-mono); padding: 2px 4px; z-index: 3; }
+.se-addon-tree .tree-edit[hidden] { display: none; }

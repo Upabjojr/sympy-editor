@@ -3536,3 +3536,93 @@ def test_naming_a_session_owns_the_row_until_it_is_done(browser, tmp_path):
     assert _wait(lambda: row.locator("code").first.inner_text() == "Hamiltonian")
     assert errors == []
     page.close()
+
+
+# ---------------------------------------------------------------------------
+# Add-ons: the front end of an Addon (sympy_editor/addons.py) gets a panel
+# under the formula, toolbar buttons, the state and the selection as they
+# change, and a way to call its Python methods.
+
+
+def _demo_addon():
+    from sympy import Basic, Integer
+    from sympy_editor import Addon
+
+    class Boxed(Basic):
+        def __new__(cls, value):
+            return Basic.__new__(cls, value)
+
+        def _latex(self, printer):
+            return r"\boxed{%s}" % printer._print(self.args[0])
+
+        def _sympystr(self, printer):
+            return "Box(%s)" % printer._print(self.args[0])
+
+    class Demo(Addon):
+        name = "demo"
+        label = "Demo panel"
+        js = """
+SympyEditor.registerAddon("demo", {
+  tools: [{ cmd: "boxit", label: "Box it", title: "Put the expression in a box",
+            run: function (api) { return api.call("box_it", {}); } }],
+  mount: function (api) {
+    var el = api.h("div", { class: "demo-panel" });
+    var btn = api.h("button", { type: "button", class: "demo-count" }, ["count"]);
+    btn.addEventListener("click", function () {
+      api.call("count", {}).then(function (res) { el.setAttribute("data-count", String(res.n)); });
+    });
+    el.appendChild(btn);
+    return {
+      element: el,
+      onState: function (snap) { if (!snap.preview) el.setAttribute("data-src", snap.src); },
+      onSelect: function (path) { el.setAttribute("data-sel", path || ""); }
+    };
+  }
+});
+"""
+        css = ".se-addon-demo .demo-panel { padding: 2px; }"
+
+        def namespace(self):
+            return {"Box": Boxed, "Boxed": Boxed}
+
+        def handle(self, doc, method, payload):
+            if method == "count":
+                return {"n": len(doc.expr.args)}
+            if method == "box_it":
+                return Boxed(doc.expr)
+            raise ValueError(method)
+
+    return Demo(), Boxed
+
+
+def test_addon_panel_tools_and_calls(browser):
+    addon, Boxed = _demo_addon()
+    doc = Document(x + y, addons=[addon])
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        page = _open(browser, srv.url)
+        panel = page.locator(".se-addon-demo .demo-panel")
+        assert panel.count() == 1
+        assert page.locator(".se-addon-demo summary").inner_text() == "Demo panel"
+        assert page.locator('style[data-se-addon="demo"]').count() == 1
+        assert panel.get_attribute("data-src") == "x + y"
+        # the selection reaches the add-on
+        _click(page, "/0")
+        page.wait_for_function("document.querySelector('.demo-panel').getAttribute('data-sel') === '/0'")
+        # a query: answered, nothing changed
+        page.locator(".demo-count").click()
+        page.wait_for_function("document.querySelector('.demo-panel').getAttribute('data-count') === '2'")
+        assert doc.expr == x + y and not doc.can_undo
+        # a toolbar button of the add-on: a change like any edit
+        page.locator('.se-toolbar [data-cmd="addon:demo:boxit"]').click()
+        page.wait_for_function("document.querySelector('.se-source').textContent.startsWith('Box(')")
+        assert isinstance(doc.expr, Boxed)
+        page.wait_for_function("document.querySelector('.demo-panel').getAttribute('data-src').startsWith('Box(')")
+        assert page.locator(".se-view .katex .fbox, .se-view .katex .boxed").count() >= 1
+        page.keyboard.press("Control+z")
+        page.wait_for_function("document.querySelector('.se-source').textContent === 'x + y'")
+        assert page.errors == []
+    finally:
+        srv.shutdown()
+        srv.server_close()

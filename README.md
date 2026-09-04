@@ -422,6 +422,25 @@ edge, and the strip reads as a grid rather than a wall of buttons.  A block
 never breaks apart: what belongs together stays together, and the action bar
 under a selection wraps the same way, so every button stays reachable.
 
+## Add-ons
+
+The editor can be extended from outside: an add-on is a package of its own
+that gives a document node types from another library, transformations,
+data beside every snapshot and methods of its own, and a panel of HTML and
+JavaScript under the formula - through one contract,
+`sympy_editor.addons.Addon`, and one message.  Three drafts live in
+[`addons/`](addons/README.md): the expression tree as an editable graph,
+the graph of the selection drawn by Plotly.js, and rewrite rules with
+wildcards matched many-to-one by
+[sympy-matching](https://github.com/Upabjojr/sympy-matching).
+
+```python
+from sympy_editor import edit
+w = edit(sin(x)**2 / x, addons=["tree", "plot", "matching"])   # installed add-ons, by name
+```
+
+`addons/README.md` describes the architecture and how to write one.
+
 ## How it works
 
 `sympy_editor.AnnotatedLatexPrinter` extends SymPy's `LatexPrinter` so that

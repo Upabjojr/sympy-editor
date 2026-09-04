@@ -50,8 +50,11 @@ src/sympy_editor/
     editor.js   The whole front end (plain script, no imports/exports).
     editor.css  Styles, scoped under .sympy-editor, theme-aware.
     widget.js   anywidget entry point; widget.py concatenates editor.js + this.
+  addons.py     The add-on contract (Addon) and loader: node types, ops, data
+                and methods from a package outside this one; see addons/.
 tests/          pytest suite (printer round-trips, document ops, HTML, server).
 examples/       demo.py generates demo.html / runs the server.
+addons/         Add-on drafts, each a package of its own (tree, plot, matching).
 ```
 
 Data flow: Python `Document.snapshot()` → JSON (`latex`, `latex_plain`,
@@ -647,6 +650,36 @@ Two conventions between printer, document and front end:
   `Document.parse(src, context=node)` reads new names as `MatrixSymbol`s of
   the context's shape when the context is a matrix.
 
+## Add-ons (`addons/`)
+
+`src/sympy_editor/addons.py` is the contract; `addons/README.md` is the
+design.  An `Addon` gives a `Document` (`Document(expr, addons=[...])`,
+`edit(..., addons=)`, `to_html(..., addons=)`) node types (`kinds`,
+`namespace()` - the constructors under the typed names *and* the class names
+`srepr` writes -, `make_symbol()` for new typed names, `rebuilders`,
+`latex_printers`), transformations (`ops`, built with `make_op`; `context=True`
+passes `doc=`), data in every snapshot (`contribute(doc, snap, expr)`) and
+methods (`handle(doc, method, payload)`: a dict answers a *query* under
+`snap["query"]`, a SymPy object is committed as the whole expression, None
+means the method edited through the document).  All of it travels through one
+message, `{"action": "addon", "addon", "method", ...}`, so every backend
+carries it unchanged.  The front end part is a plain script (`Addon.js`,
+`Addon.css`) that calls `SympyEditor.registerAddon(name, {mount(api), tools})`;
+`loadAddons` puts the CSS in the page and runs the script once,
+`Editor._mountAddons` gives each a box under the source line (`.se-addons`,
+`.se-addon-<name>`) and a toolbar block (`data-block="addon:<name>"`), and
+`onState`/`onSelect`/`destroy` follow the editor.  `api.call(method, payload)`
+is the promise of a query's result or the new snapshot.  A Pyodide page
+carries the add-ons' packages (`cfg["packages"]`, written under
+`/sympy_editor_pkg/<module>/`) and `micropip`-installs their `requires`
+(`cfg["micropip"]`); `document["addons"]` names them by module for the
+Python that makes the document again.  Rules: the add-on packages in
+`addons/` are separate distributions, never imported by `sympy_editor`; a
+change to the contract comes with `tests/test_addons.py`, and to the front
+end hooks with `test_addon_panel_tools_and_calls`; the mobile bundles do not
+carry add-ons.  Kinds, rebuilders and printer methods are process-wide
+registries (as `KINDS` always was): activation adds, nothing removes.
+
 ## Backends at a glance
 
 - Jupyter widget (`edit()`, `SympyEditorWidget`): the kernel's SymPy through
@@ -710,8 +743,8 @@ Two conventions between printer, document and front end:
   possibly several times per page, and concatenated into an ES module for
   anywidget).  Use `var SympyEditor = (function () { ... })();`.
 - Pyodide-backed pages embed the *source* of `printer.py`, `ops.py`,
-  `document.py`; those three modules must import nothing but SymPy, the
-  standard library and each other.
+  `addons.py`, `document.py`; those four modules must import nothing but
+  SymPy, the standard library and each other.
 
 ## Mobile apps (`mobile/`)
 

@@ -15,7 +15,7 @@ import traitlets
 from sympy import Basic
 
 from .document import Document, interrupt_thread
-from .html import default_urls, read_static
+from .html import addon_clients, default_urls, read_static
 
 __all__ = ["SympyEditorWidget"]
 
@@ -44,7 +44,8 @@ class SympyEditorWidget(anywidget.AnyWidget):
         urls: Optional[Dict[str, str]] = None,
         **kwargs,
     ):
-        document_kwargs = {k: kwargs.pop(k) for k in ("printer_settings", "parser", "ops", "max_history", "symbols") if k in kwargs}
+        document_kwargs = {k: kwargs.pop(k) for k in ("printer_settings", "parser", "ops", "max_history", "symbols", "addons")
+                           if k in kwargs}
         if isinstance(expr, Document):
             if document_kwargs:   # same rule as to_html(): they would be silently ignored
                 raise TypeError("Document options cannot be combined with an existing Document")
@@ -55,6 +56,7 @@ class SympyEditorWidget(anywidget.AnyWidget):
         all_urls.update(urls or {})
         opts = {"katexJs": all_urls["katexJs"], "katexCss": all_urls["katexCss"]}
         opts.update(options or {})
+        opts["addons"] = addon_clients(self.document)     # their front ends, loaded by the Editor
         super().__init__(options=opts, **kwargs)
         self._lock = threading.Lock()          # one message at a time
         self._worker: Optional[threading.Thread] = None

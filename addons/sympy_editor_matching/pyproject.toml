@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sympy-editor-matching"
+version = "0.0.1"
+description = "sympy-editor add-on: rewrite rules with wildcards, matched many-to-one (sympy-matching)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "BSD-3-Clause" }
+dependencies = ["sympy-editor", "sympy-matching>=0.0.2"]
+
+[project.entry-points."sympy_editor.addons"]
+matching = "sympy_editor_matching:ADDON"
+
+[tool.setuptools.packages.find]
+include = ["sympy_editor_matching*"]
+
+[tool.setuptools.package-data]
+sympy_editor_matching = ["static/*"]

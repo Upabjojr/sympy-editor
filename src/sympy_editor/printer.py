@@ -88,6 +88,8 @@ __all__ = [
     "parse_path",
     "get_at",
     "view_parts",
+    "REBUILDERS",
+    "register_rebuild",
     "replace_at",
     "delete_at",
     "insert_at",
@@ -223,11 +225,26 @@ def get_at(expr: Basic, path: Path, settings: Settings = None) -> Basic:
     return node
 
 
+#: Class -> ``(node, args) -> node``: how to rebuild a node whose constructor
+#: does not take its own ``args`` (see :func:`rebuild`).  Add-ons register
+#: their classes here (:func:`register_rebuild`).
+REBUILDERS: Dict[type, Callable[[Basic, List[Basic]], Basic]] = {}
+
+
+def register_rebuild(cls: type, func: Callable[[Basic, List[Basic]], Basic]) -> None:
+    """Rebuild instances of ``cls`` with ``func(node, args)`` instead of
+    ``node.func(*args)``."""
+    REBUILDERS[cls] = func
+
+
 def rebuild(expr: Basic, args) -> Basic:
     """``expr`` reconstructed with new ``args`` (``expr.func(*args)``, with
     special cases for classes whose constructor does not accept their own
     ``args``)."""
     args = list(args)
+    for cls, func in REBUILDERS.items():
+        if isinstance(expr, cls):
+            return func(expr, args)
     if isinstance(expr, BlockMatrix):
         # BlockMatrix stores a matrix of blocks but is constructed from rows.
         return BlockMatrix(args[0].tolist())

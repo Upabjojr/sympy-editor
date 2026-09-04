@@ -33,3 +33,7 @@ mobile/android/gradle/wrapper/gradle-wrapper.jar
 # web app build
 webapp/dist/
 mobile/android/.kotlin/
+
+# add-on drafts: the demo page is built, not committed
+addons/*.html
+addons/*/build/

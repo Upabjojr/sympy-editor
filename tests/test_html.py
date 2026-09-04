@@ -24,7 +24,7 @@ def test_full_page_pyodide():
     assert "var SympyEditor" in html
     cfg = _config_from(html)
     assert cfg["backend"] == "pyodide"
-    assert set(cfg["sources"]) == {"__init__.py", "printer.py", "ops.py", "document.py"}
+    assert set(cfg["sources"]) == {"__init__.py", "printer.py", "ops.py", "addons.py", "document.py"}
     assert cfg["snapshot"]["nodes"]["/"]["src"] == "x**2 + y"
     assert cfg["srepr"].startswith("Add(")
     assert "</script>" not in html.split("SympyEditor.mount", 1)[1].split("</script>", 1)[0]

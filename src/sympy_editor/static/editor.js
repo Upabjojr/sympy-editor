@@ -944,6 +944,8 @@ var SympyEditor = (function () {
       this.annotated = true;
       this._renderSeq = 0;
       this._hoverEl = null;
+      this._addons = [];      // the mounted add-ons: {name, def, inst, api, tools} (see _mountAddons)
+      loadAddons(this.opts.addons);
       this._build();
     }
 
@@ -1135,6 +1137,11 @@ var SympyEditor = (function () {
         root.appendChild(this.symbols);
       }
 
+      // The add-ons' panels, under the formula and the source line: each in
+      // a collapsible box of its own (see _mountAddons).
+      this.addonHost = h("div", { class: "se-addons", hidden: "" });
+      root.appendChild(this.addonHost);
+
       // Sessions and history live in a lateral drawer (the ≡ button), out of
       // the widget: several expressions, each with its own undo history, kept
       // in localStorage (needs a backend with openDocument: Pyodide, or the
@@ -1268,6 +1275,129 @@ var SympyEditor = (function () {
       this.host.appendChild(root);
       root.__sympyEditor = this;   // handy for debugging and tests
       this._wire();
+      this._mountAddons();
+    }
+
+    /* ---- add-ons ---- */
+
+    /** Mount the add-ons of `opts.addons` (descriptors from Python) whose
+     *  front end registered itself with SympyEditor.registerAddon: each gets
+     *  an `api` onto this editor, may return a panel element (put in a box
+     *  under the formula), toolbar buttons (`tools`), and hooks
+     *  (`onState`, `onSelect`, `destroy`).  A missing or failing add-on is
+     *  reported in the console and skipped: the editor works without it. */
+    _mountAddons() {
+      var self = this;
+      var list = this.opts.addons || [];
+      for (var i = 0; i < list.length; i++) {
+        var d = list[i];
+        var def = addonDefs[d.name];
+        if (!def) {
+          if (window.console) console.warn("sympy-editor: add-on " + d.name + " has no front end registered (SympyEditor.registerAddon)");
+          continue;
+        }
+        var entry = { name: d.name, label: d.label || d.name, def: def, api: null, inst: null, tools: [] };
+        entry.api = this._addonApi(entry, d.options || {});
+        try {
+          entry.inst = (def.mount && def.mount(entry.api)) || {};
+        } catch (e) {
+          if (window.console) console.error("sympy-editor: add-on " + d.name + " failed to mount", e);
+          continue;
+        }
+        var el = entry.inst.element;
+        if (el) {
+          var box = entry.inst.bare ? el : h("details", { class: "se-addon", "data-addon": d.name, open: "" }, [
+            h("summary", {}, [entry.inst.title || entry.label]),
+            h("div", { class: "se-addon-body" }, [el])
+          ]);
+          box.classList.add("se-addon-" + d.name);
+          this.addonHost.appendChild(box);
+          this.addonHost.hidden = false;
+        }
+        var tools = def.tools || entry.inst.tools || [];
+        if (tools.length && this.tools && !this.opts.readOnly) {
+          var block = h("div", { class: "se-block", "data-block": "addon:" + d.name });
+          for (var t = 0; t < tools.length; t++) {
+            var tool = tools[t];
+            var cmd = "addon:" + d.name + ":" + tool.cmd;
+            var b = h("button", { type: "button", "data-cmd": cmd, title: tool.title || "" }, [tool.label || tool.cmd]);
+            block.appendChild(b);
+            this.buttons[cmd] = b;
+            entry.tools.push({ cmd: tool.cmd, button: b, fn: tool.run });
+          }
+          this.tools.appendChild(block);
+        }
+        this._addons.push(entry);
+      }
+    }
+
+    /** What an add-on's front end can do with this editor. */
+    _addonApi(entry, options) {
+      var self = this;
+      return {
+        name: entry.name,
+        options: options,
+        editor: this,
+        h: h,
+        loadScript: loadScript,
+        ensureCss: ensureCss,
+        katex: function () { return loadKatex(self.opts); },
+        state: function () { return self.state; },
+        selected: function () { return self.selected; },
+        range: function () { return self.range; },
+        tree: function () { return self.tree; },
+        node: function (path) { return self.state && self.state.nodes ? self.state.nodes[path] || null : null; },
+        select: function (path) { self.select(path); },
+        send: function (msg) { return self.send(msg); },
+        call: function (method, payload) { return self._addonCall(entry.name, method, payload); },
+        status: function (text) { self._setStatus(text); },
+        error: function (text) { self._showError(text); },
+        busy: function () { return self.busy; }
+      };
+    }
+
+    /** One of an add-on's Python methods: a query resolves with its result,
+     *  a change with the new snapshot (already applied); an error rejects.
+     *  Calls queue up behind the request in flight (the editor answers one
+     *  message at a time, and `send` drops a message while it is busy):
+     *  a panel asking as the user edits must not lose its question. */
+    _addonCall(name, method, payload) {
+      var self = this;
+      var msg = Object.assign({}, payload || {}, { action: "addon", addon: name, method: method });
+      var run = async function () {
+        while (self.busy && !self.closed) await new Promise(function (r) { setTimeout(r, 25); });
+        if (self.closed) throw new Error("The session is closed");
+        var snap = await self.send(msg);
+        if (!snap) throw new Error("No answer");
+        if (snap.error) throw new Error(snap.error);
+        return snap.query ? snap.query.result : snap;
+      };
+      var chain = (this._addonChain || Promise.resolve()).then(run, run);
+      this._addonChain = chain.then(function () {}, function () {});
+      return chain;
+    }
+
+    _addonsNotify(hook) {
+      var args = Array.prototype.slice.call(arguments, 1);
+      for (var i = 0; i < this._addons.length; i++) {
+        var inst = this._addons[i].inst;
+        if (!inst || typeof inst[hook] !== "function") continue;
+        try { inst[hook].apply(inst, args); }
+        catch (e) { if (window.console) console.error("sympy-editor: add-on " + this._addons[i].name + " failed in " + hook, e); }
+      }
+    }
+
+    _addonCommand(cmd) {
+      for (var i = 0; i < this._addons.length; i++) {
+        var tools = this._addons[i].tools;
+        for (var t = 0; t < tools.length; t++) {
+          if ("addon:" + this._addons[i].name + ":" + tools[t].cmd !== cmd) continue;
+          var inst = this._addons[i].inst;
+          var fn = tools[t].fn || (inst && inst.commands && inst.commands[tools[t].cmd]);
+          if (typeof fn === "function") return fn.call(inst, this._addons[i].api);
+          return;
+        }
+      }
     }
 
     _wire() {
@@ -1487,6 +1617,7 @@ var SympyEditor = (function () {
     async setState(snap) {
       if (!snap) return;
       if (snap.export) { this._storeSession(snap); return; }   // the answer to a save, not a new state
+      if (snap.query) return;                                   // an add-on's query: answered, nothing changed
       if (snap.preview) {
         // The source line being typed: a string that does not parse leaves
         // the rendering as it is and only marks the line.
@@ -1544,6 +1675,7 @@ var SympyEditor = (function () {
         this._setStatus("Session closed – the expression was returned to Python.");
       }
       this._updateToolbar();
+      this._addonsNotify("onState", snap);
     }
 
     async _render() {
@@ -2056,6 +2188,7 @@ var SympyEditor = (function () {
     }
 
     _applySelection() {
+      this._addonsNotify("onSelect", this.selected, this.range);
       var old = this.view.querySelectorAll(".se-selected");
       for (var i = 0; i < old.length; i++) old[i].classList.remove("se-selected");
       this._drawBoxes("hover", []);
@@ -3667,6 +3800,8 @@ var SympyEditor = (function () {
         case "zoomout": return this.setZoom(this.zoom / ZOOM_STEP);
         case "zoomreset": return this.setZoom(1);
         case "finish": return this.send({ action: "close" });
+        default:
+          if (cmd && cmd.indexOf("addon:") === 0) return this._addonCommand(cmd);
       }
     }
 
@@ -3690,6 +3825,7 @@ var SympyEditor = (function () {
         if ((msg.action === "apply" || msg.action === "call") && snap && !snap.error && snap.srepr === wasSrepr) {
           this._setStatus("No change: " + this._workingText(msg).replace(/^Computing /, "").replace(/…$/, "") + " leaves the expression as it is");
         }
+        return snap;
       } catch (e) {
         this._showError(String((e && e.message) || e));
         this._applySelection();
@@ -3711,6 +3847,7 @@ var SympyEditor = (function () {
         return "Computing " + (op ? op.label : msg.op) + "…";
       }
       if (msg.action === "call") return "Computing " + msg.func + "…";
+      if (msg.action === "addon") return "Working (" + msg.addon + ": " + msg.method + ")…";
       return "Working…";
     }
 
@@ -4527,12 +4664,17 @@ var SympyEditor = (function () {
       set("finish", dis);
       if (this.opsSelect) this.opsSelect.disabled = dis;
       if (this.typeMenu) this.typeMenu.disabled = dis;
+      for (var a = 0; a < this._addons.length; a++) {
+        for (var t = 0; t < this._addons[a].tools.length; t++) this._addons[a].tools[t].button.disabled = dis;
+      }
     }
 
     /** Remove the editor from the page, and everything it put on the
      *  document: a notebook makes and disposes of many editors, and each
      *  listener left behind would keep its editor alive. */
     destroy() {
+      this._addonsNotify("destroy");
+      this._addons = [];
       this.closeDrawer();
       this.closeHistory();
       this.closeHelp();
@@ -4590,7 +4732,8 @@ var SympyEditor = (function () {
     ""
   ].join("\n");
 
-  var PYODIDE_DIR = "/sympy_editor_pkg/sympy_editor";
+  var PYODIDE_ROOT = "/sympy_editor_pkg";
+  var PYODIDE_DIR = PYODIDE_ROOT + "/sympy_editor";
 
   // The worker's script: Pyodide, SymPy and the Documents live in a worker
   // thread, so a long computation leaves the page responsive and can be
@@ -4609,6 +4752,14 @@ var SympyEditor = (function () {
     "      else await py.loadPackage('sympy');",
     "      py.FS.mkdirTree(m.dir);",
     "      for (var name in m.sources) py.FS.writeFile(m.dir + '/' + name, m.sources[name]);",
+    "      for (var pkg in (m.packages || {})) for (var f in m.packages[pkg]) {",
+    "        var fp = m.root + '/' + pkg + '/' + f; py.FS.mkdirTree(fp.slice(0, fp.lastIndexOf('/'))); py.FS.writeFile(fp, m.packages[pkg][f]);",
+    "      }",
+    "      if (m.micropip && m.micropip.length) {",
+    "        self.postMessage({ type: 'progress', text: 'Installing add-ons…' });",
+    "        await py.loadPackage('micropip');",
+    "        await py.runPythonAsync('import micropip\\nawait micropip.install(' + JSON.stringify(m.micropip) + ')');",
+    "      }",
     "      py.runPython(m.boot);",
     "      newDoc = py.globals.get('__sympy_editor_new');",
     "      handle = py.globals.get('__sympy_editor_handle');",
@@ -4643,6 +4794,16 @@ var SympyEditor = (function () {
     else await py.loadPackage("sympy");
     py.FS.mkdirTree(PYODIDE_DIR);
     for (var name in cfg.sources) py.FS.writeFile(PYODIDE_DIR + "/" + name, cfg.sources[name]);
+    for (var pkg in (cfg.packages || {})) for (var f in cfg.packages[pkg]) {
+      var fp = PYODIDE_ROOT + "/" + pkg + "/" + f;
+      py.FS.mkdirTree(fp.slice(0, fp.lastIndexOf("/")));
+      py.FS.writeFile(fp, cfg.packages[pkg][f]);
+    }
+    if (cfg.micropip && cfg.micropip.length) {
+      report("Installing add-ons…");
+      await py.loadPackage("micropip");
+      await py.runPythonAsync("import micropip\nawait micropip.install(" + JSON.stringify(cfg.micropip) + ")");
+    }
     py.runPython(PYODIDE_BOOT);
     return { newDoc: py.globals.get("__sympy_editor_new"), handle: py.globals.get("__sympy_editor_handle") };
   }
@@ -4697,7 +4858,8 @@ var SympyEditor = (function () {
             await post({ type: "init", pyodideJs: new URL(cfg.pyodideJs, document.baseURI).href,
               indexURL: new URL(cfg.pyodideIndex, document.baseURI).href,
               sympyWheel: cfg.sympyWheel ? new URL(cfg.sympyWheel, document.baseURI).href : "",
-              dir: PYODIDE_DIR, sources: cfg.sources, boot: PYODIDE_BOOT });
+              dir: PYODIDE_DIR, root: PYODIDE_ROOT, sources: cfg.sources,
+              packages: cfg.packages || {}, micropip: cfg.micropip || [], boot: PYODIDE_BOOT });
             return;
           } catch (e) {
             if (window.console) console.warn("sympy-editor: Python could not start in a worker, using the page instead.", e);
@@ -4882,12 +5044,57 @@ var SympyEditor = (function () {
 
   var backends = { http: httpBackend, pyodide: pyodideBackend, native: nativeBackend, readonly: readonlyBackend };
 
+  /* ------------------------------------------------------------------ */
+  /* Add-ons                                                             */
+  /* ------------------------------------------------------------------ */
+
+  // The front ends of the add-ons, by name - shared by every copy of this
+  // script on the page (a notebook embeds one per fragment).  An add-on's
+  // script calls registerAddon(name, {mount, tools}); a Document made with
+  // that add-on lists it in the config, and Editor mounts what is registered.
+  var addonDefs = window.__sympyEditorAddons || (window.__sympyEditorAddons = {});
+
+  /** Register the front end of an add-on: `def.mount(api)` is called by each
+   *  editor whose document has the add-on and returns `{element, title,
+   *  onState(snap), onSelect(path, range), commands: {cmd: fn}, destroy()}`
+   *  (all optional); `def.tools` lists toolbar buttons `{cmd, label, title,
+   *  run(api)}`.  See sympy_editor/addons.py for the Python side. */
+  function registerAddon(name, def) {
+    addonDefs[name] = def;
+  }
+
+  /** Load the add-ons of a document (descriptors from Python: name, js, css,
+   *  options): the CSS goes in the page once, the script runs once and
+   *  registers itself.  Idempotent, so every editor may call it. */
+  function loadAddons(list) {
+    var loaded = window.__sympyEditorAddonsLoaded || (window.__sympyEditorAddonsLoaded = {});
+    for (var i = 0; i < (list || []).length; i++) {
+      var d = list[i];
+      if (!d || !d.name) continue;
+      if (d.css && !document.querySelector('style[data-se-addon="' + d.name + '"]')) {
+        var st = document.createElement("style");
+        st.setAttribute("data-se-addon", d.name);
+        st.textContent = d.css;
+        document.head.appendChild(st);
+      }
+      if (d.js && !loaded[d.name] && !addonDefs[d.name]) {
+        loaded[d.name] = true;
+        try {
+          (new Function("SympyEditor", d.js))(API);
+        } catch (e) {
+          if (window.console) console.error("sympy-editor: the script of add-on " + d.name + " failed", e);
+        }
+      }
+    }
+  }
+
   /** Create an editor from a config object produced by html.py. */
   function mount(host, cfg) {
     var make = backends[cfg.backend] || readonlyBackend;
     var options = Object.assign({}, cfg.options || {});
     if (cfg.backend === "readonly") options.readOnly = true;
     if (cfg.examples) options.examples = cfg.examples;     // what a new session can start from
+    if (cfg.addons) options.addons = cfg.addons;           // their front ends (loaded by the Editor)
     var backend = make(cfg);
     var editor = new Editor(host, backend, options);
     editor.setState(cfg.snapshot).then(function () {
@@ -4904,13 +5111,19 @@ var SympyEditor = (function () {
     return editor;
   }
 
-  return {
+  var API = {
     Editor: Editor,
     backends: backends,
     mount: mount,
     mountHistory: mountHistory,
     buildHistoryReport: buildHistoryReport,
     loadKatex: loadKatex,
+    loadScript: loadScript,
+    ensureCss: ensureCss,
+    h: h,
+    registerAddon: registerAddon,
+    loadAddons: loadAddons,
+    addons: addonDefs,
     toDisplay: toDisplay,
     toSource: toSource,
     expandCommands: expandCommands,
@@ -4918,4 +5131,5 @@ var SympyEditor = (function () {
     parentPath: parentPath,
     DEFAULTS: DEFAULTS
   };
+  return API;
 })();

@@ -1,0 +1,15 @@
+/* sympy-editor add-on "matching". */
+.se-addon-matching .mt-panel { font-size: 12px; }
+.se-addon-matching .mt-head { display: flex; align-items: center; gap: 0.5rem; margin: 0.3rem 0 0.2rem; }
+.se-addon-matching .mt-head strong { color: var(--se-muted); font-weight: 600; margin-right: auto; }
+.se-addon-matching .mt-rules { margin: 0; padding-left: 1.6em; }
+.se-addon-matching .mt-rules li { display: flex; align-items: center; gap: 0.5rem; padding: 2px 0; }
+.se-addon-matching .mt-formula { flex: 1 1 auto; min-width: 0; overflow-x: auto; }
+.se-addon-matching .mt-del { padding: 0 6px; line-height: 1.4; }
+.se-addon-matching .mt-row { display: flex; gap: 0.4rem; margin: 0.3rem 0; }
+.se-addon-matching .mt-field { flex: 1 1 auto; min-width: 0; font: 12px var(--se-mono); padding: 3px 6px; }
+.se-addon-matching .mt-empty { color: var(--se-muted); padding: 2px 0; }
+.se-addon-matching .mt-hit { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding: 3px 0; border-top: 1px solid var(--se-rule); }
+.se-addon-matching .mt-num { color: var(--se-muted); min-width: 3.5em; }
+.se-addon-matching .mt-bind, .se-addon-matching .mt-result { font-family: var(--se-mono); }
+.se-addon-matching .mt-result { color: var(--se-added); }
