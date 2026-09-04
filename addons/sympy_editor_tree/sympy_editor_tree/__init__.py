@@ -23,8 +23,10 @@ from typing import Any, Dict, List, Optional, Sequence
 import sympy
 from sympy import Basic, Function, Tuple, sympify
 
+from sympy import Pow
+
 from sympy_editor.addons import Addon
-from sympy_editor.printer import delete_at, get_at, rebuild, replace_at
+from sympy_editor.printer import delete_at, get_at, parse_path, rebuild, replace_at
 
 __all__ = ["TreeAddon", "ADDON", "tree_of"]
 
@@ -43,32 +45,79 @@ def _label(node: Basic) -> str:
     return type(node).__name__
 
 
-def tree_of(expr: Basic, max_nodes: int = 400, view_paths=None) -> Dict[str, Any]:
+def view_objects(expr: Basic, view_paths, settings=None) -> Dict[str, Basic]:
+    """What the formula shows at each of the editor's paths: the objects
+    behind ``snapshot()["nodes"]`` (a fraction's ``n``/``d`` parts included)."""
+    out: Dict[str, Basic] = {}
+    for path in view_paths or ():
+        try:
+            out[path] = get_at(expr, parse_path(path), settings)
+        except Exception:
+            pass
+    return out
+
+
+def _view_for(node: Basic, path: List[int], shown: Dict[str, Basic], parent_view: Optional[str]) -> Optional[str]:
+    """The editor's path for a node of the argument tree.  Its own path when
+    the formula has it; else the piece of the formula, under the nearest
+    ancestor's piece, that *is* the node or equals it - the numerator ``n``
+    for the ``sin(x)**2`` of ``sin(x)**2/x``; for a negative power, the
+    piece it is drawn as: the denominator ``x`` for ``Pow(x, -1)``."""
+    own = "/" + "/".join(str(i) for i in path) if path else "/"
+    if own in shown:
+        return own
+    if parent_view is None:
+        return None
+    under = [p for p in shown if p != parent_view and p.startswith(parent_view.rstrip("/") + "/")]
+    under.sort(key=lambda p: (p.count("/"), p))
+    # The ancestor's own piece may be this very node: the x of Pow(x, -1)
+    # is what the denominator shows.
+    under.insert(0, parent_view)
+    for p in under:
+        if shown[p] is node:
+            return p
+    wanted = [node]
+    if isinstance(node, Pow) and node.exp.is_negative:
+        wanted.append(Pow(node.base, -node.exp))
+    for target in wanted:
+        for p in under:
+            obj = shown[p]
+            if type(obj) is type(target) and obj == target:
+                return p
+    return None
+
+
+def tree_of(expr: Basic, max_nodes: int = 400, view_paths=None, shown: Optional[Dict[str, Basic]] = None) -> Dict[str, Any]:
     """The argument tree of ``expr`` as JSON: ``{"head", "label", "atom",
     "path": [ints], "view": the editor's path for the same node or None,
-    "children": [...]}``; ``{"too_big": count}`` beyond ``max_nodes``."""
+    "children": [...]}``; ``{"too_big": count}`` beyond ``max_nodes``.
+    ``shown`` (from :func:`view_objects`) maps the formula's pieces to
+    nodes whose argument path is not a formula path - the factors of a
+    fraction."""
     count = 0
+    shown = shown if shown is not None else ({p: None for p in view_paths} if view_paths else {})
 
-    def walk(node: Basic, path: List[int]) -> Optional[Dict[str, Any]]:
+    def walk(node: Basic, path: List[int], parent_view: Optional[str]) -> Optional[Dict[str, Any]]:
         nonlocal count
         count += 1
         if count > max_nodes:
             return None
-        view = "/" + "/".join(str(i) for i in path) if path else "/"
+        if view_paths is None and not shown:
+            view: Optional[str] = "/" + "/".join(str(i) for i in path) if path else "/"
+        else:
+            view = _view_for(node, path, shown, parent_view)
         out: Dict[str, Any] = {
             "head": type(node).__name__, "label": _label(node), "atom": not node.args,
-            "path": list(path), "src": str(node),
-            "view": view if view_paths is None or view in view_paths else None,
-            "children": [],
+            "path": list(path), "src": str(node), "view": view, "children": [],
         }
         for i, arg in enumerate(node.args):
-            child = walk(arg, path + [i])
+            child = walk(arg, path + [i], view if view is not None else parent_view)
             if child is None:
                 return None
             out["children"].append(child)
         return out
 
-    root = walk(expr, [])
+    root = walk(expr, [], None)
     if root is None:
         return {"too_big": count, "max": max_nodes}
     return root
@@ -114,7 +163,9 @@ class TreeAddon(Addon):
         return {"heads": list(COMMON_HEADS), "maxNodes": self.max_nodes}
 
     def contribute(self, doc, snap: Dict[str, Any], expr: Basic) -> None:
-        snap["tree"] = tree_of(expr, self.max_nodes, view_paths=set(snap.get("nodes") or ()))
+        paths = set(snap.get("nodes") or ())
+        snap["tree"] = tree_of(expr, self.max_nodes, view_paths=paths,
+                               shown=view_objects(expr, paths, doc.printer_settings))
 
     def describe(self, method: str, payload: Dict[str, Any]) -> Optional[str]:
         def at(key="path"):

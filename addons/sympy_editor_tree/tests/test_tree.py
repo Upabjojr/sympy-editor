@@ -27,14 +27,28 @@ def test_the_tree_travels_with_the_snapshot():
     assert mul["view"] in snap["nodes"]           # the same node in the formula
 
 
-def test_nodes_under_a_fraction_have_no_view_path():
+def test_the_factors_of_a_fraction_map_to_its_pieces():
     doc = Document(1 / (x * y), addons=[ADDON])
     snap = doc.snapshot()
-    # The printer shows a fraction: the Pow(x, -1) of the real tree is not
-    # what is drawn, so it has no view path; the root has.
+    # The printer shows a fraction: Pow(x, -1) is not drawn as such, but x
+    # is - as a factor of the denominator - and the tree points there.
     tree = snap["tree"]
     assert tree["view"] == "/"
-    assert any(c["view"] is None for c in tree["children"])
+    views = {c["src"]: c["view"] for c in tree["children"]}
+    assert views == {"1/x": "/d/0", "1/y": "/d/1"}
+    assert doc.get("/d/0") == x
+    # the exponent -1 has no piece of its own: nothing to point at
+    pow_x = [c for c in tree["children"] if c["src"] == "1/x"][0]
+    assert [g["view"] for g in pow_x["children"]] == ["/d/0", None]
+
+
+def test_the_numerator_and_the_denominator_of_the_demo_expression():
+    doc = Document(cos(x) ** 2 + sin(x) ** 2 / x, addons=[ADDON])
+    tree = doc.snapshot()["tree"]
+    frac = [c for c in tree["children"] if c["head"] == "Mul"][0]
+    views = {c["src"]: c["view"] for c in frac["children"]}
+    assert views == {"sin(x)**2": frac["view"] + "/n", "1/x": frac["view"] + "/d"}
+    assert doc.get(views["sin(x)**2"]) == sin(x) ** 2 and doc.get(views["1/x"]) == x
 
 
 def test_too_big():

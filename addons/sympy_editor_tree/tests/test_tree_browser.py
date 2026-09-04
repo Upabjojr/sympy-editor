@@ -106,3 +106,36 @@ def test_the_node_menu_offers_the_editors_tools(page_and_doc):
     page.wait_for_function("document.querySelector('.se-source').textContent === '-y*z'")
     assert doc.expr == -y * z
     assert page.errors == []
+
+
+def test_the_factors_of_a_fraction_select_its_pieces():
+    """cos(x)**2 + sin(x)**2/x: Pow(sin(x), 2) is the numerator, Pow(x, -1)
+    is drawn as the denominator x - clicking them selects those pieces, not
+    the whole fraction."""
+    from sympy import cos
+    doc = Document(cos(x) ** 2 + sin(x) ** 2 / x, addons=[ADDON])
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    with playwright.sync_playwright() as p:
+        try:
+            browser = p.chromium.launch()
+        except Exception as exc:
+            pytest.skip(f"chromium not available: {exc}")
+        page = browser.new_page()
+        page.goto(srv.url)
+        page.wait_for_selector(".se-addon-tree .tree-node", timeout=30000)
+        pows = page.locator(".tree-node").filter(has_text="Pow")
+        sel = lambda: page.locator(".se-selected[data-path]").first.get_attribute("data-path")
+        for i in range(pows.count()):
+            node = pows.nth(i)
+            src = node.locator("title").text_content()
+            node.click()
+            page.wait_for_function("document.querySelector('.se-selected[data-path]') !== null")
+            if src == "sin(x)**2":
+                assert doc.get(sel()) == sin(x) ** 2 and sel().endswith("/n")
+            elif src == "1/x":
+                assert doc.get(sel()) == x and sel().endswith("/d")
+            page.keyboard.press("Escape")
+        browser.close()
+    srv.shutdown()
+    srv.server_close()
