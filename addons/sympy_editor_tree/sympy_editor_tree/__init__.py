@@ -167,6 +167,11 @@ class TreeAddon(Addon):
         snap["tree"] = tree_of(expr, self.max_nodes, view_paths=paths,
                                shown=view_objects(expr, paths, doc.printer_settings))
 
+    def contribute_step(self, doc, step: Dict[str, Any], expr: Basic) -> None:
+        """Every step of the history gets its tree too, for the drawer's
+        list and the report: how the tree changed from step to step."""
+        self.contribute(doc, step, expr)
+
     def describe(self, method: str, payload: Dict[str, Any]) -> Optional[str]:
         def at(key="path"):
             p = payload.get(key)

@@ -269,3 +269,19 @@ def test_addon_state_travels_with_a_session():
     assert later.addon_state["keeper"]["notes"] == ["a", "b"]
     # an add-on with nothing to say exports nothing (the default)
     assert "addon_state" not in Document(x, addons=[ADDON]).export()
+
+
+def test_addons_contribute_to_the_history_steps():
+    class Counter(Addon):
+        name = "counter"
+
+        def contribute_step(self, doc, step, expr):
+            step["args"] = len(expr.args)
+
+    doc = Document(x + y, addons=[Counter()])
+    doc.replace("/", "x*y*2")
+    steps = doc.history_labels()["steps"]
+    assert [s["args"] for s in steps] == [2, 3] and "latex" in steps[0]
+    # the render cache is not touched: a document without the add-on sees plain steps
+    doc.disable("counter")
+    assert "args" not in doc.history_labels()["steps"][0]

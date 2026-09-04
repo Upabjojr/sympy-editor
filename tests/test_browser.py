@@ -3575,6 +3575,8 @@ SympyEditor.registerAddon("demo", {
     return {
       element: el,
       help: "<section><h3>Demo</h3><p>This panel counts arguments.</p></section>",
+      historyStepHtml: function (step, i) { return '<span class="demo-step">step ' + (i + 1) + ': ' + step.src_len + '</span>'; },
+      historyCss: ".demo-step { color: rebeccapurple; }",
       onState: function (snap) { if (!snap.preview) el.setAttribute("data-src", snap.src); },
       onSelect: function (path) { el.setAttribute("data-sel", path || ""); }
     };
@@ -3592,6 +3594,9 @@ SympyEditor.registerAddon("demo", {
             if method == "box_it":
                 return Boxed(doc.expr)
             raise ValueError(method)
+
+        def contribute_step(self, doc, step, expr):
+            step["src_len"] = len(str(expr))
 
     return Demo(), Boxed
 
@@ -3633,6 +3638,14 @@ def test_addon_panel_tools_and_calls(browser):
         assert page.locator(".se-help-view").count() == 0
         page.locator('.se-toolbar [data-cmd="help"]').click()                  # the editor's own guide still opens
         assert "selecting" in page.locator(".se-help-view").inner_text().lower()
+        page.keyboard.press("Escape")
+        # the history view carries what the add-on draws under each step, with its CSS
+        page.locator('.se-toolbar [data-cmd="history"]').click()
+        frame = page.frame_locator(".se-history-frame")
+        frame.locator("section.step .demo-step").first.wait_for(timeout=15000)
+        assert frame.locator("section.step .demo-step").count() == 2
+        assert frame.locator("section.step .demo-step").first.text_content() == "step 1: 5"      # len("x + y")
+        assert page.evaluate("document.querySelector('.se-history-frame').contentDocument.head.innerHTML.includes('rebeccapurple')")
         page.keyboard.press("Escape")
         assert page.errors == []
     finally:

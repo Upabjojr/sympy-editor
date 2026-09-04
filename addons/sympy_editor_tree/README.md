@@ -18,6 +18,10 @@ w = edit(x + y*z, addons=["tree"])          # or addons=["sympy_editor_tree"]
   *Transform* entries for the node's kind and the *Methods* of its class,
   applied through the editor, so a method with parameters asks for them as
   usual.
+- While the add-on is on, every step of the history - the drawer's list and
+  the History view, saved web page included - carries the tree of its
+  expression in a collapsible box, the nodes the previous step did not have
+  in green: how the tree evolved, step by step.
 - Drag a subtree onto another node to make it that node's last argument.
 - `Delete` removes the focused node; the panel's fields add an argument to the
   selected node or wrap it in a function; the *Head* menu changes its head.

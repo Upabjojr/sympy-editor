@@ -108,3 +108,11 @@ def test_the_page_carries_the_addon():
     assert cfg["document"]["addons"] == ["sympy_editor_tree"]
     assert {"__init__.py", "static/tree.js", "static/tree.css"} <= set(cfg["packages"]["sympy_editor_tree"])
     assert cfg["micropip"] == []
+
+
+def test_every_step_of_the_history_carries_its_tree():
+    doc = Document(x + y, addons=[ADDON])
+    doc.replace("/", "x*y")
+    steps = doc.history_labels()["steps"]
+    assert [s["tree"]["head"] for s in steps] == ["Add", "Mul"]
+    assert steps[1]["tree"]["view"] == "/" and "nodes" in steps[1]

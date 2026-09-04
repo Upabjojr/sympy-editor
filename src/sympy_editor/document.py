@@ -666,7 +666,14 @@ class Document:
         expression)."""
         steps = []
         for e in self._history:
-            steps.append(self._render_cache_get(e))
+            step = self._render_cache_get(e)
+            if self.addons:
+                # A copy: the add-ons' data is not cached with the render (an
+                # add-on may be switched on or off between two requests).
+                step = dict(step)
+                for addon in self.addons.values():
+                    addon.contribute_step(self, step, e)
+            steps.append(step)
         return {"labels": [str(e) for e in self._history], "index": self._index, "steps": steps,
                 "actions": list(self._labels)}
 

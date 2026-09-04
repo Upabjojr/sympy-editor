@@ -139,3 +139,23 @@ def test_the_factors_of_a_fraction_select_its_pieces():
         browser.close()
     srv.shutdown()
     srv.server_close()
+
+
+def test_the_history_view_shows_a_tree_under_every_step(page_and_doc):
+    """The History view (a self-contained page in a frame) carries the tree
+    of each step in a collapsible box, the new nodes marked."""
+    page, doc = page_and_doc
+    page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.send({action: 'set', src: 'x + y*z + 1'})")
+    page.wait_for_function("document.querySelector('.se-source').textContent === 'x + y*z + 1'")
+    page.locator('.se-toolbar [data-cmd="history"]').click()
+    frame = page.frame_locator(".se-history-frame")
+    frame.locator("section.step").nth(1).wait_for(timeout=15000)
+    assert frame.locator("section.step").count() == 2
+    assert frame.locator("section.step details.tree-history svg").count() == 2
+    assert frame.locator("section.step details.tree-history summary").first.text_content() == "Expression tree"
+    # the second step's tree marks what the first did not have: the 1
+    added = frame.locator("section.step").nth(1).locator(".tree-node.tree-added text")
+    assert "1" in [t.text_content() for t in added.all()]
+    assert frame.locator("section.step").nth(0).locator(".tree-node.tree-added").count() == 0
+    page.keyboard.press("Escape")
+    assert page.errors == []

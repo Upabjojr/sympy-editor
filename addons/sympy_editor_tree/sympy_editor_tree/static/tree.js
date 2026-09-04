@@ -82,6 +82,80 @@ SympyEditor.registerAddon("tree", {
       return e;
     }
 
+    /** A tree drawn small and still, for a step of the history: the nodes
+     *  the previous step did not have (by source) are tinted as new. */
+    function treeSvg(t, prev) {
+      var had = {};
+      (function collect(d) { had[d.src] = true; (d.children || []).forEach(collect); })(prev || { src: null, children: [] });
+      var out = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      out.setAttribute("class", "tree-svg tree-small");
+      if (!t || t.too_big) return out;
+      var H = 20, GX = 6, GY = 22, P = 6, CH = 6.4;
+      (function measure(d) {
+        d._w = Math.max(22, d.label.length * CH + 12);
+        var kids = d.children || [], total = 0;
+        for (var i = 0; i < kids.length; i++) { measure(kids[i]); total += kids[i]._span + (i ? GX : 0); }
+        d._span = Math.max(d._w, total);
+      })(t);
+      var depth = 0;
+      (function place(d, left, level) {
+        depth = Math.max(depth, level);
+        var kids = d.children || [], total = 0;
+        for (var i = 0; i < kids.length; i++) total += kids[i]._span + (i ? GX : 0);
+        var x = left + (d._span - total) / 2;
+        for (var j = 0; j < kids.length; j++) { place(kids[j], x, level + 1); x += kids[j]._span + GX; }
+        d._x = kids.length ? (kids[0]._cx + kids[kids.length - 1]._cx) / 2 - d._w / 2 : left + (d._span - d._w) / 2;
+        d._cx = d._x + d._w / 2;
+        d._y = P + level * (H + GY);
+      })(t, P, 0);
+      var edges = el("g", { class: "tree-edges" }), boxes = el("g", { class: "tree-nodes" });
+      out.appendChild(edges); out.appendChild(boxes);
+      (function walk(d) {
+        (d.children || []).forEach(function (k) {
+          edges.appendChild(el("line", { x1: d._cx, y1: d._y + H, x2: k._cx, y2: k._y }));
+          walk(k);
+        });
+        var g = el("g", { class: "tree-node " + (d.atom ? "tree-atom" : "tree-head-node") + (prev && !had[d.src] ? " tree-added" : ""),
+                          transform: "translate(" + d._x + "," + d._y + ")" });
+        g.appendChild(el("rect", { width: d._w, height: H, rx: 5, ry: 5 }));
+        var tx = el("text", { x: d._w / 2, y: H / 2 + 3.5, "text-anchor": "middle" });
+        tx.textContent = d.label;
+        g.appendChild(tx);
+        boxes.appendChild(g);
+      })(t);
+      out.setAttribute("width", String(t._span + 2 * P));
+      out.setAttribute("height", String(P * 2 + (depth + 1) * H + depth * GY));
+      out.setAttribute("viewBox", "0 0 " + (t._span + 2 * P) + " " + (P * 2 + (depth + 1) * H + depth * GY));
+      return out;
+    }
+
+    /** The history's step: a collapsible box with the step's tree. */
+    function historyBox(step, prev) {
+      if (!step || !step.tree) return null;
+      var d = h("details", { class: "tree-history", open: "" }, [h("summary", {}, ["Expression tree"]),
+        h("div", { class: "tree-history-scroll" }, [treeSvg(step.tree, prev && prev.tree)])]);
+      if (step.tree.too_big) d.querySelector(".tree-history-scroll").textContent = "(too many nodes to draw)";
+      return d;
+    }
+
+    // The report is a self-contained page without the add-on's stylesheet:
+    // the tree's few rules go with the markup (kept plain: no CSS variables).
+    var HISTORY_CSS = [
+      ".tree-history { margin: 0.2rem 0; }",
+      ".tree-history > summary { cursor: pointer; font-size: 0.8rem; color: #656d76; font-weight: 600; }",
+      ".tree-history-scroll { overflow-x: auto; }",
+      ".tree-history .tree-svg { display: block; font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }",
+      ".tree-history .tree-edges line { stroke: #656d76; stroke-width: 1; }",
+      ".tree-history .tree-node rect { fill: #ffffff; stroke: #d0d7de; stroke-width: 1; }",
+      ".tree-history .tree-node text { fill: #1f2328; }",
+      ".tree-history .tree-head-node rect { fill: #e8effc; stroke: #9ab8f3; }",
+      ".tree-history .tree-node.tree-added rect { fill: #e8f2eb; stroke: #1a7f37; stroke-width: 1.5; }",
+      ".tree-history .tree-node.tree-added text { fill: #1a7f37; font-weight: bold; }",
+      "@media (prefers-color-scheme: dark) { .tree-history .tree-node rect { fill: #1e1e1e; stroke: #444; } .tree-history .tree-node text { fill: #e6e6e6; }",
+      "  .tree-history .tree-head-node rect { fill: #253044; stroke: #3b5a8a; } .tree-history .tree-node.tree-added rect { fill: #233726; stroke: #3fb950; }",
+      "  .tree-history .tree-node.tree-added text { fill: #3fb950; } .tree-history .tree-edges line { stroke: #a0a0a0; } }"
+    ].join("\n");
+
     function draw() {
       while (svg.firstChild) svg.removeChild(svg.firstChild);
       nodes = [];
@@ -370,6 +444,9 @@ SympyEditor.registerAddon("tree", {
       "<li>Click a node to select the same piece in the formula; select in the formula and the node lights up here.</li>",
       "<li><kbd>Space</kbd> selects the focused node, <kbd>Tab</kbd> moves between nodes.</li>",
       "</ul></section>",
+      "<section><h3>In the history</h3><ul>",
+      "<li>While this add-on is on, every step of the history \u2014 the drawer's list and the History view \u2014 carries the tree of its expression in a collapsible box, the nodes the previous step did not have in green: how the tree evolved, step by step. The saved web page keeps them.</li>",
+      "</ul></section>",
       "<section><h3>Editing</h3><ul>",
       "<li>Double-click a node (or <kbd>Enter</kbd> on it) to type over it: a new value for a leaf, a new head for an inner node \u2014 <b>Mul</b> over the arguments of an <b>Add</b> turns the sum into a product.</li>",
       "<li>Right-click a node, or press <b>Node \u25be</b> for the selected one: edit, delete, wrap, add an argument, then the editor's <b>Transform</b> entries for that kind of node and the <b>Methods</b> of its class.</li>",
@@ -383,6 +460,12 @@ SympyEditor.registerAddon("tree", {
       element: element,
       title: "Expression tree",
       help: HELP,
+      historyStep: function (step, i, prev) { return historyBox(step, prev); },
+      historyStepHtml: function (step, i, prev) {
+        var box = historyBox(step, prev);
+        return box ? box.outerHTML : "";
+      },
+      historyCss: HISTORY_CSS,
       onState: function (snap) {
         if (snap.preview || !snap.tree) return;
         tree = snap.tree;

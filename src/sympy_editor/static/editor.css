@@ -521,6 +521,9 @@
 .se-addon > summary { list-style: none; }
 .se-addon > summary::-webkit-details-marker { display: none; }
 .se-addon-help { margin-left: auto; font-size: 11px; line-height: 1.2; padding: 1px 7px; }
+/* what an add-on draws under a step of the drawer's history list */
+.se-step-extra { display: block; margin: 0.2rem 0; font-size: 11px; }
+.se-step-extra details > summary { cursor: pointer; color: var(--se-muted); }
 .se-addon-body { padding-top: 0.3rem; min-width: 0; }
 .sympy-editor.se-full > .se-addons { display: none; }
 

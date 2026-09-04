@@ -25,3 +25,14 @@
 .se-addon-tree .tree-menu-head { color: var(--se-muted); font-weight: 600; padding: 0.3rem 0.4rem 0.1rem; font-family: var(--se-mono); }
 .se-addon-tree .tree-item { text-align: left; background: none; border: 0; box-shadow: none; padding: 0.2rem 0.5rem; border-radius: 0.3rem; cursor: pointer; color: inherit; font: inherit; }
 .se-addon-tree .tree-item:hover, .se-addon-tree .tree-item:focus { background: rgba(var(--se-accent), 0.14); outline: none; }
+/* the tree under a step of the drawer's history list */
+.sympy-editor .tree-history { margin: 0.2rem 0; }
+.sympy-editor .tree-history > summary { cursor: pointer; color: var(--se-muted); font-size: 11px; }
+.sympy-editor .tree-history-scroll { overflow-x: auto; }
+.sympy-editor .tree-history .tree-svg { display: block; font: 11px var(--se-mono); }
+.sympy-editor .tree-history .tree-edges line { stroke: var(--se-muted); stroke-width: 1; }
+.sympy-editor .tree-history .tree-node rect { fill: var(--se-bg); stroke: var(--se-border); stroke-width: 1; }
+.sympy-editor .tree-history .tree-node text { fill: var(--se-fg); }
+.sympy-editor .tree-history .tree-head-node rect { fill: rgba(var(--se-accent), 0.12); stroke: rgba(var(--se-accent), 0.6); }
+.sympy-editor .tree-history .tree-node.tree-added rect { fill: rgba(var(--se-added-rgb), 0.15); stroke: var(--se-added); stroke-width: 1.5; }
+.sympy-editor .tree-history .tree-node.tree-added text { fill: var(--se-added); font-weight: bold; }

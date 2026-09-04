@@ -97,6 +97,7 @@ Three kinds of extension were asked for, and the contract has a place for each:
 | **new nodes** in the expression tree, from another library | `Addon.kinds`, `namespace()`, `make_symbol()`, `rebuilders`, `latex_printers` |
 | **a different interface**: HTML/JavaScript beside the formula | `Addon.js` / `Addon.css`, `SympyEditor.registerAddon`, the panel and toolbar hooks |
 | **custom widgets**: something that computes and shows | `contribute()` (data in every snapshot), `handle()` (methods), `api.call()` |
+| **the history**: something drawn under every step | `contribute_step()` (data per step), `historyStep` / `historyStepHtml` / `historyCss` (the drawer's list and the report) |
 
 An add-on may use one of these or all of them.  A menu of transformations is an
 add-on with nothing but `ops`; a widget under the formula is one with nothing
@@ -189,9 +190,14 @@ api.editor                   // the Editor itself, for what the above does not c
 ```
 
 `def.mount(api)` returns `{element, title, help, onState(snap), onSelect(path,
-range), commands: {cmd: fn}, destroy()}`, all optional (`help` is HTML for the
-guide behind the panel's "?", shown as the editor's own guide is - write one:
-a feature that is not in it does not exist for the user); `def.tools` is a list of
+range), commands: {cmd: fn}, destroy(), historyStep(step, i, prev),
+historyStepHtml(step, i, prev), historyCss}`, all optional (`help` is HTML for
+the guide behind the panel's "?", shown as the editor's own guide is - write
+one: a feature that is not in it does not exist for the user; the `history*`
+hooks draw something under every step of the history - an element in the
+drawer's list, static markup plus CSS in the self-contained report, from what
+the Python side's `contribute_step(doc, step, expr)` put in the step - the
+tree add-on draws each step's tree); `def.tools` is a list of
 `{cmd, label, title, run(api)}` toolbar buttons, which the editor puts in a
 block of their own (`data-block="addon:<name>"`) and disables while it is busy.
 The panel goes in a collapsible box under the source line
@@ -265,7 +271,10 @@ fixes, reproduced - not in the editor's.  `pytest addons/` runs them all,
 **`sympy_editor_tree`** - *new interface + custom widget*.  `contribute` puts
 the real argument tree in the snapshot (`snap["tree"]`, capped at 400 nodes),
 and `tree.js` lays it out (each subtree as wide as its children, the parent
-centred; no library) in SVG: click selects the same piece in the formula
+centred; no library) in SVG; every step of the history carries its tree too
+(`contribute_step`), drawn under the step in the drawer's list and in the
+report, the nodes the previous step did not have in green - how the tree
+evolved.  In the panel, click selects the same piece in the formula
 (argument paths and view paths agree except under fractions, where the
 nearest ancestor is selected), double-click edits a leaf's value or an inner
 node's head, drag drops a subtree under another node, `Delete` removes, the

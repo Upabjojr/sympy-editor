@@ -687,7 +687,13 @@ editor can load a front end it has not seen.  `Addon.export_state(doc)` /
 `Document.export()["addon_state"]` (a session; `Document(addon_state=)`
 gives it back when the add-on is on; `w.addon_state` in the widget is the
 live dict); what must outlive a session the add-on mirrors to
-`localStorage` from its panel (the rules panel's library).  `Editor._syncAddons` mounts
+`localStorage` from its panel (the rules panel's library).
+`Addon.contribute_step(doc, step, expr)` adds to each step of
+`history_labels()["steps"]` (on a copy: the render cache stays plain), and
+the front end hooks `historyStep` (an element for the drawer's rows,
+`.se-step-extra`) / `historyStepHtml` + `historyCss` (static markup and
+styles for the report, `buildHistoryReport`'s `stepExtra`/`extraCss`) draw
+it under the step - the tree add-on shows every step's tree.  `Editor._syncAddons` mounts
 and unmounts (`_mountAddon`/`_unmountAddon`) to match each snapshot, and
 `_fillAddonsMenu` builds the toolbar's **Add-ons ▾** menu
 (`data-block="addons"`, `.se-addons-menu`).  Rules: the add-on packages in

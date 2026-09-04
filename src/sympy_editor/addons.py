@@ -140,6 +140,12 @@ class Addon:
         key of the add-on's own; keep it small, it travels with every
         message's answer."""
 
+    def contribute_step(self, doc: "Document", step: Dict[str, Any], expr: Basic) -> None:
+        """Add the add-on's data to one step of the history (``{"latex",
+        "nodes"}`` for ``expr``, see ``render_step``) when the front end asks
+        for the history: what its ``historyStep`` hook draws under that step
+        in the drawer's list and in the report."""
+
     def handle(self, doc: "Document", method: str, payload: Dict[str, Any]) -> Union[None, Dict[str, Any], Basic]:
         """Answer ``{"action": "addon", "addon": self.name, "method": method,
         ...payload}``.  Return
