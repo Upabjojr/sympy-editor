@@ -44,8 +44,8 @@ class SympyEditorWidget(anywidget.AnyWidget):
         urls: Optional[Dict[str, str]] = None,
         **kwargs,
     ):
-        document_kwargs = {k: kwargs.pop(k) for k in ("printer_settings", "parser", "ops", "max_history", "symbols", "addons")
-                           if k in kwargs}
+        document_kwargs = {k: kwargs.pop(k) for k in ("printer_settings", "parser", "ops", "max_history", "symbols",
+                                                       "addons", "available", "addon_state") if k in kwargs}
         if isinstance(expr, Document):
             if document_kwargs:   # same rule as to_html(): they would be silently ignored
                 raise TypeError("Document options cannot be combined with an existing Document")
@@ -135,3 +135,11 @@ class SympyEditorWidget(anywidget.AnyWidget):
     def on_change(self, callback: Callable[[Basic], None]) -> Callable[[Basic], None]:
         """Call ``callback(expr)`` after every edit made in the browser."""
         return self.document.on_change(callback)
+
+    @property
+    def addon_state(self) -> Dict[str, Dict[str, Any]]:
+        """What each add-on keeps about this document, by add-on name, as
+        Python objects - ``w.addon_state["matching"]["rules"]`` is the live
+        list of rules of the rewrite-rules panel.  The same dict the add-on
+        reads, so a change here shows at the next message."""
+        return self.document.addon_state

@@ -24,6 +24,14 @@ w = edit(sin(x)**2 + cos(x)**2, addons=["matching"])
   rewriting); *Rewrite all* repeats the pass until nothing matches
   (*ReplaceRepeated*; a rule that matches its own result never settles: after
   50 passes it is refused, with a message, and nothing changes).
+- A rule set has a name and is kept: type a name and press *Save* and the set
+  joins a library of named sets, to load again from the menu or delete.  The
+  library and the current set are kept in the browser's storage, so they are
+  there again after a reload - in a page, in the apps and in JupyterLab
+  alike - and a set is saved with the editor's sessions.  In Jupyter the same
+  state is Python, live: `w.addon_state["matching"]["rules"]` is the list of
+  `Rule` objects, `["library"]` the named sets, `["name"]` the current name;
+  `MatchingAddon(rules=[...])` starts a document with a set.
 - A rule can be changed: the pencil (or a double-click on it) turns it into
   its text form to edit in place, and ↗ opens it in the formula editor as a
   `Rule(...)` node - edit its sides there like any formula, then *Save as

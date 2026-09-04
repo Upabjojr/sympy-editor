@@ -682,7 +682,12 @@ a catalogue (`available=`; every installed add-on by default), `enable()` /
 time - kinds are per document (`doc.kinds`, `with_kind`), ops come and go,
 `addon_state` stays - and every snapshot carries `addons` (on) and
 `addons_available`; the answer to a switch adds `addon_clients` so the
-editor can load a front end it has not seen.  `Editor._syncAddons` mounts
+editor can load a front end it has not seen.  `Addon.export_state(doc)` /
+`restore_state(doc, data)` carry an add-on's state under
+`Document.export()["addon_state"]` (a session; `Document(addon_state=)`
+gives it back when the add-on is on; `w.addon_state` in the widget is the
+live dict); what must outlive a session the add-on mirrors to
+`localStorage` from its panel (the rules panel's library).  `Editor._syncAddons` mounts
 and unmounts (`_mountAddon`/`_unmountAddon`) to match each snapshot, and
 `_fillAddonsMenu` builds the toolbar's **Add-ons ▾** menu
 (`data-block="addons"`, `.se-addons-menu`).  Rules: the add-on packages in

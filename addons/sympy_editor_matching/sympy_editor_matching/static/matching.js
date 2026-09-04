@@ -16,8 +16,17 @@ SympyEditor.registerAddon("matching", {
     var once = h("button", { type: "button", title: "One pass over the selection: every piece a rule matches is replaced, outermost first; what a rule produced is not rewritten again" }, ["Rewrite"]);
     var all = h("button", { type: "button", title: "Pass after pass until no rule matches any more (a rule that matches its own result never settles: after 50 passes this is refused and nothing changes)" }, ["Rewrite all"]);
     var hits = h("div", { class: "mt-hits" });
+    // The set's name and the library of saved sets: kept in Python (a
+    // session carries them) and mirrored to the browser's storage, so they
+    // are there again after a reload.
+    var STORE = "sympy-editor:matching";
+    var nameField = h("input", { type: "text", class: "mt-name", placeholder: "rule set name", title: "The name this set is saved under", spellcheck: "false", autocomplete: "off" });
+    var save = h("button", { type: "button", title: "Save the current rules under this name (over a saved set of the same name)" }, ["Save"]);
+    var libSel = h("select", { class: "mt-lib", title: "The saved rule sets: pick one to load it" });
+    var del = h("button", { type: "button", class: "mt-lib-del", title: "Delete the saved set of this name" }, ["Delete"]);
     var element = h("div", { class: "mt-panel" }, [
       h("div", { class: "mt-head" }, [h("strong", {}, ["Rules"]), use]),
+      h("div", { class: "mt-row mt-sets" }, [nameField, save, libSel, del]),
       empty, list,
       h("div", { class: "mt-row" }, [field, add]),
       h("div", { class: "mt-head" }, [h("strong", {}, ["Matching the selection"]), once, all]),
@@ -26,6 +35,22 @@ SympyEditor.registerAddon("matching", {
 
     var rules = [], seq = 0, timer = null, katex = null;
     var editing = null;      // the index of the rule opened in the formula editor, until it is saved or dropped
+    var library = [], setName = null;
+
+    function readStore() {
+      try { return JSON.parse(localStorage.getItem(STORE) || "null"); } catch (e) { return null; }
+    }
+    function writeStore(state) {
+      try { localStorage.setItem(STORE, JSON.stringify(state)); } catch (e) { /* storage may be off */ }
+    }
+    function renderSets() {
+      nameField.value = setName || "";
+      libSel.textContent = "";
+      libSel.appendChild(h("option", { value: "", disabled: "", selected: "" }, [library.length ? "Load a set \u25be" : "no saved set"]));
+      library.forEach(function (name) { libSel.appendChild(h("option", { value: name }, [name])); });
+      libSel.disabled = !library.length;
+      del.disabled = !(setName && library.indexOf(setName) >= 0);
+    }
     api.katex().then(function (k) { katex = k; renderRules(); }, function () { /* the sources are shown instead */ });
 
     function tex(el, latexSrc, plain) {
@@ -99,7 +124,11 @@ SympyEditor.registerAddon("matching", {
 
     function query(method, payload) {
       return api.call(method, payload || {}).then(function (res) {
-        if (res && res.rules) { rules = res.rules; renderRules(); askMatches(); }
+        if (res && res.rules) {
+          rules = res.rules; library = res.library || []; setName = res.name || null;
+          renderRules(); renderSets(); askMatches();
+          if (res.state) writeStore(res.state);     // the mirror: after every change, as Python has it
+        }
         return res;
       }, fail);
     }
@@ -164,7 +193,27 @@ SympyEditor.registerAddon("matching", {
     once.addEventListener("click", function () { api.call("rewrite", { path: target() }).then(null, fail); });
     all.addEventListener("click", function () { api.call("rewrite", { path: target(), all: true }).then(null, fail); });
 
-    query("rules");
+    save.addEventListener("click", function () {
+      var name = nameField.value.trim();
+      if (!name) { api.status("Type a name for the rule set first"); nameField.focus(); return; }
+      query("save_ruleset", { name: name });
+    });
+    nameField.addEventListener("keydown", function (ev) {
+      ev.stopPropagation();
+      if (ev.key === "Enter") { ev.preventDefault(); save.click(); }
+    });
+    libSel.addEventListener("change", function () {
+      if (libSel.value) query("load_ruleset", { name: libSel.value });
+    });
+    del.addEventListener("click", function () {
+      if (setName) query("delete_ruleset", { name: setName });
+    });
+
+    // At mount: what the browser kept - the library, and the last current
+    // set for an empty document - goes to Python, which answers with the
+    // rules as they stand.
+    var stored = readStore();
+    if (stored) query("restore", { state: stored }); else query("rules");
 
     var HELP = [
       "<section><h3>Rules and wildcards</h3><ul>",
@@ -174,6 +223,7 @@ SympyEditor.registerAddon("matching", {
       "<li>The condition is a SymPy Boolean over the wildcards, checked after the structure matches.</li>",
       "</ul></section>",
       "<section><h3>The set</h3><ul>",
+      "<li>A set has a name: type one and press <b>Save</b>, and the set joins the library of saved sets \u2014 load one from the menu, delete the current one. The library and the current set are kept by the browser, so they are there again after a reload, and a set is saved with the editor's sessions. In Jupyter the same state is Python: <code>w.addon_state[\"matching\"][\"rules\"]</code>.</li>",
       "<li>Type a rule in the field and press <kbd>Enter</kbd> or <b>Add rule</b>. The pencil (or a double-click on a rule) edits it as text; <b>\u2197</b> opens it in the formula editor as a <code>Rule(…)</code> node \u2014 edit its sides there, then <b>Save as rule N</b> puts it back. <b>\u00d7</b> removes it.</li>",
       "<li>A <code>Rule(pattern, replacement[, condition])</code> typed in the editor is a node like any other: <b>Use selection as rule</b> adds the selected one to the set; its type menu can swap its sides.</li>",
       "<li>All the rules are compiled into one many-to-one matcher (sympy-matching, OmniMatch) when the set changes: a query walks it once whatever the number of rules.</li>",

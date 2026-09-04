@@ -119,3 +119,45 @@ def test_rewrite_is_one_pass_and_rewrite_all_is_refused_when_it_never_settles():
         browser.close()
     srv.shutdown()
     srv.server_close()
+
+
+def test_rule_sets_are_saved_in_the_browser_and_come_back_after_a_reload():
+    doc = Document(sin(x) ** 2, addons=[ADDON])
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    with playwright.sync_playwright() as p:
+        try:
+            browser = p.chromium.launch()
+        except Exception as exc:
+            pytest.skip(f"chromium not available: {exc}")
+        page = browser.new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(srv.url)
+        page.wait_for_selector(".se-addon-matching .mt-field", timeout=30000)
+        page.locator(".mt-field").fill("sin(a_)**2 -> 1 - cos(a_)**2")
+        page.locator(".mt-field").press("Enter")
+        page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1")
+        page.locator(".mt-name").fill("trig")
+        page.locator(".mt-name").press("Enter")                       # Save
+        page.wait_for_function("document.querySelector('.mt-lib').options.length === 2")
+        assert doc.addon_state["matching"]["name"] == "trig"
+        stored = page.evaluate("JSON.parse(localStorage.getItem('sympy-editor:matching'))")
+        assert stored["name"] == "trig" and stored["library"] == {"trig": ["sin(a_)**2 -> 1 - cos(a_)**2"]}
+        # the document forgets everything (a kernel restarted, say); the page is
+        # loaded again in the same browser: the library is there, and so is the
+        # last current set - the browser's storage is per origin, hence the same server
+        doc.addon_state["matching"] = {}
+        page.goto(srv.url)
+        page.wait_for_selector(".se-addon-matching .mt-field", timeout=30000)
+        page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1", timeout=10000)
+        assert page.locator(".mt-name").input_value() == "trig"
+        assert [o.text_content() for o in page.locator(".mt-lib option").all()][1:] == ["trig"]
+        assert [str(r) for r in doc.addon_state["matching"]["rules"]] == ["Rule(sin(a_)**2, 1 - cos(a_)**2)"]
+        page.locator(".mt-lib-del").click()                            # delete it: gone from the store too
+        page.wait_for_function("document.querySelector('.mt-lib').options.length === 1")
+        assert page.evaluate("JSON.parse(localStorage.getItem('sympy-editor:matching')).library") == {}
+        assert errors == []
+        browser.close()
+    srv.shutdown()
+    srv.server_close()

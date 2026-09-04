@@ -11,7 +11,7 @@ pytest.importorskip("sympy_matching")
 
 from sympy_editor import Document  # noqa: E402
 from sympy_editor.ops import node_kind  # noqa: E402
-from sympy_editor_matching import ADDON, MatchingAddon, RewriteRule, parse_rule_text  # noqa: E402
+from sympy_editor_matching import ADDON, MatchingAddon, RewriteRule, parse_rule_text, rule_text  # noqa: E402
 from sympy_matching import WildSymbol  # noqa: E402
 
 x, y = symbols("x y")
@@ -156,3 +156,48 @@ def test_the_panel_gets_latex_katex_can_draw():
     res = _q(doc, "add_rule", src="_b_ * x -> z")
     tex = res["rules"][0]["latex"]
     assert r"\underline{b}" in tex and "_b_" not in tex and r"\rightarrow" in tex
+
+
+def test_named_rule_sets_and_the_library():
+    doc = Document(x, addons=[ADDON])
+    _q(doc, "add_rule", src="sin(a_)**2 -> 1 - cos(a_)**2")
+    res = _q(doc, "save_ruleset", name="trig")
+    assert res["name"] == "trig" and res["library"] == ["trig"]
+    assert res["state"] == {"name": "trig", "rules": ["sin(a_)**2 -> 1 - cos(a_)**2"], "library": {"trig": ["sin(a_)**2 -> 1 - cos(a_)**2"]}}
+    _q(doc, "remove_rule", index=0)
+    _q(doc, "add_rule", src="x -> x**2")
+    res = _q(doc, "save_ruleset", name="square")
+    assert res["library"] == ["square", "trig"]
+    res = _q(doc, "load_ruleset", name="trig")
+    assert res["name"] == "trig" and [r["text"] for r in res["rules"]] == ["sin(a_)**2 -> 1 - cos(a_)**2"]
+    res = _q(doc, "delete_ruleset", name="trig")
+    assert res["library"] == ["square"] and res["name"] is None
+    snap = doc.handle({"action": "addon", "addon": "matching", "method": "load_ruleset", "name": "trig"})
+    assert "No rule set" in snap["error"]
+    snap = doc.handle({"action": "addon", "addon": "matching", "method": "save_ruleset", "name": "  "})
+    assert "needs a name" in snap["error"]
+    # in Jupyter the same state is Python: the widget's addon_state
+    assert [str(r) for r in doc.addon_state["matching"]["rules"]] == ["Rule(sin(a_)**2, 1 - cos(a_)**2)"]
+    assert list(doc.addon_state["matching"]["library"]) == ["square"]
+
+
+def test_rules_travel_with_a_session_and_come_back_from_the_browsers_storage():
+    doc = Document(sin(x) ** 2, addons=[ADDON])
+    _q(doc, "add_rule", src="sin(a_)**2 -> 1 - cos(a_)**2 if Ne(a_, 0)")
+    _q(doc, "save_ruleset", name="trig")
+    state = doc.export()
+    assert state["addon_state"]["matching"]["name"] == "trig"
+    # a session opened again: the rules are parsed back, wildcards included
+    again = Document(x, addons=[ADDON], **state)
+    rules = again.addon_state["matching"]["rules"]
+    assert len(rules) == 1 and isinstance(rules[0].pattern.args[0].args[0], WildSymbol)
+    assert again.addon_state["matching"]["name"] == "trig" and list(again.addon_state["matching"]["library"]) == ["trig"]
+    # the browser's storage at mount: its library joins, its current set fills an empty document
+    fresh = Document(x, addons=[ADDON])
+    res = _q(fresh, "restore", state={"name": "trig", "rules": ["x -> x**2"], "library": {"trig": ["sin(a_)**2 -> 1 - cos(a_)**2"], "bad": ["no arrow"]}})
+    assert [r["text"] for r in res["rules"]] == ["x -> x**2"] and res["name"] == "trig"
+    assert res["library"] == ["bad", "trig"] and fresh.addon_state["matching"]["library"]["bad"] == []
+    # ...but never over rules the document already has
+    res = _q(fresh, "restore", state={"rules": ["y -> y**3"], "library": {"trig": ["a_ -> a_"]}})
+    assert [r["text"] for r in res["rules"]] == ["x -> x**2"]
+    assert [rule_text(r) for r in fresh.addon_state["matching"]["library"]["trig"]] == ["sin(a_)**2 -> 1 - cos(a_)**2"]

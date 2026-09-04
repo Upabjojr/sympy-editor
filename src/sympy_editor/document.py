@@ -382,6 +382,10 @@ class Document:
     available
         What can be switched on besides: the same kinds of specs, off to
         start with.  None (the default) means every installed add-on.
+    addon_state
+        ``{name: data}`` from :meth:`export`: what each add-on kept about the
+        document it was exported from, given back to it (``restore_state``)
+        once it is on.
     """
 
     def __init__(
@@ -398,6 +402,7 @@ class Document:
         labels=None,
         addons=(),
         available=None,
+        addon_state=None,
     ):
         if parser not in ("strict", "implicit"):
             raise ValueError("parser must be 'strict' or 'implicit'")
@@ -423,6 +428,11 @@ class Document:
                 addon = load_addon(spec)
                 self._catalog[addon.name] = addon
                 self._loaded[addon.name] = addon
+        # Add-ons come first (their names read srepr strings back); what a
+        # session kept for them is given back at the end, once there is an
+        # expression to parse in the context of (restore_state may parse).
+        self._pending_state: Dict[str, Any] = dict(addon_state or {})
+        self._ready = False
         for spec in addons or ():
             self.enable(spec)
         self.max_history = max_history
@@ -453,13 +463,28 @@ class Document:
             self._index = len(self._history) - 1 if index is None else max(0, min(int(index), len(self._history) - 1))
         else:
             self._commit(self._coerce(expr))
+        self._ready = True
+        for name, addon in list(self.addons.items()):
+            if name in self._pending_state:
+                addon.restore_state(self, self._pending_state.pop(name))
 
     def export(self) -> Dict[str, Any]:
         """The state that :class:`Document` takes back: ``{"history": [srepr,
-        ...], "index", "symbols": [srepr of the declared names]}`` (a
-        session's editing history, kept by the front end)."""
-        return {"history": [srepr(e) for e in self._history], "index": self._index, "labels": list(self._labels),
-                "symbols": [srepr(obj) for obj in self.declared.values()]}
+        ...], "index", "symbols": [srepr of the declared names][,
+        "addon_state": {name: data}]}`` (a session's editing history, kept
+        by the front end)."""
+        out = {"history": [srepr(e) for e in self._history], "index": self._index, "labels": list(self._labels),
+               "symbols": [srepr(obj) for obj in self.declared.values()]}
+        # What the add-ons that are on keep about this document (a rule set),
+        # by name: given back through restore_state when the session is opened.
+        state = {}
+        for name, addon in self.addons.items():
+            data = addon.export_state(self)
+            if data is not None:
+                state[name] = data
+        if state:
+            out["addon_state"] = state
+        return out
 
     # -- add-ons --------------------------------------------------------------
 
@@ -500,6 +525,8 @@ class Document:
         self.addons[addon.name] = addon
         self.addon_state.setdefault(addon.name, {})
         self._catalog.setdefault(addon.name, addon)
+        if self._ready and addon.name in self._pending_state:
+            addon.restore_state(self, self._pending_state.pop(addon.name))
         return addon
 
     def disable(self, name: str) -> None:

@@ -19,9 +19,15 @@ many-to-one matcher.  This add-on puts them in the editor:
 * **ops**: *Rewrite* / *Rewrite all* in the Transform menu (they read the
   document's rule set, hence ``context=True``), *Swap sides* on a rule.
 
-The rule set is kept per document (``doc.addon_state["matching"]``) and
-compiled again only when it changes; a query walks the compiled matcher
-once, whatever the number of rules.
+The rule set is kept per document (``doc.addon_state["matching"]``:
+``rules``, the set's ``name`` once it has one, and a ``library`` of named
+sets) and compiled again only when it changes; a query walks the compiled
+matcher once, whatever the number of rules.  In Jupyter the same dict is
+``w.addon_state["matching"]``, live.  It travels with a session
+(``export_state``/``restore_state``, as texts a document parses back), and
+the panel mirrors the library and the current set to the browser's
+storage, so they are there again after a reload - in a page, in the
+apps' web views and in JupyterLab alike.
 """
 
 from __future__ import annotations
@@ -191,7 +197,36 @@ class MatchingAddon(Addon):
         if "rules" not in state:
             state["rules"] = list(self.initial_rules)
             state["compiled"] = None
+        state.setdefault("name", None)
+        state.setdefault("library", {})
         return state
+
+    # -- sessions and storage --------------------------------------------------------
+
+    def export_state(self, doc) -> Dict[str, Any]:
+        state = self._state(doc)
+        return {"name": state["name"], "rules": [rule_text(r) for r in state["rules"]],
+                "library": {name: [rule_text(r) for r in rules] for name, rules in state["library"].items()}}
+
+    def restore_state(self, doc, data) -> None:
+        state = self._state(doc)
+        if not isinstance(data, dict):
+            return
+        state["rules"] = self._parse_all(doc, data.get("rules") or [])
+        state["compiled"] = None
+        state["name"] = data.get("name") or None
+        for name, texts in (data.get("library") or {}).items():
+            state["library"][str(name)] = self._parse_all(doc, texts)
+
+    @staticmethod
+    def _parse_all(doc, texts) -> List[RewriteRule]:
+        out = []
+        for text in texts:
+            try:
+                out.append(parse_rule_text(str(text), doc.parse))
+            except Exception:
+                continue                       # a rule that no longer parses is dropped, not the set
+        return out
 
     def rules(self, doc) -> List[RewriteRule]:
         """The document's rule set (a list: append, remove, reorder - then
@@ -278,10 +313,12 @@ class MatchingAddon(Addon):
         # drawn (sympy's own gives KaTeX "x _b_{}", which it refuses, and the
         # panel then showed the source instead of the formula).
         printer = AnnotatedLatexPrinter(dict(doc.printer_settings))
+        state = self._state(doc)
         out = []
-        for i, rule in enumerate(self.rules(doc)):
+        for i, rule in enumerate(state["rules"]):
             out.append({"index": i, "src": str(rule), "text": rule_text(rule), "latex": printer.doprint(rule)})
-        return {"rules": out}
+        return {"rules": out, "name": state["name"], "library": sorted(state["library"]),
+                "state": self.export_state(doc)}      # what the panel mirrors to the browser's storage
 
     def describe(self, method: str, payload: Dict[str, Any]) -> Optional[str]:
         if method == "rewrite":
@@ -292,7 +329,44 @@ class MatchingAddon(Addon):
         return f"Rules: {method}"
 
     def handle(self, doc, method: str, payload: Dict[str, Any]):
+        state = self._state(doc)
         if method == "rules":
+            return self._rules_answer(doc)
+        if method == "save_ruleset":
+            # The current set under a name, in the library (over an old one
+            # of that name); the set is called that from now on.
+            name = str(payload.get("name") or "").strip()
+            if not name:
+                raise ValueError("A rule set needs a name to be saved under")
+            state["library"][name] = list(state["rules"])
+            state["name"] = name
+            return self._rules_answer(doc)
+        if method == "load_ruleset":
+            name = str(payload.get("name") or "")
+            if name not in state["library"]:
+                raise ValueError(f"No rule set named {name!r}")
+            state["rules"] = list(state["library"][name])
+            state["compiled"] = None
+            state["name"] = name
+            return self._rules_answer(doc)
+        if method == "delete_ruleset":
+            name = str(payload.get("name") or "")
+            state["library"].pop(name, None)
+            if state["name"] == name:
+                state["name"] = None
+            return self._rules_answer(doc)
+        if method == "restore":
+            # The browser's storage, at mount: the library it kept joins this
+            # document's (a set kept in Python wins over the stored one of
+            # the same name), and the stored current set fills an empty one.
+            data = payload.get("state") or {}
+            for name, texts in (data.get("library") or {}).items():
+                if str(name) not in state["library"]:
+                    state["library"][str(name)] = self._parse_all(doc, texts)
+            if not state["rules"] and data.get("rules"):
+                state["rules"] = self._parse_all(doc, data["rules"])
+                state["compiled"] = None
+                state["name"] = data.get("name") or None
             return self._rules_answer(doc)
         if method == "add_rule":
             rule = parse_rule_text(str(payload.get("src", "")), doc.parse)

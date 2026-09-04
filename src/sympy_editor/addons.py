@@ -158,6 +158,17 @@ class Addon:
         """The history's label for a change made by ``method``."""
         return f"{self.label or self.name}: {method}"
 
+    def export_state(self, doc: "Document") -> Any:
+        """What the add-on keeps about ``doc`` (``doc.addon_state[name]``) as
+        JSON, for :meth:`Document.export` - a session saved by the front end,
+        a page made again elsewhere; None for nothing.  The default exports
+        nothing: state that is not plain JSON needs the add-on's own words."""
+        return None
+
+    def restore_state(self, doc: "Document", data: Any) -> None:
+        """The inverse of :meth:`export_state`, when a document is made from
+        a saved session (``Document(addon_state={name: data})``)."""
+
     # -- packaging --------------------------------------------------------------
 
     @property

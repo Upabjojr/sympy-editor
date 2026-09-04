@@ -241,3 +241,31 @@ def test_the_page_carries_what_can_be_switched_on():
     cfg = build_config(doc)
     assert cfg["addons"] == [] and cfg["document"]["available"] == [ADDON.module] and "addons" not in cfg["document"]
     assert ADDON.module in cfg["packages"]
+
+
+def test_addon_state_travels_with_a_session():
+    """What an add-on keeps about a document goes with export() and comes
+    back through restore_state when the session is opened again."""
+    class Keeper(Addon):
+        name = "keeper"
+
+        def export_state(self, doc):
+            return {"notes": list(doc.addon_state["keeper"].get("notes", []))}
+
+        def restore_state(self, doc, data):
+            doc.addon_state["keeper"]["notes"] = list(data.get("notes", []))
+
+    doc = Document(x + y, addons=[Keeper()])
+    assert "addon_state" not in doc.export() or doc.export()["addon_state"] == {"keeper": {"notes": []}}
+    doc.addon_state["keeper"]["notes"] = ["a", "b"]
+    state = doc.export()
+    assert state["addon_state"] == {"keeper": {"notes": ["a", "b"]}}
+    again = Document(x, addons=[Keeper()], **state)
+    assert again.addon_state["keeper"]["notes"] == ["a", "b"] and again.expr == x + y
+    # given to an add-on switched on later, too
+    later = Document(x, available=[Keeper()], addon_state=state["addon_state"])
+    assert "keeper" not in later.addon_state
+    later.enable("keeper")
+    assert later.addon_state["keeper"]["notes"] == ["a", "b"]
+    # an add-on with nothing to say exports nothing (the default)
+    assert "addon_state" not in Document(x, addons=[ADDON]).export()

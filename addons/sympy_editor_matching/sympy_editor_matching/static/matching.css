@@ -16,3 +16,6 @@
 .se-addon-matching .mt-edit, .se-addon-matching .mt-open { padding: 0 6px; line-height: 1.4; }
 .se-addon-matching .mt-inline { flex: 1 1 auto; }
 .se-addon-matching .mt-rules li.mt-editing { background: rgba(var(--se-accent), 0.1); border-radius: 0.3rem; }
+.se-addon-matching .mt-sets { align-items: center; flex-wrap: wrap; }
+.se-addon-matching .mt-name { flex: 0 1 12em; min-width: 6em; font: 12px var(--se-mono); padding: 3px 6px; }
+.se-addon-matching .mt-lib { font: inherit; font-size: 12px; padding: 2px 4px; max-width: 14em; }

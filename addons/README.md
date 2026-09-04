@@ -167,8 +167,12 @@ message travels.  Add-ons keep that shape.  They do not get a second channel:
   op with `context=True` receives the document too (`func(expr, doc=doc)`) -
   for state kept per document, such as a rule set.
 * **Per-document state** lives in `doc.addon_state[name]`, a dict the document
-  keeps for each add-on; an `Addon` instance may serve many documents.  It is
-  *not* exported with a session yet (see *Open questions*).
+  keeps for each add-on; an `Addon` instance may serve many documents.
+  `export_state(doc)` / `restore_state(doc, data)` carry it with a session
+  (`Document.export()["addon_state"]`), as JSON the add-on parses back; in
+  Jupyter `w.addon_state` is the same dict, live.  What should outlive a
+  session - a library of rule sets - the add-on keeps in the browser's
+  storage from its panel (`localStorage`, which every host has).
 
 ### The `api` a panel receives
 
@@ -292,10 +296,13 @@ the document's rules).
 
 These are the decisions this PR leaves open on purpose:
 
-1. **Sessions.**  `doc.addon_state` is not part of `Document.export()`: a
-   rule set does not survive switching sessions in the Pyodide page.  The
-   natural fix is an `Addon.export(doc)` / `restore(doc, data)` pair carried
-   under `export["addons"]`.
+1. **Sessions** - settled: `Addon.export_state(doc)` / `restore_state(doc,
+   data)` carry an add-on's state under `export()["addon_state"]`, so a
+   session switch keeps a rule set; `Document(addon_state=...)` gives it back
+   when the add-on is on.  Persistence beyond a session is the add-on's:
+   the rules panel mirrors its library to `localStorage`, which the pages,
+   the apps' web views and JupyterLab all have, and in Jupyter the state is
+   also Python (`w.addon_state`).
 2. **Global registries.**  Kinds are per document (`doc.kinds`), so a
    switched-off add-on leaves no classification behind; rebuilders and printer
    methods for foreign classes are still process wide, which only shows when
