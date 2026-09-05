@@ -31,9 +31,14 @@ def test_a_typed_name_ending_in_underscore_is_a_wildcard():
     doc.replace("/0", "_b_ + x")
     opt = [a for a in doc.expr.args[0].free_symbols if isinstance(a, WildSymbol)][0]
     assert opt.is_optional
-    # The snapshot prints and the wildcard is drawn as one
+    # The snapshot prints and the wildcards are drawn as such: the plain one
+    # with a solid underline, the optional one with a dotted underline
     snap = doc.snapshot()
-    assert r"\underline{b}" in snap["latex"]
+    assert r"\underset{\raisebox{0.35em}{\scriptsize\ldots}}{b}" in snap["latex"] and r"\left[" not in snap["latex"]
+    doc.replace("/0", "a_ + _b_")
+    tex = doc.snapshot()["latex"]
+    assert r"\underline{a}" in tex and r"\ldots}}{b}" in tex
+    doc.undo()                                            # back to _b_ + x for the round trip below
     # ...and the srepr round-trips through the add-on's namespace.  Not as
     # an equal object: sympy-matching numbers every WildSymbol it makes, so
     # two of one name never compare equal - matching goes by the name.
@@ -155,7 +160,7 @@ def test_the_panel_gets_latex_katex_can_draw():
     doc = Document(x, addons=[ADDON])
     res = _q(doc, "add_rule", src="_b_ * x -> z")
     tex = res["rules"][0]["latex"]
-    assert r"\underline{b}" in tex and "_b_" not in tex and r"\rightarrow" in tex
+    assert r"\ldots}}{b}" in tex and "_b_" not in tex and r"\left[" not in tex and r"\rightarrow" in tex
 
 
 def test_named_rule_sets_and_the_library():

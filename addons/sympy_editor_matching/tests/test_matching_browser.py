@@ -56,6 +56,14 @@ def test_a_rule_can_be_edited_as_text_and_in_the_editor():
         page.wait_for_selector(".mt-rules li .mt-formula .katex", timeout=10000)
         assert "Rule(" not in page.locator(".mt-rules li .mt-formula").inner_text()
         assert page.locator(".mt-rules li .mt-formula .underline").count() >= 1
+        # an optional wildcard: a dotted underline (dots set under the letter), no brackets
+        page.locator(".mt-field").fill("_c_*x -> z")
+        page.locator(".mt-field").press("Enter")
+        page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 2")
+        second = page.locator(".mt-rules li").nth(1).locator(".mt-formula")
+        assert second.locator(".katex").count() == 1 and "…" in second.inner_text() and "[" not in second.inner_text()
+        page.locator(".mt-rules li").nth(1).locator(".mt-del").click()
+        page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1")
         # in place: the pencil shows the text form, Enter saves it
         page.locator(".mt-rules li .mt-edit").click()
         field = page.locator(".mt-rules li input")

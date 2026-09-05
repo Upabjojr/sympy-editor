@@ -229,7 +229,7 @@ SympyEditor.registerAddon("matching", {
       "<section><h3>Rules and wildcards</h3><ul>",
       "<li>A rule is <code>pattern -&gt; replacement</code>, optionally <code>if condition</code>, in SymPy syntax: <code>sin(a_)**2 -&gt; 1 - cos(a_)**2</code>, <code>x**m_ -&gt; x**(m_ + 1)/(m_ + 1) if Ne(m_, -1)</code>.</li>",
       "<li>A name ending in <code>_</code> is a <b>wildcard</b>: <code>a_</code> matches anything and binds it; the same name binds the same thing everywhere in the rule. A name in underscores, <code>_a_</code>, is an <b>optional</b> wildcard: absent, it takes the identity of its slot (0 in a sum, 1 in a product or an exponent). Any other name, <code>x</code>, matches only itself.</li>",
-      "<li>Wildcards are drawn underlined in the formula; an optional one in brackets.</li>",
+      "<li>Wildcards are drawn underlined in the formula: a solid underline for one that must be there, a dotted one for an optional one.</li>",
       "<li>The condition is a SymPy Boolean over the wildcards, checked after the structure matches.</li>",
       "</ul></section>",
       "<section><h3>The set</h3><ul>",

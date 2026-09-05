@@ -94,12 +94,19 @@ class RewriteRule(Basic):
                                        module_name=module, rule_number=index)
 
 
+#: How a wildcard is drawn: a solid underline for one that must be there
+#: (``a_``), a dotted one for one that may be absent (``_a_``) - the same
+#: mark in two weights, as a dashed line stands for what may be missing.
+#: (KaTeX has no dotted underline of its own: the dots are set under the
+#: letter with ``\\underset``, raised to sit where an underline would.)
+WILD_TEX = r"\underline{%s}"
+OPTIONAL_WILD_TEX = r"\underset{\raisebox{0.35em}{\scriptsize\ldots}}{%s}"
+
+
 def _print_wild(printer, expr) -> str:
-    """A wildcard underlined, an optional one in brackets: ``a_`` is
-    ``\\underline{a}``, ``_a_`` is ``[\\underline{a}]``."""
+    """A wildcard underlined; an optional one with a dotted underline."""
     base = LatexPrinter._print_Symbol(printer, Symbol(expr.wildcard_name.strip("_") or expr.wildcard_name))
-    out = r"\underline{%s}" % base
-    return r"\left[%s\right]" % out if getattr(expr, "is_optional", False) else out
+    return (OPTIONAL_WILD_TEX if getattr(expr, "is_optional", False) else WILD_TEX) % base
 
 
 def _wild_from_srepr(name, **kwargs):

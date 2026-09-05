@@ -13,7 +13,9 @@ w = edit(sin(x)**2 + cos(x)**2, addons=["matching"])
 
 - A name ending in `_` typed anywhere in the editor is a wildcard (`a_`), and
   one wrapped in underscores (`_a_`) an optional wildcard that takes the
-  identity of its slot when absent - the conventions of sympy-matching.
+  identity of its slot when absent - the conventions of sympy-matching.  In
+  the formula a wildcard is underlined: a solid line for one that must be
+  there, a dotted line for an optional one.
 - The panel holds the rule set: type `sin(a_)**2 -> 1 - cos(a_)**2`, or
   `x**m_ -> x**(m_ + 1)/(m_ + 1) if Ne(m_, -1)` for a guarded rule.
 - Select a piece of the formula: the panel lists the rules that match it,
