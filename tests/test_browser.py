@@ -3723,3 +3723,48 @@ def test_remembered_addons_come_back_after_a_reload(browser):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def _box_follows_selection(page):
+    """The selection box lies over the selected glyphs, inside the view."""
+    return page.evaluate("""() => {
+      const box = document.querySelector('.se-box-select'), sel = document.querySelector('.se-selected[data-path]'), view = document.querySelector('.se-view');
+      if (!box || !sel) return 'missing';
+      const b = box.getBoundingClientRect(), s = sel.getBoundingClientRect(), v = view.getBoundingClientRect();
+      const near = (a, c) => Math.abs(a - c) <= 6;
+      return { inside: b.left >= v.left - 1 && b.right <= v.right + 1 && b.top >= v.top - 1 && b.bottom <= v.bottom + 1,
+               over: near(b.left + 2, s.left) && near(b.top + 2, s.top) && near(b.width - 4, s.width),
+               box: [Math.round(b.left), Math.round(b.top)], sel: [Math.round(s.left), Math.round(s.top)] };
+    }""")
+
+
+def test_the_selection_follows_the_view_into_full_screen(browser, served):
+    """Full screen with a selection: the highlight is placed in pixels, and
+    the view keeps changing size after the class is toggled (the browser's
+    full screen, a phone's bars going away), so it has to follow - and it did
+    not: the box stayed where it had been drawn, out of the formula."""
+    srv, doc = served
+    page = _open(browser, srv.url)
+    _select(page, "/0")
+    before = _box_follows_selection(page)
+    assert before["inside"] and before["over"], before
+    page.locator(".se-fullbtn").click()
+    page.wait_for_selector(".sympy-editor.se-full")
+    page.wait_for_function("document.querySelector('.se-box-select') !== null")
+    # the view's size changes again, a moment after the toggle: a padding put
+    # on the view stands for the browser's own full screen and a phone's bars
+    # (a real full screen cannot be resized from outside)
+    page.evaluate("document.querySelector('.se-view').style.padding = '40px 0 0 160px'")
+    page.wait_for_function("(() => { const b = document.querySelector('.se-box-select'), s = document.querySelector('.se-selected[data-path]'); "
+                           "if (!b || !s) return false; const br = b.getBoundingClientRect(), sr = s.getBoundingClientRect(); "
+                           "return Math.abs(br.left + 2 - sr.left) <= 6 && Math.abs(br.top + 2 - sr.top) <= 6; })()", timeout=5000)
+    after = _box_follows_selection(page)
+    assert after["inside"] and after["over"], after
+    assert page.locator(".se-selected[data-path]").get_attribute("data-path") == "/0"
+    page.locator(".se-fullbtn").click()                        # back (Esc would deselect first: something is selected)
+    page.wait_for_function("!document.querySelector('.sympy-editor').classList.contains('se-full')")
+    page.evaluate("document.querySelector('.se-view').style.padding = ''")
+    page.wait_for_function("(() => { const b = document.querySelector('.se-box-select'), s = document.querySelector('.se-selected[data-path]'); "
+                           "if (!b || !s) return false; const br = b.getBoundingClientRect(), sr = s.getBoundingClientRect(); "
+                           "return Math.abs(br.left + 2 - sr.left) <= 6 && Math.abs(br.top + 2 - sr.top) <= 6; })()", timeout=5000)
+    assert page.errors == []

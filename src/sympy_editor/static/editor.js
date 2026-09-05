@@ -1686,6 +1686,30 @@ var SympyEditor = (function () {
       this._docListeners = [];
       var onDocument = function (kind, fn) { document.addEventListener(kind, fn); self._docListeners.push([kind, fn]); };
       onDocument("selectionchange", function () { self._onSourceSelection(); });
+      // The highlight boxes, the caret and the action bar are placed in
+      // pixels measured from the rendering: whenever the view changes size
+      // they must be measured again.  Entering full screen is the case that
+      // showed it - the class is toggled at once, but the browser's own full
+      // screen (and the app's, taking the system bars away) resizes the view
+      // a moment later, and the selection stayed where it had been drawn.
+      // Rotating a phone and resizing a window are the same case.
+      this._relayout = function () {
+        if (self._relayoutPending) return;
+        self._relayoutPending = true;
+        requestAnimationFrame(function () {
+          self._relayoutPending = false;
+          self._gapCache = null;
+          if (self.caret) self._hideCaret();
+          self._applySelection();
+        });
+      };
+      if (typeof ResizeObserver === "function") {
+        this._resizeObserver = new ResizeObserver(function () { self._relayout(); });
+        this._resizeObserver.observe(this.view);
+      } else {
+        onDocument("resize", this._relayout);   // (window resize bubbles to document in no browser; kept for symmetry)
+        window.addEventListener("resize", this._relayout);
+      }
       // The Add-ons menu closes on a click anywhere else, and on Escape.
       onDocument("pointerdown", function (ev) {
         if (self.addonsMenu && !self.addonsMenu.hidden && !self.addonsMenu.contains(ev.target) && !(self.addonsBtn && self.addonsBtn.contains(ev.target))) self.addonsMenu.hidden = true;
@@ -4763,6 +4787,7 @@ var SympyEditor = (function () {
         this._fsListener = function () {
           var el = document.fullscreenElement || document.webkitFullscreenElement;
           if (self._usedFsApi && !el && self.fullscreen) self.setFullscreen(false);
+          else self._relayout();                     // entered (or left) the browser's full screen: the view has a new size
         };
         document.addEventListener("fullscreenchange", this._fsListener);
         document.addEventListener("webkitfullscreenchange", this._fsListener);
@@ -4912,6 +4937,8 @@ var SympyEditor = (function () {
         document.removeEventListener("webkitfullscreenchange", this._fsListener);
         this._fsListener = null;
       }
+      if (this._resizeObserver) { this._resizeObserver.disconnect(); this._resizeObserver = null; }
+      if (this._relayout) window.removeEventListener("resize", this._relayout);
       if (this.root.parentNode) this.root.parentNode.removeChild(this.root);
     }
   }

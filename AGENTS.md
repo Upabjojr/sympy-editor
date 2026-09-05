@@ -541,8 +541,14 @@ Two conventions between printer, document and front end:
   ignores `hide()` from an unfocused window and undoes it when focus comes
   back, so the activity remembers `wantsFullscreen` and applies it again in
   `onWindowFocusChanged`.  The button is 44x44 on a coarse pointer - a
-  target, not a glyph - and re-measures the overlay boxes after the size
-  change.
+  target, not a glyph.  The overlay boxes, the caret and the action bar are
+  placed in pixels, and the view keeps changing size *after* the class is
+  toggled (the browser's full screen, a phone's bars going away, a
+  rotation, a window resize): a `ResizeObserver` on `.se-view`
+  (`_relayout`, once per frame) and the `fullscreenchange` listener measure
+  the selection again whenever the view's size changes -
+  `test_the_selection_follows_the_view_into_full_screen` resizes the
+  viewport after the toggle and checks the box sits on the glyphs.
 - **Touch keyboards.**  `noAutoCaps` (applied by `h()` to every text input,
   and by hand to the contenteditable source line) turns off
   `autocapitalize`, `autocorrect`, `autocomplete` and `spellcheck`: what is
