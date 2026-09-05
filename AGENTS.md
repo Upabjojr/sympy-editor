@@ -638,6 +638,27 @@ Two conventions between printer, document and front end:
   converts between the displayed Greek letters and SymPy's names
   (`toDisplay`/`toSource`: `θ` ↔ `theta`, `λ` ↔ `lamda`, `∞` ↔ `oo`), so
   what is sent to Python is plain ASCII SymPy syntax.
+- **Placeholders and templates.**  `Placeholder(Symbol)` in printer.py is an
+  empty slot: a Symbol named `_1`, `_2`... (so every SymPy operation takes it
+  and the source line reads `Integral(_1, _2)`), printed as `\square`.
+  `Document.parse` turns a new name matching `PLACEHOLDER_RE` into one,
+  `_coerce` knows the class for srepr, `snapshot()["placeholders"]` lists
+  their paths in reading order and marks the nodes `placeholder`.  In
+  editor.js `TEMPLATES` (`\int`, `\sum`, `\lim`, `\frac`...) expand in
+  the fields like the other `\command`s, their slots renumbered afresh
+  against the formula's (`freshSlots`, `_placeholderNames`); `_render` gives
+  the slots `.se-placeholder` (faint), `setState` selects the first new slot
+  of a committed change, and Tab / Shift+Tab walk the slots
+  (`_selectPlaceholder`) while there are any - the caret behaviour of Tab
+  returns when there are none.  `_showError` also flickers the view red
+  (`.se-flash`, half a second, the tree add-on's flicker).  A function
+  typed or picked in the box while a caret is shown and nothing is selected
+  is *inserted* at the caret (`_insertFunctionAtCaret`: `name(_1)`, a `+ `
+  in front inside an Add, through `_insertMessage`, the one place that
+  builds an insert/extend message from a gap), the slot then selected.  The
+  box remembers the caret when it takes the focus (`_fnCaret`): loading the
+  function list re-renders the formula, which drops the live caret, and the
+  insertion waits while the editor is busy rather than being dropped.
 - **Name resolution.**  `Document.parse` uses `parse_expr(local_dict=namespace())`:
   declared/used names win, then SymPy's globals, then new symbols.
   `` `name` `` (backticks) forces a Symbol for that parse; `_collision_note`

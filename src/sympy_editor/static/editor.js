@@ -141,6 +141,9 @@ var SympyEditor = (function () {
     "<li>What you type is spliced in: operators as written, nothing between means multiplication (cos(t) after x gives x\u22c5cos(t)), <b>+</b>/<b>\u2212</b> add and subtract at the level of the sum, and a typed comma adds a function argument.</li>",
     "<li>Next to a matrix entry or a power's base the caret extends that object: \u201c+ 1\u201d adds to it, \u201cy\u201d multiplies it.</li>",
     "<li>LaTeX shortcuts in any field: \\theta becomes \u03b8 as you type (Greek letters, \\infty, \\le\u2026).</li>",
+    "<li>With a caret shown and nothing selected, a function from the box is <i>added</i> at the caret \u2014 sin gives sin(\u25a1), the box selected for you to fill \u2014 instead of being applied to the whole expression.</li>",
+    "<li>Templates: \\int, \\sum, \\prod, \\lim, \\diff, \\frac, \\binom, \\matrix typed in a field put the whole construction in, with faint empty boxes where its parts go. The first box is selected: type to fill it, <kbd>Tab</kbd> moves to the next box (<kbd>Shift</kbd>+<kbd>Tab</kbd> back). The boxes are the symbols _1, _2\u2026 in the source line.</li>",
+    "<li>An edit that cannot be read as an expression is refused: the message shows under the formula, and the formula flickers red for half a second.</li>",
     "</ul></section>",
     "<section><h3>Operators</h3><ul>",
     "<li>Click an operator itself (<b>+</b>, <b>\u2212</b>, <b>\u22c5</b>, <b>=</b>\u2026) to select it; a small palette appears.</li>",
@@ -293,7 +296,37 @@ var SympyEditor = (function () {
     sqrt: "sqrt", sin: "sin", cos: "cos", tan: "tan", cot: "cot", sec: "sec", csc: "csc",
     sinh: "sinh", cosh: "cosh", tanh: "tanh", exp: "exp", log: "log", ln: "log", ell: "l"
   };
+  // Templates: a "\command" that stands for a whole construction, with
+  // empty slots (_1, _2...) where its parts go.  The slots are placeholders
+  // (Placeholder in printer.py): faint boxes, selected as they appear so
+  // that typing fills them, Tab walking from one to the next.  Their
+  // numbers are made fresh against the slots the formula already has.
+  var TEMPLATES = {
+    int: "Integral(_1, _2)", integral: "Integral(_1, _2)", iint: "Integral(_1, _2, _3)",
+    sum: "Sum(_1, (_2, _3, _4))", prod: "Product(_1, (_2, _3, _4))",
+    lim: "Limit(_1, _2, _3)", limit: "Limit(_1, _2, _3)",
+    diff: "Derivative(_1, _2)", partial: "Derivative(_1, _2)",
+    frac: "(_1)/(_2)", binom: "binomial(_1, _2)", matrix: "Matrix([[_1, _2], [_3, _4]])"
+  };
+  for (var t in TEMPLATES) if (!(t in COMMANDS)) COMMANDS[t] = TEMPLATES[t];
   for (var g in GREEK) if (!(g in COMMANDS)) COMMANDS[g] = GREEK[g];
+
+  /** `template` with its slots numbered afresh: none of `used` (the
+   *  placeholder names the formula has) and none already in `text`. */
+  function freshSlots(template, used, text) {
+    var taken = {};
+    (used || []).forEach(function (n) { taken[n] = true; });
+    (text.match(/_\d+/g) || []).forEach(function (n) { taken[n] = true; });
+    var next = 1, map = {};
+    return template.replace(/_(\d+)/g, function (m) {
+      if (!(m in map)) {
+        while (taken["_" + next]) next++;
+        map[m] = "_" + next;
+        taken["_" + next] = true;
+      }
+      return map[m];
+    });
+  }
   // character -> SymPy name (first name listed wins: λ is "lamda", ∞ is "oo")
   var GREEK_BACK = {};
   for (var name in GREEK) if (!(GREEK[name] in GREEK_BACK)) GREEK_BACK[GREEK[name]] = name;
@@ -312,7 +345,7 @@ var SympyEditor = (function () {
   /** Replace complete "\command"s in `text`: those followed by a non-letter,
    *  or that no longer command starts with.  Returns {text, delta} where
    *  delta is the change of length before `cursor`. */
-  function expandCommands(text, cursor) {
+  function expandCommands(text, cursor, used) {
     var delta = 0;
     var out = text.replace(/\\([A-Za-z]+)/g, function (m, name, offset) {
       var next = text.charAt(offset + m.length);
@@ -321,8 +354,9 @@ var SympyEditor = (function () {
         return c !== name && c.indexOf(name) === 0;
       });
       if (!complete) return m;
-      if (offset + m.length <= cursor) delta += COMMANDS[name].length - m.length;
-      return COMMANDS[name];
+      var value = name in TEMPLATES ? freshSlots(TEMPLATES[name], used, text) : COMMANDS[name];
+      if (offset + m.length <= cursor) delta += value.length - m.length;
+      return value;
     });
     return { text: out, delta: delta };
   }
@@ -1741,6 +1775,10 @@ var SympyEditor = (function () {
         this.fnInput.addEventListener("focus", function () { self._loadFunctions(); self._filterFn(); });
         this.fnInput.addEventListener("input", function () { self._filterFn(); });
         this.fnInput.addEventListener("blur", function () { setTimeout(function () { if (document.activeElement !== self.fnInput) self._hideFnMenu(); }, 150); });
+        this.fnInput.addEventListener("focus", function () {
+          // remember where the caret is: a function picked will be added there
+          self._fnCaret = self.caret && !self.selected && !self.range ? Object.assign({}, self.caret) : null;
+        });
         this.fnInput.addEventListener("keydown", function (ev) {
           ev.stopPropagation();
           var items = self.fnMenu.querySelectorAll(".se-fn-item");
@@ -1820,6 +1858,16 @@ var SympyEditor = (function () {
         sel = selectionAfter(sel, previous.nodes, snap.nodes || {});
       }
       while (sel && !(sel in this.tree)) sel = parentPath(sel);
+      if (!snap.preview && !same && snap.placeholders && snap.placeholders.length) {
+        // A template just typed (\int): its first new slot is what to fill next.
+        var had = {};
+        var prevSlots = (previous && previous.placeholders) || [];
+        for (var hi = 0; hi < prevSlots.length; hi++) { var pn = previous.nodes && previous.nodes[prevSlots[hi]]; if (pn) had[pn.src] = true; }
+        for (var ni = 0; ni < snap.placeholders.length; ni++) {
+          var nn = snap.nodes[snap.placeholders[ni]];
+          if (nn && !had[nn.src]) { sel = snap.placeholders[ni]; break; }
+        }
+      }
       this.selected = sel;
       if (snap.methods) {
         for (var mt in snap.methods) this._methodsCache[mt] = snap.methods[mt] || [];
@@ -1886,6 +1934,11 @@ var SympyEditor = (function () {
         }
       }
       this.view.classList.remove("se-empty");
+      var slots = this.state.placeholders || [];
+      for (var si = 0; si < slots.length; si++) {
+        var sels = this._els(slots[si]);
+        for (var sj = 0; sj < sels.length; sj++) sels[sj].classList.add("se-placeholder");
+      }
       if (this.emptyField) {               // the field of the empty view survives the preview rendered above it
         var field = this.emptyField, pos = field.selectionStart, focused = document.activeElement === field || !field.parentNode;
         this.view.appendChild(field);
@@ -2356,6 +2409,7 @@ var SympyEditor = (function () {
       this._hideKeep();
       this.range = null;
       this.junction = null;
+      this._fnCaret = null;
       if (path) this._hideCaret();
       this.selected = (path && (path in this.tree)) ? path : null;
       this._fillOps();
@@ -2504,6 +2558,8 @@ var SympyEditor = (function () {
         this.isolateSelection();
       } else if (ev.shiftKey && (k === "ArrowLeft" || k === "ArrowRight") && !this.caret) {
         this._extendRange(k === "ArrowRight" ? 1 : -1);          // grow / shrink a range
+      } else if (k === "Tab" && !ro && this.state && this.state.placeholders && this.state.placeholders.length && !this.range) {
+        this._selectPlaceholder(ev.shiftKey ? -1 : 1);          // the next empty slot
       } else if (k === "Tab" && (this.selected || this.range) && !ro) {
         if (!this.caretAtSelection(ev.shiftKey)) handled = false;
       } else if (this.junction && k === "Escape") {
@@ -2892,6 +2948,7 @@ var SympyEditor = (function () {
     _pickFn(name) {
       this._hideFnMenu();
       this.fnInput.value = name;
+      if (this._insertFunctionAtCaret(name)) return;          // at a caret: added there, no parameters asked
       var sig = this._fnSigs[name];
       if (sig) { this._showFnForm(sig); return; }
       var msg = { action: "signature", name: name, path: this._fnTarget() };
@@ -2994,9 +3051,43 @@ var SympyEditor = (function () {
     }
 
     /** Apply "name(args)" / ".method(args)" from the function box to the selection. */
+    /** A function typed or picked while a caret is shown and nothing is
+     *  selected: it is inserted at the caret, applied to an empty box (a
+     *  placeholder) that is selected next, so typing fills it.  `sin` gives
+     *  `sin(_1)`; a name typed with its own arguments is taken as it is. */
+    _insertFunctionAtCaret(text) {
+      // The caret as it was when the box took the focus: the function list
+      // loading on that first focus re-renders the formula, which drops the
+      // live caret - the place the user pointed at is still the place.
+      var gap = this.caret || this._fnCaret;
+      if (!gap || this.selected || this.range) return false;
+      this._fnCaret = null;
+      var src = /\(/.test(text) ? text : text + "(_1)";
+      src = freshSlots(src, this._placeholderNames(), "");
+      // A new term in a sum, a new factor in a product: typed text at a
+      // caret joins its neighbour by juxtaposition (a product), which is
+      // right in a product and not in a sum.
+      var parent = this.state && this.state.nodes ? this.state.nodes[gap.path] : null;
+      if (!gap.extend && parent && parent.type === "Add") src = "+ " + src;
+      this.fnInput.value = "";
+      this._hideFnMenu();
+      this._hideFnForm();
+      var self = this, msg = this._insertMessage(gap, src);
+      // The box may have just asked for the function list: wait for the
+      // editor to be free rather than drop the insertion (send drops while busy).
+      (async function () {
+        while (self.busy && !self.closed) await new Promise(function (r) { setTimeout(r, 25); });
+        self._hideCaret();
+        self.send(msg);
+        self.view.focus({ preventScroll: true });
+      })();
+      return true;
+    }
+
     callFunction(text) {
       text = (text || "").trim();
       if (!text || this.opts.readOnly || this.closed) return;
+      if (this._insertFunctionAtCaret(text)) return;
       var msg = { action: "call", path: this._fnTarget(), func: text };
       if (this.lazy()) msg.lazy = true;
       if (this.range) msg.children = this._rangeIndices();
@@ -3855,7 +3946,7 @@ var SympyEditor = (function () {
       fit();
       input.addEventListener("input", function () {
         var cursor = input.selectionStart;
-        var r = expandCommands(input.value, cursor);
+        var r = expandCommands(input.value, cursor, self._placeholderNames());
         if (r.text !== input.value) {
           input.value = r.text;
           input.setSelectionRange(cursor + r.delta, cursor + r.delta);
@@ -3867,6 +3958,31 @@ var SympyEditor = (function () {
         if (ev.key === "Enter") { ev.preventDefault(); self.commitEdit(); }
         else if (ev.key === "Escape") { ev.preventDefault(); self.cancelEdit(); }
       });
+    }
+
+    /** The names of the formula's empty slots (_1, _2...), so a template
+     *  typed into a field gets fresh ones. */
+    _placeholderNames() {
+      var s = this.state, out = [];
+      if (!s || !s.placeholders) return out;
+      for (var i = 0; i < s.placeholders.length; i++) {
+        var n = s.nodes && s.nodes[s.placeholders[i]];
+        if (n) out.push(n.src);
+      }
+      return out;
+    }
+
+    /** Move the selection to the next (or previous) empty slot after the
+     *  selected node, in reading order; false when there is none. */
+    _selectPlaceholder(step) {
+      var slots = (this.state && this.state.placeholders) || [];
+      if (!slots.length) return false;
+      var at = this.selected ? slots.indexOf(this.selected) : -1;
+      var next;
+      if (at >= 0) next = slots[(at + step + slots.length) % slots.length];     // from a slot: the next one round
+      else next = step > 0 ? slots[0] : slots[slots.length - 1];                // from anywhere else: the first or the last
+      this.select(next);
+      return true;
     }
 
     _endEdit() {
@@ -3886,6 +4002,19 @@ var SympyEditor = (function () {
       }
     }
 
+    /** The message that puts `src` at the caret `gap`: an extension of the
+     *  object beside it (a power's base, a function's argument), or an
+     *  insertion among the arguments of the insertable node around it. */
+    _insertMessage(gap, src) {
+      if (gap.extend) return { action: "extend", path: gap.path, side: gap.extend, src: src };
+      var parent = gap.path;
+      var msg = { action: "insert", path: parent, index: gap.index, src: src };
+      if (gap.leftEl) msg.left = this._argIndex(parent, gap.leftEl.getAttribute("data-path"));
+      if (gap.rightEl) msg.right = this._argIndex(parent, gap.rightEl.getAttribute("data-path"));
+      if (gap.attach) msg.attach = gap.attach;
+      return msg;
+    }
+
     commitEdit() {
       if (this.editing === null && !this.inserting) return;
       var inserting = this.inserting, editRange = this._editRange;
@@ -3901,15 +4030,7 @@ var SympyEditor = (function () {
         return;
       }
       if (inserting) {
-        if (src && inserting.extend) this.send({ action: "extend", path: inserting.path, side: inserting.extend, src: src });
-        else if (src) {
-          var parent = inserting.path;
-          var msg = { action: "insert", path: parent, index: inserting.index, src: src };
-          if (inserting.leftEl) msg.left = this._argIndex(parent, inserting.leftEl.getAttribute("data-path"));
-          if (inserting.rightEl) msg.right = this._argIndex(parent, inserting.rightEl.getAttribute("data-path"));
-          if (inserting.attach) msg.attach = inserting.attach;
-          this.send(msg);
-        }
+        if (src) this.send(this._insertMessage(inserting, src));
         return;
       }
       if (!src || src === original) return;
@@ -4878,6 +4999,14 @@ var SympyEditor = (function () {
       if (msg) {
         this.error.textContent = msg;
         this.error.hidden = false;
+        // Half a second of red over the formula, so that a refused edit is
+        // not missed - the same flicker the tree panel gives.
+        var self = this;
+        this.root.classList.remove("se-flash");
+        void this.root.offsetWidth;                       // restart the animation
+        this.root.classList.add("se-flash");
+        clearTimeout(this._flashTimer);
+        this._flashTimer = setTimeout(function () { self.root.classList.remove("se-flash"); }, 600);
       } else {
         this.error.hidden = true;
         this.error.textContent = "";

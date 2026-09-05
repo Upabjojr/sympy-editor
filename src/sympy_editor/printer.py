@@ -49,10 +49,11 @@ still located relative to the enclosing frame.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from typing import Union as TUnion
 
-from sympy import Integer, Mul, Rational, S, sympify
+from sympy import Integer, Mul, Rational, S, Symbol, sympify
 from sympy.core.basic import Basic
 from sympy.core.containers import Tuple as SymTuple
 from sympy.core.numbers import Number
@@ -88,6 +89,9 @@ __all__ = [
     "parse_path",
     "get_at",
     "view_parts",
+    "Placeholder",
+    "PLACEHOLDER_RE",
+    "is_placeholder",
     "REBUILDERS",
     "register_rebuild",
     "replace_at",
@@ -223,6 +227,26 @@ def get_at(expr: Basic, path: Path, settings: Settings = None) -> Basic:
         except (IndexError, AttributeError, TypeError):
             raise ValueError(f"Invalid path {format_path(path)} for {expr}") from None
     return node
+
+
+class Placeholder(Symbol):
+    """An empty slot in a formula: what ``\\int`` leaves for the function
+    and the variable until they are typed.  A Symbol named ``_1``, ``_2``...
+    so that every SymPy operation accepts it and the source line reads
+    ``Integral(_1, _2)``; drawn as a faint empty box, and listed in the
+    snapshot (``placeholders``) so that Tab walks from one to the next."""
+
+    is_placeholder = True
+
+    def _latex(self, printer) -> str:
+        return r"\square"
+
+
+PLACEHOLDER_RE = re.compile(r"^_\d+$")
+
+
+def is_placeholder(node) -> bool:
+    return isinstance(node, Placeholder)
 
 
 #: Class -> ``(node, args) -> node``: how to rebuild a node whose constructor

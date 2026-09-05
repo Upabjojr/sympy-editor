@@ -34,12 +34,15 @@ from collections import OrderedDict
 from .addons import Addon, installed, load_addon
 from .ops import KINDS, KIND_LABELS, Op, get_ops, node_kind, node_kinds, with_kind
 from .printer import (
+    PLACEHOLDER_RE,
     Path,
+    Placeholder,
     annotate,
     annotate_str,
     delete_at,
     format_path,
     get_at,
+    is_placeholder,
     delete_range,
     extract_range,
     insert_at,
@@ -1244,8 +1247,11 @@ class Document:
             local.setdefault(name, Symbol(name))
         src = re.sub(r"`([A-Za-z_][A-Za-z_0-9]*)`", r"\1", src)
         shape = getattr(context, "shape", None) if isinstance(context, (MatrixExpr, MatrixBase)) else None
-        new_names = self._new_names(src, local) if (shape is not None and len(shape) == 2) or self.addons else []
+        new_names = self._new_names(src, local)
         for name in new_names:
+            if PLACEHOLDER_RE.match(name):
+                local[name] = Placeholder(name)         # an empty slot (\int leaves Integral(_1, _2))
+                continue
             if shape is not None and len(shape) == 2:
                 local[name] = MatrixSymbol(name, *shape)
                 continue
@@ -1456,6 +1462,10 @@ class Document:
             "methods": methods,
             "addons": list(self.addons),
             "addons_available": self.available_addons(),
+            # the empty slots, in reading order: Tab walks them, and a new one
+            # is selected as it appears so that typing fills it
+            "placeholders": [format_path(p) for p, n in sorted(nodes.items(), key=lambda kv: tuple(str(i) for i in kv[0]))
+                             if is_placeholder(n)],
             "error": error,
         }
         for addon in self.addons.values():
@@ -1476,6 +1486,8 @@ class Document:
                                 "free": sorted(str(s) for s in getattr(node, "free_symbols", ()))[:12]}
         if parts:
             info["parts"] = [name for name, _value in parts]
+        if is_placeholder(node):
+            info["placeholder"] = True
         # What unwrap could keep, when there is more than one candidate: the
         # front end asks which argument to leave instead of picking for the user.
         choices = self._keep_candidates(node)
@@ -1730,7 +1742,7 @@ class Document:
         # An add-on's node types are named in its namespace, so its srepr
         # strings read back too.
         if isinstance(expr, str):
-            local: Dict[str, Any] = {"Str": Str}
+            local: Dict[str, Any] = {"Str": Str, "Placeholder": Placeholder}
             for addon in getattr(self, "addons", {}).values():
                 for name, obj in addon.namespace().items():
                     local.setdefault(name, obj)

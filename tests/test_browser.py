@@ -1141,7 +1141,7 @@ def test_paste_over_the_whole_expression_applies_at_once(browser, serve_expr):
         const removed = [], orig = document.removeEventListener.bind(document);
         document.removeEventListener = (k, fn, o) => { removed.push(k); orig(k, fn, o); };
         ed.destroy(); document.removeEventListener = orig; return removed.sort(); }""")
-    assert removed == ["copy", "cut", "paste", "selectionchange"]
+    assert removed == ["copy", "cut", "paste", "pointerdown", "selectionchange"]   # pointerdown: the Add-ons menu closes on a click elsewhere
     assert page.locator(".sympy-editor").count() == 0
     assert page.errors == []
 
@@ -3771,4 +3771,80 @@ def test_the_selection_follows_the_view_into_full_screen(browser, served):
     page.wait_for_function("(() => { const b = document.querySelector('.se-box-select'), s = document.querySelector('.se-selected[data-path]'); "
                            "if (!b || !s) return false; const br = b.getBoundingClientRect(), sr = s.getBoundingClientRect(); "
                            "return Math.abs(br.left + 2 - sr.left) <= 6 && Math.abs(br.top + 2 - sr.top) <= 6; })()", timeout=5000)
+    assert page.errors == []
+
+
+def test_a_template_leaves_placeholders_and_a_refused_edit_flickers(browser, serve_expr):
+    r"""\int typed in a field puts an integral in with two empty boxes: the
+    first is selected so that typing fills it, Tab moves to the next; a
+    field that does not parse is refused with a red flicker of the view."""
+    srv, doc = serve_expr(x + y)
+    page = _open(browser, srv.url)
+    _select(page, "/0")
+    page.keyboard.type("\\int ")                                # the space completes the command
+    field = page.locator(".se-inline")
+    assert field.count() == 1
+    value = field.input_value()
+    assert value.startswith("Integral(_1, _2)"), value
+    page.keyboard.press("Enter")
+    page.wait_for_function("document.querySelector('.se-source').textContent.includes('Integral(_1, _2)')")
+    slots = page.locator(".se-view .se-placeholder:not(.se-ghost *)")      # (the change animation clones the rendering for a moment)
+    assert slots.count() == 2
+    assert page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.placeholders.length") == 2
+    # the first slot is selected: typing fills it
+    first = page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.placeholders[0]")
+    assert page.locator(".se-selected[data-path]").first.get_attribute("data-path") == first
+    page.keyboard.type("x**2")
+    page.keyboard.press("Enter")
+    page.wait_for_function("document.querySelector('.se-source').textContent.includes('Integral(x**2, _2)')")
+    # the next slot is selected by itself? no - Tab walks to it
+    page.keyboard.press("Tab")
+    remaining = page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.placeholders[0]")
+    assert page.locator(".se-selected[data-path]").first.get_attribute("data-path") == remaining
+    page.keyboard.type("x")
+    page.keyboard.press("Enter")
+    page.wait_for_function("document.querySelector('.se-source').textContent === 'y + Integral(x**2, x)'")
+    assert page.locator(".se-view .se-placeholder:not(.se-ghost *)").count() == 0
+    # a second template gets fresh slot numbers even while others exist
+    page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.select('/0')")
+    page.keyboard.type("\\sum ")
+    assert page.locator(".se-inline").input_value().startswith("Sum(_1, (_2, _3, _4))")
+    page.keyboard.press("Escape")
+    page.wait_for_function("document.querySelector('.se-inline') === null")
+    # a refused edit: the message, and the flicker
+    page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.select('/0')")
+    page.keyboard.type("x +")
+    page.keyboard.press("Enter")
+    page.wait_for_function("!document.querySelector('.se-error').hidden")
+    assert "parse" in page.locator(".se-error").inner_text().lower()
+    assert page.evaluate("document.querySelector('.sympy-editor').classList.contains('se-flash')")
+    page.wait_for_function("!document.querySelector('.sympy-editor').classList.contains('se-flash')", timeout=3000)
+    assert page.errors == []
+
+
+def test_a_function_at_a_caret_is_added_there(browser, serve_expr):
+    """A caret shown and nothing selected: a function from the box is
+    inserted at the caret, applied to an empty box that is selected next -
+    it used to be applied to the whole expression, or seem to do nothing."""
+    srv, doc = serve_expr(x + y)
+    page = _open(browser, srv.url)
+    page.evaluate("document.querySelector('.sympy-editor').__sympyEditor._caretAtEnd('end')")
+    page.wait_for_selector(".se-caret")
+    assert page.locator(".se-selected[data-path]").count() == 0
+    fn = page.locator(".se-fn")
+    fn.fill("sin")
+    fn.press("Enter")
+    page.wait_for_function("document.querySelector('.se-source').textContent === 'x + y + sin(_1)'")
+    assert str(doc.expr) == "x + y + sin(_1)"
+    slot = page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.placeholders[0]")
+    assert page.locator(".se-selected[data-path]").first.get_attribute("data-path") == slot
+    page.keyboard.type("x")
+    page.keyboard.press("Enter")
+    page.wait_for_function("document.querySelector('.se-source').textContent === 'x + y + sin(x)'")
+    # with a selection the box still applies the function to the selection
+    page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.select('/0')")
+    fn.fill("cos")
+    fn.press("Enter")
+    page.wait_for_function("document.querySelector('.se-source').textContent.includes('cos(')")
+    assert "cos(" in str(doc.expr) and "sin(x)" in str(doc.expr)
     assert page.errors == []

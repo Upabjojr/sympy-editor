@@ -97,6 +97,7 @@
   min-width: 0;
 }
 /* a block that needs the width takes a line of its own, and spreads on it */
+.se-block[hidden] { display: none; }   /* an empty block would still take a column (the Add-ons block, with nothing to switch) */
 .se-block-wide { flex: 1 1 100%; justify-content: space-between; }
 /* The sessions drawer slides in from the right, so its button belongs at the
  * right.  Wide, it is the third block and lands in the right-hand column on
@@ -876,3 +877,14 @@
   .se-fn-item:hover { background: rgba(var(--se-accent), 0.14); }
   .se-source[contenteditable]:hover { background: rgba(var(--se-accent), 0.06); }
 }
+
+/* Empty slots (Placeholder: the boxes a template leaves): faint until filled. */
+.se-view .katex .se-placeholder { color: var(--se-muted); opacity: 0.55; }
+.se-view .katex .se-placeholder.se-selected { opacity: 0.9; }
+/* A refused edit: half a second of red over the formula (the tree panel does the same). */
+.sympy-editor.se-flash .se-view { animation: se-flash 0.5s steps(1, end); }
+@keyframes se-flash {
+  0%, 40%, 80% { background: rgba(var(--se-removed-rgb), 0.28); }
+  20%, 60%, 100% { background: var(--se-surface); }
+}
+@media (prefers-reduced-motion: reduce) { .sympy-editor.se-flash .se-view { animation: none; background: rgba(var(--se-removed-rgb), 0.2); } }
