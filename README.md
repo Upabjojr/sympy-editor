@@ -92,6 +92,9 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | Change the operator between two arguments | click the operator itself (`+`, `−`, `⋅`, `=`, the `−` of `x − y`...): it is selected and a small palette appears; pick `+ − × ÷ ^ =` or **Delete** (side by side, the two multiply: `x + y` → `xy`) | with the operator selected, type `+ - * / ^ = < > & \|`; Del removes it; Esc deselects; ←/→/↓ select an argument, ↑ the node.  In a sum `*` binds just the two terms (`x + y + z` → `xy + z`); in a product `+` splits it there (`x·y·z` → `x + yz`).  A lone operator typed at a caret does the same |
 | Type at a caret | click **between** two terms, or at the edge of an object: a caret appears; what you type is spliced between its neighbours like in a text editor: operators you type are used as written, a missing one means juxtaposition (`cos(t)` after `x` gives `x cos(t)`), `+`/`-` bind at the sum level (`x z` with `+y+` typed between gives `x + y + z`), `, …` adds a function argument | Tab / Shift+Tab put the caret after / before the selection; ←/→ walk it through the formula like a text cursor (into a composite neighbour, out of a node at its ends); ↑ selects the object it is attached to (↓ does nothing at a caret); Enter opens an empty field; Esc removes it |
 | LaTeX shortcuts in the field | | `\theta` becomes `θ` as you type (Greek letters, `\infty`, `\sin`, `\cdot`, `\le`...); Greek letters are SymPy's names (`θ` is `theta`, `λ` is `lamda`, `∞` is `oo`) |
+| A function at a caret | function box | With a caret shown and nothing selected, the function is added at the caret with an empty box for its argument (`sin(□)`), the box selected to fill |
+| Templates | `\int`, `\sum`, `\prod`, `\lim`, `\diff`, `\frac`, `\binom`, `\matrix` | The whole construction, with faint empty boxes where its parts go: the first box is selected, type to fill it, Tab moves to the next (Shift+Tab back). The boxes are the symbols `_1`, `_2`... in the source line |
+| A refused edit | | The message shows under the formula and the formula flickers red for half a second |
 | Edit selection's existing text | double-click / **Edit** | Enter |
 | Apply / cancel an edit | click elsewhere applies | Enter / Esc |
 | Remove the selection entirely (on the whole expression: the formula is emptied and a field takes its place - type the new expression there, it is previewed as you type, Enter applies it; Esc brings the old one back) | **Delete** | Del |
@@ -421,6 +424,38 @@ so the left column starts at the left edge, the right one ends at the right
 edge, and the strip reads as a grid rather than a wall of buttons.  A block
 never breaks apart: what belongs together stays together, and the action bar
 under a selection wraps the same way, so every button stays reachable.
+
+## Add-ons
+
+The editor can be extended from outside: an add-on is a package of its own
+that gives a document node types from another library, transformations,
+data beside every snapshot and methods of its own, and a panel of HTML and
+JavaScript under the formula - through one contract,
+`sympy_editor.addons.Addon`, and one message.  Three drafts live in
+[`addons/`](addons/README.md): the expression tree as an editable graph,
+the graph of the selection drawn by Plotly.js, and rewrite rules with
+wildcards matched many-to-one by
+[sympy-matching](https://github.com/Upabjojr/sympy-matching).
+
+An add-on is a package of its own, made by anyone, found by the editor
+once it is installed (`pip install -e addons/sympy_editor_tree` for a
+draft; a published one with plain `pip install`).  Then every way of
+starting the editor takes `addons=`:
+
+```python
+from sympy_editor import edit, save_html, serve, installed_addons
+installed_addons()                                       # {'matching': ..., 'plot': ..., 'tree': ...}
+w = edit(sin(x)**2 / x, addons=["tree", "plot", "matching"])          # Jupyter, by name
+save_html(expr, "page.html", addons=["tree", "plot"])                  # a self-contained page
+serve(expr, addons=["matching"])                                       # the local server
+```
+
+The toolbar's **Add-ons ▾** menu switches any installed add-on on or off
+while editing.  Not installed?  A module name (`addons=["sympy_editor_tree"]`)
+or the object itself (`addons=[ADDON]`) work too; `python addons/demo.py`
+builds a page with the three drafts straight from the checkout.
+`addons/README.md` describes the architecture, and `addons/template/` is
+an add-on to copy when writing your own.
 
 ## How it works
 

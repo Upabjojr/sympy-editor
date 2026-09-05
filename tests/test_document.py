@@ -1191,3 +1191,31 @@ def test_labels_that_do_not_fit_the_history_are_refused():
     # trimming to max_history keeps the labels with the steps that stay
     doc = Document(None, history=["Symbol('x')", "Symbol('y')", "Symbol('z')"], labels=["a", "b", "c"], max_history=2)
     assert [str(e) for e in doc._history] == ["y", "z"] and doc._labels == ["b", "c"]
+
+
+def test_placeholders_are_empty_slots():
+    """`_1`, `_2`... typed (what a template leaves) are Placeholder symbols:
+    listed in the snapshot in reading order, marked in the node table,
+    accepted by every operation, and read back from srepr."""
+    from sympy_editor.printer import Placeholder
+    doc = Document(x)
+    doc.replace("/", "Integral(_1, _2) + x")
+    snap = doc.snapshot()
+    assert snap["placeholders"] == ["/1/0", "/1/1/0"]
+    assert all(snap["nodes"][p]["placeholder"] for p in snap["placeholders"])
+    assert all(isinstance(doc.get(p), Placeholder) for p in snap["placeholders"])
+    assert r"\square" in snap["latex"] and snap["src"] == "x + Integral(_1, _2)"
+    doc.replace(snap["placeholders"][0], "sin(x)")               # typing fills the slot
+    assert doc.snapshot()["placeholders"] == ["/1/1/0"]
+    doc.replace("/1/1/0", "x")
+    assert doc.snapshot()["placeholders"] == [] and str(doc.expr) == "x + Integral(sin(x), x)"
+    # the same name again is the same slot; a session reads them back
+    doc.replace("/", "_1 + _1**2")
+    slots = doc.snapshot()["placeholders"]
+    assert len(slots) == 2 and slots == sorted(slots) and len(doc.expr.free_symbols) == 1
+    assert all(isinstance(doc.get(p), Placeholder) for p in slots)
+    again = Document(doc.export()["history"][-1])
+    assert again.snapshot()["placeholders"] == slots
+    # an ordinary name that merely starts with an underscore is a symbol, not a slot
+    doc.replace("/", "_a + 1")
+    assert doc.snapshot()["placeholders"] == [] and "placeholder" not in doc.snapshot()["nodes"]["/0"]

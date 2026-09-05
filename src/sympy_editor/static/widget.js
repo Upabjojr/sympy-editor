@@ -30,7 +30,7 @@ function render({ model, el }) {
     const snap = JSON.parse(raw);
     const done = pending[snap._req];
     delete pending[snap._req];
-    editor.setState(snap).then(() => { if (done) done(null); });
+    editor.setState(snap).then(() => { if (done) done(null); return editor._restoreAddons(); });
   };
   model.on("change:snapshot", apply);
   apply();

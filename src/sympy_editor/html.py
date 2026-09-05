@@ -42,6 +42,7 @@ __all__ = [
     "save_html",
     "display_html",
     "build_config",
+    "addon_clients",
     "to_history_html",
     "save_history_html",
     "display_history",
@@ -60,7 +61,7 @@ SYMPY_WHEEL = ("https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135
 
 #: Python modules embedded in Pyodide-backed pages (order matters for nothing,
 #: but keep this list in sync with the imports of document.py).
-EMBEDDED_MODULES = ("printer.py", "ops.py", "document.py")
+EMBEDDED_MODULES = ("printer.py", "ops.py", "addons.py", "document.py")
 
 
 def default_urls() -> Dict[str, str]:
@@ -85,6 +86,12 @@ def python_sources() -> Dict[str, str]:
     for name in EMBEDDED_MODULES:
         sources[name] = (pkg / name).read_text(encoding="utf-8")
     return sources
+
+
+def addon_clients(doc: Document) -> list:
+    """The descriptors of the document's add-ons for the front end (name,
+    label, JavaScript and CSS sources, options)."""
+    return [addon.client() for addon in doc.addons.values()]
 
 
 def _script_json(obj: Any) -> str:
@@ -119,6 +126,28 @@ def build_config(
     cfg: Dict[str, Any] = {"backend": backend, "snapshot": doc.snapshot(), "options": opts}
     if opts.get("sessions"):
         cfg["examples"] = examples()      # what a new session can start from
+    # The add-ons' front ends: loaded by SympyEditor.mount (once per page).
+    cfg["addons"] = addon_clients(doc)
+    document = {
+        "printer_settings": doc.printer_settings,
+        "parser": doc.parser,
+        "symbols": [srepr(obj) for obj in doc.declared.values()],
+    }
+    # The add-ons the page can switch on: the ones that are on and the rest of
+    # the document's catalogue, as far as it loads - by module name, which is
+    # what the Python that makes the document again (a Pyodide page, the
+    # host application) can import.
+    catalog = []
+    for entry in doc.available_addons():
+        if "error" in entry:
+            continue
+        addon = doc._load(entry["name"])
+        if addon not in catalog:
+            catalog.append(addon)
+    if doc.addons:
+        document["addons"] = [addon.module for addon in doc.addons.values()]
+    if catalog:
+        document["available"] = [addon.module for addon in catalog]
     if backend == "pyodide":
         cfg.update(
             pyodideJs=all_urls["pyodideJs"],
@@ -126,24 +155,19 @@ def build_config(
             sympyWheel=all_urls.get("sympyWheel", ""),
             sources=python_sources(),
             srepr=srepr(doc.expr),
-            document={
-                "printer_settings": doc.printer_settings,
-                "parser": doc.parser,
-                "symbols": [srepr(obj) for obj in doc.declared.values()],
-            },
+            document=document,
         )
+        if catalog:
+            # Each add-on's package, written beside sympy_editor's in the
+            # Pyodide file system, and what micropip must install first -
+            # for what is on and what may be switched on later.
+            cfg["packages"] = {addon.module: addon.python_sources() for addon in catalog}
+            cfg["micropip"] = sorted({pkg for addon in catalog for pkg in addon.pyodide_packages()})
     elif backend == "native":
         # The host application runs Python itself (the Android app ships
         # CPython and SymPy); it only needs to know which expression to start
         # from - the sources and the runtime are its own.
-        cfg.update(
-            srepr=srepr(doc.expr),
-            document={
-                "printer_settings": doc.printer_settings,
-                "parser": doc.parser,
-                "symbols": [srepr(obj) for obj in doc.declared.values()],
-            },
-        )
+        cfg.update(srepr=srepr(doc.expr), document=document)
     elif backend == "http":
         cfg.update(apiUrl=api_url, token=token or "")
         cfg["options"].setdefault("finishButton", True)
@@ -260,7 +284,8 @@ def to_html(
         SVG markup for a mark beside the page's title (the mobile apps and the
         web app show their own icon there); ignored for a fragment.
     document_kwargs
-        Passed to :class:`Document` (``printer_settings``, ``parser``...).
+        Passed to :class:`Document` (``printer_settings``, ``parser``,
+        ``addons``...).
     """
     doc = _as_document(expr, **document_kwargs)
     backend = backend or ("pyodide" if editable else "readonly")

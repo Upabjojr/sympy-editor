@@ -49,10 +49,11 @@ still located relative to the enclosing frame.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from typing import Union as TUnion
 
-from sympy import Integer, Mul, Rational, S, sympify
+from sympy import Integer, Mul, Rational, S, Symbol, sympify
 from sympy.core.basic import Basic
 from sympy.core.containers import Tuple as SymTuple
 from sympy.core.numbers import Number
@@ -88,6 +89,11 @@ __all__ = [
     "parse_path",
     "get_at",
     "view_parts",
+    "Placeholder",
+    "PLACEHOLDER_RE",
+    "is_placeholder",
+    "REBUILDERS",
+    "register_rebuild",
     "replace_at",
     "delete_at",
     "insert_at",
@@ -223,11 +229,46 @@ def get_at(expr: Basic, path: Path, settings: Settings = None) -> Basic:
     return node
 
 
+class Placeholder(Symbol):
+    """An empty slot in a formula: what ``\\int`` leaves for the function
+    and the variable until they are typed.  A Symbol named ``_1``, ``_2``...
+    so that every SymPy operation accepts it and the source line reads
+    ``Integral(_1, _2)``; drawn as a faint empty box, and listed in the
+    snapshot (``placeholders``) so that Tab walks from one to the next."""
+
+    is_placeholder = True
+
+    def _latex(self, printer) -> str:
+        return r"\square"
+
+
+PLACEHOLDER_RE = re.compile(r"^_\d+$")
+
+
+def is_placeholder(node) -> bool:
+    return isinstance(node, Placeholder)
+
+
+#: Class -> ``(node, args) -> node``: how to rebuild a node whose constructor
+#: does not take its own ``args`` (see :func:`rebuild`).  Add-ons register
+#: their classes here (:func:`register_rebuild`).
+REBUILDERS: Dict[type, Callable[[Basic, List[Basic]], Basic]] = {}
+
+
+def register_rebuild(cls: type, func: Callable[[Basic, List[Basic]], Basic]) -> None:
+    """Rebuild instances of ``cls`` with ``func(node, args)`` instead of
+    ``node.func(*args)``."""
+    REBUILDERS[cls] = func
+
+
 def rebuild(expr: Basic, args) -> Basic:
     """``expr`` reconstructed with new ``args`` (``expr.func(*args)``, with
     special cases for classes whose constructor does not accept their own
     ``args``)."""
     args = list(args)
+    for cls, func in REBUILDERS.items():
+        if isinstance(expr, cls):
+            return func(expr, args)
     if isinstance(expr, BlockMatrix):
         # BlockMatrix stores a matrix of blocks but is constructed from rows.
         return BlockMatrix(args[0].tolist())

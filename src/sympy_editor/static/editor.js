@@ -38,10 +38,12 @@ var SympyEditor = (function () {
     interruptAfter: 2000, // ms after which the overlay offers to interrupt the computation
     sessions: false,     // a list of sessions (expressions with their own history) kept in localStorage
     unevaluated: false,  // the "unevaluated" toggle starts on: transformations build Determinant(M), Integral(f, x)... rather than computing
+    rememberAddons: false, // keep which add-ons are on in localStorage across page loads (the apps do)
     animate: true,       // animate a change: the old parts in red turn into the new ones in green
     animateDuration: 1600 // ms: a quarter to show what goes (red), the rest to move it and fade the new in (green)
   };
   var SESSIONS_KEY = "sympy-editor:sessions";
+  var ADDONS_KEY = "sympy-editor:addons";     // the add-ons switched on, when rememberAddons is set
 
   // The history report: a self-contained page (KaTeX pre-rendered, its CSS
   // and fonts inlined), see Editor.buildReport.
@@ -55,6 +57,7 @@ var SympyEditor = (function () {
     ".step, .transition { font-size: calc(1em * var(--se-report-zoom, 1)); }",
     ".step { border: 1px solid #d0d7de; border-radius: 0.6rem; padding: 0.8rem 1rem; margin: 0; overflow-x: auto; }",
     ".step h2 { font-size: 0.85rem; font-weight: 600; margin: 0 0 0.4rem; color: #656d76; text-transform: uppercase; letter-spacing: 0.04em; }",
+    ".step .extra { margin-top: 0.5rem; font-size: 0.8rem; } .step .extra details > summary { cursor: pointer; color: #656d76; font-weight: 600; }",
     ".step .formula { font-size: 1.25em; } .step code { display: block; margin-top: 0.5rem; font-size: 0.8rem; color: #656d76; white-space: pre-wrap; word-break: break-word; }",
     ".transition { display: grid; grid-template-columns: 2.5rem 1fr; align-items: center; gap: 0.3rem 0.6rem; margin: 0.4rem 0 0.4rem 1rem; }",
     ".transition .arrow { grid-row: 1 / 3; font-size: 1.8rem; text-align: center; color: #3b82f6; }",
@@ -138,6 +141,9 @@ var SympyEditor = (function () {
     "<li>What you type is spliced in: operators as written, nothing between means multiplication (cos(t) after x gives x\u22c5cos(t)), <b>+</b>/<b>\u2212</b> add and subtract at the level of the sum, and a typed comma adds a function argument.</li>",
     "<li>Next to a matrix entry or a power's base the caret extends that object: \u201c+ 1\u201d adds to it, \u201cy\u201d multiplies it.</li>",
     "<li>LaTeX shortcuts in any field: \\theta becomes \u03b8 as you type (Greek letters, \\infty, \\le\u2026).</li>",
+    "<li>With a caret shown and nothing selected, a function from the box is <i>added</i> at the caret \u2014 sin gives sin(\u25a1), the box selected for you to fill \u2014 instead of being applied to the whole expression.</li>",
+    "<li>Templates: \\int, \\sum, \\prod, \\lim, \\diff, \\frac, \\binom, \\matrix typed in a field put the whole construction in, with faint empty boxes where its parts go. The first box is selected: type to fill it, <kbd>Tab</kbd> moves to the next box (<kbd>Shift</kbd>+<kbd>Tab</kbd> back). The boxes are the symbols _1, _2\u2026 in the source line.</li>",
+    "<li>An edit that cannot be read as an expression is refused: the message shows under the formula, and the formula flickers red for half a second.</li>",
     "</ul></section>",
     "<section><h3>Operators</h3><ul>",
     "<li>Click an operator itself (<b>+</b>, <b>\u2212</b>, <b>\u22c5</b>, <b>=</b>\u2026) to select it; a small palette appears.</li>",
@@ -146,6 +152,7 @@ var SympyEditor = (function () {
     "</ul></section>",
     "<section><h3>Applying functions</h3><ul>",
     "<li><b>Transform \u25be</b> holds the general operations; a second menu appears with operations for the selection's type (Matrix, Integral, Equation\u2026). Picking one applies it at once, to the selection or, with nothing selected, to the whole expression.</li>",
+    "<li><b>Add-ons \u25be</b> switches on or off the add-ons installed beside the editor \u2014 a panel under the formula, tools, node types from other packages \u2014 without restarting anything; what an add-on kept waits for it to come back.</li>",
     "<li><b>Methods \u25be</b> lists everything the selected object's class can do \u2014 .det(), .T, .diff()\u2026 \u2014 one pick calls it. A Lambda is itself a function: <b>( ) apply</b> evaluates it at the arguments you give.</li>",
     "<li>The <b>function box</b> searches all of SymPy: pick a function and fill the parameters it asks for; \u201cdiff(x)\u201d, \u201c.T\u201d, \u201cdet()\u201d typed in full apply as written. A container takes the selection as its contents: <i>Matrix</i> over x + y gives the 1\u00d71 matrix holding it.</li>",
     "<li><b>unevaluated</b> builds the symbolic form (Determinant, Integral, sin(0)\u2026) instead of computing it; <i>Evaluate (doit)</i> computes it later.</li>",
@@ -289,7 +296,37 @@ var SympyEditor = (function () {
     sqrt: "sqrt", sin: "sin", cos: "cos", tan: "tan", cot: "cot", sec: "sec", csc: "csc",
     sinh: "sinh", cosh: "cosh", tanh: "tanh", exp: "exp", log: "log", ln: "log", ell: "l"
   };
+  // Templates: a "\command" that stands for a whole construction, with
+  // empty slots (_1, _2...) where its parts go.  The slots are placeholders
+  // (Placeholder in printer.py): faint boxes, selected as they appear so
+  // that typing fills them, Tab walking from one to the next.  Their
+  // numbers are made fresh against the slots the formula already has.
+  var TEMPLATES = {
+    int: "Integral(_1, _2)", integral: "Integral(_1, _2)", iint: "Integral(_1, _2, _3)",
+    sum: "Sum(_1, (_2, _3, _4))", prod: "Product(_1, (_2, _3, _4))",
+    lim: "Limit(_1, _2, _3)", limit: "Limit(_1, _2, _3)",
+    diff: "Derivative(_1, _2)", partial: "Derivative(_1, _2)",
+    frac: "(_1)/(_2)", binom: "binomial(_1, _2)", matrix: "Matrix([[_1, _2], [_3, _4]])"
+  };
+  for (var t in TEMPLATES) if (!(t in COMMANDS)) COMMANDS[t] = TEMPLATES[t];
   for (var g in GREEK) if (!(g in COMMANDS)) COMMANDS[g] = GREEK[g];
+
+  /** `template` with its slots numbered afresh: none of `used` (the
+   *  placeholder names the formula has) and none already in `text`. */
+  function freshSlots(template, used, text) {
+    var taken = {};
+    (used || []).forEach(function (n) { taken[n] = true; });
+    (text.match(/_\d+/g) || []).forEach(function (n) { taken[n] = true; });
+    var next = 1, map = {};
+    return template.replace(/_(\d+)/g, function (m) {
+      if (!(m in map)) {
+        while (taken["_" + next]) next++;
+        map[m] = "_" + next;
+        taken["_" + next] = true;
+      }
+      return map[m];
+    });
+  }
   // character -> SymPy name (first name listed wins: λ is "lamda", ∞ is "oo")
   var GREEK_BACK = {};
   for (var name in GREEK) if (!(GREEK[name] in GREEK_BACK)) GREEK_BACK[GREEK[name]] = name;
@@ -308,7 +345,7 @@ var SympyEditor = (function () {
   /** Replace complete "\command"s in `text`: those followed by a non-letter,
    *  or that no longer command starts with.  Returns {text, delta} where
    *  delta is the change of length before `cursor`. */
-  function expandCommands(text, cursor) {
+  function expandCommands(text, cursor, used) {
     var delta = 0;
     var out = text.replace(/\\([A-Za-z]+)/g, function (m, name, offset) {
       var next = text.charAt(offset + m.length);
@@ -317,8 +354,9 @@ var SympyEditor = (function () {
         return c !== name && c.indexOf(name) === 0;
       });
       if (!complete) return m;
-      if (offset + m.length <= cursor) delta += COMMANDS[name].length - m.length;
-      return COMMANDS[name];
+      var value = name in TEMPLATES ? freshSlots(TEMPLATES[name], used, text) : COMMANDS[name];
+      if (offset + m.length <= cursor) delta += value.length - m.length;
+      return value;
     });
     return { text: out, delta: delta };
   }
@@ -593,9 +631,13 @@ var SympyEditor = (function () {
         out.push('<div class="transition"><div class="arrow">↓</div><div class="what">' + escHtml((hist.actions && hist.actions[i]) || opts.defaultAction || "") + "</div>" +
           '<div class="before"><span class="label">from (what went is red)</span>' + renderMarked(prev.latex, diff.oldKept, "rep-removed") + "</div></div>");
       }
+      // What an add-on draws under the step (opts.stepExtra: the tree of
+      // the expression, say) - static markup, the report carries no script
+      // of its own besides the player.
+      var extra = opts.stepExtra ? (opts.stepExtra(step, i, prev) || "") : "";
       out.push('<section class="step" data-index="' + i + '"' + (i === hist.index ? ' data-current="1"' : "") + "><h2>Step " + (i + 1) + (i === hist.index ? " — current" : "") +
         (i === 0 ? " — start" : "") + '</h2><div class="formula">' + renderMarked(step.latex, diff ? diff.newKept : null, "rep-added") +
-        "</div>" + (labels[i] === undefined ? "" : "<code>" + escHtml(labels[i]) + "</code>") + "</section>");
+        "</div>" + (labels[i] === undefined ? "" : "<code>" + escHtml(labels[i]) + "</code>") + (extra ? '<div class="extra">' + extra + "</div>" : "") + "</section>");
     }
     var when = new Date();
     var player = hist.steps.length < 2 ? "" :
@@ -615,7 +657,7 @@ var SympyEditor = (function () {
       '<button type="button" class="zoom-level" title="Back to the normal size">100%</button>' +
       '<button type="button" class="zoom-in" title="Larger (Ctrl+wheel)">+</button></span></div>';
     return "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
-      "<title>" + escHtml(title) + "</title><style>\n" + css + "\n" + REPORT_CSS + "\n</style></head><body><main>" +
+      "<title>" + escHtml(title) + "</title><style>\n" + css + "\n" + REPORT_CSS + "\n" + (opts.extraCss || "") + "\n</style></head><body><main>" +
       "<h1>" + escHtml(title) + "</h1><p class=\"meta\">" + escHtml(when.toLocaleString()) + " · " + hist.steps.length + " step" + (hist.steps.length === 1 ? "" : "s") +
       " · green: what a step brought, red: what the previous one lost</p>" + player + out.join("\n") +
       "<footer>Generated by sympy-editor. This file is self-contained (KaTeX rendering and fonts included) and works offline.</footer></main>" +
@@ -908,6 +950,7 @@ var SympyEditor = (function () {
           var steps = d.querySelectorAll(".step[data-index]");
           for (var i = 0; i < steps.length; i++) {
             steps[i].addEventListener("click", function (ev) {
+              if (ev.target.closest && ev.target.closest(".extra")) return;
               var index = parseInt(ev.currentTarget.getAttribute("data-index"), 10);
               if (!isNaN(index)) cfg.onStep(index);
             });
@@ -944,6 +987,8 @@ var SympyEditor = (function () {
       this.annotated = true;
       this._renderSeq = 0;
       this._hoverEl = null;
+      this._addons = [];      // the mounted add-ons: {name, def, inst, api, tools} (see _mountAddons)
+      loadAddons(this.opts.addons);
       this._build();
     }
 
@@ -1082,6 +1127,17 @@ var SympyEditor = (function () {
         this._fnSigs = {};
         this._fnActive = -1;
       }
+      // 8. the add-ons that can be switched on or off: a menu of check boxes
+      //    (shown only when the document's snapshot lists any, see _fillAddonsMenu)
+      this.addonsBlock = null;
+      this.addonsMenu = null;
+      if (!o.readOnly) {
+        this.addonsBlock = h("div", { class: "se-block", "data-block": "addons", hidden: "" });
+        this.addonsBtn = h("button", { type: "button", "data-cmd": "addons", title: "Switch add-ons on or off: panels and tools from other packages" }, ["Add-ons \u25be"]);
+        this.addonsBlock.appendChild(this.addonsBtn);
+        this.tools.appendChild(this.addonsBlock);
+        this.addonsMenu = h("div", { class: "se-addons-menu", hidden: "", role: "menu" });
+      }
       this.status = h("span", { class: "se-status", "aria-live": "polite" });
       this.toolbar.appendChild(this.status);
       if (o.toolbar) root.appendChild(this.toolbar);
@@ -1134,6 +1190,11 @@ var SympyEditor = (function () {
         ]);
         root.appendChild(this.symbols);
       }
+
+      // The add-ons' panels, under the formula and the source line: each in
+      // a collapsible box of its own (see _mountAddons).
+      this.addonHost = h("div", { class: "se-addons", hidden: "" });
+      root.appendChild(this.addonHost);
 
       // Sessions and history live in a lateral drawer (the ≡ button), out of
       // the widget: several expressions, each with its own undo history, kept
@@ -1264,10 +1325,253 @@ var SympyEditor = (function () {
       ]);
       this.committed = null;   // the last snapshot that is not a preview (see _previewSource)
       if (this.fnMenu) { root.appendChild(this.fnMenu); root.appendChild(this.fnForm); }
+      if (this.addonsMenu) root.appendChild(this.addonsMenu);
       root.appendChild(this.overlay);
       this.host.appendChild(root);
       root.__sympyEditor = this;   // handy for debugging and tests
       this._wire();
+      this._mountAddons();
+    }
+
+    /* ---- add-ons ---- */
+
+    /** Mount the add-ons of `opts.addons` (descriptors from Python) whose
+     *  front end registered itself with SympyEditor.registerAddon: each gets
+     *  an `api` onto this editor, may return a panel element (put in a box
+     *  under the formula), toolbar buttons (`tools`), and hooks
+     *  (`onState`, `onSelect`, `destroy`).  A missing or failing add-on is
+     *  reported in the console and skipped: the editor works without it. */
+    _mountAddons() {
+      this._addonClients = {};       // descriptors by name: from the options, then from the snapshots
+      var list = this.opts.addons || [];
+      for (var i = 0; i < list.length; i++) {
+        this._addonClients[list[i].name] = list[i];
+        this._mountAddon(list[i]);
+      }
+    }
+
+    _mountedAddon(name) {
+      for (var i = 0; i < this._addons.length; i++) if (this._addons[i].name === name) return this._addons[i];
+      return null;
+    }
+
+    /** Mount one add-on from its descriptor {name, label, options}: its
+     *  panel goes in a box under the formula, its tools in a block of the
+     *  toolbar.  Nothing happens when it is mounted already. */
+    _mountAddon(d) {
+      if (this._mountedAddon(d.name)) return;
+      var def = addonDefs[d.name];
+      if (!def) {
+        if (window.console) console.warn("sympy-editor: add-on " + d.name + " has no front end registered (SympyEditor.registerAddon)");
+        return;
+      }
+      var entry = { name: d.name, label: d.label || d.name, def: def, api: null, inst: null, tools: [], box: null, block: null };
+      entry.api = this._addonApi(entry, d.options || {});
+      try {
+        entry.inst = (def.mount && def.mount(entry.api)) || {};
+      } catch (e) {
+        if (window.console) console.error("sympy-editor: add-on " + d.name + " failed to mount", e);
+        return;
+      }
+      var el = entry.inst.element;
+      if (el) {
+        var self = this;
+        var guide = entry.inst.help || def.help || null;
+        var summary = h("summary", {}, [entry.inst.title || entry.label]);
+        if (guide) {
+          // The add-on's own guide, in the editor's help overlay - the "?"
+          // every panel has, like the toolbar's.
+          var helpBtn = h("button", { type: "button", class: "se-addon-help", title: "How " + (entry.inst.title || entry.label) + " works" }, ["?"]);
+          helpBtn.addEventListener("click", function (ev) {
+            ev.preventDefault(); ev.stopPropagation();     // not the <details> toggle
+            self.showHelp(guide, entry.inst.title || entry.label);
+          });
+          summary.appendChild(helpBtn);
+        }
+        var box = entry.inst.bare ? el : h("details", { class: "se-addon", "data-addon": d.name, open: "" }, [
+          summary,
+          h("div", { class: "se-addon-body" }, [el])
+        ]);
+        box.classList.add("se-addon-" + d.name);
+        this.addonHost.appendChild(box);
+        this.addonHost.hidden = false;
+        entry.box = box;
+      }
+      var tools = def.tools || entry.inst.tools || [];
+      if (tools.length && this.tools && !this.opts.readOnly) {
+        var block = h("div", { class: "se-block", "data-block": "addon:" + d.name });
+        for (var t = 0; t < tools.length; t++) {
+          var tool = tools[t];
+          var cmd = "addon:" + d.name + ":" + tool.cmd;
+          var b = h("button", { type: "button", "data-cmd": cmd, title: tool.title || "" }, [tool.label || tool.cmd]);
+          block.appendChild(b);
+          this.buttons[cmd] = b;
+          entry.tools.push({ cmd: tool.cmd, button: b, fn: tool.run });
+        }
+        // before the add-ons menu, so that the menu stays last
+        this.tools.insertBefore(block, this.addonsBlock || null);
+        entry.block = block;
+      }
+      this._addons.push(entry);
+      if (this.state) {
+        // It arrives with a state already on screen: tell it at once.
+        try { if (entry.inst.onState) entry.inst.onState(this.state); if (entry.inst.onSelect) entry.inst.onSelect(this.selected, this.range); }
+        catch (e) { if (window.console) console.error("sympy-editor: add-on " + d.name + " failed on mount", e); }
+      }
+    }
+
+    /** Take an add-on off the page: its panel, its tools, its hooks. */
+    _unmountAddon(name) {
+      var entry = this._mountedAddon(name);
+      if (!entry) return;
+      try { if (entry.inst && entry.inst.destroy) entry.inst.destroy(); }
+      catch (e) { if (window.console) console.error("sympy-editor: add-on " + name + " failed to destroy", e); }
+      if (entry.box && entry.box.parentNode) entry.box.parentNode.removeChild(entry.box);
+      if (entry.block && entry.block.parentNode) entry.block.parentNode.removeChild(entry.block);
+      for (var t = 0; t < entry.tools.length; t++) delete this.buttons["addon:" + name + ":" + entry.tools[t].cmd];
+      this._addons.splice(this._addons.indexOf(entry), 1);
+      if (!this.addonHost.querySelector(".se-addon, [data-addon]") && !this.addonHost.firstChild) this.addonHost.hidden = true;
+    }
+
+    /** Follow the snapshot: the add-ons it says are on are mounted (their
+     *  front ends come with the answer to a switch, `addon_clients`), the
+     *  others taken down; the menu lists what can be switched. */
+    _syncAddons(snap) {
+      var clients = snap.addon_clients || [];
+      if (clients.length) loadAddons(clients);
+      for (var c = 0; c < clients.length; c++) this._addonClients[clients[c].name] = clients[c];
+      var on = snap.addons || [];
+      if (this.opts.rememberAddons && !snap.preview && this._addonsRestored) {
+        try { localStorage.setItem(ADDONS_KEY, JSON.stringify(on)); } catch (e) { /* storage may be off */ }
+      }
+      var mounted = this._addons.slice();
+      for (var i = 0; i < mounted.length; i++) if (on.indexOf(mounted[i].name) < 0) this._unmountAddon(mounted[i].name);
+      for (var j = 0; j < on.length; j++) {
+        if (!this._mountedAddon(on[j]) && this._addonClients[on[j]]) this._mountAddon(this._addonClients[on[j]]);
+      }
+      this._fillAddonsMenu(snap.addons_available || []);
+    }
+
+    /** With rememberAddons: switch on what was on last time (and off what
+     *  was not), once, when the editor is ready - the page's own choice of
+     *  add-ons is the fallback for a first visit. */
+    _restoreAddons() {
+      if (this._addonsRestored) return Promise.resolve();
+      this._addonsRestored = true;
+      if (!this.opts.rememberAddons || !this.state) return Promise.resolve();
+      var wanted = null;
+      try { wanted = JSON.parse(localStorage.getItem(ADDONS_KEY) || "null"); } catch (e) { wanted = null; }
+      if (!Array.isArray(wanted)) return Promise.resolve();
+      var known = (this.state.addons_available || []).filter(function (a) { return !a.error; }).map(function (a) { return a.name; });
+      var on = this.state.addons || [];
+      var enable = wanted.filter(function (n) { return known.indexOf(n) >= 0 && on.indexOf(n) < 0; });
+      var disable = on.filter(function (n) { return wanted.indexOf(n) < 0; });
+      if (!enable.length && !disable.length) return Promise.resolve();
+      return this.send({ action: "addons", enable: enable, disable: disable });
+    }
+
+    _fillAddonsMenu(available) {
+      if (!this.addonsBlock) return;
+      this.addonsBlock.hidden = !available.length;
+      if (!this.addonsMenu) return;
+      var self = this;
+      this.addonsMenu.textContent = "";
+      for (var i = 0; i < available.length; i++) {
+        (function (a) {
+          var box = h("input", { type: "checkbox", id: "se-addon-" + a.name + "-" + self._stateCount });
+          box.checked = !!a.on;
+          if (a.error) box.disabled = true;
+          box.addEventListener("change", function () {
+            var msg = { action: "addons" };
+            msg[box.checked ? "enable" : "disable"] = [a.name];
+            self.send(msg);
+          });
+          var text = [a.label || a.name];
+          if (a.requires && a.requires.length) text.push(h("small", {}, [" needs " + a.requires.join(", ")]));
+          if (a.error) text.push(h("small", { class: "se-addon-error" }, [" " + a.error]));
+          self.addonsMenu.appendChild(h("label", { class: "se-addon-row", title: a.error || "" }, [box].concat(text)));
+        })(available[i]);
+      }
+    }
+
+    toggleAddonsMenu() {
+      if (!this.addonsMenu) return;
+      if (!this.addonsMenu.hidden) { this.addonsMenu.hidden = true; return; }
+      this.addonsMenu.hidden = false;
+      this._placeUnder(this.addonsMenu, this.addonsBtn);
+      var first = this.addonsMenu.querySelector("input");
+      if (first) first.focus({ preventScroll: true });
+    }
+
+    /** What an add-on's front end can do with this editor. */
+    _addonApi(entry, options) {
+      var self = this;
+      return {
+        name: entry.name,
+        options: options,
+        editor: this,
+        h: h,
+        loadScript: loadScript,
+        ensureCss: ensureCss,
+        katex: function () { return loadKatex(self.opts); },
+        state: function () { return self.state; },
+        selected: function () { return self.selected; },
+        range: function () { return self.range; },
+        tree: function () { return self.tree; },
+        node: function (path) { return self.state && self.state.nodes ? self.state.nodes[path] || null : null; },
+        select: function (path) { self.select(path); },
+        send: function (msg) { return self.send(msg); },
+        call: function (method, payload) { return self._addonCall(entry.name, method, payload); },
+        status: function (text) { self._setStatus(text); },
+        error: function (text) { self._showError(text); },
+        showHelp: function (html, title) { self.showHelp(html, title || entry.label); },
+        busy: function () { return self.busy; }
+      };
+    }
+
+    /** One of an add-on's Python methods: a query resolves with its result,
+     *  a change with the new snapshot (already applied); an error rejects.
+     *  Calls queue up behind the request in flight (the editor answers one
+     *  message at a time, and `send` drops a message while it is busy):
+     *  a panel asking as the user edits must not lose its question. */
+    _addonCall(name, method, payload) {
+      var self = this;
+      var msg = Object.assign({}, payload || {}, { action: "addon", addon: name, method: method });
+      var run = async function () {
+        while (self.busy && !self.closed) await new Promise(function (r) { setTimeout(r, 25); });
+        if (self.closed) throw new Error("The session is closed");
+        var snap = await self.send(msg);
+        if (!snap) throw new Error("No answer");
+        if (snap.query && snap.query.error) throw new Error(snap.query.error);   // the method failed: the caller's to show
+        if (snap.error) throw new Error(snap.error);
+        return snap.query ? snap.query.result : snap;
+      };
+      var chain = (this._addonChain || Promise.resolve()).then(run, run);
+      this._addonChain = chain.then(function () {}, function () {});
+      return chain;
+    }
+
+    _addonsNotify(hook) {
+      var args = Array.prototype.slice.call(arguments, 1);
+      for (var i = 0; i < this._addons.length; i++) {
+        var inst = this._addons[i].inst;
+        if (!inst || typeof inst[hook] !== "function") continue;
+        try { inst[hook].apply(inst, args); }
+        catch (e) { if (window.console) console.error("sympy-editor: add-on " + this._addons[i].name + " failed in " + hook, e); }
+      }
+    }
+
+    _addonCommand(cmd) {
+      for (var i = 0; i < this._addons.length; i++) {
+        var tools = this._addons[i].tools;
+        for (var t = 0; t < tools.length; t++) {
+          if ("addon:" + this._addons[i].name + ":" + tools[t].cmd !== cmd) continue;
+          var inst = this._addons[i].inst;
+          var fn = tools[t].fn || (inst && inst.commands && inst.commands[tools[t].cmd]);
+          if (typeof fn === "function") return fn.call(inst, this._addons[i].api);
+          return;
+        }
+      }
     }
 
     _wire() {
@@ -1383,6 +1687,8 @@ var SympyEditor = (function () {
       this.root.addEventListener("keydown", function (ev) {
         if (self.drawer && self.drawer.contains(ev.target)) return;   // Esc is handled at the document level while it is open
         if (self.symbols && self.symbols.contains(ev.target)) return;
+        if (self.addonHost && self.addonHost.contains(ev.target)) return;   // an add-on's panel owns its keys
+        if (self.addonsMenu && self.addonsMenu.contains(ev.target)) return;
         if (ev.target === self.source || ev.target === self.fnInput || (self.fnForm && self.fnForm.contains(ev.target))) return;
         if (self.loading) { ev.preventDefault(); return; }
         var t = ev.target;
@@ -1415,6 +1721,39 @@ var SympyEditor = (function () {
       this._docListeners = [];
       var onDocument = function (kind, fn) { document.addEventListener(kind, fn); self._docListeners.push([kind, fn]); };
       onDocument("selectionchange", function () { self._onSourceSelection(); });
+      // The highlight boxes, the caret and the action bar are placed in
+      // pixels measured from the rendering: whenever the view changes size
+      // they must be measured again.  Entering full screen is the case that
+      // showed it - the class is toggled at once, but the browser's own full
+      // screen (and the app's, taking the system bars away) resizes the view
+      // a moment later, and the selection stayed where it had been drawn.
+      // Rotating a phone and resizing a window are the same case.
+      this._relayout = function () {
+        if (self._relayoutPending) return;
+        self._relayoutPending = true;
+        requestAnimationFrame(function () {
+          self._relayoutPending = false;
+          self._gapCache = null;
+          if (self.caret) self._hideCaret();
+          self._applySelection();
+        });
+      };
+      if (typeof ResizeObserver === "function") {
+        this._resizeObserver = new ResizeObserver(function () { self._relayout(); });
+        this._resizeObserver.observe(this.view);
+      } else {
+        onDocument("resize", this._relayout);   // (window resize bubbles to document in no browser; kept for symmetry)
+        window.addEventListener("resize", this._relayout);
+      }
+      // The Add-ons menu closes on a click anywhere else, and on Escape.
+      onDocument("pointerdown", function (ev) {
+        if (self.addonsMenu && !self.addonsMenu.hidden && !self.addonsMenu.contains(ev.target) && !(self.addonsBtn && self.addonsBtn.contains(ev.target))) self.addonsMenu.hidden = true;
+      });
+      if (this.addonsMenu) {
+        this.addonsMenu.addEventListener("keydown", function (ev) {
+          if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); self.addonsMenu.hidden = true; self.addonsBtn.focus({ preventScroll: true }); }
+        });
+      }
       // Copy / cut / paste while the formula has the focus (no clipboard permission needed).
       ["copy", "cut", "paste"].forEach(function (kind) {
         onDocument(kind, function (ev) { self._onClipboard(ev, kind); });
@@ -1436,6 +1775,10 @@ var SympyEditor = (function () {
         this.fnInput.addEventListener("focus", function () { self._loadFunctions(); self._filterFn(); });
         this.fnInput.addEventListener("input", function () { self._filterFn(); });
         this.fnInput.addEventListener("blur", function () { setTimeout(function () { if (document.activeElement !== self.fnInput) self._hideFnMenu(); }, 150); });
+        this.fnInput.addEventListener("focus", function () {
+          // remember where the caret is: a function picked will be added there
+          self._fnCaret = self.caret && !self.selected && !self.range ? Object.assign({}, self.caret) : null;
+        });
         this.fnInput.addEventListener("keydown", function (ev) {
           ev.stopPropagation();
           var items = self.fnMenu.querySelectorAll(".se-fn-item");
@@ -1487,6 +1830,7 @@ var SympyEditor = (function () {
     async setState(snap) {
       if (!snap) return;
       if (snap.export) { this._storeSession(snap); return; }   // the answer to a save, not a new state
+      if (snap.query) return;                                   // an add-on's query: answered, nothing changed
       if (snap.preview) {
         // The source line being typed: a string that does not parse leaves
         // the rendering as it is and only marks the line.
@@ -1514,6 +1858,16 @@ var SympyEditor = (function () {
         sel = selectionAfter(sel, previous.nodes, snap.nodes || {});
       }
       while (sel && !(sel in this.tree)) sel = parentPath(sel);
+      if (!snap.preview && !same && snap.placeholders && snap.placeholders.length) {
+        // A template just typed (\int): its first new slot is what to fill next.
+        var had = {};
+        var prevSlots = (previous && previous.placeholders) || [];
+        for (var hi = 0; hi < prevSlots.length; hi++) { var pn = previous.nodes && previous.nodes[prevSlots[hi]]; if (pn) had[pn.src] = true; }
+        for (var ni = 0; ni < snap.placeholders.length; ni++) {
+          var nn = snap.nodes[snap.placeholders[ni]];
+          if (nn && !had[nn.src]) { sel = snap.placeholders[ni]; break; }
+        }
+      }
       this.selected = sel;
       if (snap.methods) {
         for (var mt in snap.methods) this._methodsCache[mt] = snap.methods[mt] || [];
@@ -1544,6 +1898,8 @@ var SympyEditor = (function () {
         this._setStatus("Session closed – the expression was returned to Python.");
       }
       this._updateToolbar();
+      this._syncAddons(snap);
+      this._addonsNotify("onState", snap);
     }
 
     async _render() {
@@ -1578,6 +1934,11 @@ var SympyEditor = (function () {
         }
       }
       this.view.classList.remove("se-empty");
+      var slots = this.state.placeholders || [];
+      for (var si = 0; si < slots.length; si++) {
+        var sels = this._els(slots[si]);
+        for (var sj = 0; sj < sels.length; sj++) sels[sj].classList.add("se-placeholder");
+      }
       if (this.emptyField) {               // the field of the empty view survives the preview rendered above it
         var field = this.emptyField, pos = field.selectionStart, focused = document.activeElement === field || !field.parentNode;
         this.view.appendChild(field);
@@ -2048,6 +2409,7 @@ var SympyEditor = (function () {
       this._hideKeep();
       this.range = null;
       this.junction = null;
+      this._fnCaret = null;
       if (path) this._hideCaret();
       this.selected = (path && (path in this.tree)) ? path : null;
       this._fillOps();
@@ -2056,6 +2418,7 @@ var SympyEditor = (function () {
     }
 
     _applySelection() {
+      this._addonsNotify("onSelect", this.selected, this.range);
       var old = this.view.querySelectorAll(".se-selected");
       for (var i = 0; i < old.length; i++) old[i].classList.remove("se-selected");
       this._drawBoxes("hover", []);
@@ -2195,6 +2558,8 @@ var SympyEditor = (function () {
         this.isolateSelection();
       } else if (ev.shiftKey && (k === "ArrowLeft" || k === "ArrowRight") && !this.caret) {
         this._extendRange(k === "ArrowRight" ? 1 : -1);          // grow / shrink a range
+      } else if (k === "Tab" && !ro && this.state && this.state.placeholders && this.state.placeholders.length && !this.range) {
+        this._selectPlaceholder(ev.shiftKey ? -1 : 1);          // the next empty slot
       } else if (k === "Tab" && (this.selected || this.range) && !ro) {
         if (!this.caretAtSelection(ev.shiftKey)) handled = false;
       } else if (this.junction && k === "Escape") {
@@ -2583,6 +2948,7 @@ var SympyEditor = (function () {
     _pickFn(name) {
       this._hideFnMenu();
       this.fnInput.value = name;
+      if (this._insertFunctionAtCaret(name)) return;          // at a caret: added there, no parameters asked
       var sig = this._fnSigs[name];
       if (sig) { this._showFnForm(sig); return; }
       var msg = { action: "signature", name: name, path: this._fnTarget() };
@@ -2685,9 +3051,43 @@ var SympyEditor = (function () {
     }
 
     /** Apply "name(args)" / ".method(args)" from the function box to the selection. */
+    /** A function typed or picked while a caret is shown and nothing is
+     *  selected: it is inserted at the caret, applied to an empty box (a
+     *  placeholder) that is selected next, so typing fills it.  `sin` gives
+     *  `sin(_1)`; a name typed with its own arguments is taken as it is. */
+    _insertFunctionAtCaret(text) {
+      // The caret as it was when the box took the focus: the function list
+      // loading on that first focus re-renders the formula, which drops the
+      // live caret - the place the user pointed at is still the place.
+      var gap = this.caret || this._fnCaret;
+      if (!gap || this.selected || this.range) return false;
+      this._fnCaret = null;
+      var src = /\(/.test(text) ? text : text + "(_1)";
+      src = freshSlots(src, this._placeholderNames(), "");
+      // A new term in a sum, a new factor in a product: typed text at a
+      // caret joins its neighbour by juxtaposition (a product), which is
+      // right in a product and not in a sum.
+      var parent = this.state && this.state.nodes ? this.state.nodes[gap.path] : null;
+      if (!gap.extend && parent && parent.type === "Add") src = "+ " + src;
+      this.fnInput.value = "";
+      this._hideFnMenu();
+      this._hideFnForm();
+      var self = this, msg = this._insertMessage(gap, src);
+      // The box may have just asked for the function list: wait for the
+      // editor to be free rather than drop the insertion (send drops while busy).
+      (async function () {
+        while (self.busy && !self.closed) await new Promise(function (r) { setTimeout(r, 25); });
+        self._hideCaret();
+        self.send(msg);
+        self.view.focus({ preventScroll: true });
+      })();
+      return true;
+    }
+
     callFunction(text) {
       text = (text || "").trim();
       if (!text || this.opts.readOnly || this.closed) return;
+      if (this._insertFunctionAtCaret(text)) return;
       var msg = { action: "call", path: this._fnTarget(), func: text };
       if (this.lazy()) msg.lazy = true;
       if (this.range) msg.children = this._rangeIndices();
@@ -3546,7 +3946,7 @@ var SympyEditor = (function () {
       fit();
       input.addEventListener("input", function () {
         var cursor = input.selectionStart;
-        var r = expandCommands(input.value, cursor);
+        var r = expandCommands(input.value, cursor, self._placeholderNames());
         if (r.text !== input.value) {
           input.value = r.text;
           input.setSelectionRange(cursor + r.delta, cursor + r.delta);
@@ -3558,6 +3958,31 @@ var SympyEditor = (function () {
         if (ev.key === "Enter") { ev.preventDefault(); self.commitEdit(); }
         else if (ev.key === "Escape") { ev.preventDefault(); self.cancelEdit(); }
       });
+    }
+
+    /** The names of the formula's empty slots (_1, _2...), so a template
+     *  typed into a field gets fresh ones. */
+    _placeholderNames() {
+      var s = this.state, out = [];
+      if (!s || !s.placeholders) return out;
+      for (var i = 0; i < s.placeholders.length; i++) {
+        var n = s.nodes && s.nodes[s.placeholders[i]];
+        if (n) out.push(n.src);
+      }
+      return out;
+    }
+
+    /** Move the selection to the next (or previous) empty slot after the
+     *  selected node, in reading order; false when there is none. */
+    _selectPlaceholder(step) {
+      var slots = (this.state && this.state.placeholders) || [];
+      if (!slots.length) return false;
+      var at = this.selected ? slots.indexOf(this.selected) : -1;
+      var next;
+      if (at >= 0) next = slots[(at + step + slots.length) % slots.length];     // from a slot: the next one round
+      else next = step > 0 ? slots[0] : slots[slots.length - 1];                // from anywhere else: the first or the last
+      this.select(next);
+      return true;
     }
 
     _endEdit() {
@@ -3577,6 +4002,19 @@ var SympyEditor = (function () {
       }
     }
 
+    /** The message that puts `src` at the caret `gap`: an extension of the
+     *  object beside it (a power's base, a function's argument), or an
+     *  insertion among the arguments of the insertable node around it. */
+    _insertMessage(gap, src) {
+      if (gap.extend) return { action: "extend", path: gap.path, side: gap.extend, src: src };
+      var parent = gap.path;
+      var msg = { action: "insert", path: parent, index: gap.index, src: src };
+      if (gap.leftEl) msg.left = this._argIndex(parent, gap.leftEl.getAttribute("data-path"));
+      if (gap.rightEl) msg.right = this._argIndex(parent, gap.rightEl.getAttribute("data-path"));
+      if (gap.attach) msg.attach = gap.attach;
+      return msg;
+    }
+
     commitEdit() {
       if (this.editing === null && !this.inserting) return;
       var inserting = this.inserting, editRange = this._editRange;
@@ -3592,15 +4030,7 @@ var SympyEditor = (function () {
         return;
       }
       if (inserting) {
-        if (src && inserting.extend) this.send({ action: "extend", path: inserting.path, side: inserting.extend, src: src });
-        else if (src) {
-          var parent = inserting.path;
-          var msg = { action: "insert", path: parent, index: inserting.index, src: src };
-          if (inserting.leftEl) msg.left = this._argIndex(parent, inserting.leftEl.getAttribute("data-path"));
-          if (inserting.rightEl) msg.right = this._argIndex(parent, inserting.rightEl.getAttribute("data-path"));
-          if (inserting.attach) msg.attach = inserting.attach;
-          this.send(msg);
-        }
+        if (src) this.send(this._insertMessage(inserting, src));
         return;
       }
       if (!src || src === original) return;
@@ -3667,6 +4097,9 @@ var SympyEditor = (function () {
         case "zoomout": return this.setZoom(this.zoom / ZOOM_STEP);
         case "zoomreset": return this.setZoom(1);
         case "finish": return this.send({ action: "close" });
+        case "addons": return this.toggleAddonsMenu();
+        default:
+          if (cmd && cmd.indexOf("addon:") === 0) return this._addonCommand(cmd);
       }
     }
 
@@ -3690,6 +4123,7 @@ var SympyEditor = (function () {
         if ((msg.action === "apply" || msg.action === "call") && snap && !snap.error && snap.srepr === wasSrepr) {
           this._setStatus("No change: " + this._workingText(msg).replace(/^Computing /, "").replace(/…$/, "") + " leaves the expression as it is");
         }
+        return snap;
       } catch (e) {
         this._showError(String((e && e.message) || e));
         this._applySelection();
@@ -3711,6 +4145,7 @@ var SympyEditor = (function () {
         return "Computing " + (op ? op.label : msg.op) + "…";
       }
       if (msg.action === "call") return "Computing " + msg.func + "…";
+      if (msg.action === "addon") return "Working (" + msg.addon + ": " + msg.method + ")…";
       return "Working…";
     }
 
@@ -3941,6 +4376,14 @@ var SympyEditor = (function () {
           render(only, step, null, "");
           formulas.appendChild(only);
         }
+        var extras = this._addonsStepElements(step, i, prev);
+        if (extras.length) {
+          // Under the row, not in it: the row is a button (a click goes to
+          // the step), and what an add-on draws has clicks of its own.
+          var holder = h("div", { class: "se-step-extra" });
+          extras.forEach(function (el) { holder.appendChild(el); });
+          row.parentNode.insertBefore(holder, row.nextSibling);
+        }
         row.setAttribute("data-rendered", "1");
       }
     }
@@ -3988,8 +4431,62 @@ var SympyEditor = (function () {
       if (!hist || !hist.steps) throw new Error("No history to report");
       if (snap && snap.history) this._history = snap.history;
       var sess = this._currentSession();
+      var self = this;
       return buildHistoryReport(hist, { title: "SymPy editor \u2014 history" + (sess && sess.name ? " of " + sess.name : ""),
-                                        katexCss: this.opts.katexCss, defaultAction: "Edit" });
+                                        katexCss: this.opts.katexCss, defaultAction: "Edit",
+                                        stepExtra: function (step, i, prev) { return self._addonsStepHtml(step, i, prev); },
+                                        extraCss: this._addonsHistoryCss() });
+    }
+
+    /** What the add-ons draw under a step of the history: markup for the
+     *  report (historyStepHtml), elements for the drawer (historyStep). */
+    _addonsStepHtml(step, i, prev) {
+      var out = [];
+      for (var a = 0; a < this._addons.length; a++) {
+        var inst = this._addons[a].inst, def = this._addons[a].def;
+        var fn = (inst && inst.historyStepHtml) || def.historyStepHtml;
+        if (typeof fn !== "function") continue;
+        try { var html = fn.call(inst, step, i, prev); if (html) out.push(html); }
+        catch (e) { if (window.console) console.error("sympy-editor: add-on " + this._addons[a].name + " failed on a history step", e); }
+      }
+      return out.join("");
+    }
+
+    _addonsHistoryCss() {
+      var out = [];
+      for (var a = 0; a < this._addons.length; a++) {
+        var inst = this._addons[a].inst, def = this._addons[a].def;
+        var css = (inst && inst.historyCss) || def.historyCss;
+        if (css) out.push(css);
+      }
+      return out.join("\n");
+    }
+
+    /** Buttons an add-on puts beside the history (historyTools): in the
+     *  History view's strip and the drawer's list.  `target.getDoc()` is the
+     *  report's document (the view), `target.root` the list (the drawer). */
+    _addonsHistoryTools(target) {
+      var out = [];
+      for (var a = 0; a < this._addons.length; a++) {
+        var inst = this._addons[a].inst, def = this._addons[a].def;
+        var fn = (inst && inst.historyTools) || def.historyTools;
+        if (typeof fn !== "function") continue;
+        try { (fn.call(inst, target) || []).forEach(function (b) { if (b) out.push(b); }); }
+        catch (e) { if (window.console) console.error("sympy-editor: add-on " + this._addons[a].name + " failed on the history tools", e); }
+      }
+      return out;
+    }
+
+    _addonsStepElements(step, i, prev) {
+      var out = [];
+      for (var a = 0; a < this._addons.length; a++) {
+        var inst = this._addons[a].inst, def = this._addons[a].def;
+        var fn = (inst && inst.historyStep) || def.historyStep;
+        if (typeof fn !== "function") continue;
+        try { var el = fn.call(inst, step, i, prev); if (el) out.push(el); }
+        catch (e) { if (window.console) console.error("sympy-editor: add-on " + this._addons[a].name + " failed on a history step", e); }
+      }
+      return out;
     }
 
     /** The Python script reproducing the history (built by the document). */
@@ -4064,9 +4561,11 @@ var SympyEditor = (function () {
         h("option", { value: "py", title: "A Python script rebuilding every step with SymPy" }, ["as a Python script"])
       ]);
       var close = h("button", { type: "button", class: "se-history-close", title: "Close (Esc)", "aria-label": "Close" }, ["\u00d7"]);
+      var addonTools = this._addonsHistoryTools({ getDoc: function () { return frame.contentDocument; }, root: null, where: "view" });
       var head = h("div", { class: "se-history-head" },
         [h("span", { class: "se-history-title" }, ["History", h("small", {}, ["tap a step to open it"])])]
           .concat(playerControls(frame, ((this._history && this._history.steps) || []).length),
+                  addonTools.length ? [h("span", { class: "se-head-group se-head-addons" }, addonTools)] : [],
                   [h("span", { class: "se-head-group" }, [save]),
                    h("span", { class: "se-head-group se-head-close" }, [close])]));
       var view = h("div", { class: "se-history-view", role: "dialog", "aria-label": "History" }, [head, frame]);
@@ -4091,6 +4590,7 @@ var SympyEditor = (function () {
         var steps = d.querySelectorAll(".step[data-index]");
         for (var i = 0; i < steps.length; i++) {
           steps[i].addEventListener("click", function (ev) {
+            if (ev.target.closest && ev.target.closest(".extra")) return;   // an add-on's box: its own click (a summary toggles)
             var index = parseInt(ev.currentTarget.getAttribute("data-index"), 10);
             self.closeHistory();
             if (!isNaN(index)) self.gotoStep(index);
@@ -4126,17 +4626,24 @@ var SympyEditor = (function () {
 
     /** The guide in a box: what showHelp shows the toolbar's "?" opens.
      *  Static content (HELP_HTML), same overlay dress as the history view. */
-    showHelp() {
-      if (this.helpView) { this.closeHelp(); return; }    // the button toggles it
+    /** The guide: the editor's own (HELP_HTML), or an add-on's `html`
+     *  under `title` - the same overlay, so every "?" opens the same kind of
+     *  page.  The button toggles it; opening another guide replaces it. */
+    showHelp(html, title) {
+      var same = this.helpView && this._helpTitle === (title || "");
+      if (this.helpView) this.closeHelp();
+      if (same) return;
       var self = this;
       this.closeDrawer();
       this.closeHistory();
+      var heading = title || "How to use the editor";
+      this._helpTitle = title || "";
       var close = h("button", { type: "button", class: "se-history-close", title: "Close (Esc)", "aria-label": "Close" }, ["\u00d7"]);
       var head = h("div", { class: "se-history-head" }, [
-        h("span", { class: "se-history-title" }, ["How to use the editor"]), close]);
+        h("span", { class: "se-history-title" }, [heading]), close]);
       var body = h("div", { class: "se-help-body" });
-      body.innerHTML = HELP_HTML;
-      var view = h("div", { class: "se-history-view se-help-view", role: "dialog", "aria-label": "How to use the editor" }, [head, body]);
+      body.innerHTML = html || HELP_HTML;
+      var view = h("div", { class: "se-history-view se-help-view", role: "dialog", "aria-label": heading }, [head, body]);
       close.addEventListener("click", function () { self.closeHelp(); });
       this._helpKey = function (ev) { if (ev.key === "Escape") { ev.preventDefault(); self.closeHelp(); } };
       view.addEventListener("keydown", this._helpKey);           // (the editor's own handler stops Esc from reaching the document)
@@ -4327,6 +4834,7 @@ var SympyEditor = (function () {
       var report = h("button", { type: "button", class: "se-history-report", title: "View the whole history with what each step changed; save it as a web page or a Python script" }, ["View\u2026"]);
       report.addEventListener("click", function () { self.showHistory(); });
       tools.appendChild(report);
+      this._addonsHistoryTools({ getDoc: function () { return null; }, root: hist, where: "drawer" }).forEach(function (b) { tools.appendChild(b); });
       hist.appendChild(tools);
       if (!h_ || !h_.labels) { hist.appendChild(h("div", { class: "se-step se-step-note" }, ["(open the drawer again after an edit)"])); return; }
       h_.labels.forEach(function (label, i) {
@@ -4401,6 +4909,7 @@ var SympyEditor = (function () {
         this._fsListener = function () {
           var el = document.fullscreenElement || document.webkitFullscreenElement;
           if (self._usedFsApi && !el && self.fullscreen) self.setFullscreen(false);
+          else self._relayout();                     // entered (or left) the browser's full screen: the view has a new size
         };
         document.addEventListener("fullscreenchange", this._fsListener);
         document.addEventListener("webkitfullscreenchange", this._fsListener);
@@ -4490,6 +4999,14 @@ var SympyEditor = (function () {
       if (msg) {
         this.error.textContent = msg;
         this.error.hidden = false;
+        // Half a second of red over the formula, so that a refused edit is
+        // not missed - the same flicker the tree panel gives.
+        var self = this;
+        this.root.classList.remove("se-flash");
+        void this.root.offsetWidth;                       // restart the animation
+        this.root.classList.add("se-flash");
+        clearTimeout(this._flashTimer);
+        this._flashTimer = setTimeout(function () { self.root.classList.remove("se-flash"); }, 600);
       } else {
         this.error.hidden = true;
         this.error.textContent = "";
@@ -4525,14 +5042,20 @@ var SympyEditor = (function () {
       set("zoomreset", this.zoom === 1);
       if (this.fnInput) this.fnInput.disabled = dis;
       set("finish", dis);
+      set("addons", dis);
       if (this.opsSelect) this.opsSelect.disabled = dis;
       if (this.typeMenu) this.typeMenu.disabled = dis;
+      for (var a = 0; a < this._addons.length; a++) {
+        for (var t = 0; t < this._addons[a].tools.length; t++) this._addons[a].tools[t].button.disabled = dis;
+      }
     }
 
     /** Remove the editor from the page, and everything it put on the
      *  document: a notebook makes and disposes of many editors, and each
      *  listener left behind would keep its editor alive. */
     destroy() {
+      this._addonsNotify("destroy");
+      this._addons = [];
       this.closeDrawer();
       this.closeHistory();
       this.closeHelp();
@@ -4544,6 +5067,8 @@ var SympyEditor = (function () {
         document.removeEventListener("webkitfullscreenchange", this._fsListener);
         this._fsListener = null;
       }
+      if (this._resizeObserver) { this._resizeObserver.disconnect(); this._resizeObserver = null; }
+      if (this._relayout) window.removeEventListener("resize", this._relayout);
       if (this.root.parentNode) this.root.parentNode.removeChild(this.root);
     }
   }
@@ -4590,7 +5115,8 @@ var SympyEditor = (function () {
     ""
   ].join("\n");
 
-  var PYODIDE_DIR = "/sympy_editor_pkg/sympy_editor";
+  var PYODIDE_ROOT = "/sympy_editor_pkg";
+  var PYODIDE_DIR = PYODIDE_ROOT + "/sympy_editor";
 
   // The worker's script: Pyodide, SymPy and the Documents live in a worker
   // thread, so a long computation leaves the page responsive and can be
@@ -4609,6 +5135,14 @@ var SympyEditor = (function () {
     "      else await py.loadPackage('sympy');",
     "      py.FS.mkdirTree(m.dir);",
     "      for (var name in m.sources) py.FS.writeFile(m.dir + '/' + name, m.sources[name]);",
+    "      for (var pkg in (m.packages || {})) for (var f in m.packages[pkg]) {",
+    "        var fp = m.root + '/' + pkg + '/' + f; py.FS.mkdirTree(fp.slice(0, fp.lastIndexOf('/'))); py.FS.writeFile(fp, m.packages[pkg][f]);",
+    "      }",
+    "      if (m.micropip && m.micropip.length) {",
+    "        self.postMessage({ type: 'progress', text: 'Installing add-ons…' });",
+    "        await py.loadPackage('micropip');",
+    "        await py.runPythonAsync('import micropip\\nawait micropip.install(' + JSON.stringify(m.micropip) + ')');",
+    "      }",
     "      py.runPython(m.boot);",
     "      newDoc = py.globals.get('__sympy_editor_new');",
     "      handle = py.globals.get('__sympy_editor_handle');",
@@ -4643,6 +5177,16 @@ var SympyEditor = (function () {
     else await py.loadPackage("sympy");
     py.FS.mkdirTree(PYODIDE_DIR);
     for (var name in cfg.sources) py.FS.writeFile(PYODIDE_DIR + "/" + name, cfg.sources[name]);
+    for (var pkg in (cfg.packages || {})) for (var f in cfg.packages[pkg]) {
+      var fp = PYODIDE_ROOT + "/" + pkg + "/" + f;
+      py.FS.mkdirTree(fp.slice(0, fp.lastIndexOf("/")));
+      py.FS.writeFile(fp, cfg.packages[pkg][f]);
+    }
+    if (cfg.micropip && cfg.micropip.length) {
+      report("Installing add-ons…");
+      await py.loadPackage("micropip");
+      await py.runPythonAsync("import micropip\nawait micropip.install(" + JSON.stringify(cfg.micropip) + ")");
+    }
     py.runPython(PYODIDE_BOOT);
     return { newDoc: py.globals.get("__sympy_editor_new"), handle: py.globals.get("__sympy_editor_handle") };
   }
@@ -4697,7 +5241,8 @@ var SympyEditor = (function () {
             await post({ type: "init", pyodideJs: new URL(cfg.pyodideJs, document.baseURI).href,
               indexURL: new URL(cfg.pyodideIndex, document.baseURI).href,
               sympyWheel: cfg.sympyWheel ? new URL(cfg.sympyWheel, document.baseURI).href : "",
-              dir: PYODIDE_DIR, sources: cfg.sources, boot: PYODIDE_BOOT });
+              dir: PYODIDE_DIR, root: PYODIDE_ROOT, sources: cfg.sources,
+              packages: cfg.packages || {}, micropip: cfg.micropip || [], boot: PYODIDE_BOOT });
             return;
           } catch (e) {
             if (window.console) console.warn("sympy-editor: Python could not start in a worker, using the page instead.", e);
@@ -4882,12 +5427,66 @@ var SympyEditor = (function () {
 
   var backends = { http: httpBackend, pyodide: pyodideBackend, native: nativeBackend, readonly: readonlyBackend };
 
+  /* ------------------------------------------------------------------ */
+  /* Add-ons                                                             */
+  /* ------------------------------------------------------------------ */
+
+  // The front ends of the add-ons, by name - shared by every copy of this
+  // script on the page (a notebook embeds one per fragment).  An add-on's
+  // script calls registerAddon(name, {mount, tools}); a Document made with
+  // that add-on lists it in the config, and Editor mounts what is registered.
+  var addonDefs = window.__sympyEditorAddons || (window.__sympyEditorAddons = {});
+
+  /** Register the front end of an add-on: `def.mount(api)` is called by each
+   *  editor whose document has the add-on and returns `{element, title,
+   *  help, onState(snap), onSelect(path, range), commands: {cmd: fn},
+   *  destroy()}` (all optional); `def.tools` lists toolbar buttons `{cmd,
+   *  label, title, run(api)}`; `def.help` (or the instance's) is HTML for
+   *  the guide behind the panel's "?", shown as the editor's own guide is.
+   *  `historyStep(step, i, prev)` returns an element drawn under a step of
+   *  the history in the drawer's list, `historyStepHtml(step, i, prev)`
+   *  static markup for the same step in the self-contained report (no
+   *  script runs there), with `historyCss` for its styles; the step carries
+   *  what the Python side's contribute_step put there.  `historyTools(target)`
+   *  returns buttons for the history's strip and the drawer's list (`target.getDoc()`
+   *  is the report's document there, `target.root` the list in the drawer).
+   *  See sympy_editor/addons.py for the Python side. */
+  function registerAddon(name, def) {
+    addonDefs[name] = def;
+  }
+
+  /** Load the add-ons of a document (descriptors from Python: name, js, css,
+   *  options): the CSS goes in the page once, the script runs once and
+   *  registers itself.  Idempotent, so every editor may call it. */
+  function loadAddons(list) {
+    var loaded = window.__sympyEditorAddonsLoaded || (window.__sympyEditorAddonsLoaded = {});
+    for (var i = 0; i < (list || []).length; i++) {
+      var d = list[i];
+      if (!d || !d.name) continue;
+      if (d.css && !document.querySelector('style[data-se-addon="' + d.name + '"]')) {
+        var st = document.createElement("style");
+        st.setAttribute("data-se-addon", d.name);
+        st.textContent = d.css;
+        document.head.appendChild(st);
+      }
+      if (d.js && !loaded[d.name] && !addonDefs[d.name]) {
+        loaded[d.name] = true;
+        try {
+          (new Function("SympyEditor", d.js))(API);
+        } catch (e) {
+          if (window.console) console.error("sympy-editor: the script of add-on " + d.name + " failed", e);
+        }
+      }
+    }
+  }
+
   /** Create an editor from a config object produced by html.py. */
   function mount(host, cfg) {
     var make = backends[cfg.backend] || readonlyBackend;
     var options = Object.assign({}, cfg.options || {});
     if (cfg.backend === "readonly") options.readOnly = true;
     if (cfg.examples) options.examples = cfg.examples;     // what a new session can start from
+    if (cfg.addons) options.addons = cfg.addons;           // their front ends (loaded by the Editor)
     var backend = make(cfg);
     var editor = new Editor(host, backend, options);
     editor.setState(cfg.snapshot).then(function () {
@@ -4899,18 +5498,24 @@ var SympyEditor = (function () {
           if (backend.canInterrupt && !backend.canInterrupt()) editor._setStatus("Python runs in the page (no worker): long computations cannot be interrupted here");
         });
       }
-      warm.then(function () { return editor._initSessions(); });
+      warm.then(function () { return editor._initSessions(); }).then(function () { return editor._restoreAddons(); });
     });
     return editor;
   }
 
-  return {
+  var API = {
     Editor: Editor,
     backends: backends,
     mount: mount,
     mountHistory: mountHistory,
     buildHistoryReport: buildHistoryReport,
     loadKatex: loadKatex,
+    loadScript: loadScript,
+    ensureCss: ensureCss,
+    h: h,
+    registerAddon: registerAddon,
+    loadAddons: loadAddons,
+    addons: addonDefs,
     toDisplay: toDisplay,
     toSource: toSource,
     expandCommands: expandCommands,
@@ -4918,4 +5523,5 @@ var SympyEditor = (function () {
     parentPath: parentPath,
     DEFAULTS: DEFAULTS
   };
+  return API;
 })();

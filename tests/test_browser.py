@@ -1141,7 +1141,7 @@ def test_paste_over_the_whole_expression_applies_at_once(browser, serve_expr):
         const removed = [], orig = document.removeEventListener.bind(document);
         document.removeEventListener = (k, fn, o) => { removed.push(k); orig(k, fn, o); };
         ed.destroy(); document.removeEventListener = orig; return removed.sort(); }""")
-    assert removed == ["copy", "cut", "paste", "selectionchange"]
+    assert removed == ["copy", "cut", "paste", "pointerdown", "selectionchange"]   # pointerdown: the Add-ons menu closes on a click elsewhere
     assert page.locator(".sympy-editor").count() == 0
     assert page.errors == []
 
@@ -3536,3 +3536,315 @@ def test_naming_a_session_owns_the_row_until_it_is_done(browser, tmp_path):
     assert _wait(lambda: row.locator("code").first.inner_text() == "Hamiltonian")
     assert errors == []
     page.close()
+
+
+# ---------------------------------------------------------------------------
+# Add-ons: the front end of an Addon (sympy_editor/addons.py) gets a panel
+# under the formula, toolbar buttons, the state and the selection as they
+# change, and a way to call its Python methods.
+
+
+def _demo_addon():
+    from sympy import Basic, Integer
+    from sympy_editor import Addon
+
+    class Boxed(Basic):
+        def __new__(cls, value):
+            return Basic.__new__(cls, value)
+
+        def _latex(self, printer):
+            return r"\boxed{%s}" % printer._print(self.args[0])
+
+        def _sympystr(self, printer):
+            return "Box(%s)" % printer._print(self.args[0])
+
+    class Demo(Addon):
+        name = "demo"
+        label = "Demo panel"
+        js = """
+SympyEditor.registerAddon("demo", {
+  tools: [{ cmd: "boxit", label: "Box it", title: "Put the expression in a box",
+            run: function (api) { return api.call("box_it", {}); } }],
+  mount: function (api) {
+    var el = api.h("div", { class: "demo-panel" });
+    var btn = api.h("button", { type: "button", class: "demo-count" }, ["count"]);
+    btn.addEventListener("click", function () {
+      api.call("count", {}).then(function (res) { el.setAttribute("data-count", String(res.n)); });
+    });
+    el.appendChild(btn);
+    return {
+      element: el,
+      help: "<section><h3>Demo</h3><p>This panel counts arguments.</p></section>",
+      historyStepHtml: function (step, i) { return '<span class="demo-step">step ' + (i + 1) + ': ' + step.src_len + '</span>'; },
+      historyCss: ".demo-step { color: rebeccapurple; }",
+      onState: function (snap) { if (!snap.preview) el.setAttribute("data-src", snap.src); },
+      onSelect: function (path) { el.setAttribute("data-sel", path || ""); }
+    };
+  }
+});
+"""
+        css = ".se-addon-demo .demo-panel { padding: 2px; }"
+
+        def namespace(self):
+            return {"Box": Boxed, "Boxed": Boxed}
+
+        def handle(self, doc, method, payload):
+            if method == "count":
+                return {"n": len(doc.expr.args)}
+            if method == "box_it":
+                return Boxed(doc.expr)
+            raise ValueError(method)
+
+        def contribute_step(self, doc, step, expr):
+            step["src_len"] = len(str(expr))
+
+    return Demo(), Boxed
+
+
+def test_addon_panel_tools_and_calls(browser):
+    addon, Boxed = _demo_addon()
+    doc = Document(x + y, addons=[addon])
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        page = _open(browser, srv.url)
+        panel = page.locator(".se-addon-demo .demo-panel")
+        assert panel.count() == 1
+        assert page.locator(".se-addon-demo summary").inner_text().startswith("Demo panel")   # then the "?"
+        assert page.locator('style[data-se-addon="demo"]').count() == 1
+        assert panel.get_attribute("data-src") == "x + y"
+        # the selection reaches the add-on
+        _click(page, "/0")
+        page.wait_for_function("document.querySelector('.demo-panel').getAttribute('data-sel') === '/0'")
+        # a query: answered, nothing changed
+        page.locator(".demo-count").click()
+        page.wait_for_function("document.querySelector('.demo-panel').getAttribute('data-count') === '2'")
+        assert doc.expr == x + y and not doc.can_undo
+        # a method that fails rejects the caller's promise and leaves the editor's error line alone
+        rejected = page.evaluate("document.querySelector('.sympy-editor').__sympyEditor._addonCall('demo', 'nope', {}).then(() => 'resolved', e => e.message)")
+        assert "ValueError: nope" in rejected
+        assert page.locator(".se-error").get_attribute("hidden") is not None
+        # a toolbar button of the add-on: a change like any edit
+        page.locator('.se-toolbar [data-cmd="addon:demo:boxit"]').click()
+        page.wait_for_function("document.querySelector('.se-source').textContent.startsWith('Box(')")
+        assert isinstance(doc.expr, Boxed)
+        page.wait_for_function("document.querySelector('.demo-panel').getAttribute('data-src').startsWith('Box(')")
+        assert page.locator(".se-view .katex .fbox, .se-view .katex .boxed").count() >= 1
+        page.keyboard.press("Control+z")
+        page.wait_for_function("document.querySelector('.se-source').textContent === 'x + y'")
+        # the panel's "?" opens the add-on's guide in the editor's help overlay, Esc closes it
+        page.locator(".se-addon-demo .se-addon-help").click()
+        guide = page.locator(".se-help-view")
+        assert guide.is_visible() and "counts arguments" in guide.inner_text()
+        assert page.locator(".se-help-view .se-history-title").inner_text() == "Demo panel"
+        assert page.locator(".se-addon-demo").get_attribute("open") is not None   # the box did not fold
+        page.keyboard.press("Escape")
+        assert page.locator(".se-help-view").count() == 0
+        page.locator('.se-toolbar [data-cmd="help"]').click()                  # the editor's own guide still opens
+        assert "selecting" in page.locator(".se-help-view").inner_text().lower()
+        page.keyboard.press("Escape")
+        # the history view carries what the add-on draws under each step, with its CSS
+        page.locator('.se-toolbar [data-cmd="history"]').click()
+        frame = page.frame_locator(".se-history-frame")
+        frame.locator("section.step .demo-step").first.wait_for(timeout=15000)
+        assert frame.locator("section.step .demo-step").count() == 2
+        assert frame.locator("section.step .demo-step").first.text_content() == "step 1: 5"      # len("x + y")
+        assert page.evaluate("document.querySelector('.se-history-frame').contentDocument.head.innerHTML.includes('rebeccapurple')")
+        assert page.locator(".se-history-head .se-head-addons").count() == 0      # no historyTools: no group of theirs
+        page.keyboard.press("Escape")
+        assert page.errors == []
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_addons_can_be_switched_on_and_off_while_editing(browser):
+    addon, Boxed = _demo_addon()
+    doc = Document(x + y, available=[addon])        # known to the document, off
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        page = _open(browser, srv.url)
+        assert page.locator(".se-addon-demo").count() == 0
+        assert page.locator('.se-toolbar [data-cmd="addon:demo:boxit"]').count() == 0
+        menu_btn = page.locator('.se-toolbar [data-cmd="addons"]')
+        assert menu_btn.is_visible()
+
+        def open_menu():                                  # the button toggles: open it only when it is closed
+            if not page.locator(".se-addons-menu").is_visible():
+                menu_btn.click()
+        open_menu()
+        box = page.locator(".se-addons-menu input")
+        assert box.count() == 1 and not box.is_checked()
+        assert "Demo panel" in page.locator(".se-addons-menu").inner_text()
+        box.check()                                       # on: the panel and the tools appear
+        page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)
+        assert page.locator('.se-toolbar [data-cmd="addon:demo:boxit"]').count() == 1
+        assert list(doc.addons) == ["demo"] and not doc.can_undo
+        page.wait_for_function("document.querySelector('.demo-panel').getAttribute('data-src') === 'x + y'")
+        page.locator('.se-toolbar [data-cmd="addon:demo:boxit"]').click()
+        page.wait_for_function("document.querySelector('.se-source').textContent.startsWith('Box(')")
+        # off: everything of it goes, the expression stays
+        open_menu()
+        page.locator(".se-addons-menu input").uncheck()
+        page.wait_for_function("!document.querySelector('.se-addon-demo')", timeout=10000)
+        assert page.locator('.se-toolbar [data-cmd="addon:demo:boxit"]').count() == 0
+        assert doc.addons == {} and isinstance(doc.expr, Boxed)
+        assert page.locator(".se-source").inner_text().startswith("Box(")
+        # and on again
+        open_menu()
+        page.locator(".se-addons-menu input").check()
+        page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)
+        assert page.errors == []
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_remembered_addons_come_back_after_a_reload(browser):
+    """With rememberAddons, the add-ons switched on are kept in the browser's
+    storage and switched on again when the page loads - what the apps do."""
+    addon, Boxed = _demo_addon()
+    doc = Document(x + y, available=[addon])
+    srv = EditorServer(doc, port=0, options={"rememberAddons": True})
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        page = _open(browser, srv.url)
+        assert page.locator(".se-addon-demo").count() == 0
+        page.locator('.se-toolbar [data-cmd="addons"]').click()
+        page.locator(".se-addons-menu input").check()
+        page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)
+        assert page.evaluate("JSON.parse(localStorage.getItem('sympy-editor:addons'))") == ["demo"]
+        doc.disable("demo")                                     # the server forgets (an app restarted)
+        page.goto(srv.url)
+        page.wait_for_selector(".se-addon-demo .demo-panel", timeout=15000)     # switched on again from the storage
+        assert list(doc.addons) == ["demo"]
+        page.locator('.se-toolbar [data-cmd="addons"]').click()
+        page.locator(".se-addons-menu input").uncheck()
+        page.wait_for_function("!document.querySelector('.se-addon-demo')", timeout=10000)
+        assert page.evaluate("JSON.parse(localStorage.getItem('sympy-editor:addons'))") == []
+        assert page.errors == []
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def _box_follows_selection(page):
+    """The selection box lies over the selected glyphs, inside the view."""
+    return page.evaluate("""() => {
+      const box = document.querySelector('.se-box-select'), sel = document.querySelector('.se-selected[data-path]'), view = document.querySelector('.se-view');
+      if (!box || !sel) return 'missing';
+      const b = box.getBoundingClientRect(), s = sel.getBoundingClientRect(), v = view.getBoundingClientRect();
+      const near = (a, c) => Math.abs(a - c) <= 6;
+      return { inside: b.left >= v.left - 1 && b.right <= v.right + 1 && b.top >= v.top - 1 && b.bottom <= v.bottom + 1,
+               over: near(b.left + 2, s.left) && near(b.top + 2, s.top) && near(b.width - 4, s.width),
+               box: [Math.round(b.left), Math.round(b.top)], sel: [Math.round(s.left), Math.round(s.top)] };
+    }""")
+
+
+def test_the_selection_follows_the_view_into_full_screen(browser, served):
+    """Full screen with a selection: the highlight is placed in pixels, and
+    the view keeps changing size after the class is toggled (the browser's
+    full screen, a phone's bars going away), so it has to follow - and it did
+    not: the box stayed where it had been drawn, out of the formula."""
+    srv, doc = served
+    page = _open(browser, srv.url)
+    _select(page, "/0")
+    before = _box_follows_selection(page)
+    assert before["inside"] and before["over"], before
+    page.locator(".se-fullbtn").click()
+    page.wait_for_selector(".sympy-editor.se-full")
+    page.wait_for_function("document.querySelector('.se-box-select') !== null")
+    # the view's size changes again, a moment after the toggle: a padding put
+    # on the view stands for the browser's own full screen and a phone's bars
+    # (a real full screen cannot be resized from outside)
+    page.evaluate("document.querySelector('.se-view').style.padding = '40px 0 0 160px'")
+    page.wait_for_function("(() => { const b = document.querySelector('.se-box-select'), s = document.querySelector('.se-selected[data-path]'); "
+                           "if (!b || !s) return false; const br = b.getBoundingClientRect(), sr = s.getBoundingClientRect(); "
+                           "return Math.abs(br.left + 2 - sr.left) <= 6 && Math.abs(br.top + 2 - sr.top) <= 6; })()", timeout=5000)
+    after = _box_follows_selection(page)
+    assert after["inside"] and after["over"], after
+    assert page.locator(".se-selected[data-path]").get_attribute("data-path") == "/0"
+    page.locator(".se-fullbtn").click()                        # back (Esc would deselect first: something is selected)
+    page.wait_for_function("!document.querySelector('.sympy-editor').classList.contains('se-full')")
+    page.evaluate("document.querySelector('.se-view').style.padding = ''")
+    page.wait_for_function("(() => { const b = document.querySelector('.se-box-select'), s = document.querySelector('.se-selected[data-path]'); "
+                           "if (!b || !s) return false; const br = b.getBoundingClientRect(), sr = s.getBoundingClientRect(); "
+                           "return Math.abs(br.left + 2 - sr.left) <= 6 && Math.abs(br.top + 2 - sr.top) <= 6; })()", timeout=5000)
+    assert page.errors == []
+
+
+def test_a_template_leaves_placeholders_and_a_refused_edit_flickers(browser, serve_expr):
+    r"""\int typed in a field puts an integral in with two empty boxes: the
+    first is selected so that typing fills it, Tab moves to the next; a
+    field that does not parse is refused with a red flicker of the view."""
+    srv, doc = serve_expr(x + y)
+    page = _open(browser, srv.url)
+    _select(page, "/0")
+    page.keyboard.type("\\int ")                                # the space completes the command
+    field = page.locator(".se-inline")
+    assert field.count() == 1
+    value = field.input_value()
+    assert value.startswith("Integral(_1, _2)"), value
+    page.keyboard.press("Enter")
+    page.wait_for_function("document.querySelector('.se-source').textContent.includes('Integral(_1, _2)')")
+    slots = page.locator(".se-view .se-placeholder:not(.se-ghost *)")      # (the change animation clones the rendering for a moment)
+    assert slots.count() == 2
+    assert page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.placeholders.length") == 2
+    # the first slot is selected: typing fills it
+    first = page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.placeholders[0]")
+    assert page.locator(".se-selected[data-path]").first.get_attribute("data-path") == first
+    page.keyboard.type("x**2")
+    page.keyboard.press("Enter")
+    page.wait_for_function("document.querySelector('.se-source').textContent.includes('Integral(x**2, _2)')")
+    # the next slot is selected by itself? no - Tab walks to it
+    page.keyboard.press("Tab")
+    remaining = page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.placeholders[0]")
+    assert page.locator(".se-selected[data-path]").first.get_attribute("data-path") == remaining
+    page.keyboard.type("x")
+    page.keyboard.press("Enter")
+    page.wait_for_function("document.querySelector('.se-source').textContent === 'y + Integral(x**2, x)'")
+    assert page.locator(".se-view .se-placeholder:not(.se-ghost *)").count() == 0
+    # a second template gets fresh slot numbers even while others exist
+    page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.select('/0')")
+    page.keyboard.type("\\sum ")
+    assert page.locator(".se-inline").input_value().startswith("Sum(_1, (_2, _3, _4))")
+    page.keyboard.press("Escape")
+    page.wait_for_function("document.querySelector('.se-inline') === null")
+    # a refused edit: the message, and the flicker
+    page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.select('/0')")
+    page.keyboard.type("x +")
+    page.keyboard.press("Enter")
+    page.wait_for_function("!document.querySelector('.se-error').hidden")
+    assert "parse" in page.locator(".se-error").inner_text().lower()
+    assert page.evaluate("document.querySelector('.sympy-editor').classList.contains('se-flash')")
+    page.wait_for_function("!document.querySelector('.sympy-editor').classList.contains('se-flash')", timeout=3000)
+    assert page.errors == []
+
+
+def test_a_function_at_a_caret_is_added_there(browser, serve_expr):
+    """A caret shown and nothing selected: a function from the box is
+    inserted at the caret, applied to an empty box that is selected next -
+    it used to be applied to the whole expression, or seem to do nothing."""
+    srv, doc = serve_expr(x + y)
+    page = _open(browser, srv.url)
+    page.evaluate("document.querySelector('.sympy-editor').__sympyEditor._caretAtEnd('end')")
+    page.wait_for_selector(".se-caret")
+    assert page.locator(".se-selected[data-path]").count() == 0
+    fn = page.locator(".se-fn")
+    fn.fill("sin")
+    fn.press("Enter")
+    page.wait_for_function("document.querySelector('.se-source').textContent === 'x + y + sin(_1)'")
+    assert str(doc.expr) == "x + y + sin(_1)"
+    slot = page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.placeholders[0]")
+    assert page.locator(".se-selected[data-path]").first.get_attribute("data-path") == slot
+    page.keyboard.type("x")
+    page.keyboard.press("Enter")
+    page.wait_for_function("document.querySelector('.se-source').textContent === 'x + y + sin(x)'")
+    # with a selection the box still applies the function to the selection
+    page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.select('/0')")
+    fn.fill("cos")
+    fn.press("Enter")
+    page.wait_for_function("document.querySelector('.se-source').textContent.includes('cos(')")
+    assert "cos(" in str(doc.expr) and "sin(x)" in str(doc.expr)
+    assert page.errors == []

@@ -1,0 +1,8 @@
+{
+  "name": "tree",
+  "label": "Expression tree",
+  "module": "sympy_editor_tree",
+  "version": "0.0.1",
+  "description": "The expression tree as an editable graph under the formula, and in every step of the history.",
+  "requires": []
+}
