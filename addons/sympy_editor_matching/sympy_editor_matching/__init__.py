@@ -137,7 +137,7 @@ def rule_text(rule: RewriteRule) -> str:
 class MatchingAddon(Addon):
     name = "matching"
     label = "Rewrite rules"
-    requires = ("sympy-matching",)
+    requires = ("sympy-matching>=0.0.4",)
     kinds = {"rule": (RewriteRule,)}
     kind_labels = {"rule": "Rule"}
     js = (STATIC / "matching.js").read_text(encoding="utf-8")
