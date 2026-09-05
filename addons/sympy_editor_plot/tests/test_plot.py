@@ -70,3 +70,12 @@ def test_no_value_is_guessed():
     doc = Document(a * sin(x), addons=[ADDON])
     res = _samples(doc, path="/", span=[0, 1], n=3)
     assert res["var"] == "a" and res["needs"] == ["x"] and res["curves"] == []
+
+
+def test_a_piece_that_cannot_be_sampled_says_so():
+    from sympy import Integral, oo, exp
+    doc = Document(Integral(exp(-x ** 2), (x, -oo, y)) + sin(y), addons=[ADDON])
+    snap = doc.handle({"action": "addon", "addon": "plot", "method": "samples", "path": "/", "span": [0, 1], "n": 3})
+    assert snap["error"] is None                                     # not the editor's error
+    assert "cannot be plotted as it stands" in snap["query"]["error"]
+    assert "PrintMethodNotImplementedError" in snap["query"]["error"]

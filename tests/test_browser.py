@@ -3620,6 +3620,10 @@ def test_addon_panel_tools_and_calls(browser):
         page.locator(".demo-count").click()
         page.wait_for_function("document.querySelector('.demo-panel').getAttribute('data-count') === '2'")
         assert doc.expr == x + y and not doc.can_undo
+        # a method that fails rejects the caller's promise and leaves the editor's error line alone
+        rejected = page.evaluate("document.querySelector('.sympy-editor').__sympyEditor._addonCall('demo', 'nope', {}).then(() => 'resolved', e => e.message)")
+        assert "ValueError: nope" in rejected
+        assert page.locator(".se-error").get_attribute("hidden") is not None
         # a toolbar button of the add-on: a change like any edit
         page.locator('.se-toolbar [data-cmd="addon:demo:boxit"]').click()
         page.wait_for_function("document.querySelector('.se-source').textContent.startsWith('Box(')")

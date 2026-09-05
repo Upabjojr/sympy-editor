@@ -95,9 +95,9 @@ def test_move_a_subtree():
     _call(doc, "move", **{"from": [xi], "to": [mi]})
     assert doc.expr == x * y * z
     snap = doc.handle({"action": "addon", "addon": "tree", "method": "move", "from": [], "to": [0]})
-    assert "root" in snap["error"]
+    assert "root" in snap["query"]["error"]
     snap = doc.handle({"action": "addon", "addon": "tree", "method": "move", "from": [0], "to": [0]})
-    assert "into itself" in snap["error"]
+    assert "into itself" in snap["query"]["error"]
 
 
 def test_the_page_carries_the_addon():
@@ -129,6 +129,6 @@ def test_removable_says_what_can_leave_its_parent():
     # the server refuses the same, with words
     path = by_src["sin(x)"]["path"] + [0]
     snap = doc.handle({"action": "addon", "addon": "tree", "method": "delete", "path": path})
-    assert "cannot be taken out of sin(x)" in snap["error"] and doc.expr == sin(x) + y * z
+    assert "cannot be taken out of sin(x)" in snap["query"]["error"] and doc.expr == sin(x) + y * z
     snap = doc.handle({"action": "addon", "addon": "tree", "method": "move", "from": path, "to": by_src["y*z"]["path"]})
-    assert "cannot be taken out of sin(x)" in snap["error"] and doc.expr == sin(x) + y * z
+    assert "cannot be taken out of sin(x)" in snap["query"]["error"] and doc.expr == sin(x) + y * z

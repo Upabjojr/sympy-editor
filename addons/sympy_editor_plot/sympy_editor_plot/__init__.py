@@ -121,7 +121,15 @@ class PlotAddon(Addon):
         for label, side in sides:
             if not isinstance(side, Expr):
                 raise ValueError(f"{side} is not something with a value to plot")
-            answer["curves"].append({"label": label or str(side), "y": sample(side, var, span, n)})
+            try:
+                ys = sample(side, var, span, n)
+            except Exception as exc:
+                # an unevaluated Integral, a Sum, an undefined function: SymPy
+                # cannot turn it into numbers, and says so in printer terms
+                reason = str(exc).split("\n")[0][:120]
+                raise ValueError(f"{side} cannot be plotted as it stands ({type(exc).__name__}: {reason}); "
+                                 "evaluate it first, or select a piece that has a value") from None
+            answer["curves"].append({"label": label or str(side), "y": ys})
         return answer
 
 

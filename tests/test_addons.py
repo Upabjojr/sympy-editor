@@ -134,7 +134,7 @@ def test_methods_query_change_and_error():
     snap = doc.handle({"action": "addon", "addon": "demo", "method": "box_at", "path": "/0"})
     assert doc.expr == Boxed(Boxed(x + y)) and not snap["error"]
     snap = doc.handle({"action": "addon", "addon": "demo", "method": "nope"})
-    assert "no such method" in snap["error"] and doc.expr == Boxed(Boxed(x + y))
+    assert "no such method" in snap["query"]["error"] and doc.expr == Boxed(Boxed(x + y))
     snap = doc.handle({"action": "addon", "addon": "other", "method": "count"})
     assert "No add-on 'other'" in snap["error"]
 
@@ -355,3 +355,14 @@ def test_an_available_addon_this_python_lacks_is_listed_with_its_error_not_fatal
     doc2 = Document(x, available=["sympy_editor_tree"] if False else [ADDON.module + ":ADDON"])
     names = [a["name"] for a in doc2.available_addons()]
     assert names == ["demo"] and [a["name"] for a in doc2.available_addons()] == ["demo"]
+
+
+def test_a_failing_addon_method_reaches_only_the_caller():
+    """A method that raises answers under "query" with the error, and the
+    snapshot's own error stays None: the panel that asked shows it, the
+    editor's error line does not."""
+    doc = Document(x + y, addons=[ADDON])
+    snap = doc.handle({"action": "addon", "addon": "demo", "method": "nope"})
+    assert snap["error"] is None
+    assert snap["query"]["addon"] == "demo" and "no such method" in snap["query"]["error"]
+    assert doc.expr == x + y

@@ -94,7 +94,7 @@ def test_use_the_selected_rule_and_remove_it():
     assert len(res["rules"]) == 1 and res["rules"][0]["src"].startswith("Rule(")
     assert _q(doc, "remove_rule", index=0)["rules"] == []
     snap = doc.handle({"action": "addon", "addon": "matching", "method": "remove_rule", "index": 5})
-    assert "No rule" in snap["error"]
+    assert "No rule" in snap["query"]["error"]
 
 
 def test_rule_text():
@@ -126,9 +126,9 @@ def test_rules_can_be_edited_in_place_and_through_the_editor():
     doc.undo(); doc.undo()
     assert doc.expr == sin(x) ** 2
     snap = doc.handle({"action": "addon", "addon": "matching", "method": "update_rule", "index": 3, "src": "a_ -> a_"})
-    assert "No rule 4" in snap["error"]
+    assert "No rule 4" in snap["query"]["error"]
     snap = doc.handle({"action": "addon", "addon": "matching", "method": "update_rule", "index": 0, "path": "/"})
-    assert "not a rule" in snap["error"]
+    assert "not a rule" in snap["query"]["error"]
 
 
 def test_rewrite_is_one_pass_over_every_match():
@@ -141,7 +141,7 @@ def test_rewrite_is_one_pass_over_every_match():
     snap = doc.handle({"action": "apply", "path": "/", "op": "rewrite_all"})
     assert "did not settle" in snap["error"] and doc.expr == x ** 4 + sin(x ** 4) + y   # refused, untouched
     snap = doc.handle({"action": "addon", "addon": "matching", "method": "rewrite", "path": "/", "all": True})
-    assert "did not settle" in snap["error"] and doc.expr == x ** 4 + sin(x ** 4) + y
+    assert "did not settle" in snap["query"]["error"] and doc.expr == x ** 4 + sin(x ** 4) + y
     doc.undo(); doc.undo()
     # the panel's Rewrite does the same one pass at the selection
     snap = doc.handle({"action": "addon", "addon": "matching", "method": "rewrite", "path": "/"})
@@ -177,9 +177,9 @@ def test_named_rule_sets_and_the_library():
     res = _q(doc, "delete_ruleset", name="trig")
     assert res["library"] == ["square"] and res["name"] is None
     snap = doc.handle({"action": "addon", "addon": "matching", "method": "load_ruleset", "name": "trig"})
-    assert "No rule set" in snap["error"]
+    assert "No rule set" in snap["query"]["error"]
     snap = doc.handle({"action": "addon", "addon": "matching", "method": "save_ruleset", "name": "  "})
-    assert "needs a name" in snap["error"]
+    assert "needs a name" in snap["query"]["error"]
     # in Jupyter the same state is Python: the widget's addon_state
     assert [str(r) for r in doc.addon_state["matching"]["rules"]] == ["Rule(sin(a_)**2, 1 - cos(a_)**2)"]
     assert list(doc.addon_state["matching"]["library"]) == ["square"]
@@ -224,12 +224,12 @@ def test_a_named_set_saves_itself_and_revert_restore_step_back():
     res = _q(doc, "restore_reverted")
     assert [r["text"] for r in res["rules"]] == ["sin(a_)**2 -> 1 - cos(a_)**2", "x -> x**2"] and res["can_restore"] is False
     snap = doc.handle({"action": "addon", "addon": "matching", "method": "restore_reverted"})
-    assert "Nothing to restore" in snap["error"]
+    assert "Nothing to restore" in snap["query"]["error"]
     # Save again: the checkpoint moves, nothing to revert
     res = _q(doc, "save_ruleset", name="trig")
     assert res["dirty"] is False
     snap = doc.handle({"action": "addon", "addon": "matching", "method": "revert"})
-    assert "Nothing to revert" in snap["error"]
+    assert "Nothing to revert" in snap["query"]["error"]
     # an unnamed set has a checkpoint too (the rules at mount), and saves into no library
     fresh = Document(x, addons=[ADDON])
     res = _q(fresh, "add_rule", src="y -> y**2")

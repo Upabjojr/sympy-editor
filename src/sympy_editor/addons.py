@@ -171,8 +171,10 @@ class Addon:
         * None: the document as it is now - use it after editing through the
           document's own methods (``doc.replace(path, ...)``), which commit.
 
-        Raise ``ValueError`` (any exception) to report an error: the front
-        end shows it and nothing changes."""
+        Raise ``ValueError`` (any exception) to refuse: nothing changes, the
+        answer carries the error under ``snap["query"]["error"]`` and the
+        front end's ``api.call`` rejects with it - the panel that asked shows
+        it (the editor's own error line is for the editor's edits)."""
         raise ValueError(f"{self.label or self.name} has no method {method!r}")
 
     def describe(self, method: str, payload: Dict[str, Any]) -> Optional[str]:

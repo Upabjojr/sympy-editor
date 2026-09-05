@@ -1648,7 +1648,16 @@ class Document:
             raise ValueError(f"No add-on {name!r} in this document (it has {', '.join(self.addons) or 'none'})")
         payload = {k: v for k, v in message.items() if k not in ("action", "addon", "method", "_req")}
         self._action_label = addon.describe(method, payload) or f"{addon.label or name}: {method}"
-        result = addon.handle(self, method, payload)
+        try:
+            result = addon.handle(self, method, payload)
+        except Exception as exc:
+            # The failure goes back to the panel that asked (api.call rejects
+            # with it) and nowhere else: the editor's own error line is for
+            # the editor's own edits.  The plot asking for samples of a piece
+            # that has none is not an error of the formula.
+            snap = self.snapshot()
+            snap["query"] = {"addon": name, "method": method, "error": f"{type(exc).__name__}: {exc}"}
+            return snap
         if isinstance(result, dict):
             snap = self.snapshot()
             snap["query"] = {"addon": name, "method": method, "result": result}

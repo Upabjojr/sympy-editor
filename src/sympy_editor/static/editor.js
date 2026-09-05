@@ -1508,6 +1508,7 @@ var SympyEditor = (function () {
         if (self.closed) throw new Error("The session is closed");
         var snap = await self.send(msg);
         if (!snap) throw new Error("No answer");
+        if (snap.query && snap.query.error) throw new Error(snap.query.error);   // the method failed: the caller's to show
         if (snap.error) throw new Error(snap.error);
         return snap.query ? snap.query.result : snap;
       };
