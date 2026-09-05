@@ -443,6 +443,7 @@ def test_the_native_bundle_names_the_addons_and_remembers_the_switches(tmp_path)
     out = mod.build(tmp_path / "www", native=True)
     page = (out / "index.html").read_text(encoding="utf-8")
     assert all(m in page for m in ("sympy_editor_matching", "sympy_editor_plot", "sympy_editor_tree"))
+    assert "sympy_editor_addon_template" not in page                        # the template is not shipped
     assert '"rememberAddons": true' in page and '"addons": []' in page             # off at start, a click away
 
 

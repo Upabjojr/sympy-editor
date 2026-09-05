@@ -337,3 +337,21 @@ def test_the_repositorys_addon_folders_carry_manifests():
         assert (Path(m["folder"]) / m["module"] / "__init__.py").is_file(), name
         assert m["version"] and m["label"] and isinstance(m["requires"], list), name
         assert (Path(m["folder"]) / "pyproject.toml").is_file(), name
+
+
+def test_an_available_addon_this_python_lacks_is_listed_with_its_error_not_fatal():
+    """A page built with an add-on the Python that opens it does not have
+    (an app without that folder): the document exists, the add-on shows in
+    the menu with its error, the others work."""
+    doc = Document(x + y, available=["no_such_module_anywhere_xyz", ADDON])
+    listed = {a["name"]: a for a in doc.available_addons()}
+    assert "demo" in listed and listed["demo"]["on"] is False
+    assert "No add-on" in listed["no_such_module_anywhere_xyz"]["error"]
+    snap = doc.handle({"action": "addons", "enable": ["demo"]})
+    assert not snap["error"] and snap["addons"] == ["demo"]
+    snap = doc.handle({"action": "addons", "enable": ["no_such_module_anywhere_xyz"]})
+    assert "No add-on" in snap["error"] and doc.addons.keys() == {"demo"}
+    # a module name given as available is known by the add-on's name once seen
+    doc2 = Document(x, available=["sympy_editor_tree"] if False else [ADDON.module + ":ADDON"])
+    names = [a["name"] for a in doc2.available_addons()]
+    assert names == ["demo"] and [a["name"] for a in doc2.available_addons()] == ["demo"]

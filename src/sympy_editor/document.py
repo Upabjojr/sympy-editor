@@ -424,10 +424,16 @@ class Document:
         if available is None:
             self._catalog.update(installed())
         else:
+            # Names and module names go in as they are and load on demand:
+            # one that cannot be loaded here (a page built with an add-on
+            # this Python does not have) is listed with its error, and the
+            # document exists all the same.
             for spec in available:
-                addon = load_addon(spec)
-                self._catalog[addon.name] = addon
-                self._loaded[addon.name] = addon
+                if isinstance(spec, Addon):
+                    self._catalog[spec.name] = spec
+                    self._loaded[spec.name] = spec
+                else:
+                    self._catalog[str(spec)] = str(spec)
         # Add-ons come first (their names read srepr strings back); what a
         # session kept for them is given back at the end, once there is an
         # expression to parse in the context of (restore_state may parse).
@@ -550,11 +556,19 @@ class Document:
         with, plus what ``available`` named (every installed add-on by
         default).  One that cannot be loaded is listed with its error."""
         out = []
-        for name in list(self._catalog):
+        for key in list(self._catalog):
             try:
-                addon = self._load(name)
+                addon = self._load(key)
             except Exception as exc:
-                out.append({"name": name, "label": name, "on": False, "requires": [], "error": f"{type(exc).__name__}: {exc}"})
+                out.append({"name": key, "label": key, "on": False, "requires": [], "error": f"{type(exc).__name__}: {exc}"})
+                continue
+            if key != addon.name:
+                # a module name given as `available`: known by the add-on's name from now on
+                self._catalog.pop(key, None)
+                self._loaded.pop(key, None)
+                self._catalog[addon.name] = addon
+                self._loaded[addon.name] = addon
+            if any(entry["name"] == addon.name for entry in out):
                 continue
             out.append({"name": addon.name, "label": addon.label or addon.name, "on": addon.name in self.addons,
                         "requires": list(addon.requires)})

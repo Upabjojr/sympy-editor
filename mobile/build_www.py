@@ -144,7 +144,8 @@ def build(out: Path, *, cdn: bool = False, cache: Path | None = None, expr=None,
     # The add-ons, off to start with and a click away in the Add-ons menu: the
     # document's catalogue names them by module; the app's Python imports them
     # from the folders it bundles, a Pyodide page from the packages it carries.
-    available = [m["module"] for m in scan_addons(addons_dir if addons_dir is not None else ADDONS_DIR).values()]
+    available = [m["module"] for m in scan_addons(addons_dir if addons_dir is not None else ADDONS_DIR).values()
+                 if m.get("bundle") is not False]      # not the template: an example to copy, never shipped
     doc = Document(expr if expr is not None else demo_expression(), available=available)
     page = to_html(doc, urls=urls, title=title, head=head,
                    backend="native" if native else None,
