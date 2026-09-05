@@ -3,6 +3,8 @@ the widget do with an Addon.  The add-on here is a small one written in
 place; the real ones live in ``addons/`` at the root of the repository, each
 with tests of its own."""
 import json
+import sys
+from pathlib import Path
 
 import pytest
 from sympy import Basic, Function, Integer, cos, sin, symbols
@@ -285,3 +287,53 @@ def test_addons_contribute_to_the_history_steps():
     # the render cache is not touched: a document without the add-on sees plain steps
     doc.disable("counter")
     assert "args" not in doc.history_labels()["steps"][0]
+
+
+def test_addon_folders_are_found_by_their_manifest(tmp_path, monkeypatch):
+    """An add-on folder - a checkout of an add-on's repository, or the copy
+    an app bundles - is a manifest beside a package.  scan_addons finds it,
+    puts the folder on sys.path, and installed() lists it when the folder's
+    directory is in SYMPY_EDITOR_ADDONS or registered from Python."""
+    from sympy_editor.addons import ADDON_FOLDERS, read_manifest, register_addons_folder, scan_addons
+    folder = tmp_path / "some-addon"
+    (folder / "my_addon_pkg").mkdir(parents=True)
+    (folder / "my_addon_pkg" / "__init__.py").write_text(
+        "from sympy_editor import Addon\nclass A(Addon):\n    name = 'folderish'\n    label = 'From a folder'\nADDON = A()\n")
+    (folder / "addon.json").write_text(json.dumps({"name": "folderish", "label": "From a folder", "module": "my_addon_pkg",
+                                                   "version": "1.2.3", "requires": ["nothing-real>=1"]}))
+    (tmp_path / "not-an-addon").mkdir()                        # no manifest: skipped
+    (tmp_path / "broken").mkdir()
+    (tmp_path / "broken" / "addon.json").write_text("{not json")
+    found = scan_addons(tmp_path)
+    assert list(found) == ["folderish"] and found["folderish"]["module"] == "my_addon_pkg"
+    assert found["folderish"]["folder"] == str(folder.resolve()) and str(folder.resolve()) in sys.path
+    assert read_manifest(tmp_path / "broken") is None and read_manifest(folder)["version"] == "1.2.3"
+    # counted as installed through the environment variable...
+    from sympy_editor.addons import installed
+    monkeypatch.setenv("SYMPY_EDITOR_ADDONS", str(tmp_path))
+    assert installed()["folderish"] == "my_addon_pkg"
+    doc = Document(x)                                          # the default catalogue: every installed add-on
+    names = [a["name"] for a in doc.available_addons()]
+    assert "folderish" in names
+    doc.enable("folderish")
+    assert doc.addons["folderish"].label == "From a folder"
+    monkeypatch.delenv("SYMPY_EDITOR_ADDONS")
+    # ...or registered from Python (what the apps do)
+    register_addons_folder(tmp_path)
+    try:
+        assert installed()["folderish"] == "my_addon_pkg"
+    finally:
+        ADDON_FOLDERS.remove(str(tmp_path.resolve()))
+
+
+def test_the_repositorys_addon_folders_carry_manifests():
+    """Every add-on in addons/ is a folder of the format the apps bundle and
+    a repository would be cloned as: manifest beside the package."""
+    from sympy_editor.addons import scan_addons
+    root = Path(__file__).resolve().parent.parent / "addons"
+    found = scan_addons(root)
+    assert {"tree", "plot", "matching", "template"} <= set(found)
+    for name, m in found.items():
+        assert (Path(m["folder"]) / m["module"] / "__init__.py").is_file(), name
+        assert m["version"] and m["label"] and isinstance(m["requires"], list), name
+        assert (Path(m["folder"]) / "pyproject.toml").is_file(), name

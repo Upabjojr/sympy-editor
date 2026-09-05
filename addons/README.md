@@ -204,14 +204,46 @@ block of their own (`data-block="addon:<name>"`) and disables while it is busy.
 The panel goes in a collapsible box under the source line
 (`.se-addon.se-addon-<name>`), so an add-on's CSS is scoped there.
 
+## An add-on is a folder
+
+Whatever else it is (a pip distribution with an entry point, a checkout of a
+repository, a copy inside an app), an add-on is a **folder with a manifest
+beside its package**:
+
+```
+sympy_editor_tree/            the folder: a checkout of the add-on's repository
+  addon.json                  {"name": "tree", "label": ..., "module": "sympy_editor_tree",
+                               "version": ..., "requires": [...], "description": ...}
+  sympy_editor_tree/          the Python package the manifest names
+    __init__.py               ADDON = TreeAddon()
+    static/tree.js, tree.css
+  pyproject.toml, README.md, tests/   (not needed at run time)
+```
+
+The manifest's optional `"bundle": false` marks a folder the apps must not
+ship (the template is one: an example to copy).
+
+`sympy_editor.addons.scan_addons(directory)` reads every such folder under a
+directory, puts the folder on `sys.path` and returns the manifests by name;
+`installed()` lists them beside the entry points when the directory is in
+`SYMPY_EDITOR_ADDONS` (`os.pathsep`-separated) or was passed to
+`register_addons_folder()`.  A document's default catalogue is `installed()`,
+so an add-on folder that is found is a click away in the Add-ons menu.
+
+This is the layout the apps bundle, and the layout a repository cloned later
+will have: **adding an add-on from GitHub will be cloning it into that
+directory** - nothing else has to learn about it.  Not implemented yet (no
+cloning, no updating, no version pinning); the folder format and the scan
+are the part that must not change for it.
+
 ## Where the Python of an add-on runs
 
 | backend | the add-on's Python |
 |---|---|
-| Jupyter widget (`edit(expr, addons=[...])`) | the kernel: whatever is installed |
+| Jupyter widget (`edit(expr, addons=[...])`) | the kernel: whatever is installed (`pip install`, or a folder named in `SYMPY_EDITOR_ADDONS`); the Add-ons menu lists it all, `w.addon_state` is the live state |
 | `serve()` | the same process |
-| standalone HTML (Pyodide) | the add-on's package is written into the page beside the editor's modules (`cfg["packages"]`, from `Addon.python_sources()`), and what it `requires` is `micropip`-installed first (`cfg["micropip"]`).  The tree and plot add-ons need nothing; matching needs `sympy-matching`, which is pure Python. |
-| the mobile apps | not covered by this draft: their bundles carry Python themselves, so an add-on would have to be packaged with the app.  The `native` config already names the add-ons (`document["addons"]`). |
+| standalone HTML (Pyodide) | the add-on's package is written into the page beside the editor's modules (`cfg["packages"]`, from `Addon.python_sources()`), and what it `requires` is `micropip`-installed first (`cfg["micropip"]`).  The tree and plot add-ons need nothing; matching needs `sympy-matching`, pure Python since 0.0.4. |
+| the mobile apps | `mobile/build.py` stages every add-on folder of `addons/` beside the app's Python (`addons/<folder>/`, manifest and package, no tests), one folder each; `sympy_editor_app.py` registers that directory at start, so every document lists them and the page switches them on and off; the app's pip step installs what the manifests `require` (Chaquopy's `pip { install(...) }` on Android - a test keeps it in step with the manifests -, `app_packages` on iOS).  The bundle starts with every add-on off and `rememberAddons` on: the switches are kept in the WebView's storage between launches. |
 
 `Document(addons=[...])` accepts `Addon` objects, entry-point names (an
 installed add-on registers under the `sympy_editor.addons` group: `tree`,
@@ -319,7 +351,9 @@ These are the decisions this PR leaves open on purpose:
    such a class occurs in a document that has the add-on off.
 3. **Ordering of ops.**  An add-on's ops come after the built-in ones and an
    add-on cannot remove or rename one; `Document(ops=...)` still can.
-4. **Mobile bundles.**  Out of scope here (the apps ship their own Python).
+4. **Mobile bundles** - settled: the apps bundle the add-on folders (see
+   *Where the Python of an add-on runs*); what is not done is adding one
+   at run time from a repository, which the folder format is shaped for.
 5. **Keyboard.**  Add-ons get no hook into the editor's key handling; a panel
    handles keys on its own elements (the tree does).
 6. **Several editors, one add-on instance** work, since state is per

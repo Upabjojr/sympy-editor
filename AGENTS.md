@@ -688,6 +688,20 @@ editor can load a front end it has not seen.  `Addon.export_state(doc)` /
 gives it back when the add-on is on; `w.addon_state` in the widget is the
 live dict); what must outlive a session the add-on mirrors to
 `localStorage` from its panel (the rules panel's library).
+An add-on is a *folder* with `addon.json` (`name`, `label`, `module`,
+`version`, `requires`) beside its package - the layout of a checkout of its
+repository; `scan_addons(dir)` finds such folders and puts them on
+`sys.path`, `installed()` lists them for the directories in
+`SYMPY_EDITOR_ADDONS` / `register_addons_folder()`, beside the entry
+points.  The apps bundle them that way: `mobile/build.py` `stage_addons`
+copies every folder of `addons/` (no tests) beside the app's Python,
+`sympy_editor_app.py` registers the directory at import, `build_www` builds
+the page from a `Document(available=[their modules])` with
+`rememberAddons` on (`ADDONS_KEY` in localStorage, `_restoreAddons` at
+mount), and the manifests' `requires` go to Chaquopy's `pip` list (a test
+checks) and iOS's `app_packages`.  Adding an add-on from a repository later
+= cloning it into that directory; keep the folder format and the scan
+stable for that.
 `Addon.contribute_step(doc, step, expr)` adds to each step of
 `history_labels()["steps"]` (on a copy: the render cache stays plain), and
 the front end hooks `historyStep` (an element for the drawer's rows,

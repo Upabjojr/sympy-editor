@@ -31,7 +31,10 @@ and SymPy, since it is embedded in the Pyodide pages with ``document.py``.
 from __future__ import annotations
 
 import importlib
+import json
+import os
 import re
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
@@ -43,11 +46,23 @@ from .printer import AnnotatedLatexPrinter, register_rebuild
 if TYPE_CHECKING:  # pragma: no cover
     from .document import Document
 
-__all__ = ["Addon", "load_addon", "load_addons", "installed", "ENTRY_POINT_GROUP", "API_VERSION"]
+__all__ = ["Addon", "load_addon", "load_addons", "installed", "scan_addons", "register_addons_folder",
+           "read_manifest", "ENTRY_POINT_GROUP", "API_VERSION", "MANIFEST", "ADDONS_ENV"]
 
 #: Installed add-ons announce themselves under this entry-point group:
 #: ``[project.entry-points."sympy_editor.addons"] tree = "sympy_editor_tree:ADDON"``.
 ENTRY_POINT_GROUP = "sympy_editor.addons"
+
+#: An add-on *folder* - what a checkout of an add-on's repository is, and
+#: what the apps bundle one as - carries this manifest beside the Python
+#: package: ``{"name", "label", "module", "version", "requires": [...],
+#: "description"}``.  :func:`scan_addons` reads a directory of such folders.
+MANIFEST = "addon.json"
+#: Directories of add-on folders, ``os.pathsep``-separated, that count as
+#: installed (the apps point it at the folders they bundle).
+ADDONS_ENV = "SYMPY_EDITOR_ADDONS"
+#: Directories registered from Python (:func:`register_addons_folder`).
+ADDON_FOLDERS: List[str] = []
 
 #: The version of this contract.  An add-on may set :attr:`Addon.api_version`
 #: to the one it was written for; a later, incompatible contract refuses it
@@ -232,10 +247,66 @@ def _entry_points(group: str):
     return list(eps.get(group, []))  # type: ignore[union-attr]
 
 
+def read_manifest(folder: Union[str, Path]) -> Optional[Dict[str, Any]]:
+    """The manifest of an add-on folder (``addon.json`` beside the package),
+    or None when the folder is not one."""
+    path = Path(folder) / MANIFEST
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or not data.get("name") or not data.get("module"):
+        return None
+    data.setdefault("label", data["name"])
+    data.setdefault("requires", [])
+    data["folder"] = str(Path(folder).resolve())
+    return data
+
+
+def scan_addons(directory: Union[str, Path]) -> Dict[str, Dict[str, Any]]:
+    """The add-on folders under ``directory`` (each a checkout of an add-on's
+    repository, or a copy of one: a manifest beside the package), by name.
+    Each folder that holds its package is put on ``sys.path``, so that the
+    add-on's module imports; the manifest says which module.  This is how
+    the apps find the add-ons they bundle, and how a folder of cloned
+    repositories will be found later."""
+    out: Dict[str, Dict[str, Any]] = {}
+    root = Path(directory)
+    if not root.is_dir():
+        return out
+    for folder in sorted(p for p in root.iterdir() if p.is_dir()):
+        manifest = read_manifest(folder)
+        if manifest is None:
+            continue
+        if (folder / manifest["module"]).is_dir() and str(folder.resolve()) not in sys.path:
+            sys.path.append(str(folder.resolve()))
+        out[manifest["name"]] = manifest
+    return out
+
+
+def register_addons_folder(directory: Union[str, Path]) -> Dict[str, Dict[str, Any]]:
+    """Make the add-on folders under ``directory`` count as installed (see
+    :func:`installed`), and return them."""
+    path = str(Path(directory).resolve())
+    if path not in ADDON_FOLDERS:
+        ADDON_FOLDERS.append(path)
+    return scan_addons(path)
+
+
 def installed() -> Dict[str, str]:
-    """The add-ons installed in this environment, by entry-point name ->
-    ``"module:object"``: what ``Document(addons=[name])`` can take."""
-    return {ep.name: ep.value for ep in sorted(_entry_points(ENTRY_POINT_GROUP), key=lambda e: e.name)}
+    """The add-ons installed in this environment, by name -> spec (an
+    entry point's ``"module:object"``, or an add-on folder's module): what
+    ``Document(addons=[name])`` can take.  Entry points of installed
+    distributions, then the add-on folders of the directories in
+    ``SYMPY_EDITOR_ADDONS`` and of :func:`register_addons_folder`."""
+    out = {ep.name: ep.value for ep in sorted(_entry_points(ENTRY_POINT_GROUP), key=lambda e: e.name)}
+    dirs = [d for d in os.environ.get(ADDONS_ENV, "").split(os.pathsep) if d] + list(ADDON_FOLDERS)
+    for directory in dirs:
+        for name, manifest in scan_addons(directory).items():
+            out.setdefault(name, manifest["module"])
+    return out
 
 
 installed_addons = installed

@@ -38,10 +38,12 @@ var SympyEditor = (function () {
     interruptAfter: 2000, // ms after which the overlay offers to interrupt the computation
     sessions: false,     // a list of sessions (expressions with their own history) kept in localStorage
     unevaluated: false,  // the "unevaluated" toggle starts on: transformations build Determinant(M), Integral(f, x)... rather than computing
+    rememberAddons: false, // keep which add-ons are on in localStorage across page loads (the apps do)
     animate: true,       // animate a change: the old parts in red turn into the new ones in green
     animateDuration: 1600 // ms: a quarter to show what goes (red), the rest to move it and fade the new in (green)
   };
   var SESSIONS_KEY = "sympy-editor:sessions";
+  var ADDONS_KEY = "sympy-editor:addons";     // the add-ons switched on, when rememberAddons is set
 
   // The history report: a self-contained page (KaTeX pre-rendered, its CSS
   // and fonts inlined), see Editor.buildReport.
@@ -1405,12 +1407,33 @@ var SympyEditor = (function () {
       if (clients.length) loadAddons(clients);
       for (var c = 0; c < clients.length; c++) this._addonClients[clients[c].name] = clients[c];
       var on = snap.addons || [];
+      if (this.opts.rememberAddons && !snap.preview && this._addonsRestored) {
+        try { localStorage.setItem(ADDONS_KEY, JSON.stringify(on)); } catch (e) { /* storage may be off */ }
+      }
       var mounted = this._addons.slice();
       for (var i = 0; i < mounted.length; i++) if (on.indexOf(mounted[i].name) < 0) this._unmountAddon(mounted[i].name);
       for (var j = 0; j < on.length; j++) {
         if (!this._mountedAddon(on[j]) && this._addonClients[on[j]]) this._mountAddon(this._addonClients[on[j]]);
       }
       this._fillAddonsMenu(snap.addons_available || []);
+    }
+
+    /** With rememberAddons: switch on what was on last time (and off what
+     *  was not), once, when the editor is ready - the page's own choice of
+     *  add-ons is the fallback for a first visit. */
+    _restoreAddons() {
+      if (this._addonsRestored) return Promise.resolve();
+      this._addonsRestored = true;
+      if (!this.opts.rememberAddons || !this.state) return Promise.resolve();
+      var wanted = null;
+      try { wanted = JSON.parse(localStorage.getItem(ADDONS_KEY) || "null"); } catch (e) { wanted = null; }
+      if (!Array.isArray(wanted)) return Promise.resolve();
+      var known = (this.state.addons_available || []).filter(function (a) { return !a.error; }).map(function (a) { return a.name; });
+      var on = this.state.addons || [];
+      var enable = wanted.filter(function (n) { return known.indexOf(n) >= 0 && on.indexOf(n) < 0; });
+      var disable = on.filter(function (n) { return wanted.indexOf(n) < 0; });
+      if (!enable.length && !disable.length) return Promise.resolve();
+      return this.send({ action: "addons", enable: enable, disable: disable });
     }
 
     _fillAddonsMenu(available) {
@@ -5318,7 +5341,7 @@ var SympyEditor = (function () {
           if (backend.canInterrupt && !backend.canInterrupt()) editor._setStatus("Python runs in the page (no worker): long computations cannot be interrupted here");
         });
       }
-      warm.then(function () { return editor._initSessions(); });
+      warm.then(function () { return editor._initSessions(); }).then(function () { return editor._restoreAddons(); });
     });
     return editor;
   }

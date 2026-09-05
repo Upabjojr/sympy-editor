@@ -32,8 +32,13 @@ sys.path.insert(0, str(HERE.parent / "src"))  # run from a checkout without inst
 
 from sympy import Function, Integral, Sum, exp, oo, pi, sin, sqrt, symbols  # noqa: E402
 
-from sympy_editor import to_html  # noqa: E402
+from sympy_editor import Document, to_html  # noqa: E402
+from sympy_editor.addons import scan_addons  # noqa: E402
 from sympy_editor.html import KATEX_VERSION, PYODIDE_VERSION, SYMPY_VERSION, SYMPY_WHEEL, default_urls  # noqa: E402
+
+#: The add-on folders the bundle knows: what the apps stage beside their
+#: Python (mobile/build.py), and what a Pyodide bundle carries in the page.
+ADDONS_DIR = HERE.parent / "addons"
 
 PYODIDE_CORE = ("pyodide.js", "pyodide.asm.js", "pyodide.asm.wasm", "python_stdlib.zip", "pyodide-lock.json")
 PYODIDE_PACKAGES = ("mpmath",)  # from Pyodide's index (dependency closure read from pyodide-lock.json); SymPy itself is the PyPI wheel
@@ -126,7 +131,7 @@ def app_logo() -> str:
 
 
 def build(out: Path, *, cdn: bool = False, cache: Path | None = None, expr=None, title: str = "SymPy editor",
-          head: str = "", native: bool = False) -> Path:
+          head: str = "", native: bool = False, addons_dir: Path | None = None) -> Path:
     """Write the bundle to ``out``; ``head`` is extra ``<head>`` markup (the
     web app's manifest and service worker, see ``webapp/build.py``).
 
@@ -136,13 +141,19 @@ def build(out: Path, *, cdn: bool = False, cache: Path | None = None, expr=None,
     into the bundle."""
     out.mkdir(parents=True, exist_ok=True)
     urls = None if cdn else vendor(out, cache or Path.home() / ".cache" / "sympy-editor", pyodide=not native)
-    page = to_html(expr if expr is not None else demo_expression(), urls=urls, title=title, head=head,
+    # The add-ons, off to start with and a click away in the Add-ons menu: the
+    # document's catalogue names them by module; the app's Python imports them
+    # from the folders it bundles, a Pyodide page from the packages it carries.
+    available = [m["module"] for m in scan_addons(addons_dir if addons_dir is not None else ADDONS_DIR).values()]
+    doc = Document(expr if expr is not None else demo_expression(), available=available)
+    page = to_html(doc, urls=urls, title=title, head=head,
                    backend="native" if native else None,
                    element_id="sympy-editor-app",                         # reproducible: the web app's cache is keyed by content
                    # the app wears its own icon beside the title: in a WebView
                    # there is no title bar to say whose window this is
                    logo=app_logo(),
-                   options={"rememberZoom": True, "sessions": True})   # an app keeps its zoom and sessions between launches
+                   # an app keeps its zoom, its sessions and its add-on switches between launches
+                   options={"rememberZoom": True, "sessions": True, "rememberAddons": True})
     (out / "index.html").write_text(page, encoding="utf-8")
     return out
 

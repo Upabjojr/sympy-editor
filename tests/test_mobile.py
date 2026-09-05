@@ -251,7 +251,7 @@ def test_the_history_is_written_into_its_frame_not_handed_to_it():
     frame's document instead, which works everywhere."""
     src = (ROOT / "src" / "sympy_editor" / "static" / "editor.js").read_text(encoding="utf-8")
     start = src.index("async showHistory()")
-    view = src[start:src.index("showHelp() {", start)]
+    view = src[start:src.index("showHelp(", start)]
     assert "doc.open();" in view and "doc.write(html);" in view and "doc.close();" in view
     # the frame is dressed once, by whichever of the two paths arrives first
     assert "frame.addEventListener(\"load\", dress)" in view and "dress();" in view
@@ -398,3 +398,60 @@ def test_the_ios_app_leaves_openssl_behind():
 def test_the_ios_build_number_counts_the_commits():
     import mobile.build as build
     assert build.build_number().isdigit()
+
+
+def test_the_apps_bundle_the_addons_one_folder_each(tmp_path):
+    """mobile/build.py stages the add-on folders beside the app's Python -
+    manifest and package, no tests - and the app's module counts them as
+    installed: a document lists them, switches one on, and the page gets the
+    add-on's front end with the answer."""
+    import json
+    import subprocess
+
+    spec = importlib.util.spec_from_file_location("mobile_build", ROOT / "mobile" / "build.py")
+    build = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(build)
+    dest = build.copy_python_sources(tmp_path / "python")
+    folders = sorted(p.name for p in (dest / "addons").iterdir())
+    assert folders == ["sympy_editor_matching", "sympy_editor_plot", "sympy_editor_tree"]   # the template is not shipped
+    for folder in folders:
+        assert (dest / "addons" / folder / "addon.json").is_file()
+        assert not (dest / "addons" / folder / "tests").exists()            # nothing of the test suites
+    assert (dest / "addons" / "sympy_editor_tree" / "sympy_editor_tree" / "static" / "tree.js").is_file()
+    assert build.addon_requirements() == ["sympy-matching>=0.0.4"]
+    # the staged module, in a process of its own, as the app runs it
+    code = f"""
+import json, sys
+sys.path.insert(0, {str(dest)!r}); sys.path.insert(0, {str(ROOT / 'src')!r})
+import sympy_editor_app as app
+print(json.dumps(sorted(json.loads(app.version())["addons"])))
+snap = json.loads(app.new_doc("d", "Add(Symbol('x'), Symbol('y'))", json.dumps({{"available": ["sympy_editor_tree"]}})))   # the page named one; the app carries all
+print(json.dumps(sorted(a["name"] for a in snap["addons_available"])), json.dumps(snap["addons"]))
+snap = json.loads(app.handle("d", json.dumps({{"action": "addons", "enable": ["tree"]}})))
+print(json.dumps(snap["addons"]), snap["tree"]["head"], "registerAddon" in snap["addon_clients"][0]["js"])
+"""
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=300)
+    assert out.returncode == 0, out.stderr
+    lines = out.stdout.strip().splitlines()
+    assert json.loads(lines[0]) == ["matching", "plot", "tree"]
+    assert lines[1] == '["matching", "plot", "tree"] []'                               # listed, all off
+    assert lines[2] == '["tree"] Add True'
+
+
+def test_the_native_bundle_names_the_addons_and_remembers_the_switches(tmp_path):
+    mod = _load_builder()
+    out = mod.build(tmp_path / "www", native=True)
+    page = (out / "index.html").read_text(encoding="utf-8")
+    assert all(m in page for m in ("sympy_editor_matching", "sympy_editor_plot", "sympy_editor_tree"))
+    assert '"rememberAddons": true' in page and '"addons": []' in page             # off at start, a click away
+
+
+def test_the_android_app_installs_what_the_addons_require():
+    """The add-ons' pip requirements (their manifests) are what Chaquopy
+    installs beside SymPy: the two lists must agree."""
+    spec = importlib.util.spec_from_file_location("mobile_build", ROOT / "mobile" / "build.py")
+    build = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(build)
+    gradle = (ROOT / "mobile" / "android" / "app" / "build.gradle.kts").read_text(encoding="utf-8")
+    for req in build.addon_requirements():
+        assert f'install("{req}")' in gradle, req

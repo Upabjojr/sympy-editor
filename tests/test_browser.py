@@ -3695,3 +3695,31 @@ def test_addons_can_be_switched_on_and_off_while_editing(browser):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_remembered_addons_come_back_after_a_reload(browser):
+    """With rememberAddons, the add-ons switched on are kept in the browser's
+    storage and switched on again when the page loads - what the apps do."""
+    addon, Boxed = _demo_addon()
+    doc = Document(x + y, available=[addon])
+    srv = EditorServer(doc, port=0, options={"rememberAddons": True})
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        page = _open(browser, srv.url)
+        assert page.locator(".se-addon-demo").count() == 0
+        page.locator('.se-toolbar [data-cmd="addons"]').click()
+        page.locator(".se-addons-menu input").check()
+        page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)
+        assert page.evaluate("JSON.parse(localStorage.getItem('sympy-editor:addons'))") == ["demo"]
+        doc.disable("demo")                                     # the server forgets (an app restarted)
+        page.goto(srv.url)
+        page.wait_for_selector(".se-addon-demo .demo-panel", timeout=15000)     # switched on again from the storage
+        assert list(doc.addons) == ["demo"]
+        page.locator('.se-toolbar [data-cmd="addons"]').click()
+        page.locator(".se-addons-menu input").uncheck()
+        page.wait_for_function("!document.querySelector('.se-addon-demo')", timeout=10000)
+        assert page.evaluate("JSON.parse(localStorage.getItem('sympy-editor:addons'))") == []
+        assert page.errors == []
+    finally:
+        srv.shutdown()
+        srv.server_close()
