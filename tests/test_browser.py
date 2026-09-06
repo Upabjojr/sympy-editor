@@ -3848,3 +3848,69 @@ def test_a_function_at_a_caret_is_added_there(browser, serve_expr):
     page.wait_for_function("document.querySelector('.se-source').textContent.includes('cos(')")
     assert "cos(" in str(doc.expr) and "sin(x)" in str(doc.expr)
     assert page.errors == []
+
+
+def test_matrix_rows_columns_and_the_resize_grip(browser, serve_expr):
+    """In a matrix the action bar adds and removes rows and columns of the
+    selection's row / column, and the grip on the bottom-right corner resizes
+    the matrix by dragging, a cell at a time, with an outline of the size it
+    will get.  Outside a matrix none of it shows."""
+    from sympy import Function, Matrix
+    from sympy_editor.printer import is_placeholder
+
+    srv, doc = serve_expr(x + Function("f")(Matrix([[5, 6], [7, 8]])))   # a matrix inside an expression, a scalar beside it
+    page = _open(browser, srv.url)
+    nodes = doc.snapshot()["nodes"]
+    mats = [k for k, v in nodes.items() if v.get("matrix")]
+    entry7 = next(k for k, v in nodes.items() if v["src"] == "7")
+    xpath = next(k for k, v in nodes.items() if v["src"] == "x")
+    bar = page.locator(".se-actions")
+    grip = page.locator(".se-mat-handle")
+    # a scalar factor beside the matrix: no matrix tools
+    _click(page, xpath)
+    assert bar.is_visible() and not bar.locator('[data-cmd="matrow"]').is_visible() and grip.count() == 0
+    # the entry 7 (row 1, column 0 of the second matrix): + row adds a row of slots after it
+    _click(page, entry7)
+    assert bar.locator('[data-cmd="matrow"]').is_visible() and bar.locator('[data-cmd="matdelcol"]').is_visible()
+    assert grip.count() == 1 and grip.is_visible()
+    mat = [k for k in mats if entry7.startswith(k)][0]
+    mbox = page.evaluate("p => document.querySelector('.sympy-editor').__sympyEditor._visualRect(document.querySelector(`[data-path=\"${p}\"]`))", mat)
+    gbox = grip.bounding_box()
+    assert abs(gbox["x"] + gbox["width"] / 2 - mbox["right"]) < 6 and abs(gbox["y"] + gbox["height"] / 2 - mbox["bottom"]) < 6   # on the corner
+    _next_state(page, lambda: bar.locator('[data-cmd="matrow"]').click())
+    shaped = lambda shape: next(m for m in doc.expr.find(lambda e: getattr(e, "is_Matrix", False) and getattr(e, "shape", None) == shape))
+    big = shaped((3, 2))
+    assert big[1, 0] == 7 and all(is_placeholder(e) for e in big[2, :])          # after the row of 7
+    # the new slot is selected (a template's first slot, likewise); − col removes its column
+    sel = page.locator(".se-selected[data-path]").first.get_attribute("data-path")
+    assert doc.snapshot()["nodes"][sel].get("placeholder")
+    _next_state(page, lambda: bar.locator('[data-cmd="matdelcol"]').click())
+    big = shaped((3, 1))
+    assert big[0, 0] == 6 and big[1, 0] == 8                                     # column 0 went (7 with it)
+    # the grip: dragged one cell right and one down, the matrix becomes 4 x 2
+    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "8"))
+    ctx = page.evaluate("document.querySelector('.sympy-editor').__sympyEditor._matHandleCtx")
+    assert ctx["rows"] == 3 and ctx["cols"] == 1
+    cell_w, cell_h = ctx["rect"]["width"] / ctx["cols"], ctx["rect"]["height"] / ctx["rows"]
+    gbox = grip.bounding_box()
+    gx, gy = gbox["x"] + gbox["width"] / 2, gbox["y"] + gbox["height"] / 2
+    page.mouse.move(gx, gy)
+    page.mouse.down()
+    page.mouse.move(gx + cell_w, gy + cell_h, steps=6)
+    ghost = page.locator(".se-mat-ghost")
+    assert ghost.is_visible() and ghost.locator(".se-mat-ghost-label").inner_text() == "4 \u00d7 2"
+    assert page.locator(".se-selected[data-path]").count() >= 1                       # the drag selected nothing new
+    _next_state(page, lambda: page.mouse.up())
+    assert ghost.count() == 0
+    big = shaped((4, 2))
+    assert big[0, 0] == 6 and big[1, 0] == 8 and all(is_placeholder(e) for e in big[:, 1])
+    # a drag back to the same size changes nothing
+    seq = page.locator(".sympy-editor").get_attribute("data-seq")
+    gbox = grip.bounding_box()
+    page.mouse.move(gbox["x"] + gbox["width"] / 2, gbox["y"] + gbox["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(gbox["x"] + gbox["width"] / 2 + 3, gbox["y"] + gbox["height"] / 2 + 2, steps=2)
+    page.mouse.up()
+    page.wait_for_timeout(150)
+    assert page.locator(".sympy-editor").get_attribute("data-seq") == seq
+    assert page.errors == []

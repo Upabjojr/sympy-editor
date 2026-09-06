@@ -205,6 +205,28 @@ Two conventions between printer, document and front end:
   parameter form when required, then `call` (the per-type signature is
   never reused across types).  `{"action": "methods", "path"}` returns a
   snapshot with the target's list included regardless.
+- **Matrix rows, columns and shape.**  `Document.edit_matrix(path, op,
+  rows, cols)` (`insert_row`, `insert_col`, `delete_row`, `delete_col`,
+  `resize`; the named wrappers `insert_row(path)`... and `resize_matrix`)
+  changes the explicit matrix at `path` *or around it*: `_enclosing_matrix`
+  walks the path's prefixes up to the first `MatrixBase` and reads the cell
+  from the rest (`/2/k` of a dense matrix is entry `divmod(k, cols)`; `/2/i`
+  of a sparse one is the i-th item of its `Dict`, whose key is the cell), so
+  a selection anywhere inside an entry names its row and column; the
+  matrix itself means the last row / column.  New entries are fresh
+  placeholders (`_fresh_placeholders`); the class is kept (`type(mat)(grid)`,
+  dense or sparse); the last row or column is never deleted.  Message:
+  `{"action": "matrix", "op", "path", "rows", "cols"}`, labelled "Matrix:
+  new row" ... in the history.  `_node_info` marks explicit matrices with
+  `matrix: {rows, cols}`; the front end's `_matrixContext()` walks the
+  selection's ancestors to the nearest such node, `_placeActions` shows the
+  `+ row / + col / − row / − col` buttons (`matrow`...) of the action bar
+  for it, and `_placeMatrixHandle` (from `_applySelection`) puts the grip
+  `.se-mat-handle` on the matrix's bottom-right corner - re-appended to the
+  view at every state, like the boxes, since the rendering is replaced.
+  Dragging the grip (its own pointer listeners stop propagation and capture
+  the pointer; `touch-action: none`) moves a `.se-mat-ghost` outline a cell
+  at a time (`cellW = width / cols`) and sends `resize` on release.
 - **Loading overlay.**  Backend progress messages go through
   `Editor._report`: texts mentioning loading/waiting show `.se-loading` (a
   blocking spinner overlay, keys and clicks ignored) until the message

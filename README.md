@@ -101,6 +101,7 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | Remove the node but keep its argument (`cos(θ)` → `θ`, `∫f dx` → `f`) | **Unwrap** | Backspace — a node with several arguments (`x²`: the base or the exponent, a sum, a fraction) asks which one to leave, with the one ↑ came from ready to confirm |
 | Put the node inside a function (`x` → `cos(x)`, `f(x)`, `∫x dx`) | `Document.wrap(path, "cos")` / `{"action": "wrap"}` | — (the function box **calls** a function; wrap builds without computing) |
 | Keep only the selection (it becomes the whole expression) | **Isolate** | Ctrl+Shift+I |
+| Rows and columns of a matrix | in a matrix (the matrix, or anything in an entry) the action bar has **+ row** / **+ col** (a new row / column of empty slots after the selected one; after the last for the matrix itself) and **− row** / **− col** (the selected one removed); the **grip** at the matrix's bottom-right corner resizes it when dragged - down for rows, right for columns, with the outline of the size it will get | `Document.insert_row/insert_col/delete_row/delete_col(path)`, `resize_matrix(path, rows, cols)`, `{"action": "matrix", "op", "rows", "cols"}` |
 | Transform the selection | pick an operation in the **Transform ▾** menu (general) or the type menu ("Matrix ▾", "Array ▾"...): it applies at once, or asks for what it needs first (the array tools want their axes) | |
 | Matrix ↔ array | "Matrix ▾ → As array"; "Array ▾ → As matrix (rank 2)" — a `MatrixSymbol` becomes an `ArraySymbol` (entries stay implicit), an explicit matrix an explicit array | |
 | Array tools | "Array ▾" (for explicit arrays *and* array symbols): permute axes `(1, 0)`, contract axes `(0, 1)`, diagonal over axes, reshape, rank, explicit entries | |
@@ -186,7 +187,11 @@ left / simplify or expand both sides for equations, `tomatrix` for arrays.
 Matrices (dense and sparse), `MatrixSymbol` expressions, block matrices,
 determinants/traces and N-dimensional `Array`s are supported: every entry is
 selectable and editable, and the container is rebuilt around the edit (see
-`examples/demo_matrices.py` and `examples/demo_matrices.ipynb`).
+`examples/demo_matrices.py` and `examples/demo_matrices.ipynb`).  An explicit
+matrix also changes shape in place: with the matrix or one of its entries
+selected, the action bar adds and removes rows and columns (new entries are
+empty slots to fill, like a template's), and the grip at its bottom-right
+corner resizes it by dragging.
 
 Register your own transformations, for every selection or only for some
 kinds (`"matrix"`, `"array"`, `"scalar"`; the mapping from kinds to SymPy

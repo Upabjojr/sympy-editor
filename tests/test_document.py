@@ -1219,3 +1219,61 @@ def test_placeholders_are_empty_slots():
     # an ordinary name that merely starts with an underscore is a symbol, not a slot
     doc.replace("/", "_a + 1")
     assert doc.snapshot()["placeholders"] == [] and "placeholder" not in doc.snapshot()["nodes"]["/0"]
+
+
+def test_matrix_rows_columns_and_shape_change_in_place():
+    """The row / column tools and the resize act on the explicit matrix at a
+    path or around it: an entry's path names its row and column, the
+    matrix's own path means the last ones.  New entries are empty slots,
+    the class is kept, and the last row or column is never deleted."""
+    from sympy import ImmutableDenseMatrix, ImmutableSparseMatrix, Matrix
+    from sympy_editor.printer import is_placeholder
+
+    doc = Document(Matrix([[x, y + 1], [2, 3]]))
+    assert doc.snapshot()["nodes"]["/"]["matrix"] == {"rows": 2, "cols": 2}
+    assert "matrix" not in doc.snapshot()["nodes"]["/2/0"]
+    doc.insert_row("/2/1/0")                            # inside "y + 1", row 0: a new row after it
+    assert doc.expr.shape == (3, 2) and doc.expr[0, :] == Matrix([[x, y + 1]]) and doc.expr[2, :] == Matrix([[2, 3]])
+    assert all(is_placeholder(e) for e in doc.expr[1, :]) and len({str(e) for e in doc.expr[1, :]}) == 2
+    doc.insert_col("/")                                 # the matrix itself: after the last column
+    assert doc.expr.shape == (3, 3) and all(is_placeholder(e) for e in doc.expr[:, 2])
+    assert len({str(e) for e in doc.expr.atoms() if is_placeholder(e)}) == 5   # every slot is a fresh name
+    doc.delete_col("/2/0")                              # x: column 0
+    assert doc.expr.shape == (3, 2) and doc.expr[0, 0] == y + 1
+    doc.delete_row("/")                                 # the last row
+    assert doc.expr.shape == (2, 2) and doc.expr[0, 0] == y + 1
+    doc.resize_matrix("/2/3", 1, 3)                     # keeps the top-left corner, fills the rest
+    assert doc.expr.shape == (1, 3) and doc.expr[0, 0] == y + 1 and is_placeholder(doc.expr[0, 2])
+    assert isinstance(doc.expr, ImmutableDenseMatrix)
+    with pytest.raises(ValueError, match="single row"):
+        doc.delete_row("/2/0")
+    doc.resize_matrix("/", 1, 1)
+    with pytest.raises(ValueError, match="single column"):
+        doc.delete_col("/")
+    with pytest.raises(ValueError, match="at least one"):
+        doc.resize_matrix("/", 0, 2)
+    with pytest.raises(ValueError, match="Unknown matrix operation"):
+        doc.edit_matrix("/", "transpose")
+    with pytest.raises(ValueError, match="Not a matrix"):
+        Document(x + y).insert_row("/0")
+    # a sparse matrix stays sparse; its entries' paths go through its dict
+    sp = Document(ImmutableSparseMatrix([[x, 0], [0, y]]))
+    entry = next(k for k, v in sp.snapshot()["nodes"].items() if v["src"] == "y")
+    sp.delete_row(entry)
+    assert isinstance(sp.expr, ImmutableSparseMatrix) and sp.expr == Matrix([[x, 0]])
+    sp.insert_col(entry := next(k for k, v in sp.snapshot()["nodes"].items() if v["src"] == "x"))
+    assert sp.expr.shape == (1, 3) and is_placeholder(sp.expr[0, 1]) and sp.expr[0, 2] == 0
+    # a matrix inside an expression: the ancestors are rebuilt around it
+    inner = Document(2 * Matrix([[1, 2]]))
+    mpath = next(k for k, v in inner.snapshot()["nodes"].items() if v.get("matrix"))
+    inner.insert_row(mpath)
+    assert inner.expr.shape == (2, 2) and inner.expr[0, 1] == 4
+    # the message and its history label
+    doc = Document(Matrix([[1, 2], [3, 4]]))
+    snap = doc.handle({"action": "matrix", "op": "resize", "path": "/", "rows": 3, "cols": 1})
+    assert snap.get("error") is None and doc.expr.shape == (3, 1)
+    doc.handle({"action": "matrix", "op": "insert_col", "path": "/2/0"})
+    assert doc.history_labels()["actions"][-2:] == ["Matrix: resize to 3×1", "Matrix: new column"]
+    doc.handle({"action": "matrix", "op": "resize", "path": "/", "rows": 1, "cols": 1})
+    snap = doc.handle({"action": "matrix", "op": "delete_row", "path": "/"})
+    assert "single row" in snap["error"] and doc.expr.shape == (1, 1)               # refused, nothing changed

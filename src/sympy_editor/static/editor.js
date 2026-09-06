@@ -153,6 +153,7 @@ var SympyEditor = (function () {
     "<section><h3>Applying functions</h3><ul>",
     "<li><b>Transform \u25be</b> holds the general operations; a second menu appears with operations for the selection's type (Matrix, Integral, Equation\u2026). Picking one applies it at once, to the selection or, with nothing selected, to the whole expression.</li>",
     "<li><b>Add-ons \u25be</b> switches on or off the add-ons installed beside the editor \u2014 a panel under the formula, tools, node types from other packages \u2014 without restarting anything; what an add-on kept waits for it to come back.</li>",
+    "<li>In a <b>matrix</b> (the matrix, or anything in one of its entries) the bar under the selection adds <b>+ row</b>, <b>+ col</b>, <b>\u2212 row</b>, <b>\u2212 col</b>: a new row or column of empty slots after the selected one (after the last, for the matrix itself), or the selected one taken away. The grip at the matrix\u2019s bottom-right corner resizes it: drag down for rows, right for columns; the outline shows the size it will get.</li>",
     "<li><b>Methods \u25be</b> lists everything the selected object's class can do \u2014 .det(), .T, .diff()\u2026 \u2014 one pick calls it. A Lambda is itself a function: <b>( ) apply</b> evaluates it at the arguments you give.</li>",
     "<li>The <b>function box</b> searches all of SymPy: pick a function and fill the parameters it asks for; \u201cdiff(x)\u201d, \u201c.T\u201d, \u201cdet()\u201d typed in full apply as written. A container takes the selection as its contents: <i>Matrix</i> over x + y gives the 1\u00d71 matrix holding it.</li>",
     "<li><b>unevaluated</b> builds the symbolic form (Determinant, Integral, sin(0)\u2026) instead of computing it; <i>Evaluate (doit)</i> computes it later.</li>",
@@ -1253,9 +1254,23 @@ var SympyEditor = (function () {
           abtn("delete", "Delete", "Remove entirely"),
           abtn("isolate", "Isolate", "Keep only this: it becomes the whole expression"),
           abtn("copy", "Copy", "Copy the SymPy source of the selection (Ctrl+C; Ctrl+X cuts, Ctrl+V pastes)"),
-          abtn("paste", "Paste", "Paste the clipboard over the selection (Ctrl+V)")
+          abtn("paste", "Paste", "Paste the clipboard over the selection (Ctrl+V)"),
+          // In a matrix (the matrix itself, or anything in one of its
+          // entries): its rows and columns.  Shown by _placeActions.
+          h("span", { class: "se-sep se-mat-sep", hidden: "" }),
+          abtn("matrow", "+ row", "New row of empty slots after this one (after the last, for the matrix itself)"),
+          abtn("matcol", "+ col", "New column of empty slots after this one (after the last, for the matrix itself)"),
+          abtn("matdelrow", "\u2212 row", "Delete this row (the last one, for the matrix itself)"),
+          abtn("matdelcol", "\u2212 col", "Delete this column (the last one, for the matrix itself)")
         ]);
         root.appendChild(this.actions);
+        // The grip at the bottom-right corner of a matrix: dragging it
+        // resizes the matrix - rows down, columns right (see _placeMatrixHandle).
+        this.matHandle = h("div", { class: "se-mat-handle", title: "Drag to resize the matrix: down for rows, right for columns",
+                                    role: "button", "aria-label": "Resize the matrix", tabindex: "-1" });
+        this.matGhost = h("div", { class: "se-mat-ghost", "aria-hidden": "true" }, [h("span", { class: "se-mat-ghost-label" })]);
+        this._matDrag = null;
+        this._matHandleCtx = null;
         // The palette shown under a selected operator: what it can become.
         var obtn = function (op, label, title) { return h("button", { type: "button", "data-op": op, title: title }, [label]); };
         this.opBar = h("div", { class: "se-opbar", hidden: "", role: "toolbar", "aria-label": "Operator" }, [
@@ -1684,6 +1699,47 @@ var SympyEditor = (function () {
       this.view.addEventListener("pointerup", function (ev) { endPointer(ev, false); });
       this.view.addEventListener("pointercancel", function (ev) { endPointer(ev, true); });
       this.view.addEventListener("dblclick", function (ev) { self._onDblClick(ev); });
+      // The matrix grip: a drag from it is a resize, never a selection or a
+      // scroll (the events stop here; the grip captures the pointer).  Each
+      // cell of the matrix as drawn is one step: the outline follows the
+      // pointer a row or a column at a time, and the size is sent on release.
+      if (this.matHandle) {
+        var hd = this.matHandle;
+        hd.addEventListener("pointerdown", function (ev) {
+          if (ev.pointerType === "mouse" && ev.button !== 0) return;
+          var ctx = self._matHandleCtx;
+          ev.stopPropagation();
+          if (!ctx || self.busy || self.loading) return;
+          ev.preventDefault();
+          try { hd.setPointerCapture(ev.pointerId); } catch (e) { /* not capturable */ }
+          self._matDrag = { id: ev.pointerId, x: ev.clientX, y: ev.clientY, ctx: ctx, rows: ctx.rows, cols: ctx.cols,
+                            cellW: Math.max(8, ctx.rect.width / ctx.cols), cellH: Math.max(8, ctx.rect.height / ctx.rows) };
+          self._showMatrixGhost(ctx.rows, ctx.cols);
+        });
+        hd.addEventListener("pointermove", function (ev) {
+          var d = self._matDrag;
+          if (!d || ev.pointerId !== d.id) return;
+          ev.stopPropagation();
+          ev.preventDefault();
+          d.cols = Math.max(1, d.ctx.cols + Math.round((ev.clientX - d.x) / d.cellW));
+          d.rows = Math.max(1, d.ctx.rows + Math.round((ev.clientY - d.y) / d.cellH));
+          self._showMatrixGhost(d.rows, d.cols);
+        });
+        var endMatDrag = function (ev, cancelled) {
+          var d = self._matDrag;
+          if (!d || ev.pointerId !== d.id) return;
+          ev.stopPropagation();
+          self._matDrag = null;
+          self._hideMatrixGhost();
+          try { hd.releasePointerCapture(ev.pointerId); } catch (e) { /* not captured */ }
+          if (!cancelled && (d.rows !== d.ctx.rows || d.cols !== d.ctx.cols)) self._matrixOp("resize", d.rows, d.cols, d.ctx.path);
+          else self.view.focus({ preventScroll: true });
+        };
+        hd.addEventListener("pointerup", function (ev) { endMatDrag(ev, false); });
+        hd.addEventListener("pointercancel", function (ev) { endMatDrag(ev, true); });
+        hd.addEventListener("click", function (ev) { ev.stopPropagation(); });
+        hd.addEventListener("touchstart", function (ev) { ev.stopPropagation(); }, { passive: true });
+      }
       this.root.addEventListener("keydown", function (ev) {
         if (self.drawer && self.drawer.contains(ev.target)) return;   // Esc is handled at the document level while it is open
         if (self.symbols && self.symbols.contains(ev.target)) return;
@@ -2419,6 +2475,7 @@ var SympyEditor = (function () {
 
     _applySelection() {
       this._addonsNotify("onSelect", this.selected, this.range);
+      this._placeMatrixHandle();
       var old = this.view.querySelectorAll(".se-selected");
       for (var i = 0; i < old.length; i++) old[i].classList.remove("se-selected");
       this._drawBoxes("hover", []);
@@ -2750,6 +2807,67 @@ var SympyEditor = (function () {
     }
 
     /** Show the floating action bar under a viewport rectangle (null hides it). */
+    /** The explicit matrix the selection is, or is inside of: `{path, rows,
+     *  cols}`, or null.  With nothing selected, the whole expression counts. */
+    _matrixContext() {
+      if (!this.state || !this.state.nodes || !this.tree) return null;
+      var p = this.range ? this.range.parent : (this.selected || "/");
+      while (p !== null && p !== undefined) {
+        var node = this.state.nodes[p];
+        if (node && node.matrix) return { path: p, rows: node.matrix.rows, cols: node.matrix.cols };
+        p = this.tree[p] ? this.tree[p].parent : null;
+      }
+      return null;
+    }
+
+    /** A matrix operation (see Document.edit_matrix) on the selection's
+     *  matrix: the row / column the selection is in, or the last ones. */
+    _matrixOp(op, rows, cols, path) {
+      if (this.opts.readOnly || this.closed) return;
+      var msg = { action: "matrix", op: op, path: path || (this.range ? this.range.parent : (this.selected || "/")) };
+      if (rows) { msg.rows = rows; msg.cols = cols; }
+      this.send(msg);
+      this.view.focus({ preventScroll: true });
+    }
+
+    /** Put the grip on the bottom-right corner of the selection's matrix (or
+     *  take it away).  The rendering is replaced on every state, so the
+     *  grip is appended again each time it is placed. */
+    _placeMatrixHandle() {
+      var hd = this.matHandle;
+      if (!hd) return;
+      var ctx = !this.closed && !this.input && !this._matDrag ? this._matrixContext() : null;
+      var el = ctx ? this._els(ctx.path)[0] : null;
+      if (!el || el.classList.contains("se-editing") || this.view.classList.contains("se-empty")) {
+        if (hd.parentNode) hd.parentNode.removeChild(hd);
+        this._matHandleCtx = null;
+        return;
+      }
+      var r = this._visualRect(el), vr = this.view.getBoundingClientRect();
+      hd.style.left = Math.round(r.right - vr.left + this.view.scrollLeft) + "px";
+      hd.style.top = Math.round(r.bottom - vr.top + this.view.scrollTop) + "px";
+      if (!hd.parentNode) this.view.appendChild(hd);
+      this._matHandleCtx = { path: ctx.path, rows: ctx.rows, cols: ctx.cols, rect: r };
+    }
+
+    /** The outline of the size the matrix will get, drawn over it while the
+     *  grip is dragged, with the size written in its corner. */
+    _showMatrixGhost(rows, cols) {
+      var d = this._matDrag;
+      if (!d) return;
+      var g = this.matGhost, vr = this.view.getBoundingClientRect(), r = d.ctx.rect;
+      g.style.left = Math.round(r.left - vr.left + this.view.scrollLeft) + "px";
+      g.style.top = Math.round(r.top - vr.top + this.view.scrollTop) + "px";
+      g.style.width = Math.round(d.cellW * cols) + "px";
+      g.style.height = Math.round(d.cellH * rows) + "px";
+      g.firstChild.textContent = rows + " \u00d7 " + cols;
+      if (!g.parentNode) this.view.appendChild(g);
+    }
+
+    _hideMatrixGhost() {
+      if (this.matGhost && this.matGhost.parentNode) this.matGhost.parentNode.removeChild(this.matGhost);
+    }
+
     _placeActions(rect) {
       if (!this.actions) return;
       // The bar acts on the formula.  While the source line has the focus the
@@ -2761,15 +2879,21 @@ var SympyEditor = (function () {
       var t = this.selected ? this.tree[this.selected] : null;
       var selNode = this.selected && !this.range ? this.state.nodes[this.selected] : null;
       var unwrapOk = !!(selNode && (selNode.nargs || selNode.parts));
+      var mctx = this._matrixContext();
+      var sep = this.actions.querySelector(".se-mat-sep");
+      if (sep) sep.hidden = !mctx;
       var buttons = this.actions.querySelectorAll("button");
       for (var i = 0; i < buttons.length; i++) {
         var cmd = buttons[i].getAttribute("data-cmd");
+        if (cmd.indexOf("mat") === 0) buttons[i].hidden = !mctx;
         buttons[i].disabled = cmd === "parent" ? !(this.range || (t && t.parent))
                             : cmd === "child" ? false
                             : cmd === "paste" ? false
                             : cmd === "unwrap" ? !unwrapOk
                             : cmd === "delete" ? !(this.range || this.selected)
                             : cmd === "isolate" ? !(this.range || (this.selected && this.selected !== "/"))
+                            : cmd === "matdelrow" ? !(mctx && mctx.rows > 1)
+                            : cmd === "matdelcol" ? !(mctx && mctx.cols > 1)
                             : false;
       }
       this.actions.hidden = false;
@@ -4059,6 +4183,10 @@ var SympyEditor = (function () {
           return this.beginEdit(this.selected || "/");
         case "unwrap": return this.unwrapSelection();
         case "isolate": return this.isolateSelection();
+        case "matrow": return this._matrixOp("insert_row");
+        case "matcol": return this._matrixOp("insert_col");
+        case "matdelrow": return this._matrixOp("delete_row");
+        case "matdelcol": return this._matrixOp("delete_col");
         case "delete":
           if (this.junction) return this.setOperator("");
           if (this.range) return this.send({ action: "delete", path: this.range.parent, children: this._rangeIndices() });
