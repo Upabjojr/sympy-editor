@@ -50,8 +50,11 @@ src/sympy_editor/
     editor.js   The whole front end (plain script, no imports/exports).
     editor.css  Styles, scoped under .sympy-editor, theme-aware.
     widget.js   anywidget entry point; widget.py concatenates editor.js + this.
+  addons.py     The add-on contract (Addon) and loader: node types, ops, data
+                and methods from a package outside this one; see addons/.
 tests/          pytest suite (printer round-trips, document ops, HTML, server).
 examples/       demo.py generates demo.html / runs the server.
+addons/         Add-on drafts, each a package of its own (tree, plot, matching).
 ```
 
 Data flow: Python `Document.snapshot()` → JSON (`latex`, `latex_plain`,
@@ -538,8 +541,14 @@ Two conventions between printer, document and front end:
   ignores `hide()` from an unfocused window and undoes it when focus comes
   back, so the activity remembers `wantsFullscreen` and applies it again in
   `onWindowFocusChanged`.  The button is 44x44 on a coarse pointer - a
-  target, not a glyph - and re-measures the overlay boxes after the size
-  change.
+  target, not a glyph.  The overlay boxes, the caret and the action bar are
+  placed in pixels, and the view keeps changing size *after* the class is
+  toggled (the browser's full screen, a phone's bars going away, a
+  rotation, a window resize): a `ResizeObserver` on `.se-view`
+  (`_relayout`, once per frame) and the `fullscreenchange` listener measure
+  the selection again whenever the view's size changes -
+  `test_the_selection_follows_the_view_into_full_screen` resizes the
+  viewport after the toggle and checks the box sits on the glyphs.
 - **Touch keyboards.**  `noAutoCaps` (applied by `h()` to every text input,
   and by hand to the contenteditable source line) turns off
   `autocapitalize`, `autocorrect`, `autocomplete` and `spellcheck`: what is
@@ -629,6 +638,27 @@ Two conventions between printer, document and front end:
   converts between the displayed Greek letters and SymPy's names
   (`toDisplay`/`toSource`: `θ` ↔ `theta`, `λ` ↔ `lamda`, `∞` ↔ `oo`), so
   what is sent to Python is plain ASCII SymPy syntax.
+- **Placeholders and templates.**  `Placeholder(Symbol)` in printer.py is an
+  empty slot: a Symbol named `_1`, `_2`... (so every SymPy operation takes it
+  and the source line reads `Integral(_1, _2)`), printed as `\square`.
+  `Document.parse` turns a new name matching `PLACEHOLDER_RE` into one,
+  `_coerce` knows the class for srepr, `snapshot()["placeholders"]` lists
+  their paths in reading order and marks the nodes `placeholder`.  In
+  editor.js `TEMPLATES` (`\int`, `\sum`, `\lim`, `\frac`...) expand in
+  the fields like the other `\command`s, their slots renumbered afresh
+  against the formula's (`freshSlots`, `_placeholderNames`); `_render` gives
+  the slots `.se-placeholder` (faint), `setState` selects the first new slot
+  of a committed change, and Tab / Shift+Tab walk the slots
+  (`_selectPlaceholder`) while there are any - the caret behaviour of Tab
+  returns when there are none.  `_showError` also flickers the view red
+  (`.se-flash`, half a second, the tree add-on's flicker).  A function
+  typed or picked in the box while a caret is shown and nothing is selected
+  is *inserted* at the caret (`_insertFunctionAtCaret`: `name(_1)`, a `+ `
+  in front inside an Add, through `_insertMessage`, the one place that
+  builds an insert/extend message from a gap), the slot then selected.  The
+  box remembers the caret when it takes the focus (`_fnCaret`): loading the
+  function list re-renders the formula, which drops the live caret, and the
+  insertion waits while the editor is busy rather than being dropped.
 - **Name resolution.**  `Document.parse` uses `parse_expr(local_dict=namespace())`:
   declared/used names win, then SymPy's globals, then new symbols.
   `` `name` `` (backticks) forces a Symbol for that parse; `_collision_note`
@@ -646,6 +676,78 @@ Two conventions between printer, document and front end:
   constructors' checks, the result is test-printed before it is committed.
   `Document.parse(src, context=node)` reads new names as `MatrixSymbol`s of
   the context's shape when the context is a matrix.
+
+## Add-ons (`addons/`)
+
+`src/sympy_editor/addons.py` is the contract; `addons/README.md` is the
+design.  An `Addon` gives a `Document` (`Document(expr, addons=[...])`,
+`edit(..., addons=)`, `to_html(..., addons=)`) node types (`kinds`,
+`namespace()` - the constructors under the typed names *and* the class names
+`srepr` writes -, `make_symbol()` for new typed names, `rebuilders`,
+`latex_printers`), transformations (`ops`, built with `make_op`; `context=True`
+passes `doc=`), data in every snapshot (`contribute(doc, snap, expr)`) and
+methods (`handle(doc, method, payload)`: a dict answers a *query* under
+`snap["query"]`, a SymPy object is committed as the whole expression, None
+means the method edited through the document).  All of it travels through one
+message, `{"action": "addon", "addon", "method", ...}`, so every backend
+carries it unchanged.  The front end part is a plain script (`Addon.js`,
+`Addon.css`) that calls `SympyEditor.registerAddon(name, {mount(api), tools})`;
+`loadAddons` puts the CSS in the page and runs the script once,
+`Editor._mountAddons` gives each a box under the source line (`.se-addons`,
+`.se-addon-<name>`) and a toolbar block (`data-block="addon:<name>"`), and
+`onState`/`onSelect`/`destroy` follow the editor; a `help` (HTML) on the
+definition or the instance puts a "?" in the box's summary that opens it in
+the editor's help overlay (`showHelp(html, title)`, the same page as the
+toolbar's "?") - every add-on with a panel should have one.  `api.call(method, payload)`
+is the promise of a query's result or the new snapshot.  A Pyodide page
+carries the add-ons' packages (`cfg["packages"]`, written under
+`/sympy_editor_pkg/<module>/`) and `micropip`-installs their `requires`
+(`cfg["micropip"]`); `document["addons"]` / `document["available"]` name them by module for
+the Python that makes the document again.  **Switching**: a document keeps
+a catalogue (`available=`; every installed add-on by default), `enable()` /
+`disable()` and `{"action": "addons", "enable", "disable"}` switch at any
+time - kinds are per document (`doc.kinds`, `with_kind`), ops come and go,
+`addon_state` stays - and every snapshot carries `addons` (on) and
+`addons_available`; the answer to a switch adds `addon_clients` so the
+editor can load a front end it has not seen.  `Addon.export_state(doc)` /
+`restore_state(doc, data)` carry an add-on's state under
+`Document.export()["addon_state"]` (a session; `Document(addon_state=)`
+gives it back when the add-on is on; `w.addon_state` in the widget is the
+live dict); what must outlive a session the add-on mirrors to
+`localStorage` from its panel (the rules panel's library).
+An add-on is a *folder* with `addon.json` (`name`, `label`, `module`,
+`version`, `requires`) beside its package - the layout of a checkout of its
+repository; `scan_addons(dir)` finds such folders and puts them on
+`sys.path`, `installed()` lists them for the directories in
+`SYMPY_EDITOR_ADDONS` / `register_addons_folder()`, beside the entry
+points.  The apps bundle them that way: `mobile/build.py` `stage_addons`
+copies every folder of `addons/` (no tests) beside the app's Python,
+`sympy_editor_app.py` registers the directory at import, `build_www` builds
+the page from a `Document(available=[their modules])` with
+`rememberAddons` on (`ADDONS_KEY` in localStorage, `_restoreAddons` at
+mount), and the manifests' `requires` go to Chaquopy's `pip` list (a test
+checks) and iOS's `app_packages`.  Adding an add-on from a repository later
+= cloning it into that directory; keep the folder format and the scan
+stable for that.
+`Addon.contribute_step(doc, step, expr)` adds to each step of
+`history_labels()["steps"]` (on a copy: the render cache stays plain), and
+the front end hooks `historyStep` (an element for the drawer's rows,
+`.se-step-extra`) / `historyStepHtml` + `historyCss` (static markup and
+styles for the report, `buildHistoryReport`'s `stepExtra`/`extraCss`) draw
+it under the step - the tree add-on shows every step's tree.  `Editor._syncAddons` mounts
+and unmounts (`_mountAddon`/`_unmountAddon`) to match each snapshot, and
+`_fillAddonsMenu` builds the toolbar's **Add-ons ▾** menu
+(`data-block="addons"`, `.se-addons-menu`).  Rules: the add-on packages in
+`addons/` are separate distributions, never imported by `sympy_editor`; a
+change to the contract comes with `tests/test_addons.py`, and to the front
+end hooks with `test_addon_panel_tools_and_calls`; every add-on has tests
+of its own under `addons/<pkg>/tests/` (unit and Playwright), and a fix to
+an add-on comes with a test there - `pytest addons/` runs them all,
+including `addons/tests/test_demo_page.py`, which refuses a stale
+`addons/demo.html` (rebuild with `python addons/demo.py` after any change);
+the mobile bundles do not carry add-ons.  Rebuilders and printer methods
+are process-wide registries: activation adds, nothing removes; kinds are
+not.
 
 ## Backends at a glance
 
@@ -710,8 +812,8 @@ Two conventions between printer, document and front end:
   possibly several times per page, and concatenated into an ES module for
   anywidget).  Use `var SympyEditor = (function () { ... })();`.
 - Pyodide-backed pages embed the *source* of `printer.py`, `ops.py`,
-  `document.py`; those three modules must import nothing but SymPy, the
-  standard library and each other.
+  `addons.py`, `document.py`; those four modules must import nothing but
+  SymPy, the standard library and each other.
 
 ## Mobile apps (`mobile/`)
 

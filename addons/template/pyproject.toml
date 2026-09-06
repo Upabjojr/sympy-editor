@@ -1,0 +1,24 @@
+# A sympy-editor add-on of your own: copy this folder, rename the package
+# (three places: here, the folder, the entry point), pip install -e it.
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sympy-editor-addon-template"
+version = "0.0.1"
+description = "A sympy-editor add-on to copy: a panel, a method, an op"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "BSD-3-Clause" }
+dependencies = ["sympy-editor"]
+
+# The editor finds installed add-ons here: Document(expr, addons=["template"]).
+[project.entry-points."sympy_editor.addons"]
+template = "sympy_editor_addon_template:ADDON"
+
+[tool.setuptools.packages.find]
+include = ["sympy_editor_addon_template*"]
+
+[tool.setuptools.package-data]
+sympy_editor_addon_template = ["static/*"]

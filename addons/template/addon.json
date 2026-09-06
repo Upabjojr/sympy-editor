@@ -1,0 +1,9 @@
+{
+  "name": "template",
+  "label": "Template",
+  "module": "sympy_editor_addon_template",
+  "version": "0.0.1",
+  "description": "An add-on to copy: every hook once.",
+  "requires": [],
+  "bundle": false
+}

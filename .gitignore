@@ -17,6 +17,7 @@ mobile/www/
 mobile/android/app/src/main/assets/
 mobile/android/app/src/main/python/sympy_editor/
 mobile/android/app/src/main/python/sympy_editor_app.py
+mobile/android/app/src/main/python/addons/
 mobile/android/.gradle/
 mobile/android/**/build/
 mobile/android/local.properties
@@ -33,3 +34,7 @@ mobile/android/gradle/wrapper/gradle-wrapper.jar
 # web app build
 webapp/dist/
 mobile/android/.kotlin/
+
+# add-on drafts: the demo page is built, not committed
+addons/*.html
+addons/*/build/

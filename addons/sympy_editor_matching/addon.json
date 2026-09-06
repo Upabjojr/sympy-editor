@@ -1,0 +1,10 @@
+{
+  "name": "matching",
+  "label": "Rewrite rules",
+  "module": "sympy_editor_matching",
+  "version": "0.0.1",
+  "description": "Rewrite rules with wildcards, matched many-to-one by sympy-matching.",
+  "requires": [
+    "sympy-matching>=0.0.4"
+  ]
+}

@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sympy-editor-plot"
+version = "0.0.1"
+description = "sympy-editor add-on: the graph of the selection, drawn in the browser (Plotly.js)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "BSD-3-Clause" }
+dependencies = ["sympy-editor"]
+
+[project.optional-dependencies]
+fast = ["numpy"]
+
+[project.entry-points."sympy_editor.addons"]
+plot = "sympy_editor_plot:ADDON"
+
+[tool.setuptools.packages.find]
+include = ["sympy_editor_plot*"]
+
+[tool.setuptools.package-data]
+sympy_editor_plot = ["static/*"]

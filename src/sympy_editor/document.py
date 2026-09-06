@@ -29,14 +29,20 @@ from sympy.parsing.sympy_parser import (
     standard_transformations,
 )
 
-from .ops import KIND_LABELS, Op, get_ops, node_kind, node_kinds
+from collections import OrderedDict
+
+from .addons import Addon, installed, load_addon
+from .ops import KINDS, KIND_LABELS, Op, get_ops, node_kind, node_kinds, with_kind
 from .printer import (
+    PLACEHOLDER_RE,
     Path,
+    Placeholder,
     annotate,
     annotate_str,
     delete_at,
     format_path,
     get_at,
+    is_placeholder,
     delete_range,
     extract_range,
     insert_at,
@@ -369,6 +375,20 @@ class Document:
         the position of the current expression in it and what produced each
         step, as given by :meth:`export`; ``expr`` is ignored when a history
         is given.
+    addons
+        The add-ons switched *on* to start with: :class:`~sympy_editor.addons.Addon`
+        objects, names of installed add-ons (``"tree"``) or module names
+        (``"sympy_editor_tree"``): node types, transformations, data and
+        methods of their own, and a front end each (see
+        ``sympy_editor.addons``).  :meth:`enable` and :meth:`disable` switch
+        them at any time.
+    available
+        What can be switched on besides: the same kinds of specs, off to
+        start with.  None (the default) means every installed add-on.
+    addon_state
+        ``{name: data}`` from :meth:`export`: what each add-on kept about the
+        document it was exported from, given back to it (``restore_state``)
+        once it is on.
     """
 
     def __init__(
@@ -383,12 +403,47 @@ class Document:
         history=None,
         index: Optional[int] = None,
         labels=None,
+        addons=(),
+        available=None,
+        addon_state=None,
     ):
         if parser not in ("strict", "implicit"):
             raise ValueError("parser must be 'strict' or 'implicit'")
         self.printer_settings = dict(printer_settings or {})
         self.parser = parser
         self.ops: Dict[str, Op] = dict(ops) if ops is not None else get_ops()
+        #: This document's kind table and labels: the global ones plus the
+        #: kinds of the add-ons that are on (see :meth:`enable`).
+        self.kinds: "OrderedDict[str, tuple]" = OrderedDict(KINDS)
+        self.kind_labels: Dict[str, str] = dict(KIND_LABELS)
+        #: The add-ons that are on, by name; a dict per add-on (on or off)
+        #: for whatever it keeps about this document.
+        self.addons: Dict[str, Addon] = {}
+        self.addon_state: Dict[str, Dict[str, Any]] = {}
+        #: What can be switched on: name -> spec, loaded on demand into
+        #: ``_loaded`` (name -> Addon, or the error that loading raised).
+        self._catalog: Dict[str, Any] = {}
+        self._loaded: Dict[str, Any] = {}
+        if available is None:
+            self._catalog.update(installed())
+        else:
+            # Names and module names go in as they are and load on demand:
+            # one that cannot be loaded here (a page built with an add-on
+            # this Python does not have) is listed with its error, and the
+            # document exists all the same.
+            for spec in available:
+                if isinstance(spec, Addon):
+                    self._catalog[spec.name] = spec
+                    self._loaded[spec.name] = spec
+                else:
+                    self._catalog[str(spec)] = str(spec)
+        # Add-ons come first (their names read srepr strings back); what a
+        # session kept for them is given back at the end, once there is an
+        # expression to parse in the context of (restore_state may parse).
+        self._pending_state: Dict[str, Any] = dict(addon_state or {})
+        self._ready = False
+        for spec in addons or ():
+            self.enable(spec)
         self.max_history = max_history
         #: Type names whose method lists snapshots have already carried.
         self._methods_sent: set = set()
@@ -417,13 +472,110 @@ class Document:
             self._index = len(self._history) - 1 if index is None else max(0, min(int(index), len(self._history) - 1))
         else:
             self._commit(self._coerce(expr))
+        self._ready = True
+        for name, addon in list(self.addons.items()):
+            if name in self._pending_state:
+                addon.restore_state(self, self._pending_state.pop(name))
 
     def export(self) -> Dict[str, Any]:
         """The state that :class:`Document` takes back: ``{"history": [srepr,
-        ...], "index", "symbols": [srepr of the declared names]}`` (a
-        session's editing history, kept by the front end)."""
-        return {"history": [srepr(e) for e in self._history], "index": self._index, "labels": list(self._labels),
-                "symbols": [srepr(obj) for obj in self.declared.values()]}
+        ...], "index", "symbols": [srepr of the declared names][,
+        "addon_state": {name: data}]}`` (a session's editing history, kept
+        by the front end)."""
+        out = {"history": [srepr(e) for e in self._history], "index": self._index, "labels": list(self._labels),
+               "symbols": [srepr(obj) for obj in self.declared.values()]}
+        # What the add-ons that are on keep about this document (a rule set),
+        # by name: given back through restore_state when the session is opened.
+        state = {}
+        for name, addon in self.addons.items():
+            data = addon.export_state(self)
+            if data is not None:
+                state[name] = data
+        if state:
+            out["addon_state"] = state
+        return out
+
+    # -- add-ons --------------------------------------------------------------
+
+    def _load(self, spec) -> Addon:
+        """The Addon a spec (a catalogue name, a module name or an object)
+        stands for, cached by name; a failure is cached too and re-raised."""
+        if isinstance(spec, str) and spec in self._loaded:
+            got = self._loaded[spec]
+            if isinstance(got, Exception):
+                raise got
+            return got
+        if isinstance(spec, str) and spec in self._catalog and not isinstance(self._catalog[spec], str):
+            return self._catalog[spec]
+        try:
+            addon = load_addon(self._catalog.get(spec, spec) if isinstance(spec, str) else spec)
+        except Exception as exc:
+            if isinstance(spec, str):
+                self._loaded[spec] = exc
+            raise
+        self._loaded[addon.name] = addon
+        self._catalog.setdefault(addon.name, addon)
+        return addon
+
+    def enable(self, spec) -> Addon:
+        """Switch an add-on on: a catalogue name (see :meth:`available_addons`),
+        a module name or an :class:`Addon`.  Its kinds join this document's
+        table, its ops the menus, and its methods answer; the state it kept
+        while off (``addon_state``) is still there."""
+        addon = self._load(spec)
+        if addon.name in self.addons:
+            return addon
+        addon.activate()
+        for kind, types in addon.kinds.items():
+            self.kinds = with_kind(self.kinds, kind, types)
+            self.kind_labels[kind] = addon.kind_labels.get(kind) or kind.capitalize()
+        for op in addon.ops:
+            self.ops.setdefault(op.name, op)
+        self.addons[addon.name] = addon
+        self.addon_state.setdefault(addon.name, {})
+        self._catalog.setdefault(addon.name, addon)
+        if self._ready and addon.name in self._pending_state:
+            addon.restore_state(self, self._pending_state.pop(addon.name))
+        return addon
+
+    def disable(self, name: str) -> None:
+        """Switch an add-on off: its ops, kinds and methods go; its state
+        stays for the next :meth:`enable`.  Unknown or off already: nothing."""
+        addon = self.addons.pop(name, None)
+        if addon is None:
+            return
+        for op in addon.ops:
+            if self.ops.get(op.name) is op:
+                del self.ops[op.name]
+        still = {k for a in self.addons.values() for k in a.kinds}
+        for kind in addon.kinds:
+            if kind not in still and kind not in KINDS:
+                self.kinds.pop(kind, None)
+                self.kind_labels.pop(kind, None)
+
+    def available_addons(self) -> List[Dict[str, Any]]:
+        """The add-ons this document can switch on or off: ``[{"name",
+        "label", "on", "requires"[, "error"]}]`` - the ones it started
+        with, plus what ``available`` named (every installed add-on by
+        default).  One that cannot be loaded is listed with its error."""
+        out = []
+        for key in list(self._catalog):
+            try:
+                addon = self._load(key)
+            except Exception as exc:
+                out.append({"name": key, "label": key, "on": False, "requires": [], "error": f"{type(exc).__name__}: {exc}"})
+                continue
+            if key != addon.name:
+                # a module name given as `available`: known by the add-on's name from now on
+                self._catalog.pop(key, None)
+                self._loaded.pop(key, None)
+                self._catalog[addon.name] = addon
+                self._loaded[addon.name] = addon
+            if any(entry["name"] == addon.name for entry in out):
+                continue
+            out.append({"name": addon.name, "label": addon.label or addon.name, "on": addon.name in self.addons,
+                        "requires": list(addon.requires)})
+        return out
 
     # -- state --------------------------------------------------------------
 
@@ -531,7 +683,14 @@ class Document:
         expression)."""
         steps = []
         for e in self._history:
-            steps.append(self._render_cache_get(e))
+            step = self._render_cache_get(e)
+            if self.addons:
+                # A copy: the add-ons' data is not cached with the render (an
+                # add-on may be switched on or off between two requests).
+                step = dict(step)
+                for addon in self.addons.values():
+                    addon.contribute_step(self, step, e)
+            steps.append(step)
         return {"labels": [str(e) for e in self._history], "index": self._index, "steps": steps,
                 "actions": list(self._labels)}
 
@@ -849,7 +1008,7 @@ class Document:
             missing = [prm["name"] for prm in spec.params[len(values):] if not prm.get("optional")]
             if missing:
                 raise ValueError(f"{spec.label} needs {', '.join(missing)}")
-        result = sympify(func(target, *values))
+        result = sympify(func(target, *values, doc=self) if spec is not None and spec.context else func(target, *values))
         if children is not None:
             return self._commit(self._replace_range(self.expr, p, children, result))
         return self._commit(self._replace_at(self.expr, p, result))
@@ -1053,6 +1212,9 @@ class Document:
         ns = self.used_symbols()
         for name, obj in self.declared.items():
             ns.setdefault(name, obj)
+        for addon in self.addons.values():
+            for name, obj in addon.namespace().items():
+                ns.setdefault(name, obj)
         return ns
 
     @staticmethod
@@ -1085,9 +1247,20 @@ class Document:
             local.setdefault(name, Symbol(name))
         src = re.sub(r"`([A-Za-z_][A-Za-z_0-9]*)`", r"\1", src)
         shape = getattr(context, "shape", None) if isinstance(context, (MatrixExpr, MatrixBase)) else None
-        if shape is not None and len(shape) == 2:
-            for name in self._new_names(src, local):
+        new_names = self._new_names(src, local)
+        for name in new_names:
+            if PLACEHOLDER_RE.match(name):
+                local[name] = Placeholder(name)         # an empty slot (\int leaves Integral(_1, _2))
+                continue
+            if shape is not None and len(shape) == 2:
                 local[name] = MatrixSymbol(name, *shape)
+                continue
+            # An add-on may read a new name as a node of its own (a wildcard).
+            for addon in self.addons.values():
+                made = addon.make_symbol(name)
+                if made is not None:
+                    local[name] = made
+                    break
         self.last_note = self._collision_note(src, local)
         try:
             return sympify(parse_expr(src, local_dict=local, transformations=transformations))
@@ -1270,7 +1443,7 @@ class Document:
             if cls.__name__ not in self._methods_sent:
                 self._methods_sent.add(cls.__name__)
                 methods[cls.__name__] = type_methods(cls)
-        return {
+        snap = {
             "seq": self._seq,
             "latex": tex,
             "latex_plain": plain_latex(expr, **self.printer_settings),
@@ -1285,10 +1458,19 @@ class Document:
             "ops": [{"name": op.name, "label": op.label, "kinds": list(op.kinds) if op.kinds else None,
                      "params": [dict(prm) for prm in op.params], "doc": op.doc, "lazy": op.lazy is not None}
                     for op in self.ops.values()],
-            "kind_labels": dict(KIND_LABELS),
+            "kind_labels": dict(self.kind_labels),
             "methods": methods,
+            "addons": list(self.addons),
+            "addons_available": self.available_addons(),
+            # the empty slots, in reading order: Tab walks them, and a new one
+            # is selected as it appears so that typing fills it
+            "placeholders": [format_path(p) for p, n in sorted(nodes.items(), key=lambda kv: tuple(str(i) for i in kv[0]))
+                             if is_placeholder(n)],
             "error": error,
         }
+        for addon in self.addons.values():
+            addon.contribute(self, snap, expr)
+        return snap
 
     def _node_info(self, path: Path, node: Basic, expr: Optional[Basic] = None) -> Dict[str, Any]:
         """A node's entry in the snapshot.  ``node`` is the view-tree node
@@ -1297,13 +1479,15 @@ class Document:
         neither ``insertable`` nor ``rangeable`` (its arguments are not what
         is shown - the parts are, and they may be)."""
         parts = self._parts(node)
-        info: Dict[str, Any] = {"src": str(node), "type": type(node).__name__, "kind": node_kind(node),
-                                "kinds": node_kinds(node),
+        info: Dict[str, Any] = {"src": str(node), "type": type(node).__name__, "kind": node_kind(node, self.kinds),
+                                "kinds": node_kinds(node, self.kinds),
                                 "nargs": len(node.args), "insertable": is_insertable(node) and not parts,
                                 "rangeable": is_rangeable(node) and not parts,
                                 "free": sorted(str(s) for s in getattr(node, "free_symbols", ()))[:12]}
         if parts:
             info["parts"] = [name for name, _value in parts]
+        if is_placeholder(node):
+            info["placeholder"] = True
         # What unwrap could keep, when there is more than one candidate: the
         # front end asks which argument to leave instead of picking for the user.
         choices = self._keep_candidates(node)
@@ -1354,8 +1538,12 @@ class Document:
         ``{"action": "undeclare", "name": "A"}``,
         ``{"action": "preview", "src": ...}`` (a snapshot of the parsed source,
         not committed), ``{"action": "undo"}``, ``{"action": "redo"}``,
-        ``{"action": "snapshot"}``.  Errors are reported in the snapshot's
-        ``"error"`` field.
+        ``{"action": "snapshot"}``, ``{"action": "addon", "addon": name,
+        "method": ..., ...}`` (a method of one of the document's add-ons: a
+        query answers under ``"query"``, a change like any edit),
+        ``{"action": "addons", "enable": [names], "disable": [names]}``
+        (switch add-ons on or off; see :meth:`available_addons`).  Errors
+        are reported in the snapshot's ``"error"`` field.
         """
         self.last_note = None
         try:
@@ -1365,6 +1553,19 @@ class Document:
             self._action_label = self._describe(message)
             if action == "preview":
                 return self.preview(str(message.get("src", "")))
+            if action == "addon":
+                return self._handle_addon(message)
+            if action == "addons":
+                # Switch add-ons on or off; not a step of the history.  The
+                # answer carries the front ends of the ones that are on, so
+                # the editor can mount what it has not seen yet.
+                for name in message.get("disable") or []:
+                    self.disable(str(name))
+                for name in message.get("enable") or []:
+                    self.enable(str(name))
+                snap = self.snapshot()
+                snap["addon_clients"] = [addon.client() for addon in self.addons.values()]
+                return snap
             if action == "export":
                 snap = self.snapshot()
                 snap["export"] = self.export()
@@ -1447,6 +1648,40 @@ class Document:
         finally:
             self._action_label = None
 
+    def _handle_addon(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        """One of an add-on's methods (see :meth:`Addon.handle`): a dict
+        answer is a query, put under ``snap["query"]`` with nothing changed;
+        a SymPy object is committed as the whole expression; None leaves the
+        document as the method left it."""
+        name = str(message.get("addon", ""))
+        method = str(message.get("method", ""))
+        addon = self.addons.get(name)
+        if addon is None:
+            raise ValueError(f"No add-on {name!r} in this document (it has {', '.join(self.addons) or 'none'})")
+        payload = {k: v for k, v in message.items() if k not in ("action", "addon", "method", "_req")}
+        self._action_label = addon.describe(method, payload) or f"{addon.label or name}: {method}"
+        try:
+            result = addon.handle(self, method, payload)
+        except Exception as exc:
+            # The failure goes back to the panel that asked (api.call rejects
+            # with it) and nowhere else: the editor's own error line is for
+            # the editor's own edits.  The plot asking for samples of a piece
+            # that has none is not an error of the formula.
+            snap = self.snapshot()
+            snap["query"] = {"addon": name, "method": method, "error": f"{type(exc).__name__}: {exc}"}
+            return snap
+        if isinstance(result, dict):
+            snap = self.snapshot()
+            snap["query"] = {"addon": name, "method": method, "result": result}
+            return snap
+        if result is not None:
+            self._commit(self._coerce(result))
+        snap = self.snapshot()
+        snap["addon"] = {"name": name, "method": method}
+        if self.last_note:
+            snap["note"] = self.last_note
+        return snap
+
     def _describe(self, message: Dict[str, Any]) -> Optional[str]:
         """What a message does, for the history ("Transform: Simplify",
         "SymPy: diff(x)", "Edit: y → cos(y)"...)."""
@@ -1500,12 +1735,20 @@ class Document:
     def _path(path: PathLike) -> Path:
         return parse_path(path) if isinstance(path, str) else tuple(path)
 
-    @staticmethod
-    def _coerce(expr) -> Basic:
+    def _coerce(self, expr) -> Basic:
         # srepr output names Str (a MatrixSymbol's name) which SymPy < 1.14
         # does not export: without it in scope, sympify reads Str('A') as an
         # undefined function of A, and the matrix symbol's name becomes "Str".
-        result = sympify(expr, locals={"Str": Str}) if isinstance(expr, str) else sympify(expr)
+        # An add-on's node types are named in its namespace, so its srepr
+        # strings read back too.
+        if isinstance(expr, str):
+            local: Dict[str, Any] = {"Str": Str, "Placeholder": Placeholder}
+            for addon in getattr(self, "addons", {}).values():
+                for name, obj in addon.namespace().items():
+                    local.setdefault(name, obj)
+            result = sympify(expr, locals=local)
+        else:
+            result = sympify(expr)
         if not isinstance(result, Basic):
             raise TypeError(f"Cannot edit {type(expr).__name__} objects")
         return result

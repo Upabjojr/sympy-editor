@@ -1,0 +1,51 @@
+/* sympy-editor add-on "tree" - scoped under the panel the editor gives it. */
+.se-addon-tree .tree-panel { position: relative; }
+.se-addon-tree .tree-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; margin-bottom: 0.3rem; }
+.se-addon-tree .tree-bar select, .se-addon-tree .tree-field { font: inherit; font-size: 12px; padding: 2px 6px; }
+.se-addon-tree .tree-field { width: 9em; }
+.se-addon-tree .tree-hint { color: var(--se-muted); font-size: 11px; margin-left: auto; }
+.se-addon-tree .tree-scroll { overflow: auto; max-width: 100%; }
+.se-addon-tree .tree-svg { display: block; font: 12px var(--se-mono); }
+.se-addon-tree .tree-edges line { stroke: var(--se-muted); stroke-width: 1.2; }
+.se-addon-tree .tree-node { cursor: pointer; outline: none; }
+.se-addon-tree .tree-node rect { fill: var(--se-bg); stroke: var(--se-border); stroke-width: 1.2; }
+.se-addon-tree .tree-node text { fill: var(--se-fg); pointer-events: none; user-select: none; }
+.se-addon-tree .tree-head-node rect { fill: rgba(var(--se-accent), 0.12); stroke: rgba(var(--se-accent), 0.6); }
+.se-addon-tree .tree-node:hover rect, .se-addon-tree .tree-node:focus rect { stroke: rgb(var(--se-accent)); stroke-width: 1.8; }
+.se-addon-tree .tree-node.tree-selected rect { stroke: rgb(var(--se-accent)); stroke-width: 2.4; fill: rgba(var(--se-accent), 0.22); }
+.se-addon-tree .tree-node.tree-dragging { opacity: 0.5; }
+.se-addon-tree .tree-node.tree-drop rect { stroke: var(--se-added); stroke-width: 2.4; stroke-dasharray: 4 2; }
+.se-addon-tree .tree-note { color: var(--se-muted); font-size: 12px; padding: 0.3rem 0; }
+.se-addon-tree .tree-edit { position: absolute; font: 12px var(--se-mono); padding: 2px 4px; z-index: 3; }
+.se-addon-tree .tree-edit[hidden] { display: none; }
+.se-addon-tree .tree-menu { position: absolute; z-index: 40; min-width: 12rem; max-width: 22rem; max-height: 18rem; overflow-y: auto;
+  background: var(--se-bg); color: var(--se-fg); border: 1px solid var(--se-border); border-radius: 0.4rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18); padding: 0.25rem; display: flex; flex-direction: column; font-size: 12px; }
+.se-addon-tree .tree-menu[hidden] { display: none; }
+.se-addon-tree .tree-menu-head { color: var(--se-muted); font-weight: 600; padding: 0.3rem 0.4rem 0.1rem; font-family: var(--se-mono); }
+.se-addon-tree .tree-item { text-align: left; background: none; border: 0; box-shadow: none; padding: 0.2rem 0.5rem; border-radius: 0.3rem; cursor: pointer; color: inherit; font: inherit; }
+.se-addon-tree .tree-item:hover, .se-addon-tree .tree-item:focus { background: rgba(var(--se-accent), 0.14); outline: none; }
+/* the tree under a step of the drawer's history list */
+.sympy-editor .tree-history { margin: 0.2rem 0; }
+.sympy-editor .tree-history > summary { cursor: pointer; color: var(--se-muted); font-size: 11px; }
+.sympy-editor .tree-history-scroll { overflow-x: auto; }
+.sympy-editor .tree-history .tree-svg { display: block; font: 11px var(--se-mono); }
+.sympy-editor .tree-history .tree-edges line { stroke: var(--se-muted); stroke-width: 1; }
+.sympy-editor .tree-history .tree-node rect { fill: var(--se-bg); stroke: var(--se-border); stroke-width: 1; }
+.sympy-editor .tree-history .tree-node text { fill: var(--se-fg); }
+.sympy-editor .tree-history .tree-head-node rect { fill: rgba(var(--se-accent), 0.12); stroke: rgba(var(--se-accent), 0.6); }
+.sympy-editor .tree-history .tree-node.tree-added rect { fill: rgba(var(--se-added-rgb), 0.15); stroke: var(--se-added); stroke-width: 1.5; }
+.sympy-editor .tree-history .tree-node.tree-added text { fill: var(--se-added); font-weight: bold; }
+/* the quick actions under a clicked node */
+.se-addon-tree .tree-quick { position: absolute; z-index: 30; display: flex; gap: 2px; padding: 2px; background: var(--se-bg); border: 1px solid var(--se-border); border-radius: 0.35rem; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15); }
+.se-addon-tree .tree-quick[hidden] { display: none; }
+.se-addon-tree .tree-quick button { font-size: 11px; padding: 1px 6px; }
+/* where a drag may not land */
+.se-addon-tree .tree-node.tree-drop-no rect { stroke: var(--se-removed); stroke-width: 2.4; stroke-dasharray: 4 2; fill: rgba(var(--se-removed-rgb), 0.15); }
+/* a refused transformation: half a second of red over the panel */
+.se-addon-tree .tree-panel.tree-flash { animation: tree-flash 0.5s steps(1, end); }
+@keyframes tree-flash {
+  0%, 40%, 80% { background: rgba(var(--se-removed-rgb), 0.28); }
+  20%, 60%, 100% { background: transparent; }
+}
+@media (prefers-reduced-motion: reduce) { .se-addon-tree .tree-panel.tree-flash { animation: none; background: rgba(var(--se-removed-rgb), 0.2); } }

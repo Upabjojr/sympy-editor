@@ -55,6 +55,9 @@ chaquopy {
         version = "3.12"
         pip {
             install("sympy==1.14.0")
+            // the bundled add-ons' requirements (addons/*/addon.json "requires";
+            // a test keeps this list in step with the manifests)
+            install("sympy-matching>=0.0.4")
         }
     }
 }

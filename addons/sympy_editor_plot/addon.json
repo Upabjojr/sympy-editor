@@ -1,0 +1,8 @@
+{
+  "name": "plot",
+  "label": "Plot",
+  "module": "sympy_editor_plot",
+  "version": "0.0.1",
+  "description": "The graph of the selection, drawn by Plotly.js from samples Python takes.",
+  "requires": []
+}

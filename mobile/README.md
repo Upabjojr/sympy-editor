@@ -225,3 +225,18 @@ The mark's author, Fredrik Johansson, permits its free use on SymPy's own
 terms (the note travels in the file).  That is a copyright licence, not a
 trademark one: an app that is not part of the SymPy project should not
 present itself as if it were - see the application id above.
+
+## Add-ons
+
+The apps carry the add-ons of `addons/` as folders of their own, one each,
+beside the app's Python (`src/main/python/addons/` on Android, `app/addons/`
+on iOS): `mobile/build.py` copies a folder's manifest (`addon.json`) and its
+package, not its tests, and `sympy_editor_app.py` registers the directory at
+start so that every document lists them.  They start off; the toolbar's
+**Add-ons ▾** menu switches them on and off, and the WebView keeps the
+switches between launches (`rememberAddons`).  What an add-on `requires`
+(its manifest) is installed beside SymPy: `install(...)` lines under
+`chaquopy.pip` in `android/app/build.gradle.kts` - `tests/test_mobile.py`
+checks they match the manifests - and `app_packages` on iOS.  See
+`addons/README.md`; adding an add-on from a repository at run time is the
+step not taken yet, and the folder layout is shaped for it.

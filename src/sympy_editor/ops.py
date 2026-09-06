@@ -39,7 +39,8 @@ from sympy.tensor.array.expressions.array_expressions import _ArrayExpr, _Codege
 
 ARRAY_EXPR = (_ArrayExpr, _CodegenArrayAbstract)
 
-__all__ = ["Op", "register_op", "get_ops", "default_ops", "KINDS", "KIND_LABELS", "node_kind", "node_kinds"]
+__all__ = ["Op", "make_op", "register_op", "get_ops", "default_ops", "KINDS", "KIND_LABELS", "add_kind",
+           "with_kind", "node_kind", "node_kinds"]
 
 #: Kind name -> SymPy types, in order of precedence (a ``MatrixExpr`` is an
 #: ``Expr`` too, so "matrix" must come before "scalar").
@@ -61,16 +62,44 @@ KIND_LABELS = {
 }
 
 
-def node_kinds(expr) -> list:
-    """All kinds of ``expr`` (keys of :data:`KINDS`), most specific first -
+def add_kind(name: str, types: Tuple[type, ...], label: Optional[str] = None, before: str = "scalar") -> None:
+    """Add a kind (an add-on's node type) to :data:`KINDS`, ahead of
+    ``before`` so that it wins over the general ones - a class that is an
+    ``Expr`` would otherwise be a "scalar".  Adding a kind that exists
+    replaces its types."""
+    if not name or not isinstance(name, str):
+        raise ValueError("A kind needs a name")
+    types = tuple(types)
+    if not all(isinstance(t, type) for t in types):
+        raise TypeError(f"Kind {name!r}: types must be classes")
+    items = [(k, v) for k, v in KINDS.items() if k != name]
+    at = next((i for i, (k, _v) in enumerate(items) if k == before), len(items))
+    items.insert(at, (name, types))
+    KINDS.clear()
+    KINDS.update(items)
+    KIND_LABELS[name] = label or name.capitalize()
+
+
+def node_kinds(expr, kinds: "Optional[Dict[str, Tuple[type, ...]]]" = None) -> list:
+    """All kinds of ``expr`` (keys of :data:`KINDS`, or of ``kinds`` - a
+    document's own table, with its add-ons' kinds), most specific first -
     an ``Integral`` is ``["integral", "scalar"]``; ``["other"]`` if none."""
-    kinds = [kind for kind, types in KINDS.items() if isinstance(expr, types)]
-    return kinds or ["other"]
+    table = KINDS if kinds is None else kinds
+    found = [kind for kind, types in table.items() if isinstance(expr, types)]
+    return found or ["other"]
 
 
-def node_kind(expr) -> str:
+def node_kind(expr, kinds: "Optional[Dict[str, Tuple[type, ...]]]" = None) -> str:
     """The most specific kind of ``expr`` (a key of :data:`KINDS`), or ``"other"``."""
-    return node_kinds(expr)[0]
+    return node_kinds(expr, kinds)[0]
+
+
+def with_kind(table: "Dict[str, Tuple[type, ...]]", name: str, types: Tuple[type, ...], before: str = "scalar") -> "OrderedDict[str, Tuple[type, ...]]":
+    """``table`` with the kind ``name`` ahead of ``before`` (a new table)."""
+    items = [(k, v) for k, v in table.items() if k != name]
+    at = next((i for i, (k, _v) in enumerate(items) if k == before), len(items))
+    items.insert(at, (name, tuple(types)))
+    return OrderedDict(items)
 
 
 class Op(NamedTuple):
@@ -91,9 +120,31 @@ class Op(NamedTuple):
     #: used when the front end's "unevaluated" toggle is on; None for an op
     #: without one (a simplification), which is then applied as usual.
     lazy: Optional[Callable] = None
+    #: The op wants the document too: ``func(expr, *values, doc=document)``
+    #: (an add-on's op that reads state kept on the document).
+    context: bool = False
 
 
 _REGISTRY: "OrderedDict[str, Op]" = OrderedDict()
+
+
+def make_op(name: str, func: Callable, *, label: Optional[str] = None,
+            kinds: Optional[Tuple[str, ...]] = None, params: Optional[Tuple] = None,
+            doc: str = "", lazy: Optional[Callable] = None, context: bool = False) -> Op:
+    """An :class:`Op` without registering it - what an add-on lists in its
+    ``ops``.  The arguments are :func:`register_op`'s; with ``context`` the
+    op is called as ``func(expr, *values, doc=document)``.  The kinds are
+    not checked here: an add-on's op may name a kind the add-on itself adds
+    when it is activated (an op with a kind nothing has is merely never
+    offered)."""
+    if kinds is not None:
+        kinds = tuple(kinds)
+
+    shaped = tuple({"name": p[0], "kind": p[1] if len(p) > 1 else "text",
+                    "optional": bool(p[2]) if len(p) > 2 else False,
+                    "default": p[3] if len(p) > 3 else None}
+                   for p in (params or ()))
+    return Op(name, label or name, func, kinds, shaped, doc, lazy, context)
 
 
 def register_op(name: str, func: Optional[Callable] = None, *, label: Optional[str] = None,
@@ -110,15 +161,9 @@ def register_op(name: str, func: Optional[Callable] = None, *, label: Optional[s
         unknown = [k for k in kinds if k not in KINDS]
         if unknown:
             raise ValueError(f"Unknown kinds {unknown}; known: {list(KINDS)}")
-        kinds = tuple(kinds)
-
-    shaped = tuple({"name": p[0], "kind": p[1] if len(p) > 1 else "text",
-                    "optional": bool(p[2]) if len(p) > 2 else False,
-                    "default": p[3] if len(p) > 3 else None}
-                   for p in (params or ()))
 
     def deco(f: Callable) -> Callable:
-        _REGISTRY[name] = Op(name, label or name, f, kinds, shaped, doc, lazy)
+        _REGISTRY[name] = make_op(name, f, label=label, kinds=kinds, params=params, doc=doc, lazy=lazy)
         return f
 
     return deco(func) if func is not None else deco

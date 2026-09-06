@@ -94,8 +94,55 @@ def copy_python_sources(dest: Path) -> Path:
     shutil.copytree(HERE.parent / "src" / "sympy_editor", package,
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     shutil.copyfile(APP / "sympy_editor_app.py", dest / "sympy_editor_app.py")
+    stage_addons(dest / "addons")
     print(f"+ staged the app's Python in {dest}")
     return dest
+
+
+#: Where the add-ons live in the checkout: one folder per add-on, each with
+#: its manifest (addon.json) beside its package - the layout a checkout of
+#: an add-on's own repository has.
+ADDONS = HERE.parent / "addons"
+#: What of an add-on folder does not travel into an app.
+ADDON_SKIP = shutil.ignore_patterns("__pycache__", "*.pyc", "tests", "*.egg-info", "build", "dist", ".git")
+
+
+def addon_manifests() -> list[dict]:
+    """The manifests of the add-on folders under ``addons/``, in name order."""
+    if str(HERE.parent / "src") not in sys.path:
+        sys.path.insert(0, str(HERE.parent / "src"))
+    from sympy_editor.addons import scan_addons
+    return [m for _name, m in sorted(scan_addons(ADDONS).items())]
+
+
+def stage_addons(dest: Path) -> Path:
+    """Copy every add-on folder - manifest and package, not its tests - into
+    ``dest``, one folder each, as ``sympy_editor_app`` expects them
+    (``addons/<folder>/addon.json``).  Each stays a folder of its own, so
+    that one cloned from a repository later can sit beside them unchanged."""
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.mkdir(parents=True)
+    for manifest in addon_manifests():
+        if manifest.get("bundle") is False:          # the template: an example to copy, not to ship
+            continue
+        src = Path(manifest["folder"])
+        shutil.copytree(src, dest / src.name, ignore=ADDON_SKIP)
+    print(f"+ staged {len(list(dest.iterdir()))} add-ons in {dest}")
+    return dest
+
+
+def addon_requirements() -> list[str]:
+    """The pip requirements of the bundled add-ons (from their manifests):
+    what each app must install beside SymPy."""
+    out: list[str] = []
+    for manifest in addon_manifests():
+        if manifest.get("bundle") is False:
+            continue
+        for req in manifest.get("requires", []):
+            if req not in out:
+                out.append(req)
+    return out
 
 
 #: JDK majors the pinned Gradle/AGP/Kotlin accept (a newer default `java`,
@@ -219,13 +266,13 @@ def ios_packages() -> Path:
     """
     packages = IOS / "app_packages"
     stamp = packages / ".sympy-version"
-    wanted = sympy_version()
+    wanted = sympy_version() + " " + " ".join(addon_requirements())   # the add-ons' packages travel with SymPy
     if stamp.is_file() and stamp.read_text(encoding="utf-8").strip() == wanted:
         return packages
     if packages.exists():
         shutil.rmtree(packages)
     run([sys.executable, "-m", "pip", "install", "--quiet", "--target", str(packages),
-         "--no-compile", "--only-binary=:all:", f"sympy=={wanted}"])
+         "--no-compile", "--only-binary=:all:", f"sympy=={sympy_version()}"] + addon_requirements())
     for tests in sorted(packages.rglob("tests")):
         if tests.is_dir():
             shutil.rmtree(tests)
