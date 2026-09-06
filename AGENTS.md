@@ -161,9 +161,17 @@ Two conventions between printer, document and front end:
   Messages carry `children: [arg indices]` with `replace`/`delete`/`apply`
   (`printer.extract_range/replace_range/delete_range`); the range's source is
   built in the front end from the children's sources.  Drags use pointer
-  events (mouse, touch, pen alike); `touch-action: pan-y pinch-zoom` keeps
-  vertical scrolling and pinch-zoom on phones, and `@media (pointer: coarse)`
-  enlarges targets.
+  events (mouse, touch, pen alike): a mouse or pen drag selects at once; a
+  finger selects only after a *long press* (`_hold`, `opts.longPress` ms
+  with the finger still - `_beginHold` selects the node under it, marks the
+  drag `held`, and the drag then extends the range), because a plain
+  one-finger drag on a phone scrolls the formula (`_pan`, wherever it
+  starts) and a tap that wobbles must stay a tap.  The view's `contextmenu`
+  is prevented for touch (Android would open its menu and cancel the
+  touch), the non-passive `touchmove` listener keeps a held drag from the
+  browser, and the click after a held drag is suppressed as after a moved
+  one.  `touch-action: pan-y pinch-zoom` keeps vertical scrolling and
+  pinch-zoom on phones, and `@media (pointer: coarse)` enlarges targets.
 - **Source line.**  `AnnotatedStrPrinter` (same mixin as the LaTeX printer,
   markers instead of `\htmlData`) gives `snapshot["spans"]`: the character
   span of every node in `str(expr)` (empty if the marked output would not
@@ -612,11 +620,28 @@ Two conventions between printer, document and front end:
   buttons, Ctrl+wheel, Ctrl+plus/minus/0 and a two-pointer pinch
   (`_pointers`/`_pinch`; a non-passive `touchstart` listener prevents the
   browser's own pinch when two fingers land, so `touch-action: pan-y` can
-  stay for one-finger page scrolling).  `rememberZoom` (option; on in the
+  stay for one-finger page scrolling).  The pinch also scrolls: the
+  fingers' centre drags the content along (`_pinch.cx/cy`, applied to
+  `scrollLeft`/`scrollTop` before the zoom, which is anchored at the
+  centre), so two fingers moving together pan a formula larger than the
+  view - sideways, and up and down in full screen, where the view has a
+  height of its own.  `rememberZoom` (option; on in the
   mobile bundle) keeps it in `localStorage`.  A formula wider than the view
   (`overflow-x: auto`) scrolls with a plain wheel over it (the event reaches
-  the page again at the ends) and by dragging its empty space
-  (`_pan`; a drag that starts on a glyph still selects a range).
+  the page again at the ends), by dragging its empty space with a mouse
+  (`_pan`; a mouse drag that starts on a glyph still selects a range) or
+  anywhere with a finger, and through the **edge strips**: four
+  `.se-scrollbtn` buttons in `.se-stage` (`scrollBtns`, chevrons from
+  `chevronSvg`), each `hidden` unless there is formula beyond its edge
+  (`_updateScrollArrows`, from `_applySelection` - so after every render,
+  scroll, zoom and relayout - and from the end of the change animation,
+  whose old ghost is as wide as the old formula; `_contentObserver`
+  watches the rendering's own size for the fonts arriving late, separately
+  from `_relayout`, which would hide the caret).  A press scrolls 70% of a
+  screen (`scrollByPage`, smooth unless reduced motion).  While the right
+  or the top strip shows, the stage carries `se-past-right`/`se-past-up`
+  and the full-screen button steps in from that edge - on a short view it
+  would sit right on the chevron.
 - **Caret vs selection.**  `Editor.selected` and `Editor.caret` are mutually
   exclusive (`select()` hides the caret, `_showCaret()` clears the
   selection): keys replace a selection, insert at a caret, and never delete

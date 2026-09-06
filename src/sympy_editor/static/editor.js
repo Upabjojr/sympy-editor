@@ -33,6 +33,7 @@ var SympyEditor = (function () {
     minZoom: 0.25,
     maxZoom: 4,
     rememberZoom: false, // keep the zoom in localStorage across page loads (the mobile app does)
+    longPress: 450,      // ms a finger must rest on the formula before it starts a range selection (touch screens)
     previewDelay: 250,   // ms after the last keystroke in the source line before it is previewed
     workingAfter: 400,   // ms a request may take before the spinner overlay appears
     interruptAfter: 2000, // ms after which the overlay offers to interrupt the computation
@@ -167,7 +168,8 @@ var SympyEditor = (function () {
     "<section><h3>On a phone or tablet</h3><ul>",
     "<li>Tap to select; tap the selected node again to edit it.</li>",
     "<li>Tap a gap for a caret, tap the caret again to insert; tap an operator for its palette.</li>",
-    "<li>Drag to select a range; two fingers zoom; the <b>keyboard</b> button opens the keyboard for the selection.</li>",
+    "<li>Hold a finger still on a node to start a range, then drag over its neighbours; the <b>keyboard</b> button opens the keyboard for the selection.</li>",
+    "<li>Two fingers zoom the formula and, when it is wider or taller than the view, scroll it; one finger dragged across it scrolls it sideways. The arrows at the edges scroll a screen at a time and go away once the end is in sight.</li>",
     "</ul></section>",
     "<section><h3>Zoom and full screen</h3><ul>",
     "<li><kbd>Ctrl</kbd>+wheel, <kbd>Ctrl</kbd>+<kbd>+</kbd>/<kbd>\u2212</kbd>/<kbd>0</kbd>, pinch, or the \u2212/100%/+ buttons.</li>",
@@ -464,6 +466,16 @@ var SympyEditor = (function () {
     return '<svg class="se-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
       '<g transform="rotate(' + deg + ' 8 8)" fill="none" stroke="currentColor" stroke-width="1.7" ' +
       'stroke-linecap="round" stroke-linejoin="round"><path d="M8 13.2V3.2"/><path d="M3.9 7.3 8 3.2l4.1 4.1"/></g></svg>';
+  }
+
+  /** A chevron for the strips at the edges of a formula that runs past the
+   *  view: a tall, flat arrow with nothing but the direction to it.  Drawn
+   *  for the reason the arrows are. */
+  function chevronSvg(dir) {
+    var deg = { up: 0, right: 90, down: 180, left: 270 }[dir];
+    return '<svg class="se-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
+      '<path transform="rotate(' + deg + ' 8 8)" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+      'stroke-linecap="round" stroke-linejoin="round" d="M3.5 10.2 8 5.7l4.5 4.5"/></svg>';
   }
 
   /** A keyboard: a case, three keys and a space bar.  Drawn, not typed,
@@ -1161,6 +1173,24 @@ var SympyEditor = (function () {
         self.view.focus({ preventScroll: true });
       });
       this.stage.appendChild(this.fullBtn);
+      // Strips along the edges of the view for a formula that runs past it:
+      // each is shown while there is something to scroll to on its side and
+      // scrolls a screen that way when pressed (see _updateScrollArrows).
+      this.scrollBtns = {};
+      var scrollTitles = { left: "Scroll the formula left", right: "Scroll the formula right",
+                           up: "Scroll the formula up", down: "Scroll the formula down" };
+      ["left", "right", "up", "down"].forEach(function (dir) {
+        var b = h("button", { type: "button", class: "se-scrollbtn se-scroll-" + dir, hidden: "",
+          title: scrollTitles[dir], "aria-label": scrollTitles[dir], tabindex: "-1" });
+        b.innerHTML = chevronSvg(dir);
+        b.addEventListener("click", function (ev) {
+          ev.preventDefault();
+          self.scrollByPage(dir);
+          self.view.focus({ preventScroll: true });
+        });
+        self.scrollBtns[dir] = b;
+        self.stage.appendChild(b);
+      });
       this.fullscreen = false;
       this.zoom = 1;
       this._applyZoom(this._initialZoom());
@@ -1308,7 +1338,8 @@ var SympyEditor = (function () {
       this._drag = null;      // pointer drag in progress: {anchor, moved}
       this._pointers = {};    // pointers currently down (id -> {x, y}), for pinching
       this._pinch = null;     // {dist, zoom} while two pointers are down
-      this._pan = null;       // {x, left, moved} while a drag scrolls the view sideways
+      this._pan = null;       // {x, y, left, top, moved} while a drag scrolls the view
+      this._hold = null;      // {id, x, y, leaf, timer} while a finger rests on the formula (a long press starts a range)
       this._suppressClick = false;
       this._pointerType = "mouse";   // of the last pointerdown: touch gets tap-to-edit
       this._boxes = { hover: [], select: [] };   // highlight overlays (see _visualRect)
@@ -1597,6 +1628,9 @@ var SympyEditor = (function () {
         self.view.classList.toggle("se-gap", !!gap);
       });
       this.view.addEventListener("scroll", function () { self._gapCache = null; if (self.caret) self._hideCaret(); self._applySelection(); });
+      // A long press must not bring up the browser's own menu (Android
+      // offers one over anything held, and cancels the touch when it shows).
+      this.view.addEventListener("contextmenu", function (ev) { if (self._pointerType === "touch") ev.preventDefault(); });
       // Zoom with Ctrl/Cmd + wheel (a trackpad pinch arrives the same way); a
       // plain wheel over a formula wider than the view scrolls it sideways
       // (the view never scrolls vertically) and reaches the page at the ends.
@@ -1612,50 +1646,75 @@ var SympyEditor = (function () {
         self.view.scrollLeft = before + (ev.deltaX || ev.deltaY) * unit;
         if (self.view.scrollLeft !== before) ev.preventDefault();
       }, { passive: false });
-      // Two fingers pinch the formula, not the page: the browser must be told
-      // before it takes the gesture (one finger still scrolls the page
-      // vertically, see touch-action in the CSS).
+      // Two fingers pinch and scroll the formula, not the page: the browser
+      // must be told before it takes the gesture (one finger still scrolls
+      // the page vertically, see touch-action in the CSS) - and a finger that
+      // has started a range selection keeps it, wherever it goes next.
       this.view.addEventListener("touchstart", function (ev) { if (ev.touches.length >= 2) ev.preventDefault(); }, { passive: false });
-      this.view.addEventListener("touchmove", function (ev) { if (self._pinch) ev.preventDefault(); }, { passive: false });
+      this.view.addEventListener("touchmove", function (ev) { if (self._pinch || (self._drag && self._drag.held)) ev.preventDefault(); }, { passive: false });
       this.view.addEventListener("mouseleave", function () { self._setHover(null); });
       this.view.addEventListener("click", function (ev) { self._onClick(ev); });
-      // Dragging (mouse, touch or pen) over the formula selects a range.
+      // Dragging with a mouse or a pen over the formula selects a range.  A
+      // finger is different: a drag scrolls a formula that runs past the
+      // view (a finger cannot tell a glyph from the space beside it), a tap
+      // selects on the click that follows, and a finger held still on a node
+      // starts a range selection from it (_beginHold) - dragging on from
+      // there extends the range as a mouse drag does.
       this.view.addEventListener("pointerdown", function (ev) {
         self._pointerType = ev.pointerType || "mouse";
         self._clearChangeMarks();
+        self._suppressClick = false;      // the click that follows belongs to this press
         if (ev.pointerType === "mouse" && ev.button !== 0) return;
         self._pointers[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
         if (Object.keys(self._pointers).length === 2) {   // a second finger: a pinch, no longer a drag
           self._drag = null;
+          self._cancelHold();
           self._endPan();
-          self._pinch = { dist: self._pointerSpread(), zoom: self.zoom };
+          self._pinch = { dist: self._pointerSpread(), zoom: self.zoom, cx: self._pointerCentre(), cy: self._pointerCentreY() };
           return;
         }
         var leaf = self._leafAt(ev);
-        if (!leaf && self.view.scrollWidth > self.view.clientWidth) {
-          // Empty space of a formula wider than the view: dragging scrolls it.
+        var touch = ev.pointerType === "touch";
+        var overflow = self.view.scrollWidth > self.view.clientWidth || self.view.scrollHeight > self.view.clientHeight;
+        if (overflow && (!leaf || touch)) {
+          // Empty space of a formula that runs past the view - or, with a
+          // finger, anywhere on it: dragging scrolls it.
           self._drag = null;
-          self._pan = { x: ev.clientX, left: self.view.scrollLeft, moved: false, id: ev.pointerId };
+          self._pan = { x: ev.clientX, y: ev.clientY, left: self.view.scrollLeft, top: self.view.scrollTop, moved: false, id: ev.pointerId };
           if (ev.pointerType === "mouse" && self.view.setPointerCapture) {
             try { self.view.setPointerCapture(ev.pointerId); } catch (e) { /* not capturable */ }
           }
-          return;
+        } else {
+          self._drag = touch ? null : { anchor: leaf ? leaf.getAttribute("data-path") : null, moved: false };
         }
-        self._drag = { anchor: leaf ? leaf.getAttribute("data-path") : null, moved: false };
+        if (touch && leaf) {
+          self._cancelHold();
+          self._hold = { id: ev.pointerId, x: ev.clientX, y: ev.clientY, leaf: leaf,
+                         timer: setTimeout(function () { self._beginHold(); }, self.opts.longPress) };
+        }
       });
       this.view.addEventListener("pointermove", function (ev) {
         if (self._pointers[ev.pointerId]) self._pointers[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
+        var slop = ev.pointerType === "touch" ? 8 : 3;   // a finger trembles more than a mouse
+        if (self._hold && self._hold.id === ev.pointerId && Math.hypot(ev.clientX - self._hold.x, ev.clientY - self._hold.y) > slop) self._cancelHold();
         if (self._pinch) {
           if (Object.keys(self._pointers).length < 2) return;
-          self.setZoom(self._pinch.zoom * self._pointerSpread() / self._pinch.dist, self._pointerCentre());
+          // The fingers' centre drags the formula along (as far as there is
+          // formula beyond the view), and their spread zooms it about the centre.
+          var cx = self._pointerCentre(), cy = self._pointerCentreY();
+          self.view.scrollLeft -= cx - self._pinch.cx;
+          self.view.scrollTop -= cy - self._pinch.cy;
+          self._pinch.cx = cx; self._pinch.cy = cy;
+          self.setZoom(self._pinch.zoom * self._pointerSpread() / self._pinch.dist, cx);
           ev.preventDefault();
           return;
         }
         if (self._pan) {
           if (ev.pointerType === "mouse" && ev.buttons === 0) { self._endPan(); return; }
-          var dx = ev.clientX - self._pan.x;
-          if (Math.abs(dx) > 3) { self._pan.moved = true; self.view.classList.add("se-panning"); }
+          var dx = ev.clientX - self._pan.x, dy = ev.clientY - self._pan.y;
+          if (Math.abs(dx) > slop || Math.abs(dy) > slop) { self._pan.moved = true; self.view.classList.add("se-panning"); }
           self.view.scrollLeft = self._pan.left - dx;
+          self.view.scrollTop = self._pan.top - dy;
           if (self._pan.moved) ev.preventDefault();
           return;
         }
@@ -1672,13 +1731,16 @@ var SympyEditor = (function () {
       });
       var endPointer = function (ev, cancelled) {
         delete self._pointers[ev.pointerId];
+        self._cancelHold();
         if (self._pinch && Object.keys(self._pointers).length < 2) {
           self._pinch = null;
           self._pointers = {};              // the finger left behind must not start anything
           self._suppressClick = true;
         }
         if (self._pan) { if (self._pan.moved && !cancelled) self._suppressClick = true; self._endPan(); }
-        if (self._drag && self._drag.moved && !cancelled) self._suppressClick = true;
+        // a range selection - dragged, or begun by a long press, which has
+        // selected already - is not followed by a click's selection on top
+        if (self._drag && (self._drag.moved || self._drag.held) && !cancelled) self._suppressClick = true;
         self._drag = null;
       };
       this.view.addEventListener("pointerup", function (ev) { endPointer(ev, false); });
@@ -1741,6 +1803,10 @@ var SympyEditor = (function () {
       if (typeof ResizeObserver === "function") {
         this._resizeObserver = new ResizeObserver(function () { self._relayout(); });
         this._resizeObserver.observe(this.view);
+        // The rendering's own size matters to the edge strips alone (see
+        // _watchRendering): the caret and the selection are left in place.
+        this._contentObserver = new ResizeObserver(function () { self._updateScrollArrows(); });
+        this._watchRendering();
       } else {
         onDocument("resize", this._relayout);   // (window resize bubbles to document in no browser; kept for symmetry)
         window.addEventListener("resize", this._relayout);
@@ -1934,6 +2000,7 @@ var SympyEditor = (function () {
         }
       }
       this.view.classList.remove("se-empty");
+      this._watchRendering();
       var slots = this.state.placeholders || [];
       for (var si = 0; si < slots.length; si++) {
         var sels = this._els(slots[si]);
@@ -2093,6 +2160,7 @@ var SympyEditor = (function () {
         disp.classList.remove("se-changing");
         if (oldGhost.parentNode) oldGhost.parentNode.removeChild(oldGhost);
         if (newGhost.parentNode) newGhost.parentNode.removeChild(newGhost);
+        self._updateScrollArrows();      // the old ghost was as wide as the old formula
       };
       this._finishAnimation = finish;
       // A WebView older than Chrome 84 has no Animation.finished: its events
@@ -2418,6 +2486,7 @@ var SympyEditor = (function () {
     }
 
     _applySelection() {
+      this._updateScrollArrows();
       this._addonsNotify("onSelect", this.selected, this.range);
       var old = this.view.querySelectorAll(".se-selected");
       for (var i = 0; i < old.length; i++) old[i].classList.remove("se-selected");
@@ -4980,12 +5049,86 @@ var SympyEditor = (function () {
       return pts.length ? pts.reduce(function (sum, p) { return sum + p.x; }, 0) / pts.length : undefined;
     }
 
+    _pointerCentreY() {
+      var pts = Object.keys(this._pointers).map(function (id) { return this._pointers[id]; }, this);
+      return pts.length ? pts.reduce(function (sum, p) { return sum + p.y; }, 0) / pts.length : undefined;
+    }
+
     _endPan() {
       if (this._pan && this.view.releasePointerCapture && this._pan.id !== undefined) {
         try { this.view.releasePointerCapture(this._pan.id); } catch (e) { /* not captured */ }
       }
       this._pan = null;
       this.view.classList.remove("se-panning");
+    }
+
+    /** The finger has rested on a node long enough: it is selected, and the
+     *  drag that may follow extends the selection to a range - the finger is
+     *  selecting now, not scrolling (a scroll it had begun ends here). */
+    _beginHold() {
+      var hold = this._hold;
+      this._hold = null;
+      if (!hold || this.closed || this.loading) return;
+      this._endPan();
+      var leaf = hold.leaf;
+      if (!leaf || !leaf.isConnected || !this.view.contains(leaf)) return;
+      var path = leaf.getAttribute("data-path");
+      this._gapCache = null;
+      this.select(path);
+      this.lastLeaf = path;
+      this._drag = { anchor: path, moved: false, held: true };
+      this.view.focus({ preventScroll: true });
+    }
+
+    /** Watch the rendering's size as well as the view's: the fonts arriving
+     *  after the first render widen the formula without resizing the view,
+     *  and the edge strips must follow.  Not through _relayout, which hides
+     *  the caret: an inline field opened at a caret changes this very size. */
+    _watchRendering() {
+      if (!this._contentObserver) return;
+      var el = this.view.querySelector(".katex-display, .katex");
+      if (el === this._watched) return;
+      if (this._watched) this._contentObserver.unobserve(this._watched);
+      this._watched = el || null;
+      if (el) this._contentObserver.observe(el);
+    }
+
+    _cancelHold() {
+      if (!this._hold) return;
+      clearTimeout(this._hold.timer);
+      this._hold = null;
+    }
+
+    /** Show the edge strips of the sides the formula runs past, hide the
+     *  others: once the end of the formula is in sight, its strip goes. */
+    _updateScrollArrows() {
+      var b = this.scrollBtns;
+      if (!b) return;
+      var v = this.view;
+      var maxX = v.scrollWidth - v.clientWidth, maxY = v.scrollHeight - v.clientHeight;
+      var hide = this.closed || v.classList.contains("se-empty");
+      b.left.hidden = hide || !(maxX > 1 && v.scrollLeft > 1);
+      b.right.hidden = hide || !(maxX > 1 && v.scrollLeft < maxX - 1);
+      b.up.hidden = hide || !(maxY > 1 && v.scrollTop > 1);
+      b.down.hidden = hide || !(maxY > 1 && v.scrollTop < maxY - 1);
+      // the full-screen button steps in from a strip's edge (see the CSS)
+      this.stage.classList.toggle("se-past-right", !b.right.hidden);
+      this.stage.classList.toggle("se-past-up", !b.up.hidden);
+    }
+
+    /** Scroll the view most of a screen in `dir` ("left", "right", "up",
+     *  "down"), smoothly where the browser can. */
+    scrollByPage(dir) {
+      var v = this.view;
+      var dx = dir === "left" ? -1 : dir === "right" ? 1 : 0;
+      var dy = dir === "up" ? -1 : dir === "down" ? 1 : 0;
+      var left = dx * Math.max(40, v.clientWidth * 0.7), top = dy * Math.max(40, v.clientHeight * 0.7);
+      var smooth = !(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+      if (typeof v.scrollBy === "function" && smooth) {
+        try { v.scrollBy({ left: left, top: top, behavior: "smooth" }); return; } catch (e) { /* no options object */ }
+      }
+      v.scrollLeft += left;
+      v.scrollTop += top;
     }
 
     /* ---- misc UI ---- */
@@ -5067,7 +5210,9 @@ var SympyEditor = (function () {
         document.removeEventListener("webkitfullscreenchange", this._fsListener);
         this._fsListener = null;
       }
+      this._cancelHold();
       if (this._resizeObserver) { this._resizeObserver.disconnect(); this._resizeObserver = null; }
+      if (this._contentObserver) { this._contentObserver.disconnect(); this._contentObserver = null; }
       if (this._relayout) window.removeEventListener("resize", this._relayout);
       if (this.root.parentNode) this.root.parentNode.removeChild(this.root);
     }

@@ -190,9 +190,12 @@ as artifacts; with the secrets `ANDROID_KEYSTORE_BASE64` + passwords and
 
 [pas]: https://github.com/beeware/Python-Apple-support
 - Interaction on touch screens: tap to select, tap the selected node again
-  to edit it (tap a gap for a caret, again to insert), drag to select a
-  range, ↑ / *Delete* / the menus in the toolbar; the keyboard button opens the on-screen
-  keyboard for the selection, the caret or the whole expression.
+  to edit it (tap a gap for a caret, again to insert), hold a finger still on
+  a node and then drag to select a range, ↑ / *Delete* / the menus in the
+  toolbar; the keyboard button opens the on-screen keyboard for the
+  selection, the caret or the whole expression.  Two fingers zoom and scroll
+  a formula larger than the view, one finger dragged across it scrolls it
+  sideways, and the strips at its edges scroll it a screen at a time.
 
 ## The icon
 
