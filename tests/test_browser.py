@@ -179,7 +179,7 @@ def test_ops_undo_redo_delete_and_errors(browser, served):
     srv, doc = served
     page = _open(browser, srv.url)
     _click(page, '/1')          # the fraction
-    page.locator(".se-ops").select_option("negate")  # picking applies at once
+    _pick(page, ".se-ops", "negate")  # picking applies at once
     page.wait_for_function("document.querySelector('.se-source').textContent.startsWith('-x**2')")
     assert doc.expr == -(x**2) / y - sin(x)
     page.keyboard.press("Control+z")
@@ -292,6 +292,29 @@ def _wait(predicate, timeout=5.0):
             return True
         time.sleep(0.05)
     return predicate()
+
+
+def _pick_menu(page, selector):
+    """The floating list of the picker whose box is `selector` (.se-ops, .se-typemenu, .se-methods, .se-fn)."""
+    return page.locator(f'.se-pick-menu[data-for="{selector.lstrip(".")}"]')
+
+
+def _menu_labels(page, selector):
+    """Open a picker (focus its box) and read the labels it lists; Esc closes it again."""
+    page.locator(selector).click()
+    menu = _pick_menu(page, selector)
+    menu.wait_for(state="visible")
+    labels = menu.locator(".se-pick-name").all_inner_texts()
+    page.keyboard.press("Escape")
+    return labels
+
+
+def _pick(page, selector, value):
+    """Pick `value` in a picker, the way a user does: open it, click the entry."""
+    page.locator(selector).click()
+    menu = _pick_menu(page, selector)
+    menu.wait_for(state="visible")
+    menu.locator(f'.se-pick-item[data-name="{value}"]').click()
 
 
 def test_click_between_terms_inserts(browser, serve_expr):
@@ -471,7 +494,7 @@ def test_shift_arrows_select_ranges(browser, serve_expr):
     page.keyboard.press("Shift+ArrowLeft")             # shrink back
     assert page.locator(".se-selected").count() == 2
     assert page.locator('.se-toolbar [data-cmd="delete"]').is_enabled()
-    _next_state(page, lambda: page.locator(".se-ops").select_option("negate"))   # an op acts on the range only
+    _next_state(page, lambda: _pick(page, ".se-ops", "negate"))   # an op acts on the range only
     assert doc.expr == a - b - c + d
     assert page.locator(".se-selected").count() == 0   # a new state drops the range
     kids = _display_children(page, "/")
@@ -746,24 +769,24 @@ def test_type_menu_shows_the_selection_type_operations(browser, serve_expr):
     assert menu.is_visible()                              # nothing selected: the whole (matrix) expression is the target
     page.locator(".se-view").focus()
     page.keyboard.press("ArrowDown")                      # select it explicitly
-    assert menu.is_visible() and menu.locator("option").first.inner_text().startswith("Matrix")
-    labels = menu.locator("option").all_inner_texts()
+    assert menu.is_visible() and menu.get_attribute("placeholder").startswith("Matrix")
+    labels = _menu_labels(page, ".se-typemenu")
     assert "Transpose" in labels and "Determinant" in labels
-    assert "Transpose" not in page.locator(".se-ops option").all_inner_texts()   # not in the general dropdown
+    assert "Transpose" not in _menu_labels(page, ".se-ops")   # not in the general menu
     _click(page, "/2/0")                                  # the x entry: a plain scalar, no type menu
     assert page.locator(".se-status").inner_text() == "Symbol: x"
     assert not menu.is_visible()
     page.keyboard.press("ArrowUp")                        # the matrix itself
     assert page.locator(".se-status").inner_text().startswith("ImmutableDenseMatrix")
-    _next_state(page, lambda: menu.select_option("determinant"))   # picking applies at once
+    _next_state(page, lambda: _pick(page, ".se-typemenu", "determinant"))   # picking applies at once
     assert doc.expr == x - y * z
     assert not menu.is_visible()                          # the result is a scalar: no type menu
     srv2, doc2 = serve_expr(Integral(x**2, (x, 0, 1)) + y)
     page = _open(browser, srv2.url)
     _select(page, next(k for k, v in doc2.snapshot()["nodes"].items() if v["type"] == "Integral"))
     menu = page.locator(".se-typemenu")
-    assert menu.locator("option").first.inner_text().startswith("Integral")
-    _next_state(page, lambda: menu.select_option("evaluate"))
+    assert menu.get_attribute("placeholder").startswith("Integral")
+    _next_state(page, lambda: _pick(page, ".se-typemenu", "evaluate"))
     assert doc2.expr == y + symbols("x") ** 0 / 3 or str(doc2.expr) == "y + 1/3"
     assert page.errors == []
 
@@ -930,11 +953,11 @@ def test_array_tools_ask_for_their_axes(browser, serve_expr):
     _click(page, "/")
     menu = page.locator(".se-typemenu")
     menu.wait_for(state="visible")
-    labels = menu.locator("option").all_inner_texts()
+    labels = _menu_labels(page, ".se-typemenu")
     assert any("Permute axes" in t for t in labels) and any("Contract axes" in t for t in labels)
     assert any("As matrix" in t for t in labels)
 
-    menu.select_option("permutedims")               # asks before doing anything
+    _pick(page, ".se-typemenu", "permutedims")      # asks before doing anything
     form = page.locator(".se-fn-form")
     form.wait_for(state="visible")
     assert doc.expr == Array([[1, 2], [3, 4]])
@@ -943,10 +966,10 @@ def test_array_tools_ask_for_their_axes(browser, serve_expr):
     assert doc.expr == Array([[1, 3], [2, 4]])
 
     _click(page, "/")
-    _next_state(page, lambda: page.locator(".se-typemenu").select_option("tomatrix"))
+    _next_state(page, lambda: _pick(page, ".se-typemenu", "tomatrix"))
     assert doc.expr == Matrix([[1, 3], [2, 4]])
     _click(page, "/")
-    _next_state(page, lambda: page.locator(".se-typemenu").select_option("to_array"))
+    _next_state(page, lambda: _pick(page, ".se-typemenu", "to_array"))
     assert doc.expr == Array([[1, 3], [2, 4]])
     assert page.errors == []
 
@@ -1074,10 +1097,10 @@ def test_function_box_search_prompt_and_paste_button(browser, serve_expr):
     assert not page.locator(".se-loading").is_visible()     # no overlay on the HTTP backend
     fn = page.locator(".se-fn")
     fn.click()
-    page.wait_for_function("document.querySelectorAll('.se-fn-item').length > 0")   # the list appears on focus
+    page.wait_for_function("document.querySelectorAll('.se-pick-menu[data-for=se-fn] .se-pick-item').length > 0")   # the list appears on focus
     fn.fill("sol")
-    menu = page.locator(".se-fn-menu")
-    assert menu.is_visible() and menu.locator(".se-fn-item").first.get_attribute("data-name") == "solve"
+    menu = _pick_menu(page, ".se-fn")
+    assert menu.is_visible() and menu.locator(".se-pick-item").first.get_attribute("data-name") == "solve"
     page.keyboard.press("Enter")                              # pick solve: it needs a symbol -> a prompt
     form = page.locator(".se-fn-form")
     assert form.is_visible() and "solve(" in form.locator(".se-fn-title").inner_text()
@@ -1284,7 +1307,7 @@ def test_long_computation_shows_spinner_and_can_be_interrupted(browser):
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
         page = _open(browser, srv.url)
-        page.select_option(".se-ops", "forever")
+        _pick(page, ".se-ops", "forever")
         overlay = page.locator(".se-loading")
         _wait(lambda: overlay.is_visible())
         assert "Take forever" in overlay.inner_text() and page.locator(".se-spinner").is_visible()
@@ -1295,7 +1318,7 @@ def test_long_computation_shows_spinner_and_can_be_interrupted(browser):
         assert "Interrupted" in page.locator(".se-error").inner_text()
         assert not overlay.is_visible() and doc.expr == x + 1
         # the editor works normally afterwards; a transformation that changes nothing says so
-        _next_state(page, lambda: page.select_option(".se-ops", "expand"))
+        _next_state(page, lambda: _pick(page, ".se-ops", "expand"))
         assert page.locator(".se-error").is_hidden()
         assert _wait(lambda: page.locator(".se-status").inner_text().startswith("No change: Expand"))
         assert page.errors == []
@@ -1645,10 +1668,10 @@ def test_unevaluated_toggle(browser, serve_expr):
     page.locator(".se-view").focus()
     page.keyboard.press("ArrowDown")                                          # the whole matrix
     menu = page.locator(".se-typemenu")                                       # the matrix tools
-    _next_state(page, lambda: menu.select_option("determinant"))
+    _next_state(page, lambda: _pick(page, ".se-typemenu", "determinant"))
     assert isinstance(doc.expr, Determinant)
     assert doc.snapshot()["latex_plain"].startswith("\\left|")                    # |M|, not -2
-    _next_state(page, lambda: page.select_option(".se-ops", "doit"))
+    _next_state(page, lambda: _pick(page, ".se-ops", "doit"))
     assert doc.expr == -2
     page.locator(".se-lazy-box").uncheck()
     page.locator(".se-view").focus()
@@ -1656,7 +1679,7 @@ def test_unevaluated_toggle(browser, serve_expr):
     _next_state(page, lambda: page.keyboard.press("Control+z"))
     page.keyboard.press("Escape")                                             # (the selection followed the undo)
     page.keyboard.press("ArrowDown")
-    _next_state(page, lambda: menu.select_option("determinant"))
+    _next_state(page, lambda: _pick(page, ".se-typemenu", "determinant"))
     assert doc.expr == -2
     assert page.errors == []
 
@@ -1677,7 +1700,7 @@ def test_selection_follows_the_change(browser, serve_expr):
     assert doc.expr == Eq(sin(x)**2 + cos(x), 1)
     sel = page.locator(".se-selected").get_attribute("data-path")
     assert doc.snapshot()["nodes"][sel]["src"] == "cos(x)"                           # not sin(x)**2, which took its path
-    _next_state(page, lambda: page.select_option(".se-ops", "expand_trig"))          # no change of cos(x): still selected
+    _next_state(page, lambda: _pick(page, ".se-ops", "expand_trig"))          # no change of cos(x): still selected
     assert doc.snapshot()["nodes"][page.locator(".se-selected").get_attribute("data-path")]["src"] == "cos(x)"
     # a replacement that SymPy moves elsewhere in the sum is followed
     srv, doc = serve_expr(x + y)
@@ -1726,7 +1749,7 @@ def test_history_report_is_self_contained_and_works_offline(browser, serve_expr,
     page.keyboard.press("ArrowUp")
     page.keyboard.type("cos(y)")
     _next_state(page, lambda: page.keyboard.press("Enter"))
-    _next_state(page, lambda: page.select_option(".se-ops", "factor"))
+    _next_state(page, lambda: _pick(page, ".se-ops", "factor"))
     assert doc.expr == x**2 + cos(y)
     html = page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.buildReport()")
     assert html.startswith("<!DOCTYPE html>") and "data:font/woff2;base64," in html
@@ -2018,7 +2041,7 @@ def test_pyodide_worker_interrupt_and_sessions(browser, tmp_path):
         _next_state(page, lambda: page.locator(".se-interrupt").click())
         assert "Interrupted" in page.locator(".se-error").inner_text()
         # Python restarts on the next request; the document is back from its last state
-        _next_state(page, lambda: page.select_option(".se-ops", "expand"))
+        _next_state(page, lambda: _pick(page, ".se-ops", "expand"))
         assert _wait(lambda: page.locator(".se-loading").is_hidden(), timeout=180)
         assert page.evaluate(f"{ed}.state.src") == str(big)
         # the drawer (☰) lists the sessions - the first one so far - and the history of the current one
@@ -2146,17 +2169,17 @@ def test_methods_menu_lists_and_calls_class_methods(browser, serve_expr):
     menu = page.locator(".se-methods")
     # Nothing selected: the root expression's class, fetched once, then shown.
     assert _wait(lambda: menu.is_visible())
-    assert menu.locator("option").first.inner_text().startswith("Methods")
-    opts = menu.locator("option").all_inner_texts()
+    assert menu.get_attribute("placeholder").startswith("Methods")
+    opts = _menu_labels(page, ".se-methods")
     assert ".det()" in opts and ".T" in opts and ".rank()" in opts
     assert not any(o.startswith(".is_") for o in opts) and ".args" not in opts
     # A method without required parameters is applied at once.
-    menu.select_option("det")
+    _pick(page, ".se-methods", "det")
     page.wait_for_function("document.querySelector('.se-source').textContent.trim() === '-2'")
     assert str(doc.expr) == "-2"
     # The result is another type: its list is fetched and shown in turn.
     assert _wait(lambda: menu.is_visible())
-    opts = menu.locator("option").all_inner_texts()
+    opts = _menu_labels(page, ".se-methods")
     assert ".det()" not in opts and ".round()" in opts       # the Integer's list, not the matrix's
     assert page.errors == []
 
@@ -2592,8 +2615,8 @@ def test_a_lambda_can_be_applied_to_arguments(browser, serve_expr):
     page = _open(browser, srv.url)
     menu = page.locator(".se-methods")
     assert _wait(lambda: menu.is_visible())
-    assert "( ) apply" in menu.locator("option").all_inner_texts()
-    menu.select_option("__call__")
+    assert "( ) apply" in _menu_labels(page, ".se-methods")
+    _pick(page, ".se-methods", "__call__")
     form = page.locator(".se-fn-form")
     form.wait_for(state="visible")
     form.locator("input").first.fill("3")
@@ -2809,20 +2832,72 @@ def test_a_history_plays_as_a_slideshow(browser, tmp_path):
     page.close()
 
 
-def test_the_three_menus_are_one_size(browser, serve_expr):
-    """Transform, the type menu and Methods are one set of controls, so they
-    are one size.  A select takes the width of its widest option, which made
-    the three of them three different widths sitting side by side."""
+def test_the_four_menus_are_one_control_in_two_groups(browser, serve_expr):
+    """Transform, the type menu, Methods and the function box are one control
+    - a box with a filter over a list of every value - so they are one size
+    and one look; the first two sit in the actions group, the other two in
+    the library group, boxed apart."""
     from sympy import Matrix
 
     srv, doc = serve_expr(Matrix([[1, 2], [3, 4]]))       # a type with a menu of its own
     page = _open(browser, srv.url)
     assert _wait(lambda: page.locator(".se-methods").is_visible() and page.locator(".se-typemenu").is_visible())
-    widths = page.evaluate("""() => ['.se-ops', '.se-typemenu', '.se-methods']
-        .map(s => Math.round(document.querySelector(s).getBoundingClientRect().width))""")
-    assert len(set(widths)) == 1, widths
-    assert widths[0] > 100, widths                        # and wide enough to read
+    boxes = page.evaluate("""() => ['.se-ops', '.se-typemenu', '.se-methods', '.se-fn'].map(s => {
+        const el = document.querySelector(s), r = el.getBoundingClientRect();
+        return {tag: el.tagName, role: el.getAttribute('role'), pick: el.classList.contains('se-pick'),
+                width: Math.round(r.width), height: Math.round(r.height), group: el.parentNode.className}; })""")
+    assert all(b["tag"] == "INPUT" and b["role"] == "combobox" and b["pick"] for b in boxes), boxes
+    assert len({b["width"] for b in boxes}) == 1 and len({b["height"] for b in boxes}) == 1, boxes
+    assert boxes[0]["width"] > 100, boxes                 # and wide enough to read
+    assert boxes[0]["group"] == boxes[1]["group"] == "se-group se-group-actions"
+    assert boxes[2]["group"] == boxes[3]["group"] == "se-group se-group-library"
+    # the two groups are boxed apart: each has a border of its own, and a gap lies between them
+    gap = page.evaluate("""() => { const a = document.querySelector('.se-group-actions').getBoundingClientRect(),
+        b = document.querySelector('.se-group-library').getBoundingClientRect();
+        return {gap: b.left - a.right, border: getComputedStyle(document.querySelector('.se-group-actions')).borderTopWidth}; }""")
+    assert gap["gap"] >= 4 and gap["border"] != "0px", gap
+    # every one of them lists all its values on focus, narrowed by what is typed
+    page.locator(".se-fn").click()
+    assert _wait(lambda: page.evaluate("document.querySelector('.sympy-editor').__sympyEditor._functionsLoaded"), timeout=10)
+    total = page.evaluate("document.querySelector('.sympy-editor').__sympyEditor._fnNames.length")
+    assert _pick_menu(page, ".se-fn").locator(".se-pick-item").count() == total and total > 100
+    page.locator(".se-fn").fill("sinh")
+    names = _pick_menu(page, ".se-fn").locator(".se-pick-item").evaluate_all("els => els.map(e => e.getAttribute('data-name'))")
+    assert names[0] == "sinh" and all("sinh" in n for n in names) and "asinh" in names
+    page.keyboard.press("Escape")
+    assert not _pick_menu(page, ".se-fn").is_visible() and page.locator(".se-fn").input_value() == ""
     assert page.errors == []
+
+
+def test_the_action_menus_are_chosen_by_the_actions_option(browser, tmp_path):
+    """options.actions names, per menu, the ops to offer and their order -
+    "expr" for Transform, a kind for the type menu - and relabels one with
+    {name, label}; the library (Methods, the functions) is never trimmed."""
+    from sympy import Matrix
+    from sympy_editor import to_html
+
+    path = tmp_path / "actions.html"
+    path.write_text(to_html(Matrix([[1, 2], [3, 4]]), options={"actions": {
+        "expr": ["expand", {"name": "factor", "label": "Factorise"}, "simplify", "no_such_op"],
+        "matrix": ["determinant", "transpose"],
+    }}), encoding="utf-8")
+    page = browser.new_page()
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(path.as_uri())
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    assert _menu_labels(page, ".se-ops") == ["Expand", "Factorise", "Simplify"]        # chosen, ordered, relabelled; unknown names ignored
+    assert _menu_labels(page, ".se-typemenu") == ["Determinant", "Transpose"]
+    assert _wait(lambda: page.locator(".se-methods").is_visible())
+    assert len(_menu_labels(page, ".se-methods")) > 20                              # the library is whole
+    # changed at any time
+    page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.setActions({expr: ['simplify']})")
+    assert _menu_labels(page, ".se-ops") == ["Simplify"]
+    labels = _menu_labels(page, ".se-typemenu")
+    assert "Inverse" in labels and "Determinant" in labels                          # no matrix key any more: every matrix op
+    page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.setActions(null)")
+    assert "Cancel" in _menu_labels(page, ".se-ops")
+    assert errors == []
 
 
 def test_up_and_down_walk_into_a_determinant_s_matrix(browser, serve_expr):
@@ -3354,7 +3429,7 @@ def test_the_history_close_button_sits_in_the_corner(browser, serve_expr):
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.goto(srv.url)
     page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
-    _next_state(page, lambda: page.select_option(".se-ops", "expand"))   # a second step, so there is a player
+    _next_state(page, lambda: _pick(page, ".se-ops", "expand"))   # a second step, so there is a player
     page.locator('.se-toolbar [data-cmd="history"]').click()
     page.wait_for_selector(".se-history-view")
     assert _wait(lambda: page.locator(".se-history-head .se-play").is_visible())
@@ -3396,7 +3471,7 @@ def test_a_session_can_be_given_a_name(browser, tmp_path):
     # the formula changes; the name the user gave stays
     page.keyboard.press("Escape")                            # close the drawer (its backdrop covers the tools)
     assert _wait(lambda: page.locator(".se-drawer").is_hidden())
-    _next_state(page, lambda: page.select_option(".se-ops", "expand"))
+    _next_state(page, lambda: _pick(page, ".se-ops", "expand"))
     page.locator('[data-cmd="drawer"]').click()
     assert _wait(lambda: page.locator(".se-session").first.locator(".se-session-row > code").inner_text() == "Simplifying the Hamiltonian")
     # it survives a reload, like the sessions themselves
@@ -3423,7 +3498,7 @@ def test_the_history_strip_opens_in_its_final_shape(browser, serve_expr):
     steps, and merely become usable."""
     srv, doc = serve_expr((x + y) ** 2)
     page = _open(browser, srv.url)
-    _next_state(page, lambda: page.select_option(".se-ops", "expand"))     # two steps: there is a player
+    _next_state(page, lambda: _pick(page, ".se-ops", "expand"))     # two steps: there is a player
     GEOM = """() => {
         const out = {};
         for (const el of document.querySelectorAll('.se-history-head button, .se-history-head select, .se-history-head .se-play-count')) {
