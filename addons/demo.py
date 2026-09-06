@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A page with the three add-ons, to try them in a browser.
+"""A page with the add-ons, to try them in a browser.
 
     python addons/demo.py            # -> addons/demo.html (Pyodide: self-contained, opens anywhere)
     python addons/demo.py --serve    # the local HTTP server: edits run in this Python
@@ -16,7 +16,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "src"))
-for pkg in ("sympy_editor_tree", "sympy_editor_plot", "sympy_editor_matching"):
+for pkg in ("sympy_editor_tree", "sympy_editor_plot", "sympy_editor_matching", "sympy_editor_latex"):
     sys.path.insert(0, str(HERE / pkg))         # run from a checkout without installing
 
 from sympy import cos, sin, symbols  # noqa: E402
@@ -25,10 +25,11 @@ from sympy_editor import Document, save_html, serve  # noqa: E402
 
 
 def addons():
+    from sympy_editor_latex import ADDON as latex
     from sympy_editor_matching import ADDON as matching
     from sympy_editor_plot import ADDON as plot
     from sympy_editor_tree import ADDON as tree
-    return [tree, plot, matching]
+    return [tree, plot, matching, latex]
 
 
 def main(argv=None) -> int:
@@ -37,9 +38,9 @@ def main(argv=None) -> int:
     ap.add_argument("--out", type=Path, default=HERE / "demo.html")
     args = ap.parse_args(argv)
     x = symbols("x")
-    tree, plot, matching = addons()
-    # Two on to start with, the third a click away in the Add-ons menu.
-    doc = Document(sin(x) ** 2 / x + cos(x) ** 2, addons=[tree, plot], available=[matching])
+    tree, plot, matching, latex = addons()
+    # Two on to start with, the others a click away in the Add-ons menu.
+    doc = Document(sin(x) ** 2 / x + cos(x) ** 2, addons=[tree, plot], available=[matching, latex])
     if args.serve:
         serve(doc, title="SymPy editor - add-ons")
         return 0

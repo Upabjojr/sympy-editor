@@ -13,10 +13,11 @@ addons/
   sympy_editor_tree/        the expression tree as an editable graph      (no dependency)
   sympy_editor_plot/        the graph of the selection, drawn by Plotly.js (numpy optional)
   sympy_editor_matching/    rewrite rules matched many-to-one              (sympy-matching)
-  demo.py                   a page with the three, to try them in a browser
+  sympy_editor_latex/       LaTeX in: a first reading, every ambiguity a choice, constants as switches (lark)
+  demo.py                   a page with the four, to try them in a browser
 ```
 
-All three are **drafts**: they work end to end (each has tests, and the
+All four are **drafts**: they work end to end (each has tests, and the
 editor's browser test drives a panel), but their interfaces are the first
 version of an idea, not a promise.  They live in this repository for
 convenience only: an add-on is an **external project** - any package, in
@@ -32,6 +33,7 @@ entry point, the way pytest learns of its plugins.
    pip install -e addons/sympy_editor_tree
    pip install -e addons/sympy_editor_plot        # numpy is optional: pip install -e "addons/sympy_editor_plot[fast]"
    pip install -e addons/sympy_editor_matching    # pulls sympy-matching
+   pip install -e addons/sympy_editor_latex       # pulls lark (pure Python)
    ```
 
    A published add-on is `pip install sympy-editor-whatever`.  The editor

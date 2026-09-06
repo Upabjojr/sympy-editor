@@ -1,0 +1,10 @@
+{
+  "name": "latex",
+  "label": "LaTeX",
+  "module": "sympy_editor_latex",
+  "version": "0.0.1",
+  "description": "Type or paste LaTeX: a first reading, every ambiguity as a choice, constants as switches.",
+  "requires": [
+    "lark>=1.1"
+  ]
+}

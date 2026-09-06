@@ -413,12 +413,12 @@ def test_the_apps_bundle_the_addons_one_folder_each(tmp_path):
     spec.loader.exec_module(build)
     dest = build.copy_python_sources(tmp_path / "python")
     folders = sorted(p.name for p in (dest / "addons").iterdir())
-    assert folders == ["sympy_editor_matching", "sympy_editor_plot", "sympy_editor_tree"]   # the template is not shipped
+    assert folders == ["sympy_editor_latex", "sympy_editor_matching", "sympy_editor_plot", "sympy_editor_tree"]   # the template is not shipped
     for folder in folders:
         assert (dest / "addons" / folder / "addon.json").is_file()
         assert not (dest / "addons" / folder / "tests").exists()            # nothing of the test suites
     assert (dest / "addons" / "sympy_editor_tree" / "sympy_editor_tree" / "static" / "tree.js").is_file()
-    assert build.addon_requirements() == ["sympy-matching>=0.0.4"]
+    assert build.addon_requirements() == ["lark>=1.1", "sympy-matching>=0.0.4"]
     # the staged module, in a process of its own, as the app runs it
     code = f"""
 import json, sys
@@ -433,8 +433,8 @@ print(json.dumps(snap["addons"]), snap["tree"]["head"], "registerAddon" in snap[
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=300)
     assert out.returncode == 0, out.stderr
     lines = out.stdout.strip().splitlines()
-    assert json.loads(lines[0]) == ["matching", "plot", "tree"]
-    assert lines[1] == '["matching", "plot", "tree"] []'                               # listed, all off
+    assert json.loads(lines[0]) == ["latex", "matching", "plot", "tree"]
+    assert lines[1] == '["latex", "matching", "plot", "tree"] []'                               # listed, all off
     assert lines[2] == '["tree"] Add True'
 
 
@@ -442,7 +442,7 @@ def test_the_native_bundle_names_the_addons_and_remembers_the_switches(tmp_path)
     mod = _load_builder()
     out = mod.build(tmp_path / "www", native=True)
     page = (out / "index.html").read_text(encoding="utf-8")
-    assert all(m in page for m in ("sympy_editor_matching", "sympy_editor_plot", "sympy_editor_tree"))
+    assert all(m in page for m in ("sympy_editor_latex", "sympy_editor_matching", "sympy_editor_plot", "sympy_editor_tree"))
     assert "sympy_editor_addon_template" not in page                        # the template is not shipped
     assert '"rememberAddons": true' in page and '"addons": []' in page             # off at start, a click away
 
