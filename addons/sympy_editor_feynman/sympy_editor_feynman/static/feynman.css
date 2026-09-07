@@ -1,0 +1,30 @@
+/* The Feynman panel: a strip of drawings, one per diagram of the expression. */
+.se-addon-feynman .fd-panel { display: flex; flex-direction: column; gap: 0.4rem; font-size: 12px; }
+.se-addon-feynman .fd-bar { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+.se-addon-feynman .fd-bar select, .se-addon-feynman .fd-bar button, .se-addon-feynman .fd-bar input {
+  font: inherit; font-size: 12px; padding: 0.2rem 0.5rem; border: 1px solid var(--se-border); border-radius: 0.3rem;
+  background: var(--se-btn); color: inherit;
+}
+.se-addon-feynman .fd-bar input { width: 3rem; background: var(--se-field); }
+.se-addon-feynman .fd-bar button { cursor: pointer; }
+.se-addon-feynman .fd-bar button:disabled { opacity: 0.4; cursor: default; }
+.se-addon-feynman .fd-hint { color: var(--se-muted); }
+.se-addon-feynman .fd-strip { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.se-addon-feynman .fd-card {
+  display: flex; flex-direction: column; align-items: center; gap: 0.2rem; padding: 0.3rem;
+  border: 1px solid var(--se-border); border-radius: 0.4rem; background: var(--se-field); cursor: pointer;
+}
+.se-addon-feynman .fd-card:hover { border-color: rgba(var(--se-accent), 0.7); }
+.se-addon-feynman .fd-card.fd-selected { outline: 2px solid rgba(var(--se-accent), 0.8); outline-offset: -1px; }
+.se-addon-feynman .fd-caption { color: var(--se-muted); font-size: 11px; }
+.se-addon-feynman .fd-svg { display: block; overflow: visible; }
+.se-addon-feynman .fd-fermion { fill: none; stroke: currentColor; stroke-width: 1.4; }
+.se-addon-feynman .fd-photon { fill: none; stroke: currentColor; stroke-width: 1.2; }
+.se-addon-feynman .fd-arrow { fill: currentColor; }
+.se-addon-feynman .fd-vertex { fill: currentColor; }
+.se-addon-feynman .fd-external { fill: var(--se-bg, #fff); stroke: currentColor; stroke-width: 1.2; }
+.se-addon-feynman .fd-label { font-size: 10px; fill: currentColor; font-style: italic; }
+.se-addon-feynman .fd-empty { color: var(--se-muted); }
+@media (any-pointer: coarse) {
+  .se-addon-feynman .fd-bar select, .se-addon-feynman .fd-bar button, .se-addon-feynman .fd-bar input { font-size: 14px; padding: 0.45rem 0.7rem; min-height: 2.2rem; }
+}

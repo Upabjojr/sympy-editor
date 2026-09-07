@@ -366,3 +366,170 @@ def test_a_failing_addon_method_reaches_only_the_caller():
     assert snap["error"] is None
     assert snap["query"]["addon"] == "demo" and "no such method" in snap["query"]["error"]
     assert doc.expr == x + y
+
+
+# -- installing while editing --------------------------------------------------
+
+
+def _zip_payload(entries):
+    """An install payload: a base64 .zip of {path: text | bytes}."""
+    import base64
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for path, content in entries.items():
+            zf.writestr(path, content)
+    return {"zip": base64.b64encode(buf.getvalue()).decode("ascii")}
+
+
+def _addon_entries(top="repo-main/addons/sympy_editor_zzz/", name="zzz", module="sympy_editor_zzz", version="1.0"):
+    return {
+        top + "addon.json": json.dumps({"name": name, "label": "Zzz", "module": module, "version": version,
+                                        "description": "sleeps", "requires": ["nothing-real>=1"]}),
+        top + module + "/__init__.py": "from sympy_editor import Addon\nclass Z(Addon):\n    name = %r\n    label = 'Zzz'\nADDON = Z()\n" % name,
+        top + module + "/static/z.js": "SympyEditor.registerAddon(%r, {});" % name,
+        top + module + "/__pycache__/x.pyc": b"\x00",
+        top + "tests/test_z.py": "def test(): pass\n",
+        top + "README.md": "# zzz\n",
+    }
+
+
+@pytest.fixture
+def user_dir(tmp_path, monkeypatch):
+    """A user directory of this test's own (the default is ~/.sympy-editor/addons)."""
+    from sympy_editor import addons as mod
+    monkeypatch.setenv(mod.USER_ADDONS_ENV, str(tmp_path / "user"))
+    monkeypatch.setattr(mod, "USER_ADDONS_DIR", None)
+    yield tmp_path / "user"
+    for key in [k for k in sys.modules if k.startswith("sympy_editor_zzz") or k.startswith("sympy_editor_yyy")]:
+        del sys.modules[key]
+    for entry in list(mod.ADDON_FOLDERS):
+        if entry.startswith(str(tmp_path)):
+            mod.ADDON_FOLDERS.remove(entry)
+    sys.path[:] = [entry for entry in sys.path if not entry.startswith(str(tmp_path))]
+
+
+def test_an_archive_is_inspected_installed_listed_and_removed(user_dir):
+    """A .zip of an add-on folder (inside a downloaded repository, or not)
+    goes into the user directory - the manifest and the package, not the
+    tests or the caches - and counts as installed from then on."""
+    from sympy_editor.addons import (inspect_addons, install_addons, installed, uninstall_addon, user_dir as udir,
+                                     user_installed)
+    assert udir() == user_dir and not user_dir.exists() and user_installed() == {}
+    payload = _zip_payload(_addon_entries())
+    found = inspect_addons(payload)
+    assert [(m["name"], m["module"], m["version"], m["prefix"], m["installed"]) for m in found] == \
+        [("zzz", "sympy_editor_zzz", "1.0", "repo-main/addons/sympy_editor_zzz", None)]
+    assert found[0]["requires"] == ["nothing-real>=1"] and found[0]["description"] == "sleeps" and found[0]["files"] == 4
+    done = install_addons(payload, source="https://example.org/zzz.zip")
+    assert [m["name"] for m in done] == ["zzz"] and done[0]["folder"] == str(user_dir / "sympy_editor_zzz")
+    files = sorted(p.relative_to(user_dir).as_posix() for p in user_dir.rglob("*") if p.is_file())
+    assert files == ["installed.json", "sympy_editor_zzz/README.md", "sympy_editor_zzz/addon.json",
+                     "sympy_editor_zzz/sympy_editor_zzz/__init__.py", "sympy_editor_zzz/sympy_editor_zzz/static/z.js"]
+    assert installed()["zzz"] == "sympy_editor_zzz" and load_addon("zzz").label == "Zzz"
+    mine = user_installed()
+    assert mine["zzz"]["source"] == "https://example.org/zzz.zip" and mine["zzz"]["version"] == "1.0" and mine["zzz"]["user"]
+    assert inspect_addons(payload)[0]["installed"] == "1.0"
+    # a newer version replaces the folder, and the module already imported
+    newer = _zip_payload(_addon_entries(top="sympy_editor_zzz/", version="1.1"))     # flat: the folder itself zipped
+    assert install_addons(newer)[0]["version"] == "1.1"
+    assert user_installed()["zzz"]["version"] == "1.1" and json.loads((user_dir / "installed.json").read_text())["zzz"]["version"] == "1.1"
+    assert uninstall_addon("zzz") and not (user_dir / "sympy_editor_zzz").exists() and user_installed() == {}
+    assert "zzz" not in installed() and uninstall_addon("zzz") is False
+
+
+def test_several_addons_in_one_archive_and_a_selection(user_dir):
+    from sympy_editor.addons import install_addons, inspect_addons
+    entries = _addon_entries()
+    entries.update(_addon_entries(top="repo-main/addons/other/", name="yyy", module="sympy_editor_yyy"))
+    entries["repo-main/addons/broken/addon.json"] = "{not json"
+    entries["repo-main/addons/nopkg/addon.json"] = json.dumps({"name": "nopkg", "module": "missing_pkg"})   # no package: not one
+    entries["repo-main/addons/sympy_editor_zzz/tests/inner/addon.json"] = json.dumps({"name": "hidden", "module": "x"})
+    payload = _zip_payload(entries)
+    assert [m["name"] for m in inspect_addons(payload)] == ["yyy", "zzz"]
+    done = install_addons(payload, select=["yyy"])
+    assert [m["name"] for m in done] == ["yyy"] and (user_dir / "other" / "addon.json").is_file() and not (user_dir / "sympy_editor_zzz").exists()
+    with pytest.raises(ValueError, match="None of the add-ons named"):
+        install_addons(payload, select=["nope"])
+    # a files map, what the front end makes of a repository: text and base64
+    import base64
+    files = {"sympy_editor_zzz/addon.json": entries["repo-main/addons/sympy_editor_zzz/addon.json"],
+             "sympy_editor_zzz/sympy_editor_zzz/__init__.py": entries["repo-main/addons/sympy_editor_zzz/sympy_editor_zzz/__init__.py"],
+             "sympy_editor_zzz/sympy_editor_zzz/static/icon.png": {"b64": base64.b64encode(bytes(range(256))).decode()}}
+    done = install_addons({"files": files})
+    assert done[0]["name"] == "zzz" and (user_dir / "sympy_editor_zzz" / "sympy_editor_zzz" / "static" / "icon.png").read_bytes() == bytes(range(256))
+
+
+def test_archives_that_escape_or_hold_nothing_are_refused(user_dir):
+    from sympy_editor import addons as mod
+    from sympy_editor.addons import inspect_addons, install_addons, unpack_addons
+    with pytest.raises(ValueError, match="Refusing the path"):
+        unpack_addons(_zip_payload({"../evil.py": "x", "addon.json": "{}"}))
+    with pytest.raises(ValueError, match="Refusing the path"):
+        unpack_addons({"files": {"/etc/passwd": "x"}})
+    assert list(unpack_addons({"files": {"./a/./b.py": "x", "c\\d.py": "y"}})) == ["a/b.py", "c/d.py"]
+    with pytest.raises(ValueError, match="Not a .zip"):
+        inspect_addons({"zip": "bm90IGEgemlw"})                                       # "not a zip"
+    with pytest.raises(ValueError, match="No add-on found"):
+        inspect_addons(_zip_payload({"readme.txt": "nothing here"}))
+    with pytest.raises(ValueError, match="Nothing to install"):
+        unpack_addons({})
+    with pytest.raises(ValueError, match="too large"):
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(mod, "INSTALL_MAX_BYTES", 10)
+            unpack_addons(_zip_payload({"a.py": "x" * 20}))
+    assert not user_dir.exists()                                                         # nothing was written
+    with pytest.raises(ValueError, match="No add-on found"):
+        install_addons(_zip_payload({"readme.txt": "nothing"}))
+
+
+def test_the_document_installs_lists_and_removes_through_one_message(user_dir):
+    """The front end's way: inspect, install (into the catalogue, off),
+    enable, and uninstall - answered with snapshots that say what was
+    found or done; a document made before an install sees it too."""
+    from sympy_editor.addons import user_installed
+    payload = _zip_payload(_addon_entries())
+    doc = Document(x + y)
+    other = Document(x)
+    snap = doc.handle({"action": "addons", "inspect": payload})
+    assert snap["addons_result"]["found"][0]["name"] == "zzz" and not doc.can_undo and not user_dir.exists()
+    snap = doc.handle({"action": "addons", "install": payload, "select": ["zzz"], "source": "zzz.zip"})
+    assert [m["name"] for m in snap["addons_result"]["installed"]] == ["zzz"] and snap["addons"] == [] and snap["error"] is None
+    listed = {a["name"]: a for a in snap["addons_available"]}
+    assert listed["zzz"]["user"] == {"version": "1.0", "source": "zzz.zip"} and listed["zzz"]["on"] is False
+    assert listed["zzz"]["requires"] == []                                              # what the Addon says, not the manifest
+    snap = doc.handle({"action": "addons", "enable": ["zzz"]})
+    assert snap["addons"] == ["zzz"] and [c["name"] for c in snap["addon_clients"]] == ["zzz"]
+    # the other document, made before: the add-on is in its menu and switches on
+    assert "zzz" in [a["name"] for a in other.available_addons()]
+    other.enable("zzz")
+    assert list(other.addons) == ["zzz"]
+    # a new document: the catalogue has it whether or not `available` named others
+    assert "zzz" in [a["name"] for a in Document(x, available=[ADDON]).available_addons()]
+    # installing a newer version while it is on, and switching on in the same message: the new files run
+    newer = _addon_entries(top="sympy_editor_zzz/", version="1.1")
+    newer["sympy_editor_zzz/sympy_editor_zzz/__init__.py"] = newer["sympy_editor_zzz/sympy_editor_zzz/__init__.py"].replace("'Zzz'", "'Zzz 1.1'")
+    old_instance = doc.addons["zzz"]
+    snap = doc.handle({"action": "addons", "install": _zip_payload(newer), "enable": ["zzz"]})
+    assert snap["addons"] == ["zzz"] and snap["addons_result"]["installed"][0]["version"] == "1.1"
+    assert doc.addons["zzz"] is not old_instance and doc.addons["zzz"].label == "Zzz 1.1"
+    assert [a for a in snap["addons_available"] if a["name"] == "zzz"][0]["label"] == "Zzz 1.1"
+    # removed: off, gone from the catalogue and the directory
+    snap = doc.handle({"action": "addons", "uninstall": ["zzz", "never-there"]})
+    assert snap["addons_result"]["removed"] == ["zzz"] and snap["addons"] == [] and user_installed() == {}
+    assert "zzz" not in [a["name"] for a in snap["addons_available"]]
+    # an archive that is not one: an error in the snapshot, nothing changed
+    snap = doc.handle({"action": "addons", "install": {"zip": "bm90IGEgemlw"}})
+    assert "Not a .zip" in snap["error"] and "addons_result" not in snap
+
+
+def test_the_page_config_and_the_widget_options_carry_the_user_addons(user_dir):
+    """A user-installed add-on travels into a Pyodide page like a bundled
+    one: its package in the config, so a page saved after an install has it."""
+    from sympy_editor.addons import install_addons
+    install_addons(_zip_payload(_addon_entries()))
+    doc = Document(x, addons=["zzz"])
+    cfg = build_config(doc)
+    assert "sympy_editor_zzz" in cfg["packages"] and "static/z.js" in cfg["packages"]["sympy_editor_zzz"]
+    assert cfg["document"]["addons"] == ["sympy_editor_zzz"]

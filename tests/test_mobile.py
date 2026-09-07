@@ -189,6 +189,8 @@ def test_the_android_app_is_configured_for_its_own_python():
               / "MainActivity.kt").read_text(encoding="utf-8")
     assert "SympyEditorPy" in kotlin and "__sympyEditorNative" in kotlin
     assert "AndroidPlatform" in kotlin and "Executors.newSingleThreadExecutor" in kotlin
+    # the page's file input (an add-on from a .zip) reaches the system's picker
+    assert "onShowFileChooser" in kotlin and "FileChooserParams.parseResult" in kotlin and "registerForActivityResult" in kotlin
     src = (ROOT / "src" / "sympy_editor" / "static" / "editor.js").read_text(encoding="utf-8")
     assert "native: nativeBackend" in src
 
@@ -436,6 +438,55 @@ print(json.dumps(snap["addons"]), snap["tree"]["head"], "registerAddon" in snap[
     assert json.loads(lines[0]) == ["matching", "plot", "tree"]
     assert lines[1] == '["matching", "plot", "tree"] []'                               # listed, all off
     assert lines[2] == '["tree"] Add True'
+
+
+def test_the_app_keeps_the_addons_the_user_installs(tmp_path, monkeypatch):
+    """The app's module points the user directory into the app's own data
+    (HOME on both platforms; iOS's Library) and counts what is there as
+    installed, so an add-on installed from the Add-ons menu is in every
+    document's menu at the next launch too."""
+    import json
+    import subprocess
+
+    from sympy_editor import addons as addons_mod
+    monkeypatch.setenv("SYMPY_EDITOR_USER_ADDONS", str(tmp_path / "user"))
+    code = f"""
+import json, os, sys
+sys.path.insert(0, {str(ROOT / 'mobile' / 'app')!r}); sys.path.insert(0, {str(ROOT / 'src')!r})
+os.environ.pop("SYMPY_EDITOR_USER_ADDONS", None)
+os.environ["HOME"] = {str(tmp_path / 'home')!r}
+os.makedirs(os.path.join(os.environ["HOME"], "Library"))               # like an iOS container
+import sympy_editor_app as app
+print(app.user_addons_dir())
+os.environ["HOME"] = {str(tmp_path / 'files')!r}                       # like Chaquopy's files directory
+print(app.user_addons_dir())
+"""
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120)
+    assert out.returncode == 0, out.stderr
+    lines = out.stdout.strip().splitlines()
+    assert lines[0] == str(tmp_path / "home" / "Library" / "Application Support" / "sympy-editor" / "addons")
+    assert lines[1] == str(tmp_path / "files" / "sympy-editor" / "addons")
+    # in this process, the override: an install through the app's own message lands there, and is listed next time
+    monkeypatch.setattr(addons_mod, "USER_ADDONS_DIR", None)
+    app = _load_app_module()
+    assert app.USER_ADDONS_DIR == tmp_path / "user"
+    import base64
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("mine/addon.json", json.dumps({"name": "mine", "label": "Mine", "module": "mine_pkg", "version": "1"}))
+        zf.writestr("mine/mine_pkg/__init__.py", "from sympy_editor import Addon\nclass M(Addon):\n    name = 'mine'\n    label = 'Mine'\nADDON = M()\n")
+    payload = {"zip": base64.b64encode(buf.getvalue()).decode()}
+    json.loads(app.new_doc("u1", "Symbol('x')", "{}"))
+    snap = json.loads(app.handle("u1", json.dumps({"action": "addons", "install": payload, "enable": ["mine"]})))
+    assert snap["error"] is None and snap["addons"] == ["mine"] and (tmp_path / "user" / "mine" / "addon.json").is_file()
+    snap = json.loads(app.new_doc("u2", "Symbol('x')", json.dumps({"available": ["sympy_editor_tree"]})))
+    assert "mine" in [a["name"] for a in snap["addons_available"]]
+    snap = json.loads(app.handle("u1", json.dumps({"action": "addons", "uninstall": ["mine"]})))
+    assert snap["addons_result"]["removed"] == ["mine"] and not (tmp_path / "user" / "mine").exists()
+    sys.modules.pop("mine_pkg", None)
+    sys.path[:] = [entry for entry in sys.path if not entry.startswith(str(tmp_path))]
 
 
 def test_the_native_bundle_names_the_addons_and_remembers_the_switches(tmp_path):

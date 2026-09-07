@@ -14,10 +14,11 @@ side where each platform's build expects them.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict
 
-from sympy_editor.addons import register_addons_folder
+from sympy_editor.addons import register_addons_folder, set_user_dir
 from sympy_editor.document import Document
 
 #: The add-ons the app bundles: one folder each under ``addons/`` beside this
@@ -29,6 +30,27 @@ from sympy_editor.document import Document
 #: same way.
 ADDONS_DIR = Path(__file__).resolve().parent / "addons"
 BUNDLED_ADDONS = register_addons_folder(ADDONS_DIR) if ADDONS_DIR.is_dir() else {}
+
+
+def user_addons_dir() -> Path:
+    """Where the add-ons the user installs from the Add-ons menu (a .zip, a
+    GitHub repository) are kept between launches: in the app's own data,
+    which both platforms hand over as ``HOME`` - Chaquopy sets it to the
+    app's files directory, iOS to the app's container (whose ``Library``
+    is the place for what the user does not manage as documents).
+    ``SYMPY_EDITOR_USER_ADDONS`` overrides it (the tests do)."""
+    override = os.environ.get("SYMPY_EDITOR_USER_ADDONS")
+    if override:
+        return Path(override)
+    home = Path(os.environ.get("HOME") or Path.home())
+    base = home / "Library" / "Application Support" if (home / "Library").is_dir() else home
+    return base / "sympy-editor" / "addons"
+
+
+#: The user's own add-ons count as installed like the bundled ones: every
+#: document lists them, and ``{"action": "addons", "install": ...}`` from
+#: the page puts new ones there (sympy_editor.addons.install_addons).
+USER_ADDONS_DIR = set_user_dir(user_addons_dir())
 
 #: One Document per editor/session, by the id the page chose.
 _documents: Dict[str, Document] = {}
