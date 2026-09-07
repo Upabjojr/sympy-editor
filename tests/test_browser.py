@@ -2347,9 +2347,10 @@ def test_the_tools_are_laid_out_in_columns(browser, serve_expr):
         return out;
     }""")
     by = {b["name"]: b for b in blocks}
-    assert {"session", "zoom", "nav", "edit", "clip", "apply"} <= set(by), blocks
+    assert {"session", "zoom", "nav", "edit", "clip", "apply", "addons"} <= set(by), blocks
     rows = sorted({b["top"] for b in blocks})
-    assert len(rows) == 3, blocks                                  # two rows of three, then the wide one
+    assert len(rows) == 4, blocks                                  # two rows of three, the wide one, the Add-ons menu
+    assert by["addons"]["top"] == rows[3] and by["addons"]["left"] <= 1, blocks   # always there: it installs add-ons too
     # a block never breaks apart: what belongs together stays on one line
     assert by["session"]["top"] == by["zoom"]["top"] == by["nav"]["top"]
     assert by["edit"]["top"] == by["clip"]["top"]
