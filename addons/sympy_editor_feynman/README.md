@@ -38,6 +38,27 @@ vertices integrated over).  *connected* keeps the diagrams in one piece,
 cancel against the normalisation), *all* keeps everything.  Orders up to
 4 (every contraction is enumerated).
 
+**The drawings are editable, and the terms follow.**  The tool menu of
+the panel says what a click or a drag on a card does:
+
+| tool | on a card |
+|---|---|
+| move / select | drag a point to move it (the layout only); click a line for its menu: delete, flip the arrow, make it a photon or a fermion line |
+| draw fermion line | drag from the ψ̄ end to the ψ end of the new propagator (the arrow follows the charge) |
+| draw photon line | drag from one point to another |
+| add vertex, add external ψ / ψ̄ / photon | click an empty spot |
+| delete | click a point (its lines go with it) or a line |
+
+The factor in the caption is edited by clicking it, × removes the
+diagram from the sum, and **New diagram** adds a bare one with the
+external points, to draw by hand (from a path integral, it replaces it).
+Every change rebuilds the term from the drawing (`Diagram.edit` on the
+Python side: `diagram_from_json`) - its order is its number of vertices,
+its factor stays yours - and a ⚠ marks a drawing that is not a QED
+diagram: a vertex without exactly one fermion line in, one out and one
+photon line, an external point without its one line, a line from a point
+to itself (`problems(diagram)`).
+
 ## Install
 
 This add-on is **not bundled** with the apps: it is the example of an
@@ -67,5 +88,6 @@ amplitude(ds[1])                                                # Integral(-e**2
 ## Tests
 
 `pytest addons/sympy_editor_feynman`: the contractions (counts, factors
-and signs of the textbook cases), the nodes in a document, and, with
-Playwright and Chromium, the panel.
+and signs of the textbook cases), the nodes in a document, the edits
+that rebuild a term, and, with Playwright and Chromium, the panel -
+drawing, dragging, deleting and adding lines and points.

@@ -13,7 +13,7 @@ addons/
   sympy_editor_tree/        the expression tree as an editable graph      (no dependency)
   sympy_editor_plot/        the graph of the selection, drawn by Plotly.js (numpy optional)
   sympy_editor_matching/    rewrite rules matched many-to-one              (sympy-matching)
-  sympy_editor_feynman/     path integrals of QED as Feynman diagrams      (no dependency; not bundled: install it from the menu)
+  sympy_editor_feynman/     path integrals of QED as Feynman diagrams, drawn and editable  (no dependency; not bundled: install it from the menu)
   demo.py                   a page with the drafts, to try them in a browser
   pack.py                   zips an add-on folder for "From a file…" in the Add-ons menu
 ```

@@ -33,8 +33,8 @@ import sympy
 from sympy import Expr, Function, Integer, Rational, Symbol, Tuple
 from sympy.core.symbol import Str
 
-__all__ = ["Psi", "PsiBar", "Photon", "PathIntegral", "Diagram", "diagrams", "diagram_json", "MAX_ORDER",
-           "FERMION", "PHOTON", "amplitude", "EXAMPLES"]
+__all__ = ["Psi", "PsiBar", "Photon", "PathIntegral", "Diagram", "diagrams", "diagram_json", "diagram_from_json",
+           "problems", "MAX_ORDER", "FERMION", "PHOTON", "amplitude", "EXAMPLES"]
 
 #: Orders beyond this take too long to enumerate (every contraction is listed).
 MAX_ORDER = 4
@@ -435,20 +435,105 @@ def amplitude(diagram: Diagram) -> Expr:
 # -- for the panel ----------------------------------------------------------------
 
 
+def problems(diagram: Diagram) -> List[str]:
+    """What keeps the graph from being a QED diagram: a vertex without
+    exactly one fermion line in, one out and one photon line; an external
+    point with more or less than one line; a propagator to itself."""
+    out = []
+    legs: Dict[Any, List[str]] = {p: [] for p in list(diagram.vertices) + [_point(f) for f in diagram.externals]}
+    for e in diagram.edges:
+        if e[1] == e[2]:
+            out.append("%s is joined to itself" % e[1])
+        if e[0] == FERMION:
+            legs.setdefault(e[1], []).append("out")
+            legs.setdefault(e[2], []).append("in")
+        else:
+            legs.setdefault(e[1], []).append("A")
+            legs.setdefault(e[2], []).append("A")
+    for z in diagram.vertices:
+        got = sorted(legs[z])
+        if got != ["A", "in", "out"]:
+            out.append("%s needs one fermion line in, one out and one photon line" % z)
+    for f in diagram.externals:
+        p = _point(f)
+        want = "A" if isinstance(f, Photon) else "in" if isinstance(f, Psi) else "out"
+        if legs[p] != [want]:
+            out.append("%s should have one %s line" % (f, "photon" if want == "A" else "fermion"))
+    return out
+
+
+def _point(field) -> Any:
+    return field.args[1] if isinstance(field, Photon) else field.args[0]
+
+
 def diagram_json(diagram: Diagram) -> Dict[str, Any]:
     """What the panel draws: the points (external ones with their field),
-    the propagators, the caption."""
+    the propagators, the caption, and what is wrong with the graph if
+    anything (the panel lets it be edited)."""
     nodes = []
     for f in diagram.externals:
         kind = "psi" if isinstance(f, Psi) else "psibar" if isinstance(f, PsiBar) else "A"
-        point = f.args[0] if kind != "A" else f.args[1]
-        nodes.append({"id": str(point), "label": sympy.latex(point), "kind": kind, "external": True,
-                      "field": sympy.latex(f)})
+        point = _point(f)
+        node = {"id": str(point), "label": sympy.latex(point), "kind": kind, "external": True, "field": sympy.latex(f)}
+        if kind == "A":
+            node["index"] = str(f.args[0])
+        nodes.append(node)
     for z in diagram.vertices:
         nodes.append({"id": str(z), "label": sympy.latex(z), "kind": "vertex", "external": False})
     edges = [{"kind": "F" if e[0] == FERMION else "A", "from": str(e[1]), "to": str(e[2])} for e in diagram.edges]
     return {"src": str(diagram), "nodes": nodes, "edges": edges, "order": diagram.order,
-            "factor": sympy.latex(diagram.factor), "latex": sympy.latex(diagram)}
+            "factor": sympy.latex(diagram.factor), "factor_src": str(diagram.factor), "latex": sympy.latex(diagram),
+            "problems": problems(diagram)}
+
+
+def diagram_from_json(data: Dict[str, Any], parse=sympy.sympify, factor=None, template: Optional[Diagram] = None) -> Diagram:
+    """The Diagram a panel's edit describes: ``{"nodes": [{"id", "kind",
+    "external", "index"?}], "edges": [{"kind", "from", "to"}]}`` (the shape
+    :func:`diagram_json` gives), the ids parsed back with ``parse``.  The
+    order is the number of vertices; the factor is ``factor`` (parsed), else
+    the template's, else 1.  A photon's index is the one given, the
+    template's for that point, or a new one."""
+    points: Dict[str, Any] = {}
+
+    def point(name: str):
+        if name not in points:
+            points[name] = parse(name)
+        return points[name]
+
+    old_index = {}
+    if template is not None:
+        for f in template.externals:
+            if isinstance(f, Photon):
+                old_index[str(f.args[1])] = f.args[0]
+    externals, vertices, photon_index = [], [], {}
+    for n in data.get("nodes") or []:
+        kind, p = n.get("kind"), point(str(n["id"]))
+        if kind == "psi":
+            externals.append(Psi(p))
+        elif kind == "psibar":
+            externals.append(PsiBar(p))
+        elif kind == "A":
+            idx = parse(str(n["index"])) if n.get("index") else old_index.get(str(p), Symbol("mu_" + str(p).replace("_", "")))
+            externals.append(Photon(idx, p))
+            photon_index[p] = idx
+        else:
+            vertices.append(p)
+    for i, z in enumerate(vertices):
+        photon_index[z] = Symbol("mu_%d" % (i + 1))
+    edges = []
+    for e in data.get("edges") or []:
+        a, b = point(str(e["from"])), point(str(e["to"]))
+        if e.get("kind") == "A":
+            edges.append(Tuple(PHOTON, a, b, photon_index.get(a, Symbol("mu")), photon_index.get(b, Symbol("nu"))))
+        else:
+            edges.append(Tuple(FERMION, a, b))
+    if factor is not None and str(factor).strip() != "":
+        fac = parse(str(factor))
+    elif template is not None:
+        fac = template.factor
+    else:
+        fac = Integer(1)
+    return Diagram(externals, vertices, edges, fac, len(vertices))
 
 
 #: What the panel offers to start from: name -> the insertion's source.

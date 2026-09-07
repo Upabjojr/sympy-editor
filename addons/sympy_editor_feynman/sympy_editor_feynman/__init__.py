@@ -28,10 +28,10 @@ from sympy import Basic, preorder_traversal
 from sympy_editor.addons import Addon
 from sympy_editor.ops import make_op
 
-from .qed import (EXAMPLES, MAX_ORDER, Diagram, PathIntegral, Photon, Psi, PsiBar, amplitude, diagram_json,
-                  diagrams)
+from .qed import (EXAMPLES, MAX_ORDER, Diagram, PathIntegral, Photon, Psi, PsiBar, amplitude, diagram_from_json,
+                  diagram_json, diagrams)
 
-__all__ = ["FeynmanAddon", "ADDON", "PathIntegral", "Diagram", "Psi", "PsiBar", "Photon", "diagrams", "amplitude"]
+__all__ = ["FeynmanAddon", "ADDON", "PathIntegral", "Diagram", "Psi", "PsiBar", "Photon", "diagrams", "amplitude", "diagram_from_json"]
 
 STATIC = Path(__file__).parent / "static"
 #: How many diagrams a snapshot describes for the panel (each is small, but
@@ -100,6 +100,32 @@ class FeynmanAddon(Addon):
                 raise ValueError("Select a path integral to expand")
             doc.replace(payload.get("path") or "/", _op_expand(node, payload.get("order", 2), payload.get("which", "connected")))
             return None
+        if method == "edit":
+            # the panel's drawing, edited: the term becomes the diagram drawn
+            path = payload.get("path") or "/"
+            node = doc.get(path)
+            if not isinstance(node, Diagram):
+                raise ValueError("Not a diagram")
+            data = {"nodes": payload.get("nodes", [n for n in diagram_json(node)["nodes"]]),
+                    "edges": payload.get("edges", diagram_json(node)["edges"])}
+            new = diagram_from_json(data, parse=lambda s: doc.parse(s, doc.expr), factor=payload.get("factor"), template=node)
+            doc.replace(path, new)
+            return None
+        if method == "new_diagram":
+            # a bare diagram to draw by hand: the externals of the path
+            # integral (which it replaces) or of the diagrams already there
+            # (which it joins)
+            expr = doc.expr
+            if isinstance(expr, PathIntegral):
+                return Diagram(expr.fields, (), (), 1, 0)
+            found = [n for n in preorder_traversal(expr) if isinstance(n, Diagram)]
+            externals = found[0].externals if found else ()
+            from sympy import Add
+            terms = list(expr.args) if isinstance(expr, Add) else [expr]
+            return Add(*terms, Diagram(externals, (), (), 1, 0), evaluate=False)
+        if method == "delete_term":
+            doc.delete(payload.get("path") or "/")
+            return None
         raise ValueError(f"Feynman diagrams has no method {method!r}")
 
     def describe(self, method: str, payload: Dict[str, Any]):
@@ -107,6 +133,12 @@ class FeynmanAddon(Addon):
             return "Feynman: example"
         if method == "expand":
             return "Feynman: diagrams to order %s" % payload.get("order", 2)
+        if method == "edit":
+            return "Feynman: diagram edited" + (" (" + str(payload["what"]) + ")" if payload.get("what") else "")
+        if method == "new_diagram":
+            return "Feynman: new diagram"
+        if method == "delete_term":
+            return "Feynman: diagram removed"
         return None
 
 
