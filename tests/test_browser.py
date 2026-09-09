@@ -17,7 +17,7 @@ import pytest
 import re
 import time
 
-from sympy import Array, Matrix, MatrixSymbol, Symbol, pi, sin, symbols
+from sympy import Array, Matrix, MatrixSymbol, Symbol, pi, sin, sqrt, symbols
 
 from sympy_editor import Document, to_html
 from sympy_editor.html import default_urls
@@ -3649,6 +3649,55 @@ def test_the_selection_box_glides_only_while_a_drag_extends_it(browser, served):
     assert page.evaluate("(() => getComputedStyle(document.querySelector('%s')).transitionDuration)()" % box) != "0s"
     assert page.errors == []
 
+
+
+def test_the_tool_strip_holds_still_while_a_drag_selects(browser, serve_expr):
+    """What the menus offer follows the selection: a single node has methods
+    to call, a range of terms has none.  So the Methods box came and went as
+    the finger moved, the strip rewrapped, and the editing box below it
+    jumped by a row over and over.  The strip is left alone for the length of
+    the drag and filled once the finger lifts."""
+    terms = symbols("a0:14")
+    srv, doc = serve_expr(sum(sqrt(t) / (t**2 + 1) for t in terms) + sin(x))
+    ctx = browser.new_context(has_touch=True, is_mobile=True, viewport={"width": 380, "height": 620})
+    page = ctx.new_page()
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(srv.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    kids = _display_children(page, "/")
+    at = lambda q: page.evaluate("p => { const b = document.querySelector(`[data-path=\"${p}\"]`).getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; }", q)
+    x0, y0 = at(kids[0])
+    fire = """([t, x, y]) => { const v = document.querySelector('.se-view');
+        const s = document.elementFromPoint(%s, %s) || v;
+        (t === 'pointerdown' ? s : v).dispatchEvent(new PointerEvent(t,
+          {bubbles: true, cancelable: true, clientX: x, clientY: y, pointerType: 'touch', pointerId: 7, isPrimary: true, buttons: 1})); }""" % (x0, y0)
+    page.evaluate("a => (%s)(a)" % fire, ["pointerdown", x0, y0])
+    page.wait_for_selector(".se-selected[data-path]", timeout=10000)
+    # watch the strip's height and where the editing box starts, all through the drag
+    page.evaluate("""() => { window.__m = [];
+        window.__t = setInterval(() => window.__m.push([
+            Math.round(document.querySelector('.se-toolbar').getBoundingClientRect().height),
+            Math.round(document.querySelector('.se-stage').getBoundingClientRect().top)]), 16); }""")
+    right, mid = page.evaluate("(() => { const r = document.querySelector('.se-view').getBoundingClientRect(); return [r.right, (r.top + r.bottom) / 2]; })()")
+    for step in range(12):
+        page.evaluate("a => (%s)(a)" % fire, ["pointermove", x0 + (right - x0) * step / 7.0, mid])
+        page.wait_for_timeout(60)
+    page.wait_for_timeout(200)
+    page.evaluate("() => clearInterval(window.__t)")
+    samples = page.evaluate("() => window.__m")
+    assert len(samples) > 20, len(samples)
+    heights = {s[0] for s in samples}
+    tops = {s[1] for s in samples}
+    assert len(heights) == 1, f"the strip changed height while dragging: {sorted(heights)}"
+    assert len(tops) == 1, f"the editing box moved while dragging: {sorted(tops)}"
+    # the finger up, the menus catch up: a range of terms has no class methods
+    page.evaluate("a => (%s)(a)" % fire, ["pointerup", right, mid])
+    reach = page.evaluate("(() => { const r = document.querySelector('.sympy-editor').__sympyEditor.range; return r ? Math.abs(r.focus - r.anchor) + 1 : 0; })()")
+    assert reach >= 3, reach
+    assert _wait(lambda: page.evaluate("(() => document.querySelector('.se-methods').getBoundingClientRect().width)()") == 0)
+    assert errors == []
+    ctx.close()
 
 def test_new_session_leads_the_list(browser, serve_expr):
     """Starting one is as much what the drawer is opened for as picking an old
