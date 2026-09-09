@@ -501,7 +501,10 @@ KaTeX turns that into `<span data-path="/1/0">`, so the DOM knows which node
 of the expression tree each glyph belongs to.  Editing operations
 (`Document.replace/delete/insert/operator/apply/call/undo/redo`) rebuild the
 tree and re-render.
-See `AGENTS.md` for the architecture and design notes.
+See `AGENTS.md` for the architecture and design notes, and
+[`docs/cursor-and-selection.md`](docs/cursor-and-selection.md) for what the
+cursor and the selection do - the one description the page, the server, the
+Jupyter widget and the apps all follow.
 
 ## Dependencies and licences
 
