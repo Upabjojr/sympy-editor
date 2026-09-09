@@ -127,7 +127,9 @@ removes its terms, an operation picked in a menu transforms just those terms.
 On phones and tablets: tap to select, **tap the selected node again to edit
 it**, tap a gap for a caret and tap it again to insert, tap an operator to
 change it from its palette; **hold a finger still on a node** until it is
-selected, then drag across its neighbours to select a range; the toolbar has ↑
+selected, then drag across its neighbours to select a range - dragging to the
+edge of the view scrolls the formula along and keeps taking in what appears,
+so the range reaches terms that were off the screen; the toolbar has ↑
 for the parent and a keyboard button that opens the keyboard for the selection, the
 caret or the whole expression; the menus apply an operation as soon as it is
 picked.  Two fingers zoom the formula and, when it is larger than the view,

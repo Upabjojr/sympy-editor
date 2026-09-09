@@ -213,6 +213,16 @@ Two conventions between printer, document and front end:
   parameter form when required, then `call` (the per-type signature is
   never reused across types).  `{"action": "methods", "path"}` returns a
   snapshot with the target's list included regardless.
+- **A drag that leaves the formula.**  `_extendDragTo(x, y)` hit-tests a
+  *clamped* point (`_leafAtPoint`, then `_nearestLeafTo` when nothing is
+  drawn there), because outside the view `elementsFromPoint` finds nothing
+  and a touch event's target stays the node the finger started on - the
+  range used to snap back to its anchor.  At the edge (a 28px margin, and
+  beyond) `_autoScrollFor` runs a `requestAnimationFrame` loop that scrolls
+  the view by a speed following the overshoot and re-extends the selection
+  over what appears, so a range reaches what was off the screen; it stops
+  when the finger comes back, when the view cannot scroll further, on
+  pointerup/cancel and in `destroy`.
 - **Loading overlay.**  Backend progress messages go through
   `Editor._report`: texts mentioning loading/waiting show `.se-loading` (a
   blocking spinner overlay, keys and clicks ignored) until the message

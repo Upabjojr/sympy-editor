@@ -125,7 +125,7 @@ var SympyEditor = (function () {
     "<section><h3>Selecting</h3><ul>",
     "<li>Click the middle of anything to select it; click the same spot again for the enclosing expression.</li>",
     "<li><kbd>\u2191</kbd> enclosing, <kbd>\u2193</kbd> inside, <kbd>\u2190</kbd>/<kbd>\u2192</kbd> siblings, <kbd>Esc</kbd> deselects (the same arrows sit in the toolbar and under the selection).</li>",
-    "<li>Drag across terms to select a range; <kbd>Shift</kbd>+<kbd>\u2190</kbd>/<kbd>\u2192</kbd> grows and shrinks it.</li>",
+    "<li>Drag across terms to select a range; <kbd>Shift</kbd>+<kbd>\u2190</kbd>/<kbd>\u2192</kbd> grows and shrinks it. Dragging to the edge of the view scrolls the formula along and keeps taking in what appears, so a range can reach what lies beyond the screen.</li>",
     "<li>The line under the tools names the selection: its type and SymPy form.</li>",
     "</ul></section>",
     "<section><h3>Editing</h3><ul>",
@@ -1720,18 +1720,17 @@ var SympyEditor = (function () {
         }
         var d = self._drag;
         if (!d || !d.anchor) return;
-        if (ev.pointerType === "mouse" && ev.buttons === 0) { self._drag = null; return; }
-        var leaf = self._leafAt(ev);
-        if (!leaf) return;
-        var lp = leaf.getAttribute("data-path");
-        if (!d.moved && lp === d.anchor) return;
-        d.moved = true;
-        self._dragSelect(d.anchor, lp);
+        if (ev.pointerType === "mouse" && ev.buttons === 0) { self._stopAutoScroll(); self._drag = null; return; }
+        d.x = ev.clientX;
+        d.y = ev.clientY;
+        self._extendDragTo(d.x, d.y);
+        self._autoScrollFor(d);          // at the edge: scroll, and take in what appears
         ev.preventDefault();
       });
       var endPointer = function (ev, cancelled) {
         delete self._pointers[ev.pointerId];
         self._cancelHold();
+        self._stopAutoScroll();
         if (self._pinch && Object.keys(self._pointers).length < 2) {
           self._pinch = null;
           self._pointers = {};              // the finger left behind must not start anything
@@ -2336,18 +2335,41 @@ var SympyEditor = (function () {
      *  glyphs, so the event target's ancestors are not reliable: inspect the
      *  whole element stack at the pointer and keep the deepest path. */
     _leafAt(ev) {
-      var best = null;
-      if (ev && typeof ev.clientX === "number" && document.elementsFromPoint) {
-        var stack = document.elementsFromPoint(ev.clientX, ev.clientY);
-        for (var i = 0; i < stack.length; i++) {
-          var el = stack[i].closest ? stack[i].closest("[data-path]") : null;
-          if (!el || !this.view.contains(el)) continue;
-          if (!best || el.getAttribute("data-path").length > best.getAttribute("data-path").length) best = el;
-        }
-      }
+      var best = ev && typeof ev.clientX === "number" ? this._leafAtPoint(ev.clientX, ev.clientY) : null;
       if (!best && ev && ev.target && ev.target.closest) {
         var t = ev.target.closest("[data-path]");
         if (t && this.view.contains(t)) best = t;
+      }
+      return best;
+    }
+
+    /** The deepest annotated element drawn at a point, or null. */
+    _leafAtPoint(x, y) {
+      var best = null;
+      if (!document.elementsFromPoint) return null;
+      var stack = document.elementsFromPoint(x, y);
+      for (var i = 0; i < stack.length; i++) {
+        var el = stack[i].closest ? stack[i].closest("[data-path]") : null;
+        if (!el || !this.view.contains(el)) continue;
+        if (!best || el.getAttribute("data-path").length > best.getAttribute("data-path").length) best = el;
+      }
+      return best;
+    }
+
+    /** The annotated element nearest to a point, for a drag that has left
+     *  the formula: beyond its right edge the last thing on that line is
+     *  what the finger means, and beyond the bottom the lowest.  Ties go to
+     *  the deepest node, so a leaf wins over the box that holds it. */
+    _nearestLeafTo(x, y) {
+      var els = this.view.querySelectorAll("[data-path]");
+      var best = null, bestD = Infinity, bestLen = -1;
+      for (var i = 0; i < els.length; i++) {
+        var r = els[i].getBoundingClientRect();
+        if (!r.width && !r.height) continue;
+        var dx = x < r.left ? r.left - x : (x > r.right ? x - r.right : 0);
+        var dy = y < r.top ? r.top - y : (y > r.bottom ? y - r.bottom : 0);
+        var d = dx * dx + dy * dy, len = els[i].getAttribute("data-path").length;
+        if (d < bestD - 0.5 || (d <= bestD + 0.5 && len > bestLen)) { best = els[i]; bestD = d; bestLen = len; }
       }
       return best;
     }
@@ -3920,6 +3942,59 @@ var SympyEditor = (function () {
 
     /** Drag from glyph `a` to glyph `b`: the range of siblings between them
      *  in their nearest common rangeable ancestor (or that ancestor itself). */
+    /** Extend the drag's selection to what is under a point - or, once the
+     *  point has left the view, to the last thing that way: the hit test is
+     *  clamped to the view and falls back to the nearest node.  Without it a
+     *  finger dragged past the formula's edge found nothing under it (and, a
+     *  touch event's target being the node the finger started on, the range
+     *  snapped back to its anchor). */
+    _extendDragTo(x, y) {
+      var d = this._drag;
+      if (!d || !d.anchor || !this.state) return;
+      var r = this.view.getBoundingClientRect(), m = 2;
+      var cx = Math.min(Math.max(x, r.left + m), r.right - m);
+      var cy = Math.min(Math.max(y, r.top + m), r.bottom - m);
+      var leaf = this._leafAtPoint(cx, cy) || this._nearestLeafTo(cx, cy);
+      if (!leaf) return;
+      var lp = leaf.getAttribute("data-path");
+      if (!d.moved && lp === d.anchor) return;
+      d.moved = true;
+      this._dragSelect(d.anchor, lp);
+    }
+
+    /** A selection drag that reaches the edge of the view scrolls it, and
+     *  keeps extending over what comes into sight - the way to select what
+     *  lies beyond the screen.  The speed follows how far past the edge the
+     *  finger is; the loop stops when it comes back, when the view can
+     *  scroll no further, or when the drag ends. */
+    _autoScrollFor(d) {
+      var r = this.view.getBoundingClientRect(), margin = 28, top = 24;
+      var speed = function (pos, lo, hi) {
+        if (pos < lo + margin) return -Math.max(2, Math.min(top, (lo + margin - pos) / 2));
+        if (pos > hi - margin) return Math.max(2, Math.min(top, (pos - (hi - margin)) / 2));
+        return 0;
+      };
+      d.sx = speed(d.x, r.left, r.right);
+      d.sy = speed(d.y, r.top, r.bottom);
+      if (!d.sx && !d.sy) { this._stopAutoScroll(); return; }
+      if (this._autoScroll) return;
+      var self = this;
+      var step = function () {
+        var dd = self._drag;
+        if (!dd || (!dd.sx && !dd.sy)) { self._autoScroll = null; return; }
+        var left = self.view.scrollLeft, topNow = self.view.scrollTop;
+        self.view.scrollLeft = left + dd.sx;
+        self.view.scrollTop = topNow + dd.sy;
+        if (self.view.scrollLeft !== left || self.view.scrollTop !== topNow) self._extendDragTo(dd.x, dd.y);
+        self._autoScroll = requestAnimationFrame(step);
+      };
+      this._autoScroll = requestAnimationFrame(step);
+    }
+
+    _stopAutoScroll() {
+      if (this._autoScroll) { cancelAnimationFrame(this._autoScroll); this._autoScroll = null; }
+    }
+
     _dragSelect(a, b) {
       if (isAncestorOrSelf(a, b)) { this.select(a); return; }
       var p = this.tree[a] ? this.tree[a].parent : null;
@@ -5197,6 +5272,7 @@ var SympyEditor = (function () {
      *  document: a notebook makes and disposes of many editors, and each
      *  listener left behind would keep its editor alive. */
     destroy() {
+      this._stopAutoScroll();
       this._addonsNotify("destroy");
       this._addons = [];
       this.closeDrawer();
