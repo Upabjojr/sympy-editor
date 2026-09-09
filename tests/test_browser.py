@@ -1521,14 +1521,22 @@ def test_arrow_buttons_move_the_selection_and_the_caret(browser, serve_expr):
     # with a caret, the buttons move it between the terms
     page.keyboard.press("Tab")                                     # caret after b
     assert page.locator(".se-caret").count() == 1
-    gap = "(() => { const c = document.querySelector('.sympy-editor').__sympyEditor.caret; return [c.index, document.querySelector('.se-caret').getBoundingClientRect().left]; })()"
-    i1, x1 = page.evaluate(gap)
+    gap = "(() => { const c = document.querySelector('.sympy-editor').__sympyEditor.caret; return [c.index, c.attach || null, document.querySelector('.se-caret').getBoundingClientRect().left]; })()"
+    i1, at1, x1 = page.evaluate(gap)
     page.locator('.se-toolbar [data-cmd="right"]').click()
-    i2, x2 = page.evaluate(gap)
-    assert i2 == i1 + 1 and x2 > x1
+    i2, at2, x2 = page.evaluate(gap)
+    # The operator is drawn between the two terms, so the first step to the
+    # right crosses it: the same gap, its other side.
+    assert (i2, at2) == (i1, "right") and at1 == "left" and x2 > x1
+    page.locator('.se-toolbar [data-cmd="right"]').click()
+    i2b, at2b, x2b = page.evaluate(gap)
+    assert i2b == i1 + 1 and x2b > x2                              # and the next step reaches the next gap
     page.locator('.se-toolbar [data-cmd="left"]').click()
-    i3, x3 = page.evaluate(gap)
-    assert i3 == i1 and x3 < x2                                    # back in the previous gap (at its near end, like the ← key)
+    i3, at3, x3 = page.evaluate(gap)
+    assert (i3, at3) == (i2, at2) and x3 < x2b                     # back the way it came
+    page.locator('.se-toolbar [data-cmd="left"]').click()          # and back to where it started
+    i4, at4, x4 = page.evaluate(gap)
+    assert (i4, at4) == (i1, at1) and x4 == x1
     # with a caret, ↓ is disabled and ↑ selects the atom the caret is attached to
     assert page.locator('.se-toolbar [data-cmd="child"]').is_disabled()
     assert page.locator('.se-toolbar [data-cmd="parent"]').is_enabled()
@@ -1548,31 +1556,42 @@ def test_caret_walks_through_atoms_across_levels(browser, serve_expr):
     kids = _display_children(page, "/")
     _click(page, kids[0])                                          # a
     page.keyboard.press("Tab")                                     # caret after a (the gap before c)
-    caret = "(() => { const c = document.querySelector('.sympy-editor').__sympyEditor.caret; return c && {path: c.path, extend: c.extend || null, index: c.index, x: document.querySelector('.se-caret').getBoundingClientRect().left}; })()"
+    caret = "(() => { const c = document.querySelector('.sympy-editor').__sympyEditor.caret; return c && {path: c.path, extend: c.extend || null, index: c.index, attach: c.attach || null, x: document.querySelector('.se-caret').getBoundingClientRect().left}; })()"
     start = page.evaluate(caret)
-    assert start["path"] == "/" and start["index"] == 1
+    assert (start["path"], start["index"], start["attach"]) == ("/", 1, "left")
     right = page.locator('.se-toolbar [data-cmd="right"]')
     steps = []
-    for _ in range(4):
+    for _ in range(6):
         assert right.is_enabled()
         right.click()
         steps.append(page.evaluate(caret))
-    # gap before sin(b), into sin: before b, after b, out of sin: the end of the sum, where → is disabled
-    assert [(c["path"], c["extend"], c["index"]) for c in steps] == [("/", None, 2), (pb, "before", 0), (pb, "after", 0), ("/", None, 3)]
-    assert all(steps[i]["x"] > steps[i - 1]["x"] for i in range(1, 4)) and steps[0]["x"] > start["x"]
+    # Each + is drawn between its terms, so it has a place either side of it
+    # (that is what decides which term a bare factor typed there joins);
+    # then into sin: before b, after b, and out of it to the end of the sum,
+    # where → is disabled.
+    assert [(c["path"], c["extend"], c["index"], c["attach"]) for c in steps] == [
+        ("/", None, 1, "right"),
+        ("/", None, 2, "left"), ("/", None, 2, "right"),
+        (pb, "before", 0, None), (pb, "after", 0, None),
+        ("/", None, 3, "left")]
+    assert all(steps[i]["x"] > steps[i - 1]["x"] for i in range(1, 6)) and steps[0]["x"] > start["x"]
     assert right.is_disabled()
     # back: the same positions in reverse, strictly leftwards, down to the start of the sum, where ← is disabled
     left = page.locator('.se-toolbar [data-cmd="left"]')
     back = []
-    for _ in range(5):
+    for _ in range(7):
         assert left.is_enabled()
         left.click()
         back.append(page.evaluate(caret))
-    assert [(c["path"], c["extend"], c["index"]) for c in back] == [(pb, "after", 0), (pb, "before", 0), ("/", None, 2), ("/", None, 1), ("/", None, 0)]
-    assert all(back[i]["x"] < back[i - 1]["x"] for i in range(1, 5))
+    assert [(c["path"], c["extend"], c["index"], c["attach"]) for c in back] == [
+        (pb, "after", 0, None), (pb, "before", 0, None),
+        ("/", None, 2, "right"), ("/", None, 2, "left"),
+        ("/", None, 1, "right"), ("/", None, 1, "left"),
+        ("/", None, 0, "right")]
+    assert all(back[i]["x"] < back[i - 1]["x"] for i in range(1, 7))
     assert left.is_disabled() and right.is_enabled()
     # ↑ from the caret before b selects b
-    for _ in range(3):
+    for _ in range(5):
         right.click()
     assert page.evaluate(caret)["extend"] == "before"
     page.locator('.se-toolbar [data-cmd="parent"]').click()
@@ -3727,11 +3746,17 @@ def test_down_from_an_operator_drops_to_the_caret_it_stands_for(browser, serve_e
         state = page.evaluate(f"(() => ({{sel: {ed}.selected, path: {ed}.caret.path, index: {ed}.caret.index}}))()")
         assert state["sel"] is None, (how, state)          # not the whole expression, as it used to be
         assert [state["path"], state["index"]] == ["/", 1], (how, state)
-        # and it really is an insertion point: a term typed there joins the
-        # sum, and none of the terms is replaced
-        page.locator(".se-view").type("+w", delay=40)
+        # plainly on one side of the glyph, not adrift in the middle of it
+        caret_x = page.evaluate("(() => { const c = document.querySelector('.se-caret').getBoundingClientRect(); return c.left + c.width / 2; })()")
+        assert caret_x > plus[0], (how, caret_x, plus[0])
+        # and it really is an insertion point: nothing is selected, so nothing
+        # can be overwritten (before the fix the term on the right was
+        # selected and typing replaced it).  What a term typed there joins is
+        # test_either_side_of_an_operator_is_a_place_of_its_own.
+        assert page.locator(".se-selected").count() == 0, how
+        page.locator(".se-view").type("5", delay=40)
         page.keyboard.press("Enter")
-        assert _wait(lambda: str(doc.expr) == "w + x + y + z", timeout=20), (how, str(doc.expr))
+        assert _wait(lambda: str(doc.expr) == "x + 5*y + z", timeout=20), (how, str(doc.expr))
         assert page.errors == []
         page.close()
 
@@ -3758,6 +3783,82 @@ def test_left_and_right_from_an_operator_take_the_terms_it_joins(browser, serve_
     assert _wait(lambda: page.evaluate(f"(() => !!{ed}.junction)()"))
     page.locator(".se-view").press("ArrowLeft")
     assert _wait(lambda: page.evaluate(f"(() => {ed}.selected)()") == drawn[0])
+    assert page.errors == []
+
+
+@pytest.mark.parametrize("expr_src, want_right, want_left", [
+    ("x + y + z", "x + 5*y + z", "5*x + y + z"),
+    ("x - y", "x - 5*y", "5*x - y"),
+    ("Eq(x, y)", "Eq(x, 5*y)", "Eq(5*x, y)"),
+])
+def test_either_side_of_an_operator_is_a_place_of_its_own(browser, serve_expr, expr_src, want_right, want_left):
+    """An operator is drawn between its two arguments, so the point before it
+    and the point after it are two places, and the arrows visit both.  Which
+    one the caret is on decides which neighbour a bare term typed there joins:
+    a 5 to the right of + multiplies the right-hand term.  Both used to be one
+    place (the gap they share was merged away), and with no side to it the
+    insertion always took the left-hand term.
+
+    How the operator is drawn differs - between the arguments for +, inside
+    the right-hand one for the sign of -y, and an equation takes no new
+    argument at all - so the place is looked up among the formula's own caret
+    positions rather than worked out from the gap."""
+    from sympy import sympify
+    expr = sympify(expr_src)
+    for side, want in (("right", want_right), ("left", want_left)):
+        srv, doc = serve_expr(expr)
+        page = _open(browser, srv.url)
+        ed = "document.querySelector('.sympy-editor').__sympyEditor"
+        glyph = page.evaluate("""() => { const v = document.querySelector('.se-view');
+            const ops = ['+', '\u2212', '-', '=', '\u22c5'];
+            for (const el of v.querySelectorAll('*')) {
+                if (el.querySelector('[data-path]')) continue;
+                const t = (el.textContent || '').trim();
+                if (ops.includes(t)) { const r = el.getBoundingClientRect();
+                    if (r.width) return [r.left + r.width / 2, r.top + r.height / 2]; } }
+            return null; }""")
+        assert glyph, expr_src
+        page.mouse.click(glyph[0], glyph[1])
+        assert _wait(lambda: page.evaluate(f"(() => !!{ed}.junction)()")), expr_src
+        page.locator('.se-toolbar [data-cmd="child"]').click()
+        assert _wait(lambda: page.evaluate(f"(() => !!{ed}.caret)()")), (expr_src, side)
+        if side == "left":
+            page.locator(".se-view").press("ArrowLeft")     # the other side of the glyph
+            page.wait_for_timeout(250)
+        caret_x = page.evaluate("(() => { const c = document.querySelector('.se-caret').getBoundingClientRect(); return c.left + c.width / 2; })()")
+        if side == "right":
+            assert caret_x > glyph[0], (expr_src, side, caret_x, glyph[0])
+        else:
+            assert caret_x < glyph[0], (expr_src, side, caret_x, glyph[0])
+        page.locator(".se-view").type("5", delay=40)
+        page.keyboard.press("Enter")
+        assert _wait(lambda: str(doc.expr) == want, timeout=20), (expr_src, side, str(doc.expr), want)
+        assert page.errors == []
+        page.close()
+
+
+def test_the_arrows_visit_both_sides_of_an_operator(browser, serve_expr):
+    """Stepping used to skip one of them: the two sides share a gap, and the
+    caret positions were merged by gap, so the pair counted as one place."""
+    srv, doc = serve_expr(x + y + Symbol("z"))
+    page = _open(browser, srv.url)
+    ed = "document.querySelector('.sympy-editor').__sympyEditor"
+    places = page.evaluate(f"""(() => {ed}._caretPositions().map(q =>
+        q.gap.extend ? 'ext' : ('#' + q.gap.index + '/' + q.gap.attach)))()""")
+    for i in (1, 2):                                   # both + signs offer both sides
+        assert f"#{i}/left" in places and f"#{i}/right" in places, places
+    # and walking rightwards passes through each of them in turn
+    page.locator(".se-view").click(position={"x": 3, "y": 10})
+    page.keyboard.press("Home") if False else None
+    page.evaluate(f"(() => {ed}._caretAtEnd('start'))()")
+    seen = []
+    for _ in range(len(places)):
+        seen.append(page.evaluate(f"""(() => {{ const c = {ed}.caret;
+            return c ? (c.extend ? 'ext' : ('#' + c.index + '/' + c.attach)) : null; }})()"""))
+        page.locator(".se-view").press("ArrowRight")
+        page.wait_for_timeout(120)
+    for i in (1, 2):
+        assert f"#{i}/left" in seen and f"#{i}/right" in seen, seen
     assert page.errors == []
 
 def test_new_session_leads_the_list(browser, serve_expr):
