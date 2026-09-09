@@ -6,7 +6,11 @@
 .se-addon-plot .plot-sliders label { display: inline-flex; align-items: center; gap: 0.3rem; }
 .se-addon-plot .plot-sliders input[type=range] { width: 8em; }
 .se-addon-plot .plot-sliders output { font-family: var(--se-mono); min-width: 3em; }
-.se-addon-plot .plot-area { width: 100%; height: 260px; position: relative; }
+/* none: a finger on the picture moves the picture, in either direction, and
+ * two of them zoom it - the panel handles the lot (see plot.js), so nothing
+ * is left for the browser to scroll or magnify.  The page is scrolled from
+ * beside the picture, which on a phone is most of the width. */
+.se-addon-plot .plot-area { width: 100%; height: 260px; position: relative; touch-action: none; }
 .se-addon-plot .plot-svg { width: 100%; height: 100%; display: block; background: var(--se-bg); border: 1px solid var(--se-rule); border-radius: 4px; }
 .se-addon-plot .plot-svg .axis { stroke: var(--se-muted); stroke-width: 1; }
 .se-addon-plot .plot-svg .curve { fill: none; stroke: rgb(var(--se-accent)); stroke-width: 2; }
