@@ -3873,6 +3873,36 @@ def test_the_arrows_visit_both_sides_of_an_operator(browser, serve_expr):
         assert f"#{i}/left" in seen and f"#{i}/right" in seen, seen
     assert page.errors == []
 
+
+def test_a_page_opened_as_a_file_says_why_python_cannot_start(browser, tmp_path):
+    """Opened from the file system, a Pyodide page cannot start Python: the
+    browser gives a file:// page an opaque origin and will not let the runtime
+    fetch the parts it is made of.  Worse, the promise it leaves behind never
+    settles, so the loading overlay used to sit there for ever with the reason
+    only in the console.  It is refused up front now, and the reason - and the
+    way round it - is put where it can be read."""
+    from sympy_editor.html import default_urls
+    # the shape the web app builds: the runtime vendored beside the page, so
+    # opened from the file system it is a file:// address too.  KaTeX still
+    # comes from its CDN, so the formula renders and the failure is Python's
+    # alone (a page whose runtime *is* on a CDN loads it from here quite
+    # happily - that is an ordinary cross-origin fetch - and is not refused).
+    urls = dict(default_urls())
+    urls.update(pyodideJs="vendor/pyodide/pyodide.js", pyodideIndex="vendor/pyodide/",
+                sympyWheel="vendor/pyodide/sympy-1.14.0-py3-none-any.whl")
+    path = tmp_path / "asfile.html"
+    path.write_text(to_html(x + y, urls=urls), encoding="utf-8")
+    page = browser.new_page()
+    page.goto(path.as_uri())
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    # the overlay comes down rather than spinning for ever
+    assert _wait(lambda: page.evaluate("(() => { const o = document.querySelector('.se-loading'); return !!(o && o.hidden); })()"), timeout=30)
+    message = page.locator(".se-error")
+    assert _wait(lambda: message.is_visible(), timeout=10)
+    said = message.inner_text()
+    assert "http.server" in said and "file system" in said, said    # what is wrong, and what to do
+    page.close()
+
 def test_new_session_leads_the_list(browser, serve_expr):
     """Starting one is as much what the drawer is opened for as picking an old
     one out of the list, so it sits above the sessions rather than under them."""
