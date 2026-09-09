@@ -41,7 +41,11 @@ from sympy_editor.html import KATEX_VERSION, PYODIDE_VERSION, SYMPY_VERSION, SYM
 ADDONS_DIR = HERE.parent / "addons"
 
 PYODIDE_CORE = ("pyodide.js", "pyodide.asm.js", "pyodide.asm.wasm", "python_stdlib.zip", "pyodide-lock.json")
-PYODIDE_PACKAGES = ("mpmath",)  # from Pyodide's index (dependency closure read from pyodide-lock.json); SymPy itself is the PyPI wheel
+# From Pyodide's index (the dependency closure is read from pyodide-lock.json);
+# SymPy itself is the PyPI wheel.  micropip is here because a page that
+# carries add-ons installs their requirements with it, and loadPackage can
+# only find it if it was vendored beside the rest.
+PYODIDE_PACKAGES = ("mpmath", "micropip")
 
 NOTICE = """Third-party components vendored in this bundle
 ================================================

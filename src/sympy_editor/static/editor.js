@@ -5860,8 +5860,10 @@ var SympyEditor = (function () {
     "      }",
     "      if (m.micropip && m.micropip.length) {",
     "        self.postMessage({ type: 'progress', text: 'Installing add-ons…' });",
-    "        await py.loadPackage('micropip');",
-    "        await py.runPythonAsync('import micropip\\nawait micropip.install(' + JSON.stringify(m.micropip) + ')');",
+    "        try {",                       // an add-on's packages failing is not the editor's failure
+    "          await py.loadPackage('micropip');",
+    "          await py.runPythonAsync('import micropip\\nawait micropip.install(' + JSON.stringify(m.micropip) + ')');",
+    "        } catch (err) { console.warn('sympy-editor: an add-on\\'s packages could not be installed:', err); }",
     "      }",
     "      py.runPython(m.boot);",
     "      newDoc = py.globals.get('__sympy_editor_new');",
@@ -5903,9 +5905,17 @@ var SympyEditor = (function () {
       py.FS.writeFile(fp, cfg.packages[pkg][f]);
     }
     if (cfg.micropip && cfg.micropip.length) {
+      // What an add-on needs from PyPI.  Its failure is the add-on's, not the
+      // editor's: without a network (or without micropip beside the runtime)
+      // the formula still edits, and the add-ons that wanted these packages
+      // say so when they are switched on.
       report("Installing add-ons…");
-      await py.loadPackage("micropip");
-      await py.runPythonAsync("import micropip\nawait micropip.install(" + JSON.stringify(cfg.micropip) + ")");
+      try {
+        await py.loadPackage("micropip");
+        await py.runPythonAsync("import micropip\nawait micropip.install(" + JSON.stringify(cfg.micropip) + ")");
+      } catch (err) {
+        console.warn("sympy-editor: an add-on's packages could not be installed:", err);
+      }
     }
     py.runPython(PYODIDE_BOOT);
     return { newDoc: py.globals.get("__sympy_editor_new"), handle: py.globals.get("__sympy_editor_handle") };
