@@ -170,20 +170,26 @@ SympyEditor.registerAddon("plot", {
     }
 
 
-    /* ---- two fingers: pinch to zoom the axis ----
+    /* ---- fingers on the picture: pinch to zoom, drag to scroll ----
      *
-     * Plotly's own touch handling reads a two-finger drag as the box zoom it
-     * uses for a mouse, which lands the range wherever the fingers finished
-     * rather than around what they were holding.  This does the ordinary
-     * thing instead: the distance between the fingers scales the span, and
-     * the point under the middle of the pinch stays where it is.
+     * Plotly's own touch handling reads a drag as the box zoom it uses for a
+     * mouse: two fingers landed the range wherever they finished rather than
+     * around what they were holding, and one finger drew a zoom box where a
+     * finger on a picture is expected to push it along.  Both gestures are
+     * taken here instead, before Plotly sees them.
      *
-     * The span alone is changed, not the vertical axis: y is read off the
-     * curve every time it is sampled, so anything set here would be gone by
-     * the next draw.  Any direction of pinch counts, so a pinch that happens
-     * to be vertical still zooms rather than doing nothing.
+     * A pinch scales the span by how far the fingers move apart and keeps
+     * what is under the middle of them where it is.  A drag sideways moves
+     * the span along under the finger, so the curve follows it exactly.
+     *
+     * The span alone is changed, never the vertical axis: y is read off the
+     * curve every time it is sampled, so anything set for it would be gone
+     * by the next draw.  That is also why a drag up or down is left to the
+     * browser - it scrolls the page, as it does everywhere else.
      */
     var pinch = null;
+    var drag = null;
+    var DRAG_SLOP = 8;      // px of sideways movement before a drag is one
 
     function touchDistance(a, b) {
       var dx = a.clientX - b.clientX, dy = a.clientY - b.clientY;
@@ -202,6 +208,14 @@ SympyEditor.registerAddon("plot", {
       return Math.min(1, Math.max(0, (clientX - left) / width));
     }
 
+    /** The axis's width in pixels (its own, not the panel's). */
+    function axisLength() {
+      var ax = area._fullLayout && area._fullLayout.xaxis;
+      if (ax && ax._length) return ax._length;
+      var box = area.getBoundingClientRect();
+      return box.width || 0;
+    }
+
     function currentRange() {
       var ax = area._fullLayout && area._fullLayout.xaxis;
       if (ax && ax.range && ax.range.length === 2 && ax.range[0] < ax.range[1]) return [ax.range[0], ax.range[1]];
@@ -213,7 +227,13 @@ SympyEditor.registerAddon("plot", {
     // drag as the box zoom it uses for a mouse, and would undo this on the
     // same gesture.  One finger is left alone, so its own pan still works.
     area.addEventListener("touchstart", function (ev) {
+      if (plotly && ev.touches.length === 1) {
+        // not a drag yet: which way the finger goes decides, so that a
+        // scroll down the page over the picture still scrolls the page
+        drag = { x: ev.touches[0].clientX, y: ev.touches[0].clientY, range: currentRange(), moving: false };
+      }
       if (!plotly || ev.touches.length !== 2) { pinch = null; return; }
+      drag = null;
       var r = currentRange();
       pinch = {
         distance: touchDistance(ev.touches[0], ev.touches[1]),
@@ -225,6 +245,22 @@ SympyEditor.registerAddon("plot", {
     }, true);
 
     area.addEventListener("touchmove", function (ev) {
+      if (drag && !pinch && ev.touches.length === 1) {
+        var dx = ev.touches[0].clientX - drag.x, dy = ev.touches[0].clientY - drag.y;
+        if (!drag.moving) {
+          if (Math.abs(dx) < DRAG_SLOP && Math.abs(dy) < DRAG_SLOP) return;   // too early to say
+          if (Math.abs(dy) > Math.abs(dx)) { drag = null; return; }           // downwards: the page's, not ours
+          drag.moving = true;
+        }
+        ev.preventDefault();
+        ev.stopPropagation();
+        var length = axisLength();
+        if (!length) return;
+        var wide = drag.range[1] - drag.range[0];
+        var by = -(dx / length) * wide;                     // the picture goes with the finger
+        plotly.relayout(area, { "xaxis.range": [drag.range[0] + by, drag.range[1] + by] });
+        return;
+      }
       if (!pinch || ev.touches.length !== 2) return;
       var now = touchDistance(ev.touches[0], ev.touches[1]);
       if (!(now > 0) || !(pinch.distance > 0)) return;
@@ -243,7 +279,10 @@ SympyEditor.registerAddon("plot", {
       plotly.relayout(area, { "xaxis.range": [lo, hi] });
     }, true);
 
-    var endPinch = function (ev) { if (!ev.touches || ev.touches.length < 2) pinch = null; };
+    var endPinch = function (ev) {
+      if (!ev.touches || ev.touches.length < 2) pinch = null;
+      if (!ev.touches || !ev.touches.length) drag = null;
+    };
     area.addEventListener("touchend", endPinch, true);
     area.addEventListener("touchcancel", endPinch, true);
 
@@ -330,7 +369,8 @@ SympyEditor.registerAddon("plot", {
       "<li><b>variable</b>: the symbol on the horizontal axis (the first free symbol to begin with); <b>from</b>/<b>to</b>: the span.</li>",
       "<li>With more than one free symbol nothing is drawn until the others have a value: each gets a field and a slider, and the value is substituted on the way to the plot \u2014 the formula stays symbolic. No value is ever guessed.</li>",
       "<li>Zoom or pan in the picture (drag a box, turn the mouse wheel over it, drag an axis; double-click to reset): the <b>from</b>/<b>to</b> fields take the visible range, <i>visible range</i> reads it out, and the curve is sampled again over it \u2014 zooming in brings detail.</li>",
-      "<li>On a touch screen, <b>pinch with two fingers</b> to zoom: apart for a closer look, together to come back out. What is under the middle of the pinch stays where it is, and one finger still scrolls the page.</li>",
+      "<li>On a touch screen, <b>pinch with two fingers</b> to zoom: apart for a closer look, together to come back out. What is under the middle of the pinch stays where it is.</li>",
+      "<li>And <b>drag sideways with one finger</b> to scroll along the axis, the curve following the finger. A drag up or down is left alone, so it scrolls the page as it does anywhere else.</li>",
       "<li>The picture follows every committed change \u2014 an edit, a transformation, an undo \u2014 and the selection.</li>",
       "</ul></section>"
     ].join("");

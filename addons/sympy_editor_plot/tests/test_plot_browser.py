@@ -175,3 +175,56 @@ def test_two_fingers_pinch_the_axis():
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_one_finger_drags_the_plot_along():
+    """A finger on a picture is expected to push it along; Plotly would draw
+    a zoom box instead.  Sideways is the panel's - the span moves with the
+    finger, at the same width - and up or down is left to the browser, which
+    scrolls the page as it does everywhere else."""
+    doc = Document(sin(x), addons=[ADDON])
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with playwright.sync_playwright() as p:
+            browser = p.chromium.launch()
+            ctx = browser.new_context(has_touch=True, is_mobile=True, viewport={"width": 420, "height": 820})
+            page = ctx.new_page()
+            errors = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.goto(srv.url)
+            page.wait_for_selector(".se-addon-plot .plot-area", timeout=30000)
+            page.wait_for_function("() => { const a = document.querySelector('.plot-area'); return a && a._fullLayout; }", timeout=60000)
+            cdp = ctx.new_cdp_session(page)
+            box = page.locator(".plot-area").bounding_box()
+            cx, cy = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+            rng = lambda: page.evaluate("() => document.querySelector('.plot-area')._fullLayout.xaxis.range.slice()")
+            ids = [40]
+
+            def swipe(dx, dy, steps=10):
+                ids[0] += 1
+                i = ids[0]
+                cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": cx, "y": cy, "id": i}]})
+                for k in range(1, steps + 1):
+                    cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints":
+                        [{"x": cx + dx * k / steps, "y": cy + dy * k / steps, "id": i}]})
+                    page.wait_for_timeout(40)
+                cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+                page.wait_for_timeout(1400)
+
+            start = rng()
+            wide = start[1] - start[0]
+            swipe(-110, 0)                            # push the picture left: further along the axis
+            moved = rng()
+            assert moved[0] > start[0] + wide * 0.15, (start, moved)
+            assert abs((moved[1] - moved[0]) - wide) < wide * 0.02, (start, moved)   # scrolled, not zoomed
+            swipe(110, 0)
+            assert abs(rng()[0] - start[0]) < wide * 0.1, (start, rng())             # and back
+            here = rng()
+            swipe(0, -160)                            # straight down: the page's gesture
+            assert abs(rng()[0] - here[0]) < wide * 0.05, (here, rng())
+            assert errors == []
+            browser.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
