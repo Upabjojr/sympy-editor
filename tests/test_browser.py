@@ -3288,11 +3288,11 @@ def test_the_app_wears_its_own_icon_beside_its_name(browser, serve_expr):
         const text = document.querySelector('h1').textContent.trim();
         return {mark: [mark.x, mark.y, mark.height], h1: [h1.x, h1.y, h1.height], bar: [bar.y], text};
     }""")
-    assert where["text"] == "SymPy editor"
+    assert where["text"] == "SymPy Editor"
     # the mark is decorative: the words beside it are the heading, and the
     # licence note inside the drawing is not part of what the heading says
     assert page.locator("h1 .page-logo").get_attribute("aria-hidden") == "true"
-    assert page.locator("h1").inner_text() == "SymPy editor"
+    assert page.locator("h1").inner_text() == "SymPy Editor"
     # on the title's line: same left edge as the heading, centred on it, and
     # about as tall as the words rather than a picture of its own
     assert abs(where["mark"][0] - where["h1"][0]) < 2
@@ -3306,7 +3306,7 @@ def test_the_app_wears_its_own_icon_beside_its_name(browser, serve_expr):
     page.goto(srv2.url)
     page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
     assert page.locator(".page-logo").count() == 0
-    assert page.locator("h1").inner_text() == "SymPy editor"
+    assert page.locator("h1").inner_text() == "SymPy Editor"
     assert page.errors == []
 
 
@@ -3650,6 +3650,29 @@ def test_the_selection_box_glides_only_while_a_drag_extends_it(browser, served):
     assert page.errors == []
 
 
+def test_new_session_leads_the_list(browser, serve_expr):
+    """Starting one is as much what the drawer is opened for as picking an old
+    one out of the list, so it sits above the sessions rather than under them."""
+    srv, doc = serve_expr(x + y, options={"sessions": True})
+    page = browser.new_page()
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(srv.url)
+    # two sessions in the store, so there is a list for the row to lead
+    page.evaluate("""() => localStorage.setItem('sympy-editor:sessions', JSON.stringify(
+        {current: 'a', list: [{id: 'a', name: 'x + y', updated: 2}, {id: 'b', name: 'sin(x)', updated: 1}]}))""")
+    page.reload()
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    page.locator('[data-cmd="drawer"]').click()
+    page.wait_for_selector(".se-session-add", state="visible", timeout=10000)
+    rows = page.evaluate("(() => [...document.querySelectorAll('.se-sessions > .se-session')].map(r => r.className))()")
+    assert len(rows) == 3, rows                       # the new-session row and the two sessions
+    assert "se-session-add" in rows[0], rows          # leading them, not trailing
+    assert "se-session-add" not in rows[1] and "se-session-add" not in rows[2], rows
+    assert errors == []
+    page.close()
+
+
 def test_the_full_screen_button_keeps_its_corner(browser, serve_expr):
     """It is the one fixed landmark of the editing box: it used to step inward
     when a scroll strip appeared, so it drifted towards the middle as the
@@ -3690,8 +3713,12 @@ def test_the_add_ons_switches_sit_at_the_top_of_the_drawer(browser, serve_expr):
         page.wait_for_selector(".se-drawer-addons", state="visible", timeout=10000)
         panes = page.evaluate("(() => [...document.querySelector('.se-drawer').children].map(c => c.className))()")
         assert "se-drawer-addons" in panes[1], panes      # right under the head, above the sessions
+        # it is a fold, shut until it is wanted
+        assert page.evaluate("(() => document.querySelector('.se-drawer-addons').open)()") is False
+        assert not page.locator(".se-drawer-addons input").is_visible()
+        page.locator(".se-drawer-addons .se-drawer-subhead").click()
         box = page.locator(".se-drawer-addons input")
-        assert box.count() == 1 and not box.is_checked()
+        assert box.count() == 1 and box.is_visible() and not box.is_checked()
         box.check()                                       # and it still switches the add-on on
         page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)
         assert list(doc.addons) == ["demo"]
@@ -3737,7 +3764,7 @@ def test_a_session_can_be_given_a_name(browser, tmp_path):
     page.goto(path.as_uri())
     page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
     page.locator('[data-cmd="drawer"]').click()
-    row = page.locator(".se-session").first
+    row = page.locator(".se-session:not(.se-session-add)").first   # "New session…" leads the list now
     assert _wait(lambda: row.locator(".se-session-row > code").inner_text() == "x + y")
 
     row.locator(".se-session-rename").first.click()
@@ -3752,20 +3779,20 @@ def test_a_session_can_be_given_a_name(browser, tmp_path):
     assert _wait(lambda: page.locator(".se-drawer").is_hidden())
     _next_state(page, lambda: _pick(page, ".se-ops", "expand"))
     page.locator('[data-cmd="drawer"]').click()
-    assert _wait(lambda: page.locator(".se-session").first.locator(".se-session-row > code").inner_text() == "Simplifying the Hamiltonian")
+    assert _wait(lambda: page.locator(".se-session:not(.se-session-add)").first.locator(".se-session-row > code").inner_text() == "Simplifying the Hamiltonian")
     # it survives a reload, like the sessions themselves
     page.reload()
     page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
     page.locator('[data-cmd="drawer"]').click()
-    assert _wait(lambda: page.locator(".se-session").first.locator(".se-session-row > code").inner_text() == "Simplifying the Hamiltonian")
+    assert _wait(lambda: page.locator(".se-session:not(.se-session-add)").first.locator(".se-session-row > code").inner_text() == "Simplifying the Hamiltonian")
 
     # emptying the name hands the session back to its formula
-    page.locator(".se-session").first.locator(".se-session-rename").first.click()
-    field = page.locator(".se-session").first.locator("input.se-session-name")
+    page.locator(".se-session:not(.se-session-add)").first.locator(".se-session-rename").first.click()
+    field = page.locator(".se-session:not(.se-session-add)").first.locator("input.se-session-name")
     field.wait_for()
     field.fill("")
     field.press("Enter")
-    assert _wait(lambda: page.locator(".se-session").first.locator(".se-session-row > code").inner_text() != "Simplifying the Hamiltonian")
+    assert _wait(lambda: page.locator(".se-session:not(.se-session-add)").first.locator(".se-session-row > code").inner_text() != "Simplifying the Hamiltonian")
     assert errors == []
     page.close()
 

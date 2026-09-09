@@ -17,7 +17,7 @@ android {
         // Chaquopy ships a CPython runtime per ABI: these two cover phones,
         // tablets and the emulator (every other ABI is long obsolete).
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
-        manifestPlaceholders["appLabel"] = "SymPy editor"
+        manifestPlaceholders["appLabel"] = "SymPy Editor"
     }
 
     // Release signing from the environment (see mobile/README.md); without a
@@ -38,13 +38,13 @@ android {
         // Android refuses to update an app with a differently signed one, so
         // sharing the application id would mean uninstalling the store app
         // (and its sessions with it) to try a build.  The debug build is its
-        // own application - org.sympy.editor.debug, "SymPy editor (debug)" on
+        // own application - org.sympy.editor.debug, "SymPy Editor (debug)" on
         // the launcher - and the two live side by side.  The FileProvider's
         // authority already follows ${applicationId}, so they do not collide.
         getByName("debug") {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
-            manifestPlaceholders["appLabel"] = "SymPy editor (debug)"
+            manifestPlaceholders["appLabel"] = "SymPy Editor (debug)"
         }
         release {
             isMinifyEnabled = false

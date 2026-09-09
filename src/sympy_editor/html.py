@@ -223,7 +223,7 @@ _PAGE = """<!DOCTYPE html>
 """
 
 
-def render_page(config: Dict[str, Any], title: str = "SymPy editor", head: str = "",
+def render_page(config: Dict[str, Any], title: str = "SymPy Editor", head: str = "",
                 element_id: Optional[str] = None, logo: str = "") -> str:
     """The full page; ``head`` is extra markup for its ``<head>`` (a web app
     manifest, meta tags, a service-worker registration...); ``element_id``
@@ -245,7 +245,7 @@ def to_html(
     full_page: bool = True,
     editable: bool = True,
     backend: Optional[str] = None,
-    title: str = "SymPy editor",
+    title: str = "SymPy Editor",
     options: Optional[Dict[str, Any]] = None,
     urls: Optional[Dict[str, str]] = None,
     head: str = "",

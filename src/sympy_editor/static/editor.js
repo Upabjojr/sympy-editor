@@ -1432,8 +1432,10 @@ var SympyEditor = (function () {
         if (this.addonsMenu && !this.addonsBtn) {
           this.addonsMenu.hidden = false;
           this.addonsMenu.classList.add("se-addons-inline");
-          this.addonsPane = h("section", { class: "se-drawer-addons", hidden: "" }, [
-            h("div", { class: "se-drawer-subhead" }, [h("strong", {}, ["Add-ons"])]),
+          // A fold, shut to start with: the switches are set once in a while,
+          // and the sessions below them are what the drawer is opened for.
+          this.addonsPane = h("details", { class: "se-drawer-addons", hidden: "" }, [
+            h("summary", { class: "se-drawer-subhead" }, ["Add-ons"]),
             this.addonsMenu
           ]);
         }
@@ -4996,7 +4998,7 @@ var SympyEditor = (function () {
       if (snap && snap.history) this._history = snap.history;
       var sess = this._currentSession();
       var self = this;
-      return buildHistoryReport(hist, { title: "SymPy editor \u2014 history" + (sess && sess.name ? " of " + sess.name : ""),
+      return buildHistoryReport(hist, { title: "SymPy Editor \u2014 history" + (sess && sess.name ? " of " + sess.name : ""),
                                         katexCss: this.opts.katexCss, defaultAction: "Edit",
                                         stepExtra: function (step, i, prev) { return self._addonsStepHtml(step, i, prev); },
                                         extraCss: this._addonsHistoryCss() });
@@ -5056,7 +5058,7 @@ var SympyEditor = (function () {
     /** The Python script reproducing the history (built by the document). */
     async buildPython() {
       var sess = this._currentSession();
-      var title = "SymPy editor \u2014 history" + (sess && sess.name ? " of " + sess.name : "");
+      var title = "SymPy Editor \u2014 history" + (sess && sess.name ? " of " + sess.name : "");
       var snap = await this.backend.send({ action: "script", title: title }, function () {});
       if (!snap || !snap.script) throw new Error("No history to export");
       return snap.script;
@@ -5344,6 +5346,13 @@ var SympyEditor = (function () {
       body.textContent = "";
       var list = store.list.slice().sort(function (a, b) { return b.updated - a.updated; });
       if (this.buttons.drawer) this.buttons.drawer.title = "Sessions (" + list.length + ") and history";
+      // Starting a new one comes first: it is what the drawer is opened for
+      // as often as picking an old session out of the list under it.
+      var add = h("button", { type: "button", class: "se-session-new", title: "Start a new session: an empty formula, a copy of this one, or an example" }, ["New session\u2026"]);
+      add.disabled = !this._sessionsReady;
+      var addRow = h("div", { class: "se-session se-session-add" }, [add]);
+      add.addEventListener("click", function () { self._showSessionPicker(addRow); });
+      body.appendChild(addRow);
       list.forEach(function (sess) {
         var current = sess.id === store.current;
         var when = new Date(sess.updated || 0);
@@ -5385,11 +5394,6 @@ var SympyEditor = (function () {
         }
         body.appendChild(row);
       });
-      var add = h("button", { type: "button", class: "se-session-new", title: "Start a new session: an empty formula, a copy of this one, or an example" }, ["New session\u2026"]);
-      add.disabled = !this._sessionsReady;
-      var addRow = h("div", { class: "se-session se-session-add" }, [add]);
-      add.addEventListener("click", function () { self._showSessionPicker(addRow); });
-      body.appendChild(addRow);
       // The history of the current session: one row per step, the current one marked.
       var hist = this.historyBody;
       hist.textContent = "";
