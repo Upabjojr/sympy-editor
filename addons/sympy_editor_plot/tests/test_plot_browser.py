@@ -107,3 +107,71 @@ def test_fields_values_zoom_and_guide():
         browser.close()
     srv.shutdown()
     srv.server_close()
+
+
+def test_two_fingers_pinch_the_axis():
+    """Pinch to zoom, on a touch screen.  Plotly reads a two-finger drag as
+    the box zoom it uses for a mouse, which lands the range wherever the
+    fingers finished rather than around what they were holding; the panel
+    takes the gesture first (a capture listener that stops it going on) and
+    scales the span itself, keeping the point under the middle of the pinch
+    where it is."""
+    doc = Document(sin(x), addons=[ADDON])
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with playwright.sync_playwright() as p:
+            browser = p.chromium.launch()
+            ctx = browser.new_context(has_touch=True, is_mobile=True, viewport={"width": 420, "height": 820})
+            page = ctx.new_page()
+            errors = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.goto(srv.url)
+            page.wait_for_selector(".se-addon-plot .plot-area", timeout=30000)
+            page.wait_for_function("() => { const a = document.querySelector('.plot-area'); return a && a._fullLayout; }", timeout=60000)
+            # one finger still scrolls the page; the pinch is the panel's
+            assert page.evaluate("() => getComputedStyle(document.querySelector('.plot-area')).touchAction") == "pan-y"
+
+            cdp = ctx.new_cdp_session(page)
+            box = page.locator(".plot-area").bounding_box()
+            cy = box["y"] + box["height"] / 2
+            hold = box["x"] + box["width"] * 0.62        # off-centre, both fingers still on the picture
+            span = lambda: page.evaluate("() => { const r = document.querySelector('.plot-area')._fullLayout.xaxis.range; return r[1] - r[0]; }")
+            at_hold = lambda: page.evaluate("""(cx) => { const a = document.querySelector('.plot-area');
+                const b = a.getBoundingClientRect(); const ax = a._fullLayout.xaxis;
+                const f = (cx - (b.left + ax._offset)) / ax._length;
+                return ax.range[0] + f * (ax.range[1] - ax.range[0]); }""", hold)
+
+            ids = [0]
+
+            def pinch(d0, d1):
+                ids[0] += 2                              # fresh ids: a gesture that reuses them loses a finger
+                a, b = ids[0], ids[0] + 1
+                pt = lambda d, i: {"x": hold + (-d if i == a else d), "y": cy, "id": i}
+                cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [pt(d0, a)]})
+                cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [pt(d0, a), pt(d0, b)]})
+                for i in range(1, 11):
+                    d = d0 + (d1 - d0) * i / 10.0
+                    cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [pt(d, a), pt(d, b)]})
+                    page.wait_for_timeout(40)
+                cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+                page.wait_for_timeout(1200)
+
+            wide, held = span(), at_hold()
+            pinch(30, 110)                               # fingers apart: a closer look
+            close = span()
+            assert close < wide * 0.6, (wide, close)
+            assert abs(at_hold() - held) < close * 0.06, (held, at_hold())   # what was held stayed put
+            # the fields and the label follow the pinch, as they do a wheel zoom
+            assert abs(float(page.locator(".se-addon-plot .plot-bar .plot-num").first.input_value())
+                       - page.evaluate("() => document.querySelector('.plot-area')._fullLayout.xaxis.range[0]")) < 0.2
+            assert page.locator(".plot-shown").inner_text().startswith("visible range:")
+
+            pinch(110, 30)                               # fingers together: back out
+            assert span() > close * 1.8, (close, span())
+            assert abs(at_hold() - held) < span() * 0.06, (held, at_hold())
+            assert errors == []
+            browser.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()

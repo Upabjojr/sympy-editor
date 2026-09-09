@@ -169,6 +169,84 @@ SympyEditor.registerAddon("plot", {
       showRange(sampled[0], sampled[1]);
     }
 
+
+    /* ---- two fingers: pinch to zoom the axis ----
+     *
+     * Plotly's own touch handling reads a two-finger drag as the box zoom it
+     * uses for a mouse, which lands the range wherever the fingers finished
+     * rather than around what they were holding.  This does the ordinary
+     * thing instead: the distance between the fingers scales the span, and
+     * the point under the middle of the pinch stays where it is.
+     *
+     * The span alone is changed, not the vertical axis: y is read off the
+     * curve every time it is sampled, so anything set here would be gone by
+     * the next draw.  Any direction of pinch counts, so a pinch that happens
+     * to be vertical still zooms rather than doing nothing.
+     */
+    var pinch = null;
+
+    function touchDistance(a, b) {
+      var dx = a.clientX - b.clientX, dy = a.clientY - b.clientY;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    /** Where a point on the screen falls along the axis: 0 at its left end,
+     *  1 at its right.  Plotly puts the axis's own offset and length on the
+     *  layout; without them (an SVG fallback) the box is close enough. */
+    function axisFraction(clientX) {
+      var box = area.getBoundingClientRect();
+      var ax = area._fullLayout && area._fullLayout.xaxis;
+      var left = box.left + (ax && typeof ax._offset === "number" ? ax._offset : 0);
+      var width = ax && ax._length ? ax._length : box.width;
+      if (!width) return 0.5;
+      return Math.min(1, Math.max(0, (clientX - left) / width));
+    }
+
+    function currentRange() {
+      var ax = area._fullLayout && area._fullLayout.xaxis;
+      if (ax && ax.range && ax.range.length === 2 && ax.range[0] < ax.range[1]) return [ax.range[0], ax.range[1]];
+      var a = parseFloat(from.value), b = parseFloat(to.value);
+      return (a < b) ? [a, b] : (opts.span || [-6, 6]);
+    }
+
+    // Caught on the way down, and stopped there: Plotly reads a two-finger
+    // drag as the box zoom it uses for a mouse, and would undo this on the
+    // same gesture.  One finger is left alone, so its own pan still works.
+    area.addEventListener("touchstart", function (ev) {
+      if (!plotly || ev.touches.length !== 2) { pinch = null; return; }
+      var r = currentRange();
+      pinch = {
+        distance: touchDistance(ev.touches[0], ev.touches[1]),
+        range: r,
+        fraction: axisFraction((ev.touches[0].clientX + ev.touches[1].clientX) / 2)
+      };
+      ev.preventDefault();
+      ev.stopPropagation();
+    }, true);
+
+    area.addEventListener("touchmove", function (ev) {
+      if (!pinch || ev.touches.length !== 2) return;
+      var now = touchDistance(ev.touches[0], ev.touches[1]);
+      if (!(now > 0) || !(pinch.distance > 0)) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      // fingers apart: a shorter span, so a closer look
+      var span = (pinch.range[1] - pinch.range[0]) * (pinch.distance / now);
+      var limit = Math.abs(pinch.range[1] - pinch.range[0]);
+      span = Math.min(Math.max(span, limit * 1e-4), limit * 1e4);   // room to move, no room to break
+      var held = pinch.range[0] + pinch.fraction * (pinch.range[1] - pinch.range[0]);
+      var lo = held - pinch.fraction * span, hi = lo + span;
+      if (!isFinite(lo) || !isFinite(hi) || !(lo < hi)) return;
+      // the relayout tells the panel, which writes the fields and asks for
+      // samples over the new span (that request is debounced, so a pinch
+      // makes one of them, not one per frame)
+      plotly.relayout(area, { "xaxis.range": [lo, hi] });
+    }, true);
+
+    var endPinch = function (ev) { if (!ev.touches || ev.touches.length < 2) pinch = null; };
+    area.addEventListener("touchend", endPinch, true);
+    area.addEventListener("touchcancel", endPinch, true);
+
     /** A zoom or a pan in the picture (Plotly.react itself emits no
      *  relayout): the fields take the visible range and the curve is
      *  sampled again over it, so that zooming in brings detail rather than
@@ -252,6 +330,7 @@ SympyEditor.registerAddon("plot", {
       "<li><b>variable</b>: the symbol on the horizontal axis (the first free symbol to begin with); <b>from</b>/<b>to</b>: the span.</li>",
       "<li>With more than one free symbol nothing is drawn until the others have a value: each gets a field and a slider, and the value is substituted on the way to the plot \u2014 the formula stays symbolic. No value is ever guessed.</li>",
       "<li>Zoom or pan in the picture (drag a box, turn the mouse wheel over it, drag an axis; double-click to reset): the <b>from</b>/<b>to</b> fields take the visible range, <i>visible range</i> reads it out, and the curve is sampled again over it \u2014 zooming in brings detail.</li>",
+      "<li>On a touch screen, <b>pinch with two fingers</b> to zoom: apart for a closer look, together to come back out. What is under the middle of the pinch stays where it is, and one finger still scrolls the page.</li>",
       "<li>The picture follows every committed change \u2014 an edit, a transformation, an undo \u2014 and the selection.</li>",
       "</ul></section>"
     ].join("");
