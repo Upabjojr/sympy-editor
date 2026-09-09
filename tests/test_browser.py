@@ -3639,7 +3639,9 @@ def test_the_selection_box_glides_only_while_a_drag_extends_it(browser, served):
     page.locator('[data-path="/"]').click(force=True)
     page.wait_for_selector(".se-box-select")
     box = ".se-box-select"
-    assert page.evaluate("(() => document.querySelector('%s').classList.contains('se-box-new'))()" % box) is False
+    # se-box-new is dropped on the frame after the box is made: wait for that
+    # rather than race it - a loaded runner can be a while getting there.
+    page.wait_for_function("() => { const b = document.querySelector('%s'); return b && !b.classList.contains('se-box-new'); }" % box, timeout=10000)
     assert page.evaluate("(() => document.querySelector('%s').classList.contains('se-box-glide'))()" % box) is False
     assert page.evaluate("(() => getComputedStyle(document.querySelector('%s')).transitionDuration)()" % box) == "0s"
     # the rule is there for the drag: with the class on, it animates
