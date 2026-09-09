@@ -117,21 +117,28 @@ def vendor(out: Path, cache: Path, pyodide: bool = True) -> dict:
     }
 
 
-def app_logo() -> str:
+def app_logo(debug: bool = False) -> str:
     """The app's own icon as inline SVG, for the corner of the toolbar.
 
     Inline, because the bundle has to work with no network and the icon is a
     few kilobytes; the same drawing the launcher shows (``mobile/icon``,
-    written by ``make_icons.py``).  Missing, it is simply left out.
+    written by ``make_icons.py``) - the badged one for a debug build, so the
+    page wears the mark its launcher icon does.  Missing, it is left out.
     """
-    svg = HERE / "icon" / "icon.svg"
+    svg = HERE / "icon" / ("icon-debug.svg" if debug else "icon.svg")
+    if not svg.is_file():
+        svg = HERE / "icon" / "icon.svg"
     if not svg.is_file():
         return ""
     return svg.read_text(encoding="utf-8").split("?>", 1)[-1].strip()
 
 
+#: What a debug build calls itself, wherever it is named (see mobile/build.py).
+DEBUG_SUFFIX = " (debug)"
+
+
 def build(out: Path, *, cdn: bool = False, cache: Path | None = None, expr=None, title: str = "SymPy editor",
-          head: str = "", native: bool = False, addons_dir: Path | None = None) -> Path:
+          head: str = "", native: bool = False, addons_dir: Path | None = None, debug: bool = False) -> Path:
     """Write the bundle to ``out``; ``head`` is extra ``<head>`` markup (the
     web app's manifest and service worker, see ``webapp/build.py``).
 
@@ -147,12 +154,16 @@ def build(out: Path, *, cdn: bool = False, cache: Path | None = None, expr=None,
     available = [m["module"] for m in scan_addons(addons_dir if addons_dir is not None else ADDONS_DIR).values()
                  if m.get("bundle") is not False]      # not the template: an example to copy, never shipped
     doc = Document(expr if expr is not None else demo_expression(), available=available)
+    # A debug build is a second application on the phone: it says so over the
+    # formula and wears the badged icon, as its launcher entry does.
+    if debug and not title.endswith(DEBUG_SUFFIX):
+        title += DEBUG_SUFFIX
     page = to_html(doc, urls=urls, title=title, head=head,
                    backend="native" if native else None,
                    element_id="sympy-editor-app",                         # reproducible: the web app's cache is keyed by content
                    # the app wears its own icon beside the title: in a WebView
                    # there is no title bar to say whose window this is
-                   logo=app_logo(),
+                   logo=app_logo(debug),
                    # an app keeps its zoom, its sessions and its add-on switches between launches
                    options={"rememberZoom": True, "sessions": True, "rememberAddons": True})
     (out / "index.html").write_text(page, encoding="utf-8")
@@ -175,8 +186,12 @@ def main(argv=None) -> int:
     ap.add_argument("--android", action="store_true", help="also copy the bundle to mobile/android/app/src/main/assets/www")
     ap.add_argument("--native", action="store_true",
                     help="the host application runs Python (the Android app): no Pyodide in the bundle")
+    ap.add_argument("--title", default="SymPy editor", help="the page's title, over the formula")
+    ap.add_argument("--debug", action="store_true",
+                    help="a debug build: the title says so and the icon beside it wears the bug badge")
     args = ap.parse_args(argv)
-    out = build(args.out, cdn=args.cdn, cache=args.cache, native=args.native or args.android)
+    out = build(args.out, cdn=args.cdn, cache=args.cache, native=args.native or args.android,
+                title=args.title, debug=args.debug)
     size = sum(p.stat().st_size for p in out.rglob("*") if p.is_file())
     print(f"Wrote {out} ({size / 1e6:.1f} MB)")
     if args.android:
