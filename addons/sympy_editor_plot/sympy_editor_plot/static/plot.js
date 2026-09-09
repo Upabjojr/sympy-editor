@@ -35,6 +35,8 @@ SympyEditor.registerAddon("plot", {
     var seq = 0, timer = null, plotly = null, plotlyFailed = false;
     var lastVar = null;
     var sampled = null;     // [from, to] of the samples on show
+    var yRange = null;      // [low, high] once a gesture has set one: y is otherwise
+                            // read off the curve, and would spring back on every draw
 
     function fmt(v) { return Number(v).toPrecision(4).replace(/\.?0+$/, ""); }
     function showRange(a, b) { shown.textContent = a === null ? "" : "visible range: " + fmt(a) + " \u2026 " + fmt(b); }
@@ -154,11 +156,17 @@ SympyEditor.registerAddon("plot", {
         });
         var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
         plotly.react(area, traces, {
+          // A drag moves the picture, the way a finger does: zooming is the
+          // wheel, a trackpad pinch, two fingers, or the from/to fields, and
+          // a double-click comes back to the whole thing.
+          dragmode: "pan",
           margin: { l: 40, r: 10, t: 10, b: 30 }, showlegend: res.curves.length > 1,
           paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
           font: { color: dark ? "#e6e6e6" : "#1f2328", size: 11 },
           xaxis: { title: res.var, zeroline: true, gridcolor: dark ? "#333" : "#eee" },
-          yaxis: { zeroline: true, gridcolor: dark ? "#333" : "#eee" }
+          yaxis: yRange
+            ? { zeroline: true, gridcolor: dark ? "#333" : "#eee", range: [yRange[0], yRange[1]], autorange: false }
+            : { zeroline: true, gridcolor: dark ? "#333" : "#eee" }
         }, { responsive: true, displayModeBar: false, scrollZoom: true }).then(listenZoom, function () { /* drawn or not, nothing to listen to */ });
         sampled = [xs[0], xs[xs.length - 1]];
         showRange(sampled[0], sampled[1]);
@@ -169,6 +177,233 @@ SympyEditor.registerAddon("plot", {
       showRange(sampled[0], sampled[1]);
     }
 
+
+    /* ---- fingers on the picture: pinch to zoom, drag to scroll ----
+     *
+     * Plotly's own touch handling reads a drag as the box zoom it uses for a
+     * mouse: two fingers landed the range wherever they finished rather than
+     * around what they were holding, and one finger drew a zoom box where a
+     * finger on a picture is expected to push it along.  Both gestures are
+     * taken here instead, before Plotly sees them.
+     *
+     * A pinch scales the span by how far the fingers move apart and keeps
+     * what is under the middle of them where it is.  A drag sideways moves
+     * the span along under the finger, so the curve follows it exactly.
+     *
+     * The span alone is changed, never the vertical axis: y is read off the
+     * curve every time it is sampled, so anything set for it would be gone
+     * by the next draw.  That is also why a drag up or down is left to the
+     * browser - it scrolls the page, as it does everywhere else.
+     */
+    var pinch = null;
+    var drag = null;
+    var DRAG_SLOP = 8;      // px of movement before a drag is one
+    var SEPARATION = 24;    // px: below this the fingers say nothing about that axis
+
+    function separation(a, b) {
+      return { x: Math.abs(a.clientX - b.clientX), y: Math.abs(a.clientY - b.clientY) };
+    }
+
+    /** How much an axis is scaled by fingers that started `was` apart along
+     *  it and are now `now` apart.  A pinch along the picture says nothing
+     *  about the other axis - the fingers barely separate across it, and the
+     *  ratio of two small numbers is noise - so a separation under a couple
+     *  of dozen pixels leaves that axis alone.  This is what makes a
+     *  sideways pinch zoom the span, an upright one the height, and a
+     *  diagonal one both, each by its own share. */
+    function axisScale(was, now) {
+      if (was < SEPARATION || now < SEPARATION) return 1;
+      return was / now;
+    }
+
+    /** Where a point on the screen falls along the axis: 0 at its left end,
+     *  1 at its right.  Plotly puts the axis's own offset and length on the
+     *  layout; without them (an SVG fallback) the box is close enough. */
+    function axisFraction(clientX) {
+      var box = area.getBoundingClientRect();
+      var ax = area._fullLayout && area._fullLayout.xaxis;
+      var left = box.left + (ax && typeof ax._offset === "number" ? ax._offset : 0);
+      var width = ax && ax._length ? ax._length : box.width;
+      if (!width) return 0.5;
+      return Math.min(1, Math.max(0, (clientX - left) / width));
+    }
+
+    /** Room to move, no room to break the axis. */
+    function clampSpan(want, was) {
+      var limit = Math.abs(was) || 1;
+      return Math.min(Math.max(want, limit * 1e-4), limit * 1e4);
+    }
+
+    /** The axis's width in pixels (its own, not the panel's). */
+    function axisLength() {
+      var ax = area._fullLayout && area._fullLayout.xaxis;
+      if (ax && ax._length) return ax._length;
+      var box = area.getBoundingClientRect();
+      return box.width || 0;
+    }
+
+    function currentRange() {
+      var ax = area._fullLayout && area._fullLayout.xaxis;
+      if (ax && ax.range && ax.range.length === 2 && ax.range[0] < ax.range[1]) return [ax.range[0], ax.range[1]];
+      var a = parseFloat(from.value), b = parseFloat(to.value);
+      return (a < b) ? [a, b] : (opts.span || [-6, 6]);
+    }
+
+    /** The height on show, as the axis has it. */
+    function currentHeight() {
+      var ay = area._fullLayout && area._fullLayout.yaxis;
+      if (ay && ay.range && ay.range.length === 2 && ay.range[0] < ay.range[1]) return [ay.range[0], ay.range[1]];
+      return yRange;
+    }
+
+    function axisHeight() {
+      var ay = area._fullLayout && area._fullLayout.yaxis;
+      if (ay && ay._length) return ay._length;
+      var box = area.getBoundingClientRect();
+      return box.height || 0;
+    }
+
+    /** Where a point on the screen falls up the axis: 0 at the bottom, 1 at
+     *  the top (the screen counts downwards, the axis upwards). */
+    function heightFraction(clientY) {
+      var box = area.getBoundingClientRect();
+      var ay = area._fullLayout && area._fullLayout.yaxis;
+      var top = box.top + (ay && typeof ay._offset === "number" ? ay._offset : 0);
+      var length = ay && ay._length ? ay._length : box.height;
+      if (!length) return 0.5;
+      return 1 - Math.min(1, Math.max(0, (clientY - top) / length));
+    }
+
+    // Caught on the way down, and stopped there: Plotly reads a two-finger
+    // drag as the box zoom it uses for a mouse, and would undo this on the
+    // same gesture.  One finger is left alone, so its own pan still works.
+    area.addEventListener("touchstart", function (ev) {
+      if (plotly && ev.touches.length === 1) {
+        // not a drag yet: which way the finger goes decides, so that a
+        // scroll down the page over the picture still scrolls the page.
+        // Stopped here all the same, without preventing the default: Plotly
+        // would otherwise read the drag as its mouse zoom box and pull the
+        // range about on a gesture meant for the page.  Not preventing the
+        // default is what leaves the page free to scroll.
+        drag = { x: ev.touches[0].clientX, y: ev.touches[0].clientY,
+                 range: currentRange(), height: currentHeight(), moving: false };
+        ev.stopPropagation();
+      }
+      if (!plotly || ev.touches.length !== 2) { pinch = null; return; }
+      drag = null;
+      var apart = separation(ev.touches[0], ev.touches[1]);
+      pinch = {
+        apart: apart,
+        range: currentRange(),
+        height: currentHeight(),
+        fraction: axisFraction((ev.touches[0].clientX + ev.touches[1].clientX) / 2),
+        up: heightFraction((ev.touches[0].clientY + ev.touches[1].clientY) / 2)
+      };
+      ev.preventDefault();
+      ev.stopPropagation();
+    }, true);
+
+    area.addEventListener("touchmove", function (ev) {
+      if (drag && !pinch && ev.touches.length === 1) {
+        var dx = ev.touches[0].clientX - drag.x, dy = ev.touches[0].clientY - drag.y;
+        if (!drag.moving) {
+          if (Math.abs(dx) < DRAG_SLOP && Math.abs(dy) < DRAG_SLOP) return;   // too early to say
+          drag.moving = true;
+        }
+        ev.preventDefault();
+        ev.stopPropagation();
+        var moved = {};
+        var length = axisLength();
+        if (length) {
+          var wide = drag.range[1] - drag.range[0];
+          var by = -(dx / length) * wide;                   // the picture goes with the finger
+          moved["xaxis.range"] = [drag.range[0] + by, drag.range[1] + by];
+        }
+        var tall = axisHeight();
+        var height = drag.height || currentHeight();
+        if (tall && height) {
+          var reach = height[1] - height[0];
+          var up = (dy / tall) * reach;                     // the screen counts down, the axis up
+          yRange = [height[0] + up, height[1] + up];
+          moved["yaxis.range"] = yRange.slice();
+          moved["yaxis.autorange"] = false;
+        }
+        if (moved["xaxis.range"] || moved["yaxis.range"]) plotly.relayout(area, moved);
+        return;
+      }
+      if (!pinch || ev.touches.length !== 2) return;
+      var now = separation(ev.touches[0], ev.touches[1]);
+      ev.preventDefault();
+      ev.stopPropagation();
+      var change = {};
+      // Each axis takes the share the fingers moved along it: sideways for
+      // the span, up and down for the height, both for a pinch across the
+      // corner.  What is under the middle of the pinch stays where it is.
+      var sx = axisScale(pinch.apart.x, now.x);
+      if (sx !== 1) {
+        var wide = pinch.range[1] - pinch.range[0];
+        var span = clampSpan(wide * sx, wide);
+        var heldX = pinch.range[0] + pinch.fraction * wide;
+        var lo = heldX - pinch.fraction * span;
+        if (isFinite(lo) && isFinite(lo + span)) change["xaxis.range"] = [lo, lo + span];
+      }
+      var height = pinch.height || currentHeight();
+      var sy = axisScale(pinch.apart.y, now.y);
+      if (sy !== 1 && height) {
+        var tall = height[1] - height[0];
+        var reach = clampSpan(tall * sy, tall);
+        var heldY = height[0] + pinch.up * tall;
+        var bottom = heldY - pinch.up * reach;
+        if (isFinite(bottom) && isFinite(bottom + reach)) {
+          yRange = [bottom, bottom + reach];        // kept, so the next draw does not undo it
+          change["yaxis.range"] = yRange.slice();
+          change["yaxis.autorange"] = false;
+        }
+      }
+      // the relayout tells the panel, which writes the fields and asks for
+      // samples over the new span (that request is debounced, so a pinch
+      // makes one of them, not one per frame)
+      if (change["xaxis.range"] || change["yaxis.range"]) plotly.relayout(area, change);
+    }, true);
+
+    /* A pinch on a laptop's trackpad reaches the page as a wheel event with
+     * ctrlKey set - that is how the browser reports it, and how it would zoom
+     * the page if nobody took it.  Plotly's own wheel zoom ignores it (it
+     * wants a plain wheel), so it is taken here and zooms both axes about the
+     * pointer, the way two fingers on a screen do. */
+    area.addEventListener("wheel", function (ev) {
+      if (!plotly || !(ev.ctrlKey || ev.metaKey)) return;      // a plain wheel is Plotly's own zoom
+      ev.preventDefault();
+      ev.stopPropagation();
+      var unit = ev.deltaMode === 1 ? 16 : ev.deltaMode === 2 ? 100 : 1;
+      var scale = Math.exp(ev.deltaY * unit * 0.002);          // away from you: a wider view
+      var change = {};
+      var r = currentRange(), wide = r[1] - r[0];
+      var fx = axisFraction(ev.clientX);
+      var span = clampSpan(wide * scale, wide);
+      var lo = (r[0] + fx * wide) - fx * span;
+      if (isFinite(lo) && isFinite(lo + span)) change["xaxis.range"] = [lo, lo + span];
+      var height = currentHeight();
+      if (height) {
+        var tall = height[1] - height[0], fy = heightFraction(ev.clientY);
+        var reach = clampSpan(tall * scale, tall);
+        var bottom = (height[0] + fy * tall) - fy * reach;
+        if (isFinite(bottom) && isFinite(bottom + reach)) {
+          yRange = [bottom, bottom + reach];
+          change["yaxis.range"] = yRange.slice();
+          change["yaxis.autorange"] = false;
+        }
+      }
+      if (change["xaxis.range"] || change["yaxis.range"]) plotly.relayout(area, change);
+    }, { passive: false });
+
+    var endPinch = function (ev) {
+      if (!ev.touches || ev.touches.length < 2) pinch = null;
+      if (!ev.touches || !ev.touches.length) drag = null;
+    };
+    area.addEventListener("touchend", endPinch, true);
+    area.addEventListener("touchcancel", endPinch, true);
+
     /** A zoom or a pan in the picture (Plotly.react itself emits no
      *  relayout): the fields take the visible range and the curve is
      *  sampled again over it, so that zooming in brings detail rather than
@@ -176,7 +411,11 @@ SympyEditor.registerAddon("plot", {
      *  span. */
     function onRelayout(ev) {
       if (!ev) return;
-      if (ev["xaxis.autorange"]) { from.value = String(opts.span ? opts.span[0] : -6); to.value = String(opts.span ? opts.span[1] : 6); request(); return; }
+      if (ev["yaxis.autorange"]) yRange = null;                       // back to the curve's own height
+      if (ev["xaxis.autorange"]) { yRange = null; from.value = String(opts.span ? opts.span[0] : -6); to.value = String(opts.span ? opts.span[1] : 6); request(); return; }
+      var ylo = ev["yaxis.range[0]"], yhi = ev["yaxis.range[1]"];
+      if (ev["yaxis.range"]) { ylo = ev["yaxis.range"][0]; yhi = ev["yaxis.range"][1]; }
+      if (typeof ylo === "number" && typeof yhi === "number" && ylo < yhi) yRange = [ylo, yhi];
       var a = ev["xaxis.range[0]"], b = ev["xaxis.range[1]"];
       if (ev["xaxis.range"]) { a = ev["xaxis.range"][0]; b = ev["xaxis.range"][1]; }
       if (typeof a !== "number" || typeof b !== "number" || !(a < b)) return;
@@ -251,7 +490,10 @@ SympyEditor.registerAddon("plot", {
       "<section><h3>Controls</h3><ul>",
       "<li><b>variable</b>: the symbol on the horizontal axis (the first free symbol to begin with); <b>from</b>/<b>to</b>: the span.</li>",
       "<li>With more than one free symbol nothing is drawn until the others have a value: each gets a field and a slider, and the value is substituted on the way to the plot \u2014 the formula stays symbolic. No value is ever guessed.</li>",
-      "<li>Zoom or pan in the picture (drag a box, turn the mouse wheel over it, drag an axis; double-click to reset): the <b>from</b>/<b>to</b> fields take the visible range, <i>visible range</i> reads it out, and the curve is sampled again over it \u2014 zooming in brings detail.</li>",
+      "<li><b>Drag</b> in the picture to move it \u2014 with the mouse or a finger, in either direction \u2014 and <b>turn the wheel</b> over it to zoom; double-click to come back to the whole thing. The <b>from</b>/<b>to</b> fields take the visible range, <i>visible range</i> reads it out, and the curve is sampled again over it \u2014 zooming in brings detail.</li>",
+      "<li>On a touch screen, <b>pinch with two fingers</b> to zoom: apart for a closer look, together to come back out. Each axis takes the share the fingers moved along it \u2014 sideways for the span, up and down for the height, both for a pinch across the corner \u2014 and what is under the middle of the pinch stays where it is.</li>",
+      "<li><b>Drag with one finger</b> to move the picture, in either direction: the span sideways, the height up and down.</li>",
+      "<li>On a laptop, a <b>pinch on the trackpad</b> zooms both axes about the pointer. Double-click to come back to the whole picture.</li>",
       "<li>The picture follows every committed change \u2014 an edit, a transformation, an undo \u2014 and the selection.</li>",
       "</ul></section>"
     ].join("");
