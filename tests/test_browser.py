@@ -3699,6 +3699,67 @@ def test_the_tool_strip_holds_still_while_a_drag_selects(browser, serve_expr):
     assert errors == []
     ctx.close()
 
+
+def test_down_from_an_operator_drops_to_the_caret_it_stands_for(browser, serve_expr):
+    """An operator selected, down goes to the point it sits at - the caret
+    between the two terms it joins.  The toolbar's arrow calls _selectChild
+    straight off, and that had no case for an operator: it fell through to
+    "nothing is selected" and took the whole expression instead."""
+    for how in ("button", "key"):
+        srv, doc = serve_expr(x + y + Symbol("z"))
+        page = _open(browser, srv.url)
+        plus = page.evaluate("""() => { const v = document.querySelector('.se-view');
+            for (const el of v.querySelectorAll('*')) {
+                if (el.querySelector('[data-path]')) continue;
+                if ((el.textContent || '').trim() === '+') {
+                    const r = el.getBoundingClientRect();
+                    return [r.left + r.width / 2, r.top + r.height / 2]; } }
+            return null; }""")
+        assert plus, "no + glyph found"
+        page.mouse.click(plus[0], plus[1])
+        ed = "document.querySelector('.sympy-editor').__sympyEditor"
+        assert _wait(lambda: page.evaluate(f"(() => !!{ed}.junction)()"))
+        if how == "button":
+            page.locator('.se-toolbar [data-cmd="child"]').click()
+        else:
+            page.locator(".se-view").press("ArrowDown")
+        assert _wait(lambda: page.evaluate(f"(() => !!{ed}.caret)()")), how
+        state = page.evaluate(f"(() => ({{sel: {ed}.selected, path: {ed}.caret.path, index: {ed}.caret.index}}))()")
+        assert state["sel"] is None, (how, state)          # not the whole expression, as it used to be
+        assert [state["path"], state["index"]] == ["/", 1], (how, state)
+        # and it really is an insertion point: a term typed there joins the
+        # sum, and none of the terms is replaced
+        page.locator(".se-view").type("+w", delay=40)
+        page.keyboard.press("Enter")
+        assert _wait(lambda: str(doc.expr) == "w + x + y + z", timeout=20), (how, str(doc.expr))
+        assert page.errors == []
+        page.close()
+
+
+def test_left_and_right_from_an_operator_take_the_terms_it_joins(browser, serve_expr):
+    """Sideways still picks the operands - and by the order they are drawn in,
+    which is not always the order the tree keeps them in."""
+    srv, doc = serve_expr(x**2 + y)
+    page = _open(browser, srv.url)
+    plus = page.evaluate("""() => { const v = document.querySelector('.se-view');
+        for (const el of v.querySelectorAll('*')) {
+            if (el.querySelector('[data-path]')) continue;
+            if ((el.textContent || '').trim() === '+') {
+                const r = el.getBoundingClientRect();
+                return [r.left + r.width / 2, r.top + r.height / 2]; } }
+        return null; }""")
+    ed = "document.querySelector('.sympy-editor').__sympyEditor"
+    page.mouse.click(plus[0], plus[1])
+    assert _wait(lambda: page.evaluate(f"(() => !!{ed}.junction)()"))
+    drawn = page.evaluate(f"(() => {ed}._displayChildren({ed}.junction.path))()")
+    page.locator(".se-view").press("ArrowRight")
+    assert _wait(lambda: page.evaluate(f"(() => {ed}.selected)()") == drawn[1])
+    page.mouse.click(plus[0], plus[1])
+    assert _wait(lambda: page.evaluate(f"(() => !!{ed}.junction)()"))
+    page.locator(".se-view").press("ArrowLeft")
+    assert _wait(lambda: page.evaluate(f"(() => {ed}.selected)()") == drawn[0])
+    assert page.errors == []
+
 def test_new_session_leads_the_list(browser, serve_expr):
     """Starting one is as much what the drawer is opened for as picking an old
     one out of the list, so it sits above the sessions rather than under them."""

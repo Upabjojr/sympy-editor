@@ -2734,6 +2734,31 @@ var SympyEditor = (function () {
      *  parent, or extending the atom). */
     _selectChild() {
       if (this.range) { this.select(this._displayChildren(this.range.parent)[this.range.focus]); return; }
+      // From an operator, down goes to what the operator stands between: the
+      // caret at that very point, ready to type into.  Selecting an operator
+      // leaves `selected` empty, so without this it fell through to the
+      // "nothing is selected" case below and took the whole expression.
+      var j = this.junction;
+      if (j) {
+        var jkids = this._displayChildren(j.path);
+        var leftEl = this._els(jkids[j.leftIndex])[0];
+        var jgaps = this._gapsOf(j.path);
+        for (var g = 0; g < jgaps.length; g++) {
+          if (jgaps[g].leftEl === leftEl) {
+            // No `attach`: this is a point between two arguments, where what
+            // is typed becomes an argument of its own.  Attaching it to a
+            // side would glue it to that neighbour instead (x + y with the
+            // caret attached left takes "w" as w*x).
+            this._showCaret(jgaps[g], (jgaps[g].a + jgaps[g].b) / 2);
+            return;
+          }
+        }
+        // nothing can be inserted there: the term to the operator's right is
+        // the next thing down
+        this.junction = null;
+        this.select(jkids[j.rightIndex] || j.path);
+        return;
+      }
       if (!this.selected) { this.select("/"); return; }
       var t = this.tree[this.selected];
       if (t && t.children.length) {
@@ -2932,9 +2957,14 @@ var SympyEditor = (function () {
         if (!ro) this.setOperator(k);
       } else if (this.junction && k === "ArrowUp") {
         this.select(this.junction.path);
-      } else if (this.junction && (k === "ArrowLeft" || k === "ArrowRight" || k === "ArrowDown")) {
-        var jj = this.junction, jkids = this.tree[jj.path].children;
+      } else if (this.junction && (k === "ArrowLeft" || k === "ArrowRight")) {
+        // leftIndex/rightIndex count the arguments as they are drawn, so the
+        // list they index has to be the drawn one: the tree's own order is
+        // not always what is on the screen (x**2 + y, sqrt(x) + y...).
+        var jj = this.junction, jkids = this._displayChildren(jj.path);
         this.select(jkids[k === "ArrowLeft" ? jj.leftIndex : jj.rightIndex]);
+        // (down is left to _selectChild, which drops to the caret between the
+        //  two - the same thing the toolbar's arrow does)
       } else if (this.junction && k === "Enter") {
         // nothing to edit in place: the palette (or a key) changes it
       } else if (this.range && k === "Escape") {
