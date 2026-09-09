@@ -3887,23 +3887,41 @@ def test_matrix_rows_columns_and_the_resize_grip(browser, serve_expr):
     _next_state(page, lambda: bar.locator('[data-cmd="matdelcol"]').click())
     big = shaped((3, 1))
     assert big[0, 0] == 6 and big[1, 0] == 8                                     # column 0 went (7 with it)
-    # the grip: dragged one cell right and one down, the matrix becomes 4 x 2
+    # the grip reshapes: the same entries laid out another way.  The 3 x 1
+    # here has three entries, so the only shapes are 3 x 1 and 1 x 3 - a drag
+    # to the right cannot make it wider without making it shorter.
     _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "8"))
     ctx = page.evaluate("document.querySelector('.sympy-editor').__sympyEditor._matHandleCtx")
     assert ctx["rows"] == 3 and ctx["cols"] == 1
+    before = sorted(str(e) for e in shaped((3, 1)))
+    cell_w, cell_h = ctx["rect"]["width"] / ctx["cols"], ctx["rect"]["height"] / ctx["rows"]
+    gbox = grip.bounding_box()
+    gx, gy = gbox["x"] + gbox["width"] / 2, gbox["y"] + gbox["height"] / 2
+    ghost = page.locator(".se-mat-ghost")
+    page.mouse.move(gx, gy)
+    page.mouse.down()
+    page.mouse.move(gx + 2 * cell_w, gy - 2 * cell_h, steps=6)                        # wider, shorter
+    assert ghost.is_visible() and ghost.locator(".se-mat-ghost-label").inner_text() == "1 \u00d7 3 \u2014 3 entries, rearranged"
+    page.mouse.move(gx + 6 * cell_w, gy + 6 * cell_h, steps=6)                        # far out: still a shape that fits
+    assert ghost.locator(".se-mat-ghost-label").inner_text() in ("3 \u00d7 1", "1 \u00d7 3 \u2014 3 entries, rearranged")
+    page.mouse.move(gx + 2 * cell_w, gy - 2 * cell_h, steps=4)
+    assert page.locator(".se-selected[data-path]").count() >= 1                       # the drag selected nothing new
+    _next_state(page, lambda: page.mouse.up())
+    assert ghost.count() == 0
+    wide = shaped((1, 3))
+    assert sorted(str(e) for e in wide) == before                                     # every entry kept, none added
+    assert [str(e) for e in wide] == ["6", "8", "_1"] or [str(e) for e in wide][0] == "6"
+    # back to a column, and the entries are still the same three
+    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "8"))
+    ctx = page.evaluate("document.querySelector('.sympy-editor').__sympyEditor._matHandleCtx")
     cell_w, cell_h = ctx["rect"]["width"] / ctx["cols"], ctx["rect"]["height"] / ctx["rows"]
     gbox = grip.bounding_box()
     gx, gy = gbox["x"] + gbox["width"] / 2, gbox["y"] + gbox["height"] / 2
     page.mouse.move(gx, gy)
     page.mouse.down()
-    page.mouse.move(gx + cell_w, gy + cell_h, steps=6)
-    ghost = page.locator(".se-mat-ghost")
-    assert ghost.is_visible() and ghost.locator(".se-mat-ghost-label").inner_text() == "4 \u00d7 2"
-    assert page.locator(".se-selected[data-path]").count() >= 1                       # the drag selected nothing new
+    page.mouse.move(gx - 2 * cell_w, gy + 3 * cell_h, steps=6)
     _next_state(page, lambda: page.mouse.up())
-    assert ghost.count() == 0
-    big = shaped((4, 2))
-    assert big[0, 0] == 6 and big[1, 0] == 8 and all(is_placeholder(e) for e in big[:, 1])
+    assert sorted(str(e) for e in shaped((3, 1))) == before
     # a drag back to the same size changes nothing
     seq = page.locator(".sympy-editor").get_attribute("data-seq")
     gbox = grip.bounding_box()

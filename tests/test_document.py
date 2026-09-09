@@ -1277,3 +1277,49 @@ def test_matrix_rows_columns_and_shape_change_in_place():
     doc.handle({"action": "matrix", "op": "resize", "path": "/", "rows": 1, "cols": 1})
     snap = doc.handle({"action": "matrix", "op": "delete_row", "path": "/"})
     assert "single row" in snap["error"] and doc.expr.shape == (1, 1)               # refused, nothing changed
+
+
+def test_matrix_reshape_keeps_every_entry():
+    """The reshape lays the same entries out in another shape, in reading
+    order (SymPy's Matrix.reshape): only a shape that holds them all, and
+    nothing added or lost - it is the grip's operation, where resize (which
+    fills and truncates) is the row/column tools'."""
+    from sympy import ImmutableDenseMatrix, ImmutableSparseMatrix, Matrix
+
+    doc = Document(Matrix([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]]))
+    doc.reshape_matrix("/", 2, 6)
+    assert doc.expr == Matrix([[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12]])          # reading order
+    doc.reshape_matrix("/2/7", 12, 1)                                               # from an entry, too
+    assert doc.expr.T == Matrix([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]])
+    doc.reshape_matrix("/", 3, 4)
+    assert doc.expr == Matrix([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]])
+    assert sorted(doc.expr) == list(range(1, 13))                                    # every entry, always
+    # a shape that does not hold exactly the entries is refused, and says which do
+    with pytest.raises(ValueError, match="12 entries"):
+        doc.reshape_matrix("/", 5, 2)
+    with pytest.raises(ValueError, match=r"1x12, 2x6, 3x4, 4x3, 6x2, 12x1"):
+        doc.reshape_matrix("/", 4, 4)
+    with pytest.raises(ValueError, match="at least one"):
+        doc.reshape_matrix("/", 0, 12)
+    assert doc.expr.shape == (3, 4)                                                  # refused: nothing changed
+    # the class is kept, sparse included
+    im = Document(ImmutableDenseMatrix([[x, y], [1, 2]]))
+    im.reshape_matrix("/", 1, 4)
+    assert isinstance(im.expr, ImmutableDenseMatrix) and im.expr == Matrix([[x, y, 1, 2]])
+    sp = Document(ImmutableSparseMatrix([[x, 0], [0, y]]))
+    sp.reshape_matrix("/", 4, 1)
+    assert isinstance(sp.expr, ImmutableSparseMatrix) and sp.expr.T == Matrix([[x, 0, 0, y]])
+    # a prime number of entries has only the two shapes
+    pr = Document(Matrix([[1, 2, 3, 4, 5]]))
+    pr.reshape_matrix("/", 5, 1)
+    assert pr.expr.shape == (5, 1)
+    with pytest.raises(ValueError, match=r"1x5, 5x1"):
+        pr.reshape_matrix("/", 2, 3)
+    # through the message, with its history label
+    doc = Document(2 * Matrix([[1, 2], [3, 4]]))                 # SymPy multiplies it out
+    mpath = next(k for k, v in doc.snapshot()["nodes"].items() if v.get("matrix"))
+    snap = doc.handle({"action": "matrix", "op": "reshape", "path": mpath, "rows": 1, "cols": 4})
+    assert snap.get("error") is None and doc.expr == Matrix([[2, 4, 6, 8]])
+    assert doc.history_labels()["actions"][-1] == "Matrix: reshape to 1×4"
+    snap = doc.handle({"action": "matrix", "op": "reshape", "path": mpath, "rows": 3, "cols": 3})
+    assert "keeps every entry" in snap["error"] and doc.expr.shape == (1, 4)

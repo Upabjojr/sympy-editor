@@ -225,8 +225,16 @@ Two conventions between printer, document and front end:
   `.se-mat-handle` on the matrix's bottom-right corner - re-appended to the
   view at every state, like the boxes, since the rendering is replaced.
   Dragging the grip (its own pointer listeners stop propagation and capture
-  the pointer; `touch-action: none`) moves a `.se-mat-ghost` outline a cell
-  at a time (`cellW = width / cols`) and sends `resize` on release.
+  the pointer; `touch-action: none`) moves a `.se-mat-ghost` outline and
+  sends **`reshape`** on release: the drag rearranges the entries the matrix
+  has, it does not grow or shrink it, so the outline snaps to the shapes
+  that hold them all (`matrixShapes(rows * cols)`, the divisor pairs; the
+  nearest by the outline's size, `cellW = width / cols`).  `+ row / + col /
+  − row / − col` are what add and remove entries.  Two operations, kept
+  apart on purpose: `resize` (rows x cols as asked, top-left kept, the rest
+  empty slots) is the Python API's, `reshape` (`Matrix.reshape`, reading
+  order, the product must match) is the grip's - a drag that silently
+  dropped entries off the bottom of a matrix is the thing this avoids.
 - **Loading overlay.**  Backend progress messages go through
   `Editor._report`: texts mentioning loading/waiting show `.se-loading` (a
   blocking spinner overlay, keys and clicks ignored) until the message

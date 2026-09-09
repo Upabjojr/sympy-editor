@@ -153,7 +153,7 @@ var SympyEditor = (function () {
     "<section><h3>Applying functions</h3><ul>",
     "<li><b>Transform \u25be</b> holds the general operations; a second menu appears with operations for the selection's type (Matrix, Integral, Equation\u2026). Picking one applies it at once, to the selection or, with nothing selected, to the whole expression.</li>",
     "<li><b>Add-ons \u25be</b> switches on or off the add-ons installed beside the editor \u2014 a panel under the formula, tools, node types from other packages \u2014 without restarting anything; what an add-on kept waits for it to come back.</li>",
-    "<li>In a <b>matrix</b> (the matrix, or anything in one of its entries) the bar under the selection adds <b>+ row</b>, <b>+ col</b>, <b>\u2212 row</b>, <b>\u2212 col</b>: a new row or column of empty slots after the selected one (after the last, for the matrix itself), or the selected one taken away. The grip at the matrix\u2019s bottom-right corner resizes it: drag down for rows, right for columns; the outline shows the size it will get.</li>",
+    "<li>In a <b>matrix</b> (the matrix, or anything in one of its entries) the bar under the selection adds <b>+ row</b>, <b>+ col</b>, <b>\u2212 row</b>, <b>\u2212 col</b>: a new row or column of empty slots after the selected one (after the last, for the matrix itself), or the selected one taken away. The grip at the matrix\u2019s bottom-right corner <b>reshapes</b> it: the same entries laid out another way (SymPy\u2019s reshape, in reading order), so it snaps to the shapes that hold them all \u2014 12 entries go 1\u00d712, 2\u00d76, 3\u00d74, 4\u00d73, 6\u00d72, 12\u00d71 and nowhere else. Nothing is added or lost; the outline shows the shape it will take. To grow or shrink the matrix, use + row / + col / \u2212 row / \u2212 col.</li>",
     "<li><b>Methods \u25be</b> lists everything the selected object's class can do \u2014 .det(), .T, .diff()\u2026 \u2014 one pick calls it. A Lambda is itself a function: <b>( ) apply</b> evaluates it at the arguments you give.</li>",
     "<li>The <b>function box</b> searches all of SymPy: pick a function and fill the parameters it asks for; \u201cdiff(x)\u201d, \u201c.T\u201d, \u201cdet()\u201d typed in full apply as written. A container takes the selection as its contents: <i>Matrix</i> over x + y gives the 1\u00d71 matrix holding it.</li>",
     "<li><b>unevaluated</b> builds the symbolic form (Determinant, Integral, sin(0)\u2026) instead of computing it; <i>Evaluate (doit)</i> computes it later.</li>",
@@ -513,6 +513,16 @@ var SympyEditor = (function () {
    *  ancestor: one tinted box per changed region, over the node's whole
    *  visual extent, instead of an inline background per level (which paints
    *  the line box only - a fraction or matrix is then half covered). */
+  /** The shapes `n` entries can be laid out in: every pair of whole numbers
+   *  that multiplies to n, rows ascending.  A reshape rearranges the
+   *  entries it has - it never adds or drops one - so these are the only
+   *  shapes the grip may offer (SymPy's Matrix.reshape). */
+  function matrixShapes(n) {
+    var out = [];
+    for (var r = 1; r <= n; r++) if (n % r === 0) out.push([r, n / r]);
+    return out;
+  }
+
   function markBoxes(root, cls, boxCls) {
     var marked = root.querySelectorAll("." + cls);
     for (var i = 0; i < marked.length; i++) {
@@ -1266,7 +1276,8 @@ var SympyEditor = (function () {
         root.appendChild(this.actions);
         // The grip at the bottom-right corner of a matrix: dragging it
         // resizes the matrix - rows down, columns right (see _placeMatrixHandle).
-        this.matHandle = h("div", { class: "se-mat-handle", title: "Drag to resize the matrix: down for rows, right for columns",
+        this.matHandle = h("div", { class: "se-mat-handle",
+          title: "Drag to lay the same entries out in another shape: wider for more columns, taller for more rows. Only shapes that hold every entry (2\u00d76 for 12, not 5\u00d72) - nothing is added or lost. Use + row / + col to grow the matrix.",
                                     role: "button", "aria-label": "Resize the matrix", tabindex: "-1" });
         this.matGhost = h("div", { class: "se-mat-ghost", "aria-hidden": "true" }, [h("span", { class: "se-mat-ghost-label" })]);
         this._matDrag = null;
@@ -1713,7 +1724,8 @@ var SympyEditor = (function () {
           ev.preventDefault();
           try { hd.setPointerCapture(ev.pointerId); } catch (e) { /* not capturable */ }
           self._matDrag = { id: ev.pointerId, x: ev.clientX, y: ev.clientY, ctx: ctx, rows: ctx.rows, cols: ctx.cols,
-                            cellW: Math.max(8, ctx.rect.width / ctx.cols), cellH: Math.max(8, ctx.rect.height / ctx.rows) };
+                            cellW: Math.max(8, ctx.rect.width / ctx.cols), cellH: Math.max(8, ctx.rect.height / ctx.rows),
+                            shapes: matrixShapes(ctx.rows * ctx.cols) };
           self._showMatrixGhost(ctx.rows, ctx.cols);
         });
         hd.addEventListener("pointermove", function (ev) {
@@ -1721,8 +1733,20 @@ var SympyEditor = (function () {
           if (!d || ev.pointerId !== d.id) return;
           ev.stopPropagation();
           ev.preventDefault();
-          d.cols = Math.max(1, d.ctx.cols + Math.round((ev.clientX - d.x) / d.cellW));
-          d.rows = Math.max(1, d.ctx.rows + Math.round((ev.clientY - d.y) / d.cellH));
+          // The pointer asks for a box this wide and this tall; the shape is
+          // the one of `shapes` whose outline comes closest to it, so the
+          // drag can only ever land on a shape that holds every entry.
+          var wantW = d.ctx.rect.width + (ev.clientX - d.x), wantH = d.ctx.rect.height + (ev.clientY - d.y);
+          var best = null, bestAt = Infinity;
+          for (var i = 0; i < d.shapes.length; i++) {
+            var r = d.shapes[i][0], c = d.shapes[i][1];
+            var dw = c * d.cellW - wantW, dh = r * d.cellH - wantH;
+            var at = dw * dw + dh * dh;
+            if (at < bestAt) { bestAt = at; best = d.shapes[i]; }
+          }
+          if (!best) return;
+          d.rows = best[0];
+          d.cols = best[1];
           self._showMatrixGhost(d.rows, d.cols);
         });
         var endMatDrag = function (ev, cancelled) {
@@ -1732,7 +1756,7 @@ var SympyEditor = (function () {
           self._matDrag = null;
           self._hideMatrixGhost();
           try { hd.releasePointerCapture(ev.pointerId); } catch (e) { /* not captured */ }
-          if (!cancelled && (d.rows !== d.ctx.rows || d.cols !== d.ctx.cols)) self._matrixOp("resize", d.rows, d.cols, d.ctx.path);
+          if (!cancelled && (d.rows !== d.ctx.rows || d.cols !== d.ctx.cols)) self._matrixOp("reshape", d.rows, d.cols, d.ctx.path);
           else self.view.focus({ preventScroll: true });
         };
         hd.addEventListener("pointerup", function (ev) { endMatDrag(ev, false); });
@@ -2860,7 +2884,7 @@ var SympyEditor = (function () {
       g.style.top = Math.round(r.top - vr.top + this.view.scrollTop) + "px";
       g.style.width = Math.round(d.cellW * cols) + "px";
       g.style.height = Math.round(d.cellH * rows) + "px";
-      g.firstChild.textContent = rows + " \u00d7 " + cols;
+      g.firstChild.textContent = rows + " \u00d7 " + cols + (rows === d.ctx.rows && cols === d.ctx.cols ? "" : " \u2014 " + (rows * cols) + " entries, rearranged");
       if (!g.parentNode) this.view.appendChild(g);
     }
 

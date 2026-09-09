@@ -1083,7 +1083,7 @@ class Document:
 
     # -- explicit matrices: rows, columns, shape ----------------------------
 
-    MATRIX_OPS = ("insert_row", "insert_col", "delete_row", "delete_col", "resize")
+    MATRIX_OPS = ("insert_row", "insert_col", "delete_row", "delete_col", "resize", "reshape")
 
     def _enclosing_matrix(self, path: PathLike):
         """The explicit matrix at ``path`` or around it: ``(matrix path,
@@ -1134,9 +1134,14 @@ class Document:
         path is the matrix itself; ``"delete_row"`` / ``"delete_col"`` remove the
         row (column) the path is in - the last one for the matrix itself;
         ``"resize"`` makes it ``rows`` x ``cols``, keeping what fits from the
-        top-left corner.  New entries are empty slots (placeholders, ``_1``,
-        ``_2``...) to fill in.  The matrix keeps its class (dense or sparse,
-        mutable or not); a matrix never loses its last row or column.
+        top-left corner; ``"reshape"`` lays the same entries out in another
+        shape (SymPy's ``Matrix.reshape``, in reading order), so it takes only
+        a ``rows`` x ``cols`` that multiplies to the number of entries there
+        already are - nothing is added and nothing is lost.  New entries (the
+        insertions, and what ``resize`` cannot fill) are empty slots
+        (placeholders, ``_1``, ``_2``...).  The matrix keeps its class (dense
+        or sparse, mutable or not); a matrix never loses its last row or
+        column.
         """
         if op not in self.MATRIX_OPS:
             raise ValueError(f"Unknown matrix operation {op!r}; one of {', '.join(self.MATRIX_OPS)}")
@@ -1165,12 +1170,25 @@ class Document:
             try:
                 nr, nc = int(rows), int(cols)   # type: ignore[arg-type]
             except (TypeError, ValueError):
-                raise ValueError("resize needs the numbers of rows and columns") from None
+                raise ValueError(f"{op} needs the numbers of rows and columns") from None
             if nr < 1 or nc < 1:
                 raise ValueError("A matrix needs at least one row and one column")
+            if op == "reshape":
+                # The same entries in another shape: only a shape that holds
+                # them all, and no empty slot - what SymPy's reshape does.
+                if nr * nc != r * c:
+                    raise ValueError(f"{r}x{c} has {r * c} entries and {nr}x{nc} holds {nr * nc}: a reshape keeps every "
+                                     f"entry, so the two must agree ({self._shapes_for(r * c)})")
+                new = mat.reshape(nr, nc)
+                return self._commit(self._replace_at(self.expr, mpath, new))
             grid = [[grid[i][j] if i < r and j < c else next(fresh) for j in range(nc)] for i in range(nr)]
         new = type(mat)(grid)
         return self._commit(self._replace_at(self.expr, mpath, new))
+
+    @staticmethod
+    def _shapes_for(count: int) -> str:
+        """The shapes ``count`` entries can be laid out in, for a message."""
+        return ", ".join(f"{r}x{count // r}" for r in range(1, count + 1) if count % r == 0)
 
     def insert_row(self, path: PathLike) -> Basic:
         """A new row of empty slots after the one at ``path`` (see :meth:`edit_matrix`)."""
@@ -1189,8 +1207,15 @@ class Document:
         return self.edit_matrix(path, "delete_col")
 
     def resize_matrix(self, path: PathLike, rows: int, cols: int) -> Basic:
-        """Make the matrix at (or around) ``path`` ``rows`` x ``cols``."""
+        """Make the matrix at (or around) ``path`` ``rows`` x ``cols``,
+        keeping what fits from the top-left corner (see :meth:`edit_matrix`)."""
         return self.edit_matrix(path, "resize", rows, cols)
+
+    def reshape_matrix(self, path: PathLike, rows: int, cols: int) -> Basic:
+        """The same entries of the matrix at (or around) ``path`` laid out as
+        ``rows`` x ``cols`` (``Matrix.reshape``); the shape must hold exactly
+        the entries there are."""
+        return self.edit_matrix(path, "reshape", rows, cols)
 
     def _keep_candidates(self, node: Basic) -> List[TypingTuple[Union[int, str], Basic]]:
         """What ``unwrap`` could leave in the node's place, as (``keep`` key,
@@ -1639,7 +1664,7 @@ class Document:
         ``{"action": "apply", "path": "/", "op": "expand"[, "args": ["(1, 0)"]]}``
         (``args`` for an op that declares ``params``, such as the array tools),
         ``{"action": "delete", "path": "/1"}``, ``{"action": "set", "src": ...}``,
-        ``{"action": "matrix", "path", "op": "insert_row" | "insert_col" | "delete_row" | "delete_col" | "resize", "rows", "cols"}``,
+        ``{"action": "matrix", "path", "op": "insert_row" | "insert_col" | "delete_row" | "delete_col" | "resize" | "reshape", "rows", "cols"}``,
         ``{"action": "insert", "path": "/", "index": 2, "src": "y", "left": 1}``,
         ``{"action": "extend", "path": "/2/0", "side": "after", "src": "+ 1"}``,
         ``{"action": "unwrap", "path": "/1", "keep": 0}`` (keep an argument, drop the node),
@@ -1845,6 +1870,8 @@ class Document:
                 op = str(message.get("op", ""))
                 if op == "resize":
                     return f"Matrix: resize to {message.get('rows')}×{message.get('cols')}"
+                if op == "reshape":
+                    return f"Matrix: reshape to {message.get('rows')}×{message.get('cols')}"
                 return "Matrix: " + {"insert_row": "new row", "insert_col": "new column",
                                      "delete_row": "delete row", "delete_col": "delete column"}.get(op, op)
             if action in ("retype", "declare"):
