@@ -5965,6 +5965,21 @@ var SympyEditor = (function () {
       if (report) rt.report = report;
       if (rt.ready) return rt.ready;
       rt.ready = (async function () {
+        // Said before trying, because trying does not fail: the promise
+        // Pyodide leaves behind when it cannot fetch its own parts never
+        // settles either way, and the spinner would sit there for ever with
+        // the reason only in the console.
+        //
+        // It is the *runtime's* address that decides this, not the page's. A
+        // page opened from the file system loads a runtime from a CDN quite
+        // happily - an ordinary cross-origin fetch - and only a runtime
+        // vendored beside the page, and so addressed file:// itself, is out
+        // of reach. That is the bundle the web app builds.
+        if (fileUrl(cfg.pyodideJs)) {
+          throw new Error("Python cannot start: this page carries its own copy of the runtime, and a page opened from "
+                          + "the file system is not allowed to read it. Serve this folder instead - "
+                          + "\u201cpython3 -m http.server\u201d in it, then open http://localhost:8000/.");
+        }
         rt.worker = spawn();
         if (rt.worker) {
           try {
@@ -6076,8 +6091,11 @@ var SympyEditor = (function () {
         await rt.newDoc(id, srepr, Object.assign({}, cfg.document || {}, state || {}));
         return rt.handle(id, JSON.stringify({ action: "snapshot" }));
       },
-      /** Load the runtime now (page load) instead of at the first edit. */
-      warmup: function (report) { return start(report).then(function () { report(""); }, function (e) { report("Python failed to load: " + e.message); }); }
+      /** Load the runtime now (page load) instead of at the first edit.  A
+       *  failure is passed on rather than reported and forgotten: the caller
+       *  is what takes the spinner down and puts the reason where it can be
+       *  read. */
+      warmup: function (report) { return start(report).then(function () { report(""); }, function (e) { report(""); throw e; }); }
     };
   }
 
@@ -6144,7 +6162,7 @@ var SympyEditor = (function () {
       },
       warmup: function (report) {
         return start(report).then(function () { report(""); },
-                                  function (e) { report("Python failed to start: " + e.message); });
+                                  function (e) { report(""); throw e; });
       }
     };
   }
@@ -6210,6 +6228,24 @@ var SympyEditor = (function () {
     }
   }
 
+  /** Would this address be read off the file system? */
+  function fileUrl(href) {
+    if (!href) return false;
+    try { return new URL(href, document.baseURI).protocol === "file:"; } catch (e) { return false; }
+  }
+
+  /** Why Python did not start, in words worth reading.
+   *
+   *  Opened from the file system, a page cannot start Pyodide at all: the
+   *  browser gives a file:// page an opaque origin, and the runtime is not
+   *  allowed to fetch the parts it is made of (the service worker will not
+   *  register either).  Nothing in this page can lift that - it has to be
+   *  served - so the message says how, rather than reporting a fetch that
+   *  failed for reasons the reader cannot act on. */
+  function whyNoPython(err) {
+    return String((err && err.message) || err || "Python could not be started.");
+  }
+
   /** Create an editor from a config object produced by html.py. */
   function mount(host, cfg) {
     var make = backends[cfg.backend] || readonlyBackend;
@@ -6226,6 +6262,11 @@ var SympyEditor = (function () {
         warm = backend.warmup(function (text) { editor._report(text); }).then(function () {
           editor._hideLoading();
           if (backend.canInterrupt && !backend.canInterrupt()) editor._setStatus("Python runs in the page (no worker): long computations cannot be interrupted here");
+        }, function (err) {
+          // Without this the overlay sat there for ever: the runtime had
+          // given up, and the only word of it was in the console.
+          editor._hideLoading();
+          editor._showError(whyNoPython(err));
         });
       }
       warm.then(function () { return editor._initSessions(); }).then(function () { return editor._restoreAddons(); });
