@@ -17,7 +17,7 @@ import logging
 import tokenize
 
 import sympy
-from sympy import Add, Basic, Dummy, Function, IndexedBase, Integer, MatrixSymbol, Mul, Symbol, Tuple, sympify, srepr
+from sympy import Add, Basic, Dummy, Function, IndexedBase, Integer, MatrixSymbol, Mul, Symbol, Tuple, sympify
 from sympy.core.function import AppliedUndef
 from sympy.core.symbol import Str
 from sympy.matrices.expressions import MatrixExpr
@@ -56,6 +56,7 @@ from .printer import (
     replace_at,
     view_parts,
 )
+from .printer import exact_srepr as srepr   # a MatAdd's term order must survive the round trip
 
 __all__ = ["Document", "SYMBOL_TYPES", "Interrupted", "interrupt_thread"]
 

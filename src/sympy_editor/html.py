@@ -27,9 +27,10 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
-from sympy import Basic, srepr
+from sympy import Basic
 
 from .document import Document
+from .printer import exact_srepr as srepr   # srepr that reads back unchanged (SymPy's reorders MatAdd)
 from .examples import examples
 from .history import History
 
