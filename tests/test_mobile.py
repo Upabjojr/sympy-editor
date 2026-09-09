@@ -396,7 +396,11 @@ def test_the_ios_app_leaves_openssl_behind():
 
 
 def test_the_ios_build_number_counts_the_commits():
-    import mobile.build as build
+    # by path, as the other tests load it: `mobile` is a directory of scripts,
+    # not an importable package, so an installed checkout has no such module
+    spec = importlib.util.spec_from_file_location("mobile_build", ROOT / "mobile" / "build.py")
+    build = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(build)
     assert build.build_number().isdigit()
 
 
@@ -477,6 +481,7 @@ def test_a_debug_build_is_its_own_application():
     assert '"$packageName.fileprovider"' in kotlin        # the id it was installed under, not a written-out one
 
 
+@pytest.mark.skipif(not shutil.which("rsvg-convert"), reason="needs librsvg (rsvg-convert)")
 def test_a_debug_build_says_debug_everywhere_it_is_named(tmp_path):
     """The debug build is a second application on the phone, so each place
     that names it says which one it is: the launcher (its label), the page
@@ -484,7 +489,7 @@ def test_a_debug_build_says_debug_everywhere_it_is_named(tmp_path):
     into the debug source set, which Android merges over the main one)."""
     import subprocess
 
-    from PIL import Image
+    Image = pytest.importorskip("PIL.Image", reason="needs Pillow to read the icons")
 
     spec = importlib.util.spec_from_file_location("mobile_build", ROOT / "mobile" / "build.py")
     build = importlib.util.module_from_spec(spec)
