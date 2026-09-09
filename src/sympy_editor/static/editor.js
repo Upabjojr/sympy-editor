@@ -155,7 +155,7 @@ var SympyEditor = (function () {
     "</ul></section>",
     "<section><h3>Applying functions</h3><ul>",
     "<li>The four menus of the last row are one kind of box: it lists everything it offers when it takes the focus, narrows the list as you type, and \u2191/\u2193 + <kbd>Enter</kbd> (or a click) pick. The first group holds the <b>actions</b>: <b>Transform \u25be</b> for the general operations, and a second menu with the operations for the selection's type (Matrix, Integral, Equation\u2026). Picking one applies it at once, to the selection or, with nothing selected, to the whole expression.</li>",
-    "<li><b>Add-ons \u25be</b> switches on or off the add-ons installed beside the editor \u2014 a panel under the formula, tools, node types from other packages \u2014 without restarting anything; what an add-on kept waits for it to come back.</li>",
+    "<li><b>Add-ons</b>, at the top of what <b>\u2261</b> opens, switches on or off the add-ons installed beside the editor \u2014 a panel under the formula, tools, node types from other packages \u2014 without restarting anything; what an add-on kept waits for it to come back. (With the sessions drawer off there is no \u2261, and the switches keep a button of their own on the strip.)</li>",
     "<li>In a <b>matrix</b> or an <b>array</b> the four arrows move as it is drawn: <kbd>\u2190</kbd>/<kbd>\u2192</kbd> along the row, <kbd>\u2191</kbd>/<kbd>\u2193</kbd> between the rows \u2014 for the selection and for the caret alike. At the edge the usual meaning takes over: <kbd>\u2191</kbd> in the top row selects the matrix itself (again, its own parent), <kbd>\u2190</kbd>/<kbd>\u2192</kbd> step out of it. An array of any rank works the same way, because the rule follows the drawing: a rank-3 array is a row of matrices, so <kbd>\u2192</kbd> at the right edge of one block enters the next on the same line.</li>",
     "<li>In a <b>matrix</b> (the matrix, or anything in one of its entries) the bar under the selection adds <b>+ row</b>, <b>+ col</b>, <b>\u2212 row</b>, <b>\u2212 col</b>: a new row or column of empty slots after the selected one (after the last, for the matrix itself), or the selected one taken away. The grip at the matrix\u2019s bottom-right corner <b>reshapes</b> it: the same entries laid out another way (SymPy\u2019s reshape, in reading order), so it snaps to the shapes that hold them all \u2014 12 entries go 1\u00d712, 2\u00d76, 3\u00d74, 4\u00d73, 6\u00d72, 12\u00d71 and nowhere else. Nothing is added or lost; the outline shows the shape it will take. To grow or shrink the matrix, use + row / + col / \u2212 row / \u2212 col.</li>",
     "<li><b>Methods \u25be</b> lists everything the selected object's class can do \u2014 .det(), .T, .diff()\u2026 \u2014 one pick calls it. A Lambda is itself a function: <b>( ) apply</b> evaluates it at the arguments you give.</li>",
@@ -1144,6 +1144,9 @@ var SympyEditor = (function () {
     _build() {
       var self = this;
       var o = this.opts;
+      // Settled before the strip is built: the add-ons' switches go on it only
+      // when there is no drawer to hold them (see where addonsMenu is made).
+      this._drawerWanted = !!(o.sessions && !o.readOnly);
       var root = h("div", { class: "sympy-editor" });
       this.root = root;
       this.buttons = {};
@@ -1312,12 +1315,19 @@ var SympyEditor = (function () {
       //    (shown only when the document's snapshot lists any, see _fillAddonsMenu)
       this.addonsBlock = null;
       this.addonsMenu = null;
+      this.addonsBtn = null;
       if (!o.readOnly) {
-        this.addonsBlock = h("div", { class: "se-block", "data-block": "addons", hidden: "" });
-        this.addonsBtn = h("button", { type: "button", "data-cmd": "addons", title: "Switch add-ons on or off: panels and tools from other packages" }, ["Add-ons \u25be"]);
-        this.addonsBlock.appendChild(this.addonsBtn);
-        this.tools.appendChild(this.addonsBlock);
         this.addonsMenu = h("div", { class: "se-addons-menu", hidden: "", role: "menu" });
+        // Where the switches live: at the top of the drawer the \u2261 button
+        // opens, so everything that is not about the formula itself is behind
+        // that one button.  With no drawer (sessions off) they would have
+        // nowhere to go, and keep their own button on the strip.
+        if (!this._drawerWanted) {
+          this.addonsBlock = h("div", { class: "se-block", "data-block": "addons", hidden: "" });
+          this.addonsBtn = h("button", { type: "button", "data-cmd": "addons", title: "Switch add-ons on or off: panels and tools from other packages" }, ["Add-ons \u25be"]);
+          this.addonsBlock.appendChild(this.addonsBtn);
+          this.tools.appendChild(this.addonsBlock);
+        }
       }
       this.status = h("span", { class: "se-status", "aria-live": "polite" });
       this.toolbar.appendChild(this.status);
@@ -1416,10 +1426,20 @@ var SympyEditor = (function () {
           if (tab) self.showDrawerTab(tab.classList.contains("se-subtab-current") ? "sessions" : tab.getAttribute("data-tab"));
         });
         this.historyPane = h("div", { class: "se-drawer-pane", "data-pane": "history", hidden: "" }, [this.historyBody]);
+        // The add-ons' switches ride at the top of the drawer (see the note
+        // where addonsMenu is made): open in place, not a menu that drops.
+        this.addonsPane = null;
+        if (this.addonsMenu && !this.addonsBtn) {
+          this.addonsMenu.hidden = false;
+          this.addonsMenu.classList.add("se-addons-inline");
+          this.addonsPane = h("section", { class: "se-drawer-addons", hidden: "" }, [
+            h("div", { class: "se-drawer-subhead" }, [h("strong", {}, ["Add-ons"])]),
+            this.addonsMenu
+          ]);
+        }
         this.drawer = h("aside", { class: "se-drawer", hidden: "", role: "dialog", "aria-label": "Sessions" }, [
-          h("div", { class: "se-drawer-head" }, [h("strong", {}, ["Sessions"]), close]),
-          this.sessionsBody
-        ]);
+          h("div", { class: "se-drawer-head" }, [h("strong", {}, ["Sessions"]), close])
+        ].concat(this.addonsPane ? [this.addonsPane] : []).concat([this.sessionsBody]));
         this.backdrop = h("div", { class: "se-backdrop", hidden: "" });
         this.backdrop.addEventListener("click", function () { self.closeDrawer(); });
         this.sessions = this.drawer;
@@ -1540,7 +1560,7 @@ var SympyEditor = (function () {
       ]);
       this.committed = null;   // the last snapshot that is not a preview (see _previewSource)
       if (this.fnForm) root.appendChild(this.fnForm);
-      if (this.addonsMenu) root.appendChild(this.addonsMenu);
+      if (this.addonsMenu && this.addonsBtn) root.appendChild(this.addonsMenu);
       root.appendChild(this.overlay);
       this.host.appendChild(root);
       root.__sympyEditor = this;   // handy for debugging and tests
@@ -1686,8 +1706,8 @@ var SympyEditor = (function () {
     }
 
     _fillAddonsMenu(available) {
-      if (!this.addonsBlock) return;
-      this.addonsBlock.hidden = !available.length;
+      var host = this.addonsBlock || this.addonsPane;
+      if (host) host.hidden = !available.length;
       if (!this.addonsMenu) return;
       var self = this;
       this.addonsMenu.textContent = "";
@@ -1710,7 +1730,7 @@ var SympyEditor = (function () {
     }
 
     toggleAddonsMenu() {
-      if (!this.addonsMenu) return;
+      if (!this.addonsMenu || !this.addonsBtn) return;   // in the drawer it is always open
       if (!this.addonsMenu.hidden) { this.addonsMenu.hidden = true; return; }
       this.addonsMenu.hidden = false;
       this._placeUnder(this.addonsMenu, this.addonsBtn);
@@ -2050,11 +2070,11 @@ var SympyEditor = (function () {
       }
       // The Add-ons menu closes on a click anywhere else, and on Escape.
       onDocument("pointerdown", function (ev) {
-        if (self.addonsMenu && !self.addonsMenu.hidden && !self.addonsMenu.contains(ev.target) && !(self.addonsBtn && self.addonsBtn.contains(ev.target))) self.addonsMenu.hidden = true;
+        if (self.addonsBtn && self.addonsMenu && !self.addonsMenu.hidden && !self.addonsMenu.contains(ev.target) && !self.addonsBtn.contains(ev.target)) self.addonsMenu.hidden = true;
       });
       if (this.addonsMenu) {
         this.addonsMenu.addEventListener("keydown", function (ev) {
-          if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); self.addonsMenu.hidden = true; self.addonsBtn.focus({ preventScroll: true }); }
+          if (ev.key === "Escape" && self.addonsBtn) { ev.preventDefault(); ev.stopPropagation(); self.addonsMenu.hidden = true; self.addonsBtn.focus({ preventScroll: true }); }
         });
       }
       // Copy / cut / paste while the formula has the focus (no clipboard permission needed).
@@ -2639,23 +2659,46 @@ var SympyEditor = (function () {
 
     /** Draw highlight boxes of `kind` ("hover" or "select") around `rects`
      *  (viewport rectangles); an empty list removes them. */
+    /** The highlight overlays for `kind`, moved to `rects`.
+     *
+     *  The boxes already up are reused: a drag re-selects on every pointer
+     *  move, and tearing the box out of the document only to put a new one
+     *  back leaves a frame with nothing drawn - the selection blinks all the
+     *  way through the drag.  Moving the same element instead lets CSS carry
+     *  it to its new size (.se-box-select), so it grows into the range.  A box
+     *  that is new (or was dropped by a re-render) must not animate from
+     *  wherever it happens to start: se-box-new holds the transition off for
+     *  its first frame. */
     _drawBoxes(kind, rects) {
-      var old = this._boxes[kind];
-      for (var i = 0; i < old.length; i++) if (old[i].parentNode) old[i].parentNode.removeChild(old[i]);
-      var boxes = [];
+      var boxes = this._boxes[kind] || (this._boxes[kind] = []);
       var vr = this.view.getBoundingClientRect();
-      var pad = 2;
+      var pad = 2, fresh = [];
+      // Only a drag glides: it is the one case where the box grows a little
+      // at a time under the finger.  Zooming, going full screen or a resize
+      // move it for reasons of layout, and there it must simply be where it
+      // belongs on the next frame.
+      var glide = kind === "select" && !!(this._drag && this._drag.moved);
+      while (boxes.length > rects.length) {
+        var gone = boxes.pop();
+        if (gone.parentNode) gone.parentNode.removeChild(gone);
+      }
       for (var j = 0; j < rects.length; j++) {
-        var r = rects[j];
-        var box = h("span", { class: "se-box se-box-" + kind, "aria-hidden": "true" });
+        var r = rects[j], box = boxes[j];
+        if (!box || box.parentNode !== this.view) {
+          box = h("span", { class: "se-box se-box-" + kind + " se-box-new", "aria-hidden": "true" });
+          boxes[j] = box;
+          this.view.appendChild(box);
+          fresh.push(box);
+        }
+        box.classList.toggle("se-box-glide", glide);
         box.style.left = Math.round(r.left - vr.left + this.view.scrollLeft - pad) + "px";
         box.style.top = Math.round(r.top - vr.top + this.view.scrollTop - pad) + "px";
         box.style.width = Math.round(r.width + 2 * pad) + "px";
         box.style.height = Math.round(r.height + 2 * pad) + "px";
-        this.view.appendChild(box);
-        boxes.push(box);
       }
-      this._boxes[kind] = boxes;
+      if (fresh.length) requestAnimationFrame(function () {
+        for (var k = 0; k < fresh.length; k++) fresh[k].classList.remove("se-box-new");
+      });
     }
 
     _unionRect(rects) {
@@ -4366,7 +4409,14 @@ var SympyEditor = (function () {
           if (ca === cb) { this.select(ca); return; }
           if (this.state.nodes[p].rangeable) {
             var kids = this._displayChildren(p);
-            this._setRange(p, kids.indexOf(ca), kids.indexOf(cb));
+            var ia = kids.indexOf(ca), ib = kids.indexOf(cb);
+            // Dragging over a part that is not one of the parent's own
+            // display children (an operator glyph between two terms, say)
+            // finds no index: keep the range as it stands rather than store
+            // a -1, which selects nothing and blinks the selection out from
+            // under the finger.
+            if (ia < 0 || ib < 0) return;
+            this._setRange(p, ia, ib);
           } else {
             this.select(p);
           }
