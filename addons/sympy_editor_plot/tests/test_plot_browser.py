@@ -3,6 +3,7 @@ values, the zoom, the guide.  Needs Playwright with Chromium and the KaTeX
 and Plotly CDNs (skipped otherwise)."""
 import sys
 import threading
+import time
 import urllib.request
 from contextlib import closing
 from pathlib import Path
@@ -279,6 +280,94 @@ def test_a_trackpad_pinch_zooms_both_axes():
             close = axis("xaxis")
             trackpad(120)                                    # and back out
             assert axis("xaxis") > close * 1.15, (close, axis("xaxis"))
+            assert errors == []
+            browser.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_a_gesture_redraws_by_the_frame_not_by_the_move():
+    """A finger sends moves faster than the picture can be redrawn, and asking
+    Plotly for each of them is what makes a gesture stutter.  The moves are
+    collected and the last one before the frame is the only one drawn."""
+    doc = Document(sin(x), addons=[ADDON])
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with playwright.sync_playwright() as p:
+            browser = p.chromium.launch()
+            ctx = browser.new_context(has_touch=True, is_mobile=True, viewport={"width": 420, "height": 900})
+            page = ctx.new_page()
+            errors = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.goto(srv.url)
+            page.wait_for_selector(".se-addon-plot .plot-area", timeout=30000)
+            page.wait_for_function("() => { const a = document.querySelector('.plot-area'); return a && a._fullLayout; }", timeout=60000)
+            out = page.evaluate("""async () => {
+                window.__R = 0;
+                const real = Plotly.relayout;
+                Plotly.relayout = function () { window.__R++; return real.apply(this, arguments); };
+                const a = document.querySelector('.plot-area');
+                const b = a.getBoundingClientRect();
+                const cx = b.left + b.width / 2, cy = b.top + b.height / 2;
+                const touch = (t, x) => {
+                    const p = new Touch({identifier: 9, target: a, clientX: x, clientY: cy});
+                    const none = t === 'touchend';
+                    a.dispatchEvent(new TouchEvent(t, {touches: none ? [] : [p], targetTouches: none ? [] : [p],
+                        changedTouches: [p], bubbles: true, cancelable: true}));
+                };
+                touch('touchstart', cx);
+                for (let i = 1; i <= 40; i++) touch('touchmove', cx - i * 3);   // all inside one frame
+                const during = window.__R;
+                await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+                touch('touchend', cx - 120);
+                return {during: during, after: window.__R};
+            }""")
+            assert out["during"] == 0, out          # forty moves, nothing asked of Plotly yet
+            assert out["after"] == 1, out           # and one redraw when the frame came
+            assert errors == []
+            browser.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_the_picture_stops_following_when_sampling_is_too_slow():
+    """Sampling is Python's work and can be slow - an integral, a big
+    expression, a phone - while a gesture asks for a new range many times a
+    second.  Rather than let that pile up, the picture stops following itself
+    and says so, with the way back beside it."""
+    doc = Document(sin(x), addons=[ADDON])
+    real = doc.handle
+
+    def slow(message, *a, **k):
+        if isinstance(message, dict) and message.get("method") == "samples":
+            time.sleep(4.0)                        # well past the stall budget
+        return real(message, *a, **k)
+
+    doc.handle = slow
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with playwright.sync_playwright() as p:
+            browser = p.chromium.launch()
+            page = browser.new_page()
+            errors = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.goto(srv.url)
+            page.wait_for_selector(".se-addon-plot .plot-area", timeout=60000)
+            stopped = False
+            for _ in range(60):
+                if "stopped following" in page.locator(".plot-note").inner_text():
+                    stopped = True
+                    break
+                # keep asking for a new range, as a person tinkering would
+                page.evaluate("""() => { const a = document.querySelector('.plot-area');
+                    if (window.Plotly && a._fullLayout) Plotly.relayout(a, {'xaxis.range': [-6 + Math.random(), 6 + Math.random()]}); }""")
+                page.wait_for_timeout(1000)
+            assert stopped, page.locator(".plot-note").inner_text()
+            assert page.locator(".plot-again").count() == 1
             assert errors == []
             browser.close()
     finally:

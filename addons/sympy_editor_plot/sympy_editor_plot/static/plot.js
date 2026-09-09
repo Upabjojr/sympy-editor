@@ -38,6 +38,26 @@ SympyEditor.registerAddon("plot", {
     var yRange = null;      // [low, high] once a gesture has set one: y is otherwise
                             // read off the curve, and would spring back on every draw
 
+    /* ---- keeping the picture from eating the machine ----
+     *
+     * Sampling a function is Python's work and can be slow - an integral, a
+     * big expression, a phone - while a gesture asks for a new range many
+     * times a second.  Three things keep that in hand: only one sampling is
+     * ever in flight, the redraws a gesture asks for are collected into one
+     * a frame, and how long the last sampling took decides how many points
+     * the next one gets.  When even a small sampling stays slow the picture
+     * stops following by itself and says so, rather than locking up. */
+    var inFlight = false;   // a sampling is out; the next one waits for it
+    var wanted = false;     // ... and one is waiting
+    var samples = 0;        // points asked for last time (0: the option's own number)
+    var slowRuns = 0;       // samplings in a row that took longer than the budget
+    var paused = false;     // the picture has stopped following, until asked again
+    var frame = null;       // the relayout a gesture asked for, waiting for a frame
+    var SLOW = 900;         // ms: over budget, so fewer points next time
+    var QUICK = 250;        // ms: room to spare, so more of them again
+    var STALL = 3500;       // ms: too slow to keep doing by itself
+    var FEWEST = 60;        // points: below this the curve is not worth drawing
+
     function fmt(v) { return Number(v).toPrecision(4).replace(/\.?0+$/, ""); }
     function showRange(a, b) { shown.textContent = a === null ? "" : "visible range: " + fmt(a) + " \u2026 " + fmt(b); }
 
@@ -59,13 +79,18 @@ SympyEditor.registerAddon("plot", {
 
     function ask() {
       if (api.busy()) { request(); return; }     // after the edit in flight
+      if (paused) return;                        // stopped following: only an explicit ask draws now
+      if (inFlight) { wanted = true; return; }   // one at a time, and only the latest is wanted
+      inFlight = true;
+      var began = Date.now();
       var my = ++seq;
       var t = target();
       var payload = { path: t.path, var: varSel.value || lastVar || null, values: values,
-                      span: [parseFloat(from.value), parseFloat(to.value)], n: opts.samples || 400 };
+                      span: [parseFloat(from.value), parseFloat(to.value)], n: samples || opts.samples || 400 };
       if (t.children) payload.children = t.children;
       if (!(payload.span[0] < payload.span[1])) payload.span = opts.span || [-6, 6];
       api.call("samples", payload).then(function (res) {
+        var giveUp = settle(began);
         if (my !== seq) return;
         fillVars(res);
         fillSliders(res);
@@ -79,11 +104,54 @@ SympyEditor.registerAddon("plot", {
           return;
         }
         draw(res);
+        if (giveUp) pause();          // after the draw: the note it writes is the last word
       }, function (e) {
+        settle(began);
         if (my !== seq) return;
         note.textContent = String(e && e.message || e);
         note.className = "plot-note error";
       });
+    }
+
+    /** A sampling has come back: let the next one go, and let how long this
+     *  one took decide how big it is - fewer points while it is slow, more
+     *  again once there is room.  Two slow ones in a row at the fewest points
+     *  we would draw, and the picture stops following on its own. */
+    function settle(began) {
+      var took = Date.now() - began;
+      var was = samples || opts.samples || 400;
+      inFlight = false;
+      if (took > SLOW) {
+        samples = Math.max(FEWEST, Math.round(was / 2));
+        if (took > STALL) slowRuns += 1;
+        if (slowRuns >= 2 && samples <= FEWEST) return true;   // the caller pauses, after it has drawn
+      } else if (took < QUICK) {
+        slowRuns = 0;
+        samples = Math.min(opts.samples || 400, Math.round(was * 1.5) || (opts.samples || 400));
+      }
+      if (wanted) { wanted = false; request(); }
+      return false;
+    }
+
+    /** Stop following by itself, and say so where the reason belongs. */
+    function pause() {
+      paused = true;
+      wanted = false;
+      note.className = "plot-note plot-paused";
+      note.textContent = "";
+      note.appendChild(document.createTextNode("The picture has stopped following: sampling this took too long. "));
+      var again = h("button", { type: "button", class: "plot-again" }, ["Draw it again"]);
+      again.addEventListener("click", function () { resume(); });
+      note.appendChild(again);
+    }
+
+    function resume() {
+      paused = false;
+      slowRuns = 0;
+      samples = FEWEST;                          // start small; settle() grows it back
+      note.className = "plot-note";
+      note.textContent = "";
+      request();
     }
 
     function fillVars(res) {
@@ -228,6 +296,25 @@ SympyEditor.registerAddon("plot", {
       return Math.min(1, Math.max(0, (clientX - left) / width));
     }
 
+    /** Move the axes, at most once a frame.  A finger sends moves faster than
+     *  the picture can be redrawn, and asking Plotly for each of them is what
+     *  makes a gesture stutter; the last one before the frame is the only one
+     *  that matters anyway. */
+    function moveAxes(change) {
+      if (!change || (!change["xaxis.range"] && !change["yaxis.range"])) return;
+      frame = frame || {};
+      for (var k in change) frame[k] = change[k];
+      if (frame.__queued) return;
+      frame.__queued = true;
+      requestAnimationFrame(function () {
+        var pending = frame;
+        frame = null;
+        if (!plotly || !pending) return;
+        delete pending.__queued;
+        plotly.relayout(area, pending);
+      });
+    }
+
     /** Room to move, no room to break the axis. */
     function clampSpan(want, was) {
       var limit = Math.abs(was) || 1;
@@ -328,7 +415,7 @@ SympyEditor.registerAddon("plot", {
           moved["yaxis.range"] = yRange.slice();
           moved["yaxis.autorange"] = false;
         }
-        if (moved["xaxis.range"] || moved["yaxis.range"]) plotly.relayout(area, moved);
+        moveAxes(moved);
         return;
       }
       if (!pinch || ev.touches.length !== 2) return;
@@ -363,7 +450,7 @@ SympyEditor.registerAddon("plot", {
       // the relayout tells the panel, which writes the fields and asks for
       // samples over the new span (that request is debounced, so a pinch
       // makes one of them, not one per frame)
-      if (change["xaxis.range"] || change["yaxis.range"]) plotly.relayout(area, change);
+      moveAxes(change);
     }, true);
 
     /* A pinch on a laptop's trackpad reaches the page as a wheel event with
@@ -394,7 +481,7 @@ SympyEditor.registerAddon("plot", {
           change["yaxis.autorange"] = false;
         }
       }
-      if (change["xaxis.range"] || change["yaxis.range"]) plotly.relayout(area, change);
+      moveAxes(change);
     }, { passive: false });
 
     var endPinch = function (ev) {
@@ -494,6 +581,7 @@ SympyEditor.registerAddon("plot", {
       "<li>On a touch screen, <b>pinch with two fingers</b> to zoom: apart for a closer look, together to come back out. Each axis takes the share the fingers moved along it \u2014 sideways for the span, up and down for the height, both for a pinch across the corner \u2014 and what is under the middle of the pinch stays where it is.</li>",
       "<li><b>Drag with one finger</b> to move the picture, in either direction: the span sideways, the height up and down.</li>",
       "<li>On a laptop, a <b>pinch on the trackpad</b> zooms both axes about the pointer. Double-click to come back to the whole picture.</li>",
+      "<li>Sampling a function is Python's work, and some are slow. Only one sampling is ever out at a time, a gesture is drawn once a frame however fast the finger moves, and a slow function is given fewer points until it keeps up. If it stays too slow the picture stops following and offers to draw again \u2014 the axes still move, the curve is simply not sampled afresh until you ask.</li>",
       "<li>The picture follows every committed change \u2014 an edit, a transformation, an undo \u2014 and the selection.</li>",
       "</ul></section>"
     ].join("");
