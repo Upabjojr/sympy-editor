@@ -972,13 +972,18 @@ def test_edge_of_a_matrix_entry_extends_it(browser, serve_expr):
     r = _rect(page, zpath)
     page.mouse.click((r["l"] + r["r"]) / 2, r["y"])       # the middle of a glyph still selects it
     assert page.locator(".se-status").inner_text() == "Symbol: z" and page.locator(".se-caret").count() == 0
-    # ↓ on an atom gives a caret after it and lifts the selection entirely; ↑ from a caret selects that atom first
+    # ↓ on an atom gives a caret after it and lifts the selection entirely
     page.keyboard.press("ArrowDown")
     assert page.locator(".se-caret").count() == 1 and page.locator(".se-selected").count() == 0
     assert page.locator(".se-box-select").count() == 0 and page.locator(".se-source mark").count() == 0
     assert not page.locator(".se-actions").is_visible()
+    # ↑ inside a matrix is a row up (the caret is in the bottom row here), and
+    # the row above having none, the next ↑ selects what the caret is beside -
+    # the way out of a grid, and what ↑ does at a caret everywhere else
     page.keyboard.press("ArrowUp")
-    assert page.locator(".se-status").inner_text() == "Symbol: z"
+    assert page.locator(".se-status").inner_text().startswith("Type after Symbol x")
+    page.keyboard.press("ArrowUp")
+    assert page.locator(".se-status").inner_text() == "Symbol: x"
     assert page.errors == []
 
 
@@ -3996,6 +4001,147 @@ def test_a_function_at_a_caret_is_added_there(browser, serve_expr):
     assert page.errors == []
 
 
+def test_matrix_rows_columns_and_the_resize_grip(browser, serve_expr):
+    """In a matrix the action bar adds and removes rows and columns of the
+    selection's row / column, and the grip on the bottom-right corner resizes
+    the matrix by dragging, a cell at a time, with an outline of the size it
+    will get.  Outside a matrix none of it shows."""
+    from sympy import Function, Matrix
+    from sympy_editor.printer import is_placeholder
+
+    srv, doc = serve_expr(x + Function("f")(Matrix([[5, 6], [7, 8]])))   # a matrix inside an expression, a scalar beside it
+    page = _open(browser, srv.url)
+    nodes = doc.snapshot()["nodes"]
+    mats = [k for k, v in nodes.items() if v.get("matrix")]
+    entry7 = next(k for k, v in nodes.items() if v["src"] == "7")
+    xpath = next(k for k, v in nodes.items() if v["src"] == "x")
+    bar = page.locator(".se-actions")
+    grip = page.locator(".se-mat-handle")
+    # a scalar factor beside the matrix: no matrix tools
+    _click(page, xpath)
+    assert bar.is_visible() and not bar.locator('[data-cmd="matrow"]').is_visible() and grip.count() == 0
+    # the entry 7 (row 1, column 0 of the second matrix): + row adds a row of slots after it
+    _click(page, entry7)
+    assert bar.locator('[data-cmd="matrow"]').is_visible() and bar.locator('[data-cmd="matdelcol"]').is_visible()
+    assert grip.count() == 1 and grip.is_visible()
+    mat = [k for k in mats if entry7.startswith(k)][0]
+    mbox = page.evaluate("p => document.querySelector('.sympy-editor').__sympyEditor._visualRect(document.querySelector(`[data-path=\"${p}\"]`))", mat)
+    gbox = grip.bounding_box()
+    assert abs(gbox["x"] + gbox["width"] / 2 - mbox["right"]) < 6 and abs(gbox["y"] + gbox["height"] / 2 - mbox["bottom"]) < 6   # on the corner
+    _next_state(page, lambda: bar.locator('[data-cmd="matrow"]').click())
+    shaped = lambda shape: next(m for m in doc.expr.find(lambda e: getattr(e, "is_Matrix", False) and getattr(e, "shape", None) == shape))
+    big = shaped((3, 2))
+    assert big[1, 0] == 7 and all(is_placeholder(e) for e in big[2, :])          # after the row of 7
+    # the new slot is selected (a template's first slot, likewise); − col removes its column
+    sel = page.locator(".se-selected[data-path]").first.get_attribute("data-path")
+    assert doc.snapshot()["nodes"][sel].get("placeholder")
+    _next_state(page, lambda: bar.locator('[data-cmd="matdelcol"]').click())
+    big = shaped((3, 1))
+    assert big[0, 0] == 6 and big[1, 0] == 8                                     # column 0 went (7 with it)
+    # the grip reshapes: the same entries laid out another way.  The 3 x 1
+    # here has three entries, so the only shapes are 3 x 1 and 1 x 3 - a drag
+    # to the right cannot make it wider without making it shorter.
+    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "8"))
+    ctx = page.evaluate("document.querySelector('.sympy-editor').__sympyEditor._matHandleCtx")
+    assert ctx["rows"] == 3 and ctx["cols"] == 1
+    before = sorted(str(e) for e in shaped((3, 1)))
+    cell_w, cell_h = ctx["rect"]["width"] / ctx["cols"], ctx["rect"]["height"] / ctx["rows"]
+    gbox = grip.bounding_box()
+    gx, gy = gbox["x"] + gbox["width"] / 2, gbox["y"] + gbox["height"] / 2
+    ghost = page.locator(".se-mat-ghost")
+    page.mouse.move(gx, gy)
+    page.mouse.down()
+    page.mouse.move(gx + 2 * cell_w, gy - 2 * cell_h, steps=6)                        # wider, shorter
+    assert ghost.is_visible() and ghost.locator(".se-mat-ghost-label").inner_text() == "1 \u00d7 3 \u2014 3 entries, rearranged"
+    page.mouse.move(gx + 6 * cell_w, gy + 6 * cell_h, steps=6)                        # far out: still a shape that fits
+    assert ghost.locator(".se-mat-ghost-label").inner_text() in ("3 \u00d7 1", "1 \u00d7 3 \u2014 3 entries, rearranged")
+    page.mouse.move(gx + 2 * cell_w, gy - 2 * cell_h, steps=4)
+    assert page.locator(".se-selected[data-path]").count() >= 1                       # the drag selected nothing new
+    _next_state(page, lambda: page.mouse.up())
+    assert ghost.count() == 0
+    wide = shaped((1, 3))
+    assert sorted(str(e) for e in wide) == before                                     # every entry kept, none added
+    assert [str(e) for e in wide] == ["6", "8", "_1"] or [str(e) for e in wide][0] == "6"
+    # back to a column, and the entries are still the same three
+    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "8"))
+    ctx = page.evaluate("document.querySelector('.sympy-editor').__sympyEditor._matHandleCtx")
+    cell_w, cell_h = ctx["rect"]["width"] / ctx["cols"], ctx["rect"]["height"] / ctx["rows"]
+    gbox = grip.bounding_box()
+    gx, gy = gbox["x"] + gbox["width"] / 2, gbox["y"] + gbox["height"] / 2
+    page.mouse.move(gx, gy)
+    page.mouse.down()
+    page.mouse.move(gx - 2 * cell_w, gy + 3 * cell_h, steps=6)
+    _next_state(page, lambda: page.mouse.up())
+    assert sorted(str(e) for e in shaped((3, 1))) == before
+    # a drag back to the same size changes nothing
+    seq = page.locator(".sympy-editor").get_attribute("data-seq")
+    gbox = grip.bounding_box()
+    page.mouse.move(gbox["x"] + gbox["width"] / 2, gbox["y"] + gbox["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(gbox["x"] + gbox["width"] / 2 + 3, gbox["y"] + gbox["height"] / 2 + 2, steps=2)
+    page.mouse.up()
+    page.wait_for_timeout(150)
+    assert page.locator(".sympy-editor").get_attribute("data-seq") == seq
+    assert page.errors == []
+
+
+def test_arrows_move_through_a_matrix_as_it_is_drawn(browser, serve_expr):
+    """In a grid the four arrows are directional: the entries of a matrix are
+    a flat list of siblings (paths /2/0.. in reading order), so ← → used to
+    wrap from the end of a row to the start of the next and ↑ ↓ walked the
+    tree instead of the rows.  They follow the drawing now, for the
+    selection and for the caret alike."""
+    from sympy import Matrix
+    srv, doc = serve_expr(Matrix([[1, 2, 3], [4, 5, 6]]))
+    page = _open(browser, srv.url)
+    nodes = doc.snapshot()["nodes"]
+    at = lambda v: next(k for k, n in nodes.items() if n["src"] == v)
+    here = lambda: nodes[page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.selected")]["src"]
+    _select(page, at("1"))
+    for key, expect in [("ArrowRight", "2"), ("ArrowRight", "3"), ("ArrowDown", "6"),
+                        ("ArrowLeft", "5"), ("ArrowLeft", "4"), ("ArrowUp", "1")]:
+        page.keyboard.press(key)
+        page.wait_for_function("document.querySelector('.se-selected[data-path]') && document.querySelector('.se-status').textContent.endsWith(%r)" % expect)
+        assert here() == expect, key
+    # the edges: ← at the first cell has nowhere to go inside the grid, and ↑
+    # at the top row hands over to the tree - the matrix itself
+    page.keyboard.press("ArrowUp")
+    page.wait_for_function("document.querySelector('.sympy-editor').__sympyEditor.selected === '/'")
+    assert page.locator(".se-status").inner_text().endswith("Matrix([[1, 2, 3], [4, 5, 6]])")
+    # the caret moves the same way: ← → along the row, ↑ ↓ between rows
+    _select(page, at("5"))
+    page.keyboard.press("ArrowDown")                                  # the bottom row: a caret beside the cell
+    page.wait_for_selector(".se-caret")
+    caret = lambda: page.evaluate("(() => { const c = document.querySelector('.sympy-editor').__sympyEditor.caret; return c && c.path + ':' + (c.extend || c.index); })()")
+    assert caret() and caret().startswith(at("5"))
+    page.keyboard.press("ArrowUp")                                    # the row above, not out of the grid
+    page.wait_for_function("document.querySelector('.se-status').textContent.includes('Symbol') || document.querySelector('.se-caret')")
+    assert caret().startswith(at("2")) and page.locator(".se-selected").count() == 0
+    page.keyboard.press("ArrowRight")
+    assert caret().startswith(at("2")) or caret().startswith(at("3"))  # along the row, never down to the next
+    assert page.errors == []
+
+
+def test_arrows_cross_the_blocks_of_an_n_dim_array(browser, serve_expr):
+    """A rank-3 array is drawn as a row of matrices, a rank-4 one as a matrix
+    of matrices: the same rule serves every rank, because it follows what is
+    drawn - → at the right edge of a block enters the next block on the same
+    visual row, ↓ stays inside the block."""
+    from sympy import Array
+    srv, doc = serve_expr(Array([[[1, 2], [3, 4]], [[5, 6], [7, 8]]]))
+    page = _open(browser, srv.url)
+    nodes = doc.snapshot()["nodes"]
+    at = lambda v: next(k for k, n in nodes.items() if n["src"] == v)
+    here = lambda: nodes[page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.selected")]["src"]
+    _select(page, at("1"))
+    # [1 2; 3 4] [5 6; 7 8]: the rows on screen are "1 2 5 6" and "3 4 7 8"
+    for key, expect in [("ArrowRight", "2"), ("ArrowRight", "5"), ("ArrowRight", "6"),
+                        ("ArrowDown", "8"), ("ArrowLeft", "7"), ("ArrowLeft", "4"), ("ArrowUp", "2")]:
+        page.keyboard.press(key)
+        page.wait_for_function("document.querySelector('.se-status').textContent.endsWith(%r)" % expect)
+        assert here() == expect, key
+    assert page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.nodes['/'].array") == {"shape": [2, 2, 2]}
+    assert page.errors == []
 def test_a_drag_past_the_edge_scrolls_and_keeps_selecting(browser, serve_expr):
     """A range dragged to the edge of the view: the formula scrolls along and
     the range takes in what comes into sight, so it can reach terms that were
