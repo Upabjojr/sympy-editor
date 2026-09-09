@@ -142,7 +142,8 @@ DEBUG_SUFFIX = " (debug)"
 
 
 def build(out: Path, *, cdn: bool = False, cache: Path | None = None, expr=None, title: str = "SymPy Editor",
-          head: str = "", native: bool = False, addons_dir: Path | None = None, debug: bool = False) -> Path:
+          head: str = "", native: bool = False, addons_dir: Path | None = None, debug: bool = False,
+          enable_addons: bool = False) -> Path:
     """Write the bundle to ``out``; ``head`` is extra ``<head>`` markup (the
     web app's manifest and service worker, see ``webapp/build.py``).
 
@@ -157,7 +158,11 @@ def build(out: Path, *, cdn: bool = False, cache: Path | None = None, expr=None,
     # from the folders it bundles, a Pyodide page from the packages it carries.
     available = [m["module"] for m in scan_addons(addons_dir if addons_dir is not None else ADDONS_DIR).values()
                  if m.get("bundle") is not False]      # not the template: an example to copy, never shipped
-    doc = Document(expr if expr is not None else demo_expression(), available=available)
+    # ``enable_addons`` starts them switched on rather than a click away: the
+    # web site shows the editor with everything it has, where an app would
+    # rather open quickly and let its owner choose (and remembers the choice).
+    doc = Document(expr if expr is not None else demo_expression(),
+                   addons=available if enable_addons else (), available=available)
     # A debug build is a second application on the phone: it says so over the
     # formula and wears the badged icon, as its launcher entry does.
     if debug and not title.endswith(DEBUG_SUFFIX):
@@ -188,6 +193,8 @@ def main(argv=None) -> int:
     ap.add_argument("--cdn", action="store_true", help="do not vendor; load KaTeX and Pyodide from the CDNs")
     ap.add_argument("--cache", type=Path, default=None, help="download cache directory")
     ap.add_argument("--android", action="store_true", help="also copy the bundle to mobile/android/app/src/main/assets/www")
+    ap.add_argument("--enable-addons", action="store_true",
+                    help="start with every bundled add-on switched on (the web site does)")
     ap.add_argument("--native", action="store_true",
                     help="the host application runs Python (the Android app): no Pyodide in the bundle")
     ap.add_argument("--title", default="SymPy Editor", help="the page's title, over the formula")
@@ -195,7 +202,7 @@ def main(argv=None) -> int:
                     help="a debug build: the title says so and the icon beside it wears the bug badge")
     args = ap.parse_args(argv)
     out = build(args.out, cdn=args.cdn, cache=args.cache, native=args.native or args.android,
-                title=args.title, debug=args.debug)
+                title=args.title, debug=args.debug, enable_addons=args.enable_addons)
     size = sum(p.stat().st_size for p in out.rglob("*") if p.is_file())
     print(f"Wrote {out} ({size / 1e6:.1f} MB)")
     if args.android:

@@ -556,7 +556,7 @@ warranty. The short version is not the licence; the licence is:</p>""")
         title="Privacy", description="SymPy Editor collects no data: the mathematics stays on your device.",
         lead="The short version: the editor computes on your device, and nothing you type is sent anywhere by us.",
         body=cards,
-        footer="This page describes SymPy Editor 0.1.0 (September 2026). "
+        footer="This page describes SymPy Editor 0.1.1 (September 2026). "
                "If the facts change, this page changes with them."),
         encoding="utf-8")
 
@@ -742,7 +742,10 @@ def shelf_site(out: Path, *, cache: Path | None = None, cdn: bool = False) -> Pa
 
 def build(out: Path, *, cdn: bool = False, cache: Path | None = None) -> Path:
     head = HEAD.format(theme=THEME, short=SHORT_NAME)
-    build_www.build(out, cdn=cdn, cache=cache, title=NAME, head=head)
+    # The site is the shop window: everything the editor can do is on when it
+    # opens - the plot, the tree, the rewrite rules, the LaTeX reader - rather
+    # than waiting behind a menu nobody has been told about.
+    build_www.build(out, cdn=cdn, cache=cache, title=NAME, head=head, enable_addons=True)
     vendored = (out / "vendor/katex/katex.min.js").is_file()
     derivations_page(                           # before sw.js: the precache lists what is there
         out / "derivations",
