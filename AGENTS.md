@@ -1,5 +1,9 @@
 # AGENTS.md — notes for coding agents and contributors
 
+The behaviour of the cursor and the selection - every state, every key, and
+what differs on a touch screen - is written down in
+`docs/cursor-and-selection.md`.  Change that file with the behaviour.
+
 ## What this project is
 
 A WYSIWYG editor for SymPy expressions.  Requirements set by the project owner:

@@ -2734,6 +2734,33 @@ var SympyEditor = (function () {
      *  parent, or extending the atom). */
     _selectChild() {
       if (this.range) { this.select(this._displayChildren(this.range.parent)[this.range.focus]); return; }
+      // From an operator, down goes to what the operator stands between: the
+      // caret at that very point, ready to type into.  Selecting an operator
+      // leaves `selected` empty, so without this it fell through to the
+      // "nothing is selected" case below and took the whole expression.
+      var j = this.junction;
+      if (j) {
+        // The place just to the right of the glyph, taken from the formula's
+        // own caret positions rather than made up: then <- and -> step away
+        // from it and back to it like any other place.  Which position that
+        // is depends on how the operator is drawn - between the two
+        // arguments for +, inside the right-hand one for the sign of -x, and
+        // an equation takes no new argument at all, so it is the point just
+        // before its right-hand side.
+        var jlist = this._caretPositions();
+        var gr = this._visualRect(j.el), gx = (gr.left + gr.right) / 2;
+        var after = null, before = null;
+        for (var q = 0; q < jlist.length; q++) {
+          var pos = jlist[q];
+          if (pos.x >= gx) { if (!after || pos.x < after.x) after = pos; }
+          else if (!before || pos.x > before.x) before = pos;
+        }
+        var pick = after || before;
+        if (pick) { this._showCaret(pick.gap, pick.x); return; }
+        this.junction = null;                       // nowhere to stand: take the right-hand term
+        this.select(this._displayChildren(j.path)[j.rightIndex] || j.path);
+        return;
+      }
       if (!this.selected) { this.select("/"); return; }
       var t = this.tree[this.selected];
       if (t && t.children.length) {
@@ -2932,9 +2959,14 @@ var SympyEditor = (function () {
         if (!ro) this.setOperator(k);
       } else if (this.junction && k === "ArrowUp") {
         this.select(this.junction.path);
-      } else if (this.junction && (k === "ArrowLeft" || k === "ArrowRight" || k === "ArrowDown")) {
-        var jj = this.junction, jkids = this.tree[jj.path].children;
+      } else if (this.junction && (k === "ArrowLeft" || k === "ArrowRight")) {
+        // leftIndex/rightIndex count the arguments as they are drawn, so the
+        // list they index has to be the drawn one: the tree's own order is
+        // not always what is on the screen (x**2 + y, sqrt(x) + y...).
+        var jj = this.junction, jkids = this._displayChildren(jj.path);
         this.select(jkids[k === "ArrowLeft" ? jj.leftIndex : jj.rightIndex]);
+        // (down is left to _selectChild, which drops to the caret between the
+        //  two - the same thing the toolbar's arrow does)
       } else if (this.junction && k === "Enter") {
         // nothing to edit in place: the palette (or a key) changes it
       } else if (this.range && k === "Escape") {
@@ -4073,7 +4105,13 @@ var SympyEditor = (function () {
       var out = [];
       for (var i = 0; i < list.length; i++) {
         var pos = list[i], last = out[out.length - 1];
-        if (last && (sameGap(last.gap, pos.gap) || (Math.abs(last.x - pos.x) < 1.5 && sameLine(last.gap, pos.gap)))) {
+        var merge = last && (sameGap(last.gap, pos.gap) || (Math.abs(last.x - pos.x) < 1.5 && sameLine(last.gap, pos.gap)));
+        // ... except where an operator is drawn between the two arguments:
+        // then "after the left one" and "before the right one" are either
+        // side of that glyph, two places on the screen a step apart, and
+        // each is a caret position of its own.
+        if (merge && sameGap(last.gap, pos.gap) && Math.abs(last.x - pos.x) >= 1.5 && self._gapHasOperator(pos.gap)) merge = false;
+        if (merge) {
           var better = (!pos.gap.extend && last.gap.extend) ||
             (!!pos.gap.extend === !!last.gap.extend && pos.gap.path.length > last.gap.path.length);
           if (better) out[out.length - 1] = pos;
@@ -4084,6 +4122,22 @@ var SympyEditor = (function () {
       return out;
     }
 
+    /** Is an operator glyph drawn inside this gap?  With one there, the gap's
+     *  two ends are either side of it and read as two places; with nothing
+     *  between them they are the same place, and merge. */
+    _gapHasOperator(gap) {
+      if (!gap || gap.extend || !gap.leftEl || !gap.rightEl || !document.elementsFromPoint) return false;
+      var stack = document.elementsFromPoint((gap.a + gap.b) / 2, (gap.top + gap.bottom) / 2);
+      for (var i = 0; i < stack.length; i++) {
+        var el = stack[i];
+        if (!this.view.contains(el) || el === this.view || el.querySelector("[data-path]")) continue;
+        if (gap.leftEl.contains(el) || gap.rightEl.contains(el)) return false;   // reached an argument: nothing between
+        var text = (el.textContent || "").trim();
+        if (text) return Object.prototype.hasOwnProperty.call(OPERATOR_GLYPHS, text);
+      }
+      return false;
+    }
+
     /** ←/→ at a caret: the previous/next caret position of the formula -
      *  out of the current node at its ends, into a composite neighbour. */
     _moveCaret(step) {
@@ -4091,8 +4145,7 @@ var SympyEditor = (function () {
       if (!at) return;
       var j = at.index + step;
       if (j < 0 || j >= at.count) return;
-      var g = at.list[j].gap;
-      this._showCaret(g, g.extend ? at.list[j].x : (step < 0 ? g.b : g.a));   // the near end of a gap
+      this._showCaret(at.list[j].gap, at.list[j].x);   // the place, on the side it is on
     }
 
     /** A caret at the first or the last position of the formula. */
@@ -4101,7 +4154,7 @@ var SympyEditor = (function () {
       var list = this._caretPositions();
       if (!list.length) return;
       var pos = list[which === "start" ? 0 : list.length - 1];
-      this._showCaret(pos.gap, pos.gap.extend ? pos.x : (which === "start" ? pos.gap.b : pos.gap.a));
+      this._showCaret(pos.gap, pos.x);
     }
 
     /** Where the caret is among the positions of the formula: {index, count}. */
@@ -4112,7 +4165,9 @@ var SympyEditor = (function () {
       var idx = -1, best = Infinity, mid = (cur.a + cur.b) / 2;
       for (var i = 0; i < list.length; i++) {
         var g = list[i].gap;
-        var same = g.path === cur.path && !!g.extend === !!cur.extend && (g.extend ? g.extend === cur.extend : g.index === cur.index);
+        var same = g.path === cur.path && !!g.extend === !!cur.extend
+                   && (g.extend ? g.extend === cur.extend
+                                : (g.index === cur.index && (g.attach || null) === (cur.attach || null)));
         var d = Math.abs(list[i].x - mid);
         if (same && d < best) { idx = i; best = d; }
       }
