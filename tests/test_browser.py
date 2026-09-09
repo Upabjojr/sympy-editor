@@ -826,13 +826,18 @@ def test_edge_of_a_matrix_entry_extends_it(browser, serve_expr):
     r = _rect(page, zpath)
     page.mouse.click((r["l"] + r["r"]) / 2, r["y"])       # the middle of a glyph still selects it
     assert page.locator(".se-status").inner_text() == "Symbol: z" and page.locator(".se-caret").count() == 0
-    # ↓ on an atom gives a caret after it and lifts the selection entirely; ↑ from a caret selects that atom first
+    # ↓ on an atom gives a caret after it and lifts the selection entirely
     page.keyboard.press("ArrowDown")
     assert page.locator(".se-caret").count() == 1 and page.locator(".se-selected").count() == 0
     assert page.locator(".se-box-select").count() == 0 and page.locator(".se-source mark").count() == 0
     assert not page.locator(".se-actions").is_visible()
+    # ↑ inside a matrix is a row up (the caret is in the bottom row here), and
+    # the row above having none, the next ↑ selects what the caret is beside -
+    # the way out of a grid, and what ↑ does at a caret everywhere else
     page.keyboard.press("ArrowUp")
-    assert page.locator(".se-status").inner_text() == "Symbol: z"
+    assert page.locator(".se-status").inner_text().startswith("Type after Symbol x")
+    page.keyboard.press("ArrowUp")
+    assert page.locator(".se-status").inner_text() == "Symbol: x"
     assert page.errors == []
 
 
@@ -3931,4 +3936,63 @@ def test_matrix_rows_columns_and_the_resize_grip(browser, serve_expr):
     page.mouse.up()
     page.wait_for_timeout(150)
     assert page.locator(".sympy-editor").get_attribute("data-seq") == seq
+    assert page.errors == []
+
+
+def test_arrows_move_through_a_matrix_as_it_is_drawn(browser, serve_expr):
+    """In a grid the four arrows are directional: the entries of a matrix are
+    a flat list of siblings (paths /2/0.. in reading order), so ← → used to
+    wrap from the end of a row to the start of the next and ↑ ↓ walked the
+    tree instead of the rows.  They follow the drawing now, for the
+    selection and for the caret alike."""
+    from sympy import Matrix
+    srv, doc = serve_expr(Matrix([[1, 2, 3], [4, 5, 6]]))
+    page = _open(browser, srv.url)
+    nodes = doc.snapshot()["nodes"]
+    at = lambda v: next(k for k, n in nodes.items() if n["src"] == v)
+    here = lambda: nodes[page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.selected")]["src"]
+    _select(page, at("1"))
+    for key, expect in [("ArrowRight", "2"), ("ArrowRight", "3"), ("ArrowDown", "6"),
+                        ("ArrowLeft", "5"), ("ArrowLeft", "4"), ("ArrowUp", "1")]:
+        page.keyboard.press(key)
+        page.wait_for_function("document.querySelector('.se-selected[data-path]') && document.querySelector('.se-status').textContent.endsWith(%r)" % expect)
+        assert here() == expect, key
+    # the edges: ← at the first cell has nowhere to go inside the grid, and ↑
+    # at the top row hands over to the tree - the matrix itself
+    page.keyboard.press("ArrowUp")
+    page.wait_for_function("document.querySelector('.sympy-editor').__sympyEditor.selected === '/'")
+    assert page.locator(".se-status").inner_text().endswith("Matrix([[1, 2, 3], [4, 5, 6]])")
+    # the caret moves the same way: ← → along the row, ↑ ↓ between rows
+    _select(page, at("5"))
+    page.keyboard.press("ArrowDown")                                  # the bottom row: a caret beside the cell
+    page.wait_for_selector(".se-caret")
+    caret = lambda: page.evaluate("(() => { const c = document.querySelector('.sympy-editor').__sympyEditor.caret; return c && c.path + ':' + (c.extend || c.index); })()")
+    assert caret() and caret().startswith(at("5"))
+    page.keyboard.press("ArrowUp")                                    # the row above, not out of the grid
+    page.wait_for_function("document.querySelector('.se-status').textContent.includes('Symbol') || document.querySelector('.se-caret')")
+    assert caret().startswith(at("2")) and page.locator(".se-selected").count() == 0
+    page.keyboard.press("ArrowRight")
+    assert caret().startswith(at("2")) or caret().startswith(at("3"))  # along the row, never down to the next
+    assert page.errors == []
+
+
+def test_arrows_cross_the_blocks_of_an_n_dim_array(browser, serve_expr):
+    """A rank-3 array is drawn as a row of matrices, a rank-4 one as a matrix
+    of matrices: the same rule serves every rank, because it follows what is
+    drawn - → at the right edge of a block enters the next block on the same
+    visual row, ↓ stays inside the block."""
+    from sympy import Array
+    srv, doc = serve_expr(Array([[[1, 2], [3, 4]], [[5, 6], [7, 8]]]))
+    page = _open(browser, srv.url)
+    nodes = doc.snapshot()["nodes"]
+    at = lambda v: next(k for k, n in nodes.items() if n["src"] == v)
+    here = lambda: nodes[page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.selected")]["src"]
+    _select(page, at("1"))
+    # [1 2; 3 4] [5 6; 7 8]: the rows on screen are "1 2 5 6" and "3 4 7 8"
+    for key, expect in [("ArrowRight", "2"), ("ArrowRight", "5"), ("ArrowRight", "6"),
+                        ("ArrowDown", "8"), ("ArrowLeft", "7"), ("ArrowLeft", "4"), ("ArrowUp", "2")]:
+        page.keyboard.press(key)
+        page.wait_for_function("document.querySelector('.se-status').textContent.endsWith(%r)" % expect)
+        assert here() == expect, key
+    assert page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.nodes['/'].array") == {"shape": [2, 2, 2]}
     assert page.errors == []

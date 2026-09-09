@@ -235,6 +235,24 @@ Two conventions between printer, document and front end:
   empty slots) is the Python API's, `reshape` (`Matrix.reshape`, reading
   order, the product must match) is the grip's - a drag that silently
   dropped entries off the bottom of a matrix is the thing this avoids.
+- **Moving through a grid.**  The entries of an explicit matrix and of an
+  explicit `NDimArray` are one flat list of siblings (`/2/0`, `/2/1`... in
+  reading order: the `Tuple` that holds them is transparent), so nothing in
+  the paths says where a cell is drawn - `←/→` used to wrap from the end of
+  a row to the start of the next and `↑/↓` walked the tree.  Inside such a
+  node the four arrows are *geometric* instead: `_gridOf(path)` (the parent
+  carries `matrix: {rows, cols}` or `array: {shape}` in the snapshot) gives
+  the cells, `_gridNeighbour` picks the nearest one that lies that way *and*
+  shares the band across it (the same drawn row for `←/→`, the same column
+  for `↑/↓`), `_gridMove` moves the selection and `_gridCaretMove` the caret
+  (over `_caretPositions()` restricted to the grid).  Nothing is special
+  about a rank: a rank-3 array is drawn as a row of matrices, so the same
+  rule crosses its blocks.  At the edge of the grid each key falls back to
+  what it did before - `↑` in the top row selects the matrix, `←/→` step out
+  of it, so every cell stays reachable and the way out is unchanged.  The
+  keys and the toolbar/action-bar arrows go through the same `command()`
+  cases, and `_updateToolbar` asks `_gridTarget`/`_gridCaretTarget` (dry
+  runs) so a button is live exactly when the move exists.
 - **Loading overlay.**  Backend progress messages go through
   `Editor._report`: texts mentioning loading/waiting show `.se-loading` (a
   blocking spinner overlay, keys and clicks ignored) until the message

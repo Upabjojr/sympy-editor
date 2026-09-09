@@ -22,6 +22,7 @@ from sympy.core.function import AppliedUndef
 from sympy.core.symbol import Str
 from sympy.matrices.expressions import MatrixExpr
 from sympy.matrices import MatrixBase
+from sympy.tensor.array import NDimArray
 from sympy.parsing.sympy_parser import (
     convert_xor,
     implicit_multiplication_application,
@@ -1628,6 +1629,12 @@ class Document:
             # an explicit matrix: the front end offers its row/column tools and
             # the corner handle that resizes it (see edit_matrix)
             info["matrix"] = {"rows": int(node.rows), "cols": int(node.cols)}
+        elif isinstance(node, NDimArray):
+            # An explicit array: its entries are one flat list of arguments,
+            # as a matrix's are, and the printer lays them out in two
+            # dimensions (a rank-3 array is a row of matrices).  The shape
+            # says how; the front end moves through them by what is drawn.
+            info["array"] = {"shape": [int(d) for d in node.shape]}
         # What unwrap could keep, when there is more than one candidate: the
         # front end asks which argument to leave instead of picking for the user.
         choices = self._keep_candidates(node)
