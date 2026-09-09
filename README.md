@@ -103,14 +103,14 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | Keep only the selection (it becomes the whole expression) | **Isolate** | Ctrl+Shift+I |
 | Moving in a matrix or an array | ← → ↑ ↓ | directional, as it is drawn: along the row, between the rows, for the selection and the caret alike (an array of any rank too - a rank-3 one is a row of matrices, and → crosses into the next block). At the edge the usual meaning takes over: ↑ in the top row selects the matrix itself |
 | Rows and columns of a matrix | in a matrix (the matrix, or anything in an entry) the action bar has **+ row** / **+ col** (a new row / column of empty slots after the selected one; after the last for the matrix itself) and **− row** / **− col** (the selected one removed); the **grip** at the matrix's bottom-right corner *reshapes* it when dragged - the same entries laid out another way, so it snaps to the shapes that hold them all (12 entries: 1×12, 2×6, 3×4, 4×3, 6×2, 12×1), nothing added or lost | `Document.insert_row/insert_col/delete_row/delete_col(path)`, `reshape_matrix(path, rows, cols)`, `resize_matrix(...)` (grows and truncates), `{"action": "matrix", "op", "rows", "cols"}` |
-| Transform the selection | pick an operation in the **Transform ▾** menu (general) or the type menu ("Matrix ▾", "Array ▾"...): it applies at once, or asks for what it needs first (the array tools want their axes) | |
+| Transform the selection | pick an operation in the **Transform ▾** menu (general) or the type menu ("Matrix ▾", "Array ▾"...) - the first group of the last toolbar row, both lists chosen by `options={"actions": ...}`: it applies at once, or asks for what it needs first (the array tools want their axes) | |
 | Matrix ↔ array | "Matrix ▾ → As array"; "Array ▾ → As matrix (rank 2)" — a `MatrixSymbol` becomes an `ArraySymbol` (entries stay implicit), an explicit matrix an explicit array | |
 | Array tools | "Array ▾" (for explicit arrays *and* array symbols): permute axes `(1, 0)`, contract axes `(0, 1)`, diagonal over axes, reshape, rank, explicit entries | |
 | Reshape | "Matrix ▾" / "Array ▾" → Reshape… — a matrix reshaped to a rank other than 2 becomes an array | |
 | Derive by array | **Transform ▾** → Derive by array… — by `x` or `[x, y]`, for an expression (its gradient), a matrix or an array, symbolic or explicit | |
 | Copy / cut / paste a part | **Copy** / **Paste** (toolbar or action bar) | Ctrl+C / Ctrl+X copy the selection's SymPy source; Ctrl+V pastes over a selection or at a caret |
-| Apply any SymPy function | the **function box** in the toolbar: type to search SymPy's functions, pick one; a function that needs parameters asks for them (symbol parameters offer the selection's free symbols — `solve` on `sin(x)cos(y)` asks x or y); `diff(x)`, `.T`, `det()` typed in full apply as written | |
-| Call a method of the selection's class | the **Methods** menu lists the public methods and properties of the selected object's class (of the whole expression when nothing is selected) — `.det()`, `.T`, `.rref()` on a matrix, `.diff()`, `.as_poly()` on an expression; picking one calls it, and a method that needs parameters asks for them.  A `Lambda` is itself a function: its menu starts with **( ) apply**, which asks for the arguments and evaluates it there (`(3)` in the function box does the same) | |
+| Apply any SymPy function | the **function box** in the toolbar (the library group, beside Methods): it lists every function of SymPy, type to narrow the list, pick one; a function that needs parameters asks for them (symbol parameters offer the selection's free symbols — `solve` on `sin(x)cos(y)` asks x or y); `diff(x)`, `.T`, `det()` typed in full apply as written | |
+| Call a method of the selection's class | the **Methods** menu (the library group) lists every public method and property of the selected object's class (of the whole expression when nothing is selected) — `.det()`, `.T`, `.rref()` on a matrix, `.diff()`, `.as_poly()` on an expression; picking one calls it, and a method that needs parameters asks for them.  A `Lambda` is itself a function: its menu starts with **( ) apply**, which asks for the arguments and evaluates it there (`(3)` in the function box does the same) | |
 | Undo / redo | ↺ / ↻ | Ctrl+Z / Ctrl+Shift+Z |
 | Zoom the formula | **−** / **100%** (reset) / **+**, Ctrl+mouse wheel, pinch with two fingers | Ctrl+plus / Ctrl+minus / Ctrl+0 |
 | Scroll a formula wider (or, in full screen, taller) than the view | the arrow strips along the edges it runs past (each scrolls a screen and goes once that end is in sight), the scrollbar, the mouse wheel over the formula, a drag on its empty space; on a phone one finger dragged anywhere across it, or two fingers moving together | |
@@ -180,14 +180,36 @@ scalar context can still be a 3×3 matrix symbol — and from Python the same is
 `edit(expr, symbols=[MatrixSymbol("C", 3, 3)])` or
 `w.document.declare("C", "MatrixSymbol", 3, 3)`.
 
-The **Transform ▾** menu holds the general ops (simplify, expand, factor,
-...) and applies one as soon as it is picked.  Operations specific to the selection's *type* appear in a
-separate highlighted **type menu** next to it, labelled with the type
+The last row of the toolbar holds what can be applied, in two groups boxed
+apart.  The four menus in them are one kind of control: a box that lists
+everything it offers when it takes the focus, narrows the list as you type,
+and picks with ↑/↓ + Enter or a click.
+
+The first group is the **actions**.  The **Transform ▾** menu holds the
+general ops (simplify, expand, factor, ...) and applies one as soon as it is
+picked.  Operations specific to the selection's *type* appear in the
+**type menu** next to it, labelled with the type
 ("Matrix ▾", "Integral ▾", "Equation ▾"...), and apply as soon as you pick
 one: transpose / inverse / trace / determinant / `as_explicit` for matrices,
 evaluate / numeric value / expand or simplify the function inside for
 integrals, sums, derivatives and limits, swap sides / move everything to the
 left / simplify or expand both sides for equations, `tomatrix` for arrays.
+Both lists are yours to choose: `options={"actions": {...}}` names, per
+menu, the ops to offer and their order - `"expr"` for Transform, a kind
+(`"matrix"`, `"integral"`, `"relational"`...) for the type menu of
+selections of that kind; an entry is an op's name, or `{"name": ...,
+"label": ...}` to relabel it; a key left out keeps every registered op:
+
+```python
+edit(expr, options={"actions": {
+    "expr": ["simplify", "expand", {"name": "factor", "label": "Factorise"}],
+    "matrix": ["transpose", "determinant", "inverse"],
+}})
+```
+
+The second group is the **library**, which is never trimmed: the
+**Methods ▾** menu lists every public method and property of the selected
+object's class, and the **function box** every function of SymPy.
 
 Matrices (dense and sparse), `MatrixSymbol` expressions, block matrices,
 determinants/traces and N-dimensional `Array`s are supported: every entry is

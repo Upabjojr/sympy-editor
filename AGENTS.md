@@ -41,7 +41,11 @@ src/sympy_editor/
                 kinds of a node, most specific first.  An op registered with
                 kinds= appears in the front end's *type menu* (labelled with
                 the most specific kind) for selections of those kinds; ops
-                without kinds are in the general dropdown.
+                without kinds are in the general (Transform) menu.  The
+                front-end option `actions` ({expr: [...], <kind>: [...]},
+                names or {name, label}) chooses and orders what each of the
+                two menus offers (`_chosenActions`); a key left out keeps
+                every registered op.
   html.py       Standalone HTML (full page or fragment) with the `pyodide`,
                 `http` or `readonly` backend; embeds the core modules for Pyodide.
   server.py     Stdlib http.server backend: serve(expr) -> edited expr.
@@ -207,11 +211,28 @@ Two conventions between printer, document and front end:
   per document (`Document._methods_sent`) - piggybacked so that no extra
   request ever races an edit (`Editor.send` drops messages while busy).
   The front end accumulates them (`_methodsCache` by type name) and
-  `_fillMethods` (from `_fillOps`) fills the `.se-methods` select for the
-  selection - the root when nothing is selected.  Picking an entry goes
-  through the function-box flow: `_pickFn("." + name)` - signature,
-  parameter form when required, then `call` (the per-type signature is
-  never reused across types).  `{"action": "methods", "path"}` returns a
+  `_fillMethods` (from `_fillOps`) fills the `.se-methods` picker for the
+  selection - the root when nothing is selected - with every entry, never
+  trimmed.  Picking an entry goes
+  through the function-box flow: `_pickFn("." + name, anchor)` - signature,
+  parameter form when required (placed under `anchor`, the menu it came
+  from: `_formAnchor`), then `call` (the per-type signature is
+  never reused across types).
+- **One picker for the four menus.**  `Picker(root, opts)` is the control
+  behind Transform (`.se-ops`), the type menu (`.se-typemenu`), Methods
+  (`.se-methods`) and the function box (`.se-fn`): a text `input.se-pick`
+  (`role=combobox`) with a floating `.se-pick-menu[data-for=<class>]` on the
+  root that lists every item on focus and narrows as one types (exact names,
+  then prefixes, then substrings; ↑/↓, Enter, Esc, click).  `setItems([{value,
+  label, doc}])`, `open()`, `close()`, `pick(value)` → `opts.onPick`; the
+  function box adds `onFocus` (the caret to insert at, loading the list),
+  `onTyped` (a text with parentheses is called as written) and `freeText`.
+  The row sits in two boxed groups (`.se-group-actions`: Transform + type
+  menu; `.se-group-library`: Methods + the function box) inside the wide
+  "apply" block, the unevaluated toggle after them.  `Editor.opsSelect`,
+  `typeMenu`, `methodsMenu` and `fnInput` are the pickers' inputs, so
+  `_updateToolbar` and the tests keep their names; `setActions(spec)`
+  changes `options.actions` live.  `{"action": "methods", "path"}` returns a
   snapshot with the target's list included regardless.
 - **Matrix rows, columns and shape.**  `Document.edit_matrix(path, op,
   rows, cols)` (`insert_row`, `insert_col`, `delete_row`, `delete_col`,
@@ -566,7 +587,8 @@ Two conventions between printer, document and front end:
 - **Touch sizes.**  The `any-pointer: coarse` rule lists every control that
   grows for a finger.  A control added later and left out of that list stays
   12px beside its 14px neighbours - which is exactly what happened to the
-  type and Methods menus.  Add new controls to it.
+  type and Methods menus (the four pickers are covered as `.se-pick`).  Add
+  new controls to it.
 - **Printers that reach past `_print`.**  Annotation happens in
   `_AnnotatingMixin._print`, so a `_print_*` that formats a child without
   going through `self._print` leaves that node out of the view tree and
@@ -666,7 +688,7 @@ Two conventions between printer, document and front end:
   container's width nor move the tools, either of which moves the formula
   under the pointer between two clicks.  The tools sit in `.se-tools` in three logical rows -
   session/timeline + zoom, selection navigation + edits + clipboard, and
-  the transform menus + function box - forced by `.se-break` spans
+  the two groups of pickers (actions, library) + the toggle - forced by `.se-break` spans
   (`flex-basis: 100%`), with `.se-sep` rules between the blocks of a row;
   each row still wraps onto more lines when narrow, and the status line sits
   under them at every width; `.se-actions` wraps too (`max-width: calc(100% - 8px)`), so no
