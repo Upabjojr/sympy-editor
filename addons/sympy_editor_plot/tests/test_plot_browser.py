@@ -71,19 +71,25 @@ def test_fields_values_zoom_and_guide():
         page.wait_for_function("document.querySelector('.se-addon-plot .plot-bar .plot-num').value === '0'")
         assert page.locator(".se-addon-plot .plot-bar .plot-num").nth(1).input_value() == "1"
         page.wait_for_function("document.querySelector('.plot-shown').textContent === 'visible range: 0 … 1'")
-        # the gestures a person uses: a box dragged in the picture, and the wheel
+        # the gestures a person uses: a drag moves the picture, the wheel zooms
         box = page.locator(".plot-area .nsewdrag").first.bounding_box()
-        x0, x1, ym = box["x"] + box["width"] * 0.3, box["x"] + box["width"] * 0.6, box["y"] + box["height"] * 0.5
-        page.mouse.move(x0, ym); page.mouse.down(); page.mouse.move(x0 + 5, ym + 5); page.mouse.move(x1, ym + 40, steps=8); page.mouse.up()
+        x0, ym = box["x"] + box["width"] * 0.5, box["y"] + box["height"] * 0.5
+        span = page.evaluate("() => { const ax = document.querySelector('.plot-area')._fullLayout.xaxis; return [ax._length, ax.range[1] - ax.range[0]]; }")
+        by = box["width"] * 0.2
+        page.mouse.move(x0, ym); page.mouse.down(); page.mouse.move(x0 - by, ym, steps=10); page.mouse.up()
+        # pushed left by that many pixels, and the picture goes with it: the
+        # left end moves right by exactly what those pixels are worth
+        want = by / span[0] * span[1]
         near = "(() => { const v = parseFloat(document.querySelector('.se-addon-plot .plot-bar .plot-num').value); return Math.abs(v - %s) < 0.06; })()"
-        page.wait_for_function(near % 0.3)                                    # the box's left edge, 30% of [0, 1]
+        page.wait_for_function(near % round(want, 4))
+        assert page.locator(".plot-shown").inner_text().startswith("visible range:")
         shown = page.locator(".plot-shown").inner_text()
-        assert shown.startswith("visible range: 0.2") or shown.startswith("visible range: 0.3")
+        wide = page.evaluate("() => { const r = document.querySelector('.plot-area')._fullLayout.xaxis.range; return r[1] - r[0]; }")
         page.mouse.move(box["x"] + box["width"] * 0.5, ym)
         for _ in range(3):                                                     # three notches: zooms in around the pointer
             page.mouse.wheel(0, -120)
             page.wait_for_timeout(200)
-        page.wait_for_function("parseFloat(document.querySelector('.se-addon-plot .plot-bar .plot-num').value) > 0.31")
+        page.wait_for_function("(w) => { const r = document.querySelector('.plot-area')._fullLayout.xaxis.range; return (r[1] - r[0]) < w * 0.9; }", arg=wide)
         assert page.locator(".plot-shown").inner_text() != shown
         page.mouse.dblclick(x0, ym)                                            # back to the whole span
         page.wait_for_function("document.querySelector('.plot-shown').textContent === 'visible range: -6 … 6'")
@@ -95,10 +101,10 @@ def test_fields_values_zoom_and_guide():
         page.wait_for_selector(".plot-area svg.main-svg", timeout=30000)
         page.wait_for_function("document.querySelector('.plot-area')._seRelayout === true")
         box = page.locator(".plot-area .nsewdrag").first.bounding_box()
-        x0, x1, ym = box["x"] + box["width"] * 0.3, box["x"] + box["width"] * 0.6, box["y"] + box["height"] * 0.5
-        page.mouse.move(x0, ym); page.mouse.down(); page.mouse.move(x0 + 5, ym + 5); page.mouse.move(x1, ym + 40, steps=8); page.mouse.up()
+        x0, ym = box["x"] + box["width"] * 0.5, box["y"] + box["height"] * 0.5
+        page.mouse.move(x0, ym); page.mouse.down(); page.mouse.move(x0 - box["width"] * 0.25, ym, steps=10); page.mouse.up()
         page.wait_for_function("document.querySelector('.plot-shown').textContent !== 'visible range: -6 … 6'")
-        assert page.locator(".se-addon-plot .plot-bar .plot-num").first.input_value().startswith("-2.")
+        assert float(page.locator(".se-addon-plot .plot-bar .plot-num").first.input_value()) > -6
         # the guide
         page.locator(".se-addon-plot .se-addon-help").click()
         assert "zoom" in page.locator(".se-help-view").inner_text().lower()
@@ -129,8 +135,9 @@ def test_two_fingers_pinch_the_axis():
             page.goto(srv.url)
             page.wait_for_selector(".se-addon-plot .plot-area", timeout=30000)
             page.wait_for_function("() => { const a = document.querySelector('.plot-area'); return a && a._fullLayout; }", timeout=60000)
-            # one finger still scrolls the page; the pinch is the panel's
-            assert page.evaluate("() => getComputedStyle(document.querySelector('.plot-area')).touchAction") == "pan-y"
+            # every gesture on the picture is the panel's: nothing is left for
+            # the browser to scroll or magnify over it
+            assert page.evaluate("() => getComputedStyle(document.querySelector('.plot-area')).touchAction") == "none"
 
             cdp = ctx.new_cdp_session(page)
             box = page.locator(".plot-area").bounding_box()
@@ -157,11 +164,15 @@ def test_two_fingers_pinch_the_axis():
                 cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
                 page.wait_for_timeout(1200)
 
-            wide, held = span(), at_hold()
-            pinch(30, 110)                               # fingers apart: a closer look
+            height = lambda: page.evaluate("() => { const r = document.querySelector('.plot-area')._fullLayout.yaxis.range; return r[1] - r[0]; }")
+            wide, held, tall = span(), at_hold(), height()
+            pinch(30, 110)                               # apart, sideways: a closer look along the axis
             close = span()
             assert close < wide * 0.6, (wide, close)
             assert abs(at_hold() - held) < close * 0.06, (held, at_hold())   # what was held stayed put
+            # fingers that barely separate up the screen say nothing about the
+            # height, so a sideways pinch leaves it alone
+            assert abs(height() - tall) < tall * 0.2, (tall, height())
             # the fields and the label follow the pinch, as they do a wheel zoom
             assert abs(float(page.locator(".se-addon-plot .plot-bar .plot-num").first.input_value())
                        - page.evaluate("() => document.querySelector('.plot-area')._fullLayout.xaxis.range[0]")) < 0.2
@@ -179,9 +190,8 @@ def test_two_fingers_pinch_the_axis():
 
 def test_one_finger_drags_the_plot_along():
     """A finger on a picture is expected to push it along; Plotly would draw
-    a zoom box instead.  Sideways is the panel's - the span moves with the
-    finger, at the same width - and up or down is left to the browser, which
-    scrolls the page as it does everywhere else."""
+    a zoom box instead.  Both directions move it, at the size it has: the
+    span sideways, the height up and down."""
     doc = Document(sin(x), addons=[ADDON])
     srv = EditorServer(doc, port=0)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -212,17 +222,63 @@ def test_one_finger_drags_the_plot_along():
                 cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
                 page.wait_for_timeout(1400)
 
-            start = rng()
-            wide = start[1] - start[0]
+            yrng = lambda: page.evaluate("() => document.querySelector('.plot-area')._fullLayout.yaxis.range.slice()")
+            start, ystart = rng(), yrng()
+            wide, tall = start[1] - start[0], ystart[1] - ystart[0]
             swipe(-110, 0)                            # push the picture left: further along the axis
             moved = rng()
             assert moved[0] > start[0] + wide * 0.15, (start, moved)
             assert abs((moved[1] - moved[0]) - wide) < wide * 0.02, (start, moved)   # scrolled, not zoomed
             swipe(110, 0)
             assert abs(rng()[0] - start[0]) < wide * 0.1, (start, rng())             # and back
-            here = rng()
-            swipe(0, -160)                            # straight down: the page's gesture
-            assert abs(rng()[0] - here[0]) < wide * 0.05, (here, rng())
+            # up and down moves the picture too: pushed up, what was below it
+            # comes into view, which is lower down the axis
+            here = yrng()
+            swipe(0, -90)
+            after = yrng()
+            assert after[0] < here[0] - tall * 0.05, (here, after)
+            assert abs((after[1] - after[0]) - tall) < tall * 0.03, (here, after)    # moved, not zoomed
+            assert errors == []
+            browser.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_a_trackpad_pinch_zooms_both_axes():
+    """A pinch on a laptop's trackpad reaches the page as a wheel event with
+    ctrlKey set - that is how the browser reports it, and how it would zoom
+    the page if nobody took it.  Plotly's wheel zoom wants a plain wheel and
+    ignores it, so the panel takes it and zooms both axes about the pointer."""
+    doc = Document(sin(x), addons=[ADDON])
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with playwright.sync_playwright() as p:
+            browser = p.chromium.launch()
+            page = browser.new_page()
+            errors = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.goto(srv.url)
+            page.wait_for_selector(".se-addon-plot .plot-area", timeout=30000)
+            page.wait_for_function("() => { const a = document.querySelector('.plot-area'); return a && a._fullLayout; }", timeout=60000)
+            axis = lambda name: page.evaluate("(n) => { const r = document.querySelector('.plot-area')._fullLayout[n].range; return r[1] - r[0]; }", name)
+
+            def trackpad(delta, times=4):
+                page.evaluate("""([dy, n]) => { const el = document.querySelector('.plot-area');
+                    const r = el.getBoundingClientRect();
+                    for (let i = 0; i < n; i++) el.dispatchEvent(new WheelEvent('wheel',
+                        {deltaY: dy, deltaMode: 0, ctrlKey: true, bubbles: true, cancelable: true,
+                         clientX: r.left + r.width / 2, clientY: r.top + r.height / 2})); }""", [delta, times])
+                page.wait_for_timeout(1200)
+
+            wide, tall = axis("xaxis"), axis("yaxis")
+            trackpad(-120)                                   # towards you: a closer look
+            assert axis("xaxis") < wide * 0.85, (wide, axis("xaxis"))
+            assert axis("yaxis") < tall * 0.85, (tall, axis("yaxis"))
+            close = axis("xaxis")
+            trackpad(120)                                    # and back out
+            assert axis("xaxis") > close * 1.15, (close, axis("xaxis"))
             assert errors == []
             browser.close()
     finally:
