@@ -45,6 +45,9 @@ Windows equivalents) when neither `ANDROID_HOME` nor `local.properties` is set.
 
 ```bash
 python mobile/build.py android            # debug APK, signed with the debug key: install with adb
+                                          #   (it is org.sympy.editor.debug, "SymPy editor (debug)" on the
+                                          #    launcher, so it sits beside an installed release instead of
+                                          #    refusing to update it - their signatures differ)
 python mobile/build.py android --release  # release APK + AAB (for Google Play)
 ```
 

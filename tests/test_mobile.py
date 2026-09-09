@@ -456,3 +456,22 @@ def test_the_android_app_installs_what_the_addons_require():
     gradle = (ROOT / "mobile" / "android" / "app" / "build.gradle.kts").read_text(encoding="utf-8")
     for req in build.addon_requirements():
         assert f'install("{req}")' in gradle, req
+
+
+def test_a_debug_build_is_its_own_application():
+    """A debug APK is signed with the debug key, which no release is, and
+    Android refuses to update an app with a differently signed one: sharing
+    the application id would mean uninstalling the store app - and its
+    sessions with it - to try a build.  The debug build is its own
+    application instead, named apart on the launcher, and the FileProvider's
+    authority follows the id so the two never collide."""
+    gradle = (ROOT / "mobile" / "android" / "app" / "build.gradle.kts").read_text(encoding="utf-8")
+    manifest = (ROOT / "mobile" / "android" / "app" / "src" / "main" / "AndroidManifest.xml").read_text(encoding="utf-8")
+    assert 'applicationId = "org.sympy.editor"' in gradle
+    assert 'applicationIdSuffix = ".debug"' in gradle and 'versionNameSuffix = "-debug"' in gradle
+    assert 'manifestPlaceholders["appLabel"] = "SymPy editor"' in gradle          # the release's name
+    assert 'manifestPlaceholders["appLabel"] = "SymPy editor (debug)"' in gradle  # and the debug one's
+    assert 'android:label="${appLabel}"' in manifest
+    assert 'android:authorities="${applicationId}.fileprovider"' in manifest
+    kotlin = (ROOT / "mobile/android/app/src/main/java/org/sympy/editor/MainActivity.kt").read_text(encoding="utf-8")
+    assert '"$packageName.fileprovider"' in kotlin        # the id it was installed under, not a written-out one
