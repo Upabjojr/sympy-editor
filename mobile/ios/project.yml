@@ -32,7 +32,7 @@ targets:
       path: SymPyEditor/Info.plist
       properties:
         CFBundleDisplayName: SymPy Editor
-        CFBundleShortVersionString: "0.1.0"
+        CFBundleShortVersionString: "0.1.1"
         CFBundleVersion: ${IOS_BUILD_NUMBER}
         # No cryptography of the app's own, and no OpenSSL either (see the
         # build phase): the store's export-compliance question is answered here.

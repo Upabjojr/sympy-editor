@@ -266,3 +266,37 @@ def test_the_shelf_teaches_and_shows_the_notebook_only_when_it_can(tmp_path):
     page = build.derivations_page(shot, urls=None, editor_href="editor.html").read_text(encoding="utf-8")
     assert heading in page and '<span class="phone"><img src="android-editor.png"' in page
     assert "android-history.png" not in page
+
+
+def test_the_site_opens_with_every_add_on_switched_on(tmp_path):
+    """The site is the shop window: everything the editor can do is on when it
+    opens, rather than waiting behind a menu nobody has been told about.  An
+    app builds the same bundle with them merely available, and remembers what
+    its owner leaves on, so the flag is the web site's alone."""
+    mod = _load()
+    out = mod.build(tmp_path / "dist", cdn=True)
+    index = (out / "index.html").read_text(encoding="utf-8")
+    snapshot = json.loads(re.search(r'"snapshot":\s*(\{.*?\}),\s*"options"', index, re.S).group(1)) \
+        if re.search(r'"snapshot":\s*(\{.*?\}),\s*"options"', index, re.S) else None
+    on = re.search(r'"addons":\s*(\[[^\]]*\])', index)
+    assert on, "the page says nothing about which add-ons are on"
+    names = json.loads(on.group(1))
+    assert sorted(names) == ["latex", "matching", "plot", "tree"], names
+    # and every one of them is listed as available too, so they can be switched off
+    available = re.findall(r'"name":\s*"([a-z]+)",\s*"label"', index)
+    for name in names:
+        assert name in available, (name, available)
+
+
+def test_a_bundle_leaves_the_add_ons_off_unless_asked(tmp_path):
+    """What the apps build: the add-ons are there to switch on, but the editor
+    opens without them (and the app remembers the choice from last time)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("build_www", ROOT / "mobile" / "build_www.py")
+    build_www = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(build_www)
+    out = build_www.build(tmp_path / "app", cdn=True)
+    index = (out / "index.html").read_text(encoding="utf-8")
+    on = re.search(r'"addons":\s*(\[[^\]]*\])', index)
+    assert on and json.loads(on.group(1)) == [], on.group(1) if on else "no addons key"
+    assert '"name": "plot"' in index          # ... but they are all there to be switched on
