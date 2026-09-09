@@ -165,9 +165,17 @@ Two conventions between printer, document and front end:
   Messages carry `children: [arg indices]` with `replace`/`delete`/`apply`
   (`printer.extract_range/replace_range/delete_range`); the range's source is
   built in the front end from the children's sources.  Drags use pointer
-  events (mouse, touch, pen alike); `touch-action: pan-y pinch-zoom` keeps
-  vertical scrolling and pinch-zoom on phones, and `@media (pointer: coarse)`
-  enlarges targets.
+  events (mouse, touch, pen alike): a mouse or pen drag selects at once; a
+  finger selects only after a *long press* (`_hold`, `opts.longPress` ms
+  with the finger still - `_beginHold` selects the node under it, marks the
+  drag `held`, and the drag then extends the range), because a plain
+  one-finger drag on a phone scrolls the formula (`_pan`, wherever it
+  starts) and a tap that wobbles must stay a tap.  The view's `contextmenu`
+  is prevented for touch (Android would open its menu and cancel the
+  touch), the non-passive `touchmove` listener keeps a held drag from the
+  browser, and the click after a held drag is suppressed as after a moved
+  one.  `touch-action: pan-y pinch-zoom` keeps vertical scrolling and
+  pinch-zoom on phones, and `@media (pointer: coarse)` enlarges targets.
 - **Source line.**  `AnnotatedStrPrinter` (same mixin as the LaTeX printer,
   markers instead of `\htmlData`) gives `snapshot["spans"]`: the character
   span of every node in `str(expr)` (empty if the marked output would not
@@ -226,6 +234,64 @@ Two conventions between printer, document and front end:
   `_updateToolbar` and the tests keep their names; `setActions(spec)`
   changes `options.actions` live.  `{"action": "methods", "path"}` returns a
   snapshot with the target's list included regardless.
+- **Matrix rows, columns and shape.**  `Document.edit_matrix(path, op,
+  rows, cols)` (`insert_row`, `insert_col`, `delete_row`, `delete_col`,
+  `resize`; the named wrappers `insert_row(path)`... and `resize_matrix`)
+  changes the explicit matrix at `path` *or around it*: `_enclosing_matrix`
+  walks the path's prefixes up to the first `MatrixBase` and reads the cell
+  from the rest (`/2/k` of a dense matrix is entry `divmod(k, cols)`; `/2/i`
+  of a sparse one is the i-th item of its `Dict`, whose key is the cell), so
+  a selection anywhere inside an entry names its row and column; the
+  matrix itself means the last row / column.  New entries are fresh
+  placeholders (`_fresh_placeholders`); the class is kept (`type(mat)(grid)`,
+  dense or sparse); the last row or column is never deleted.  Message:
+  `{"action": "matrix", "op", "path", "rows", "cols"}`, labelled "Matrix:
+  new row" ... in the history.  `_node_info` marks explicit matrices with
+  `matrix: {rows, cols}`; the front end's `_matrixContext()` walks the
+  selection's ancestors to the nearest such node, `_placeActions` shows the
+  `+ row / + col / − row / − col` buttons (`matrow`...) of the action bar
+  for it, and `_placeMatrixHandle` (from `_applySelection`) puts the grip
+  `.se-mat-handle` on the matrix's bottom-right corner - re-appended to the
+  view at every state, like the boxes, since the rendering is replaced.
+  Dragging the grip (its own pointer listeners stop propagation and capture
+  the pointer; `touch-action: none`) moves a `.se-mat-ghost` outline and
+  sends **`reshape`** on release: the drag rearranges the entries the matrix
+  has, it does not grow or shrink it, so the outline snaps to the shapes
+  that hold them all (`matrixShapes(rows * cols)`, the divisor pairs; the
+  nearest by the outline's size, `cellW = width / cols`).  `+ row / + col /
+  − row / − col` are what add and remove entries.  Two operations, kept
+  apart on purpose: `resize` (rows x cols as asked, top-left kept, the rest
+  empty slots) is the Python API's, `reshape` (`Matrix.reshape`, reading
+  order, the product must match) is the grip's - a drag that silently
+  dropped entries off the bottom of a matrix is the thing this avoids.
+- **Moving through a grid.**  The entries of an explicit matrix and of an
+  explicit `NDimArray` are one flat list of siblings (`/2/0`, `/2/1`... in
+  reading order: the `Tuple` that holds them is transparent), so nothing in
+  the paths says where a cell is drawn - `←/→` used to wrap from the end of
+  a row to the start of the next and `↑/↓` walked the tree.  Inside such a
+  node the four arrows are *geometric* instead: `_gridOf(path)` (the parent
+  carries `matrix: {rows, cols}` or `array: {shape}` in the snapshot) gives
+  the cells, `_gridNeighbour` picks the nearest one that lies that way *and*
+  shares the band across it (the same drawn row for `←/→`, the same column
+  for `↑/↓`), `_gridMove` moves the selection and `_gridCaretMove` the caret
+  (over `_caretPositions()` restricted to the grid).  Nothing is special
+  about a rank: a rank-3 array is drawn as a row of matrices, so the same
+  rule crosses its blocks.  At the edge of the grid each key falls back to
+  what it did before - `↑` in the top row selects the matrix, `←/→` step out
+  of it, so every cell stays reachable and the way out is unchanged.  The
+  keys and the toolbar/action-bar arrows go through the same `command()`
+  cases, and `_updateToolbar` asks `_gridTarget`/`_gridCaretTarget` (dry
+  runs) so a button is live exactly when the move exists.
+- **A drag that leaves the formula.**  `_extendDragTo(x, y)` hit-tests a
+  *clamped* point (`_leafAtPoint`, then `_nearestLeafTo` when nothing is
+  drawn there), because outside the view `elementsFromPoint` finds nothing
+  and a touch event's target stays the node the finger started on - the
+  range used to snap back to its anchor.  At the edge (a 28px margin, and
+  beyond) `_autoScrollFor` runs a `requestAnimationFrame` loop that scrolls
+  the view by a speed following the overshoot and re-extends the selection
+  over what appears, so a range reaches what was off the screen; it stops
+  when the finger comes back, when the view cannot scroll further, on
+  pointerup/cancel and in `destroy`.
 - **Loading overlay.**  Backend progress messages go through
   `Editor._report`: texts mentioning loading/waiting show `.se-loading` (a
   blocking spinner overlay, keys and clicks ignored) until the message
@@ -634,11 +700,28 @@ Two conventions between printer, document and front end:
   buttons, Ctrl+wheel, Ctrl+plus/minus/0 and a two-pointer pinch
   (`_pointers`/`_pinch`; a non-passive `touchstart` listener prevents the
   browser's own pinch when two fingers land, so `touch-action: pan-y` can
-  stay for one-finger page scrolling).  `rememberZoom` (option; on in the
+  stay for one-finger page scrolling).  The pinch also scrolls: the
+  fingers' centre drags the content along (`_pinch.cx/cy`, applied to
+  `scrollLeft`/`scrollTop` before the zoom, which is anchored at the
+  centre), so two fingers moving together pan a formula larger than the
+  view - sideways, and up and down in full screen, where the view has a
+  height of its own.  `rememberZoom` (option; on in the
   mobile bundle) keeps it in `localStorage`.  A formula wider than the view
   (`overflow-x: auto`) scrolls with a plain wheel over it (the event reaches
-  the page again at the ends) and by dragging its empty space
-  (`_pan`; a drag that starts on a glyph still selects a range).
+  the page again at the ends), by dragging its empty space with a mouse
+  (`_pan`; a mouse drag that starts on a glyph still selects a range) or
+  anywhere with a finger, and through the **edge strips**: four
+  `.se-scrollbtn` buttons in `.se-stage` (`scrollBtns`, chevrons from
+  `chevronSvg`), each `hidden` unless there is formula beyond its edge
+  (`_updateScrollArrows`, from `_applySelection` - so after every render,
+  scroll, zoom and relayout - and from the end of the change animation,
+  whose old ghost is as wide as the old formula; `_contentObserver`
+  watches the rendering's own size for the fonts arriving late, separately
+  from `_relayout`, which would hide the caret).  A press scrolls 70% of a
+  screen (`scrollByPage`, smooth unless reduced motion).  While the right
+  or the top strip shows, the stage carries `se-past-right`/`se-past-up`
+  and the full-screen button steps in from that edge - on a short view it
+  would sit right on the chevron.
 - **Caret vs selection.**  `Editor.selected` and `Editor.caret` are mutually
   exclusive (`select()` hides the caret, `_showCaret()` clears the
   selection): keys replace a selection, insert at a caret, and never delete

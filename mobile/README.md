@@ -45,6 +45,9 @@ Windows equivalents) when neither `ANDROID_HOME` nor `local.properties` is set.
 
 ```bash
 python mobile/build.py android            # debug APK, signed with the debug key: install with adb
+                                          #   (it is org.sympy.editor.debug, "SymPy editor (debug)" on the
+                                          #    launcher, so it sits beside an installed release instead of
+                                          #    refusing to update it - their signatures differ)
 python mobile/build.py android --release  # release APK + AAB (for Google Play)
 ```
 
@@ -190,9 +193,12 @@ as artifacts; with the secrets `ANDROID_KEYSTORE_BASE64` + passwords and
 
 [pas]: https://github.com/beeware/Python-Apple-support
 - Interaction on touch screens: tap to select, tap the selected node again
-  to edit it (tap a gap for a caret, again to insert), drag to select a
-  range, ↑ / *Delete* / the menus in the toolbar; the keyboard button opens the on-screen
-  keyboard for the selection, the caret or the whole expression.
+  to edit it (tap a gap for a caret, again to insert), hold a finger still on
+  a node and then drag to select a range, ↑ / *Delete* / the menus in the
+  toolbar; the keyboard button opens the on-screen keyboard for the
+  selection, the caret or the whole expression.  Two fingers zoom and scroll
+  a formula larger than the view, one finger dragged across it scrolls it
+  sideways, and the strips at its edges scroll it a screen at a time.
 
 ## The icon
 
