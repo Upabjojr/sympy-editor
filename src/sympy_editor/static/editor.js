@@ -3968,10 +3968,13 @@ var SympyEditor = (function () {
      *  finger is; the loop stops when it comes back, when the view can
      *  scroll no further, or when the drag ends. */
     _autoScrollFor(d) {
-      var r = this.view.getBoundingClientRect(), margin = 28, top = 24;
+      // A third of the overshoot per frame, up to 16px: a finger just past
+      // the edge creeps, one well past it moves about a screen a second -
+      // fast enough to cross a long formula, slow enough to stop on a term.
+      var r = this.view.getBoundingClientRect(), margin = 28, top = 16;
       var speed = function (pos, lo, hi) {
-        if (pos < lo + margin) return -Math.max(2, Math.min(top, (lo + margin - pos) / 2));
-        if (pos > hi - margin) return Math.max(2, Math.min(top, (pos - (hi - margin)) / 2));
+        if (pos < lo + margin) return -Math.max(1.5, Math.min(top, (lo + margin - pos) / 3));
+        if (pos > hi - margin) return Math.max(1.5, Math.min(top, (pos - (hi - margin)) / 3));
         return 0;
       };
       d.sx = speed(d.x, r.left, r.right);
