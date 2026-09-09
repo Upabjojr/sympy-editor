@@ -63,7 +63,7 @@ def test_service_worker_installs_and_caches(tmp_path):
             assert any(k.startswith("sympy-editor-") for k in keys), keys
             cached = page.evaluate("caches.keys().then(ks => caches.open(ks.find(k => k.startsWith('sympy-editor-'))).then(c => c.keys())).then(rs => rs.map(r => r.url))")
             assert any(u.endswith("/index.html") for u in cached) and any(u.endswith("/manifest.webmanifest") for u in cached)
-            assert page.evaluate("fetch('manifest.webmanifest').then(r => r.json()).then(m => m.name)") == "SymPy editor"
+            assert page.evaluate("fetch('manifest.webmanifest').then(r => r.json()).then(m => m.name)") == "SymPy Editor"
             browser.close()
     finally:
         httpd.shutdown()
@@ -82,7 +82,7 @@ def test_the_showcase_carries_the_shelf_and_one_copy_of_the_editor(tmp_path):
     assert page.count("SympyEditor.mountHistory(") >= 8          # one viewer per derivation
     assert page.count("var SympyEditor") <= 1                    # and one copy of the code
     assert 'href="editor.html"' in page                          # the editor is a click away
-    assert "SymPy editor" in page and "history" in page          # the project is introduced
+    assert "SymPy Editor" in page and "history" in page          # the project is introduced
     assert '"hideTitle": true' in page                           # the card names it, the report need not
     assert len(page) < 900_000, len(page)
 
@@ -118,7 +118,7 @@ def test_the_shelf_s_editor_wears_the_mark_beside_its_title(tmp_path):
     assert '<h1><span class="page-logo" aria-hidden="true"><svg' in page
     mark = (ROOT / "mobile/icon/icon.svg").read_text(encoding="utf-8").split("?>", 1)[-1].strip()
     assert mark in page                                          # the same drawing the launcher shows
-    assert page.index(mark) < page.index("SymPy editor</h1>")     # beside the title, not after it
+    assert page.index(mark) < page.index("SymPy Editor</h1>")     # beside the title, not after it
 
 
 def test_the_shelf_opens_with_an_editor_of_its_own(tmp_path):

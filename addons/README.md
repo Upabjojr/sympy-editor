@@ -62,7 +62,7 @@ entry point, the way pytest learns of its plugins.
    with the three drafts (no install needed, it reads them from the
    checkout), `python addons/demo.py --serve` runs them on the local server.
 
-4. **Switch them while editing.**  The toolbar's **Add-ons ▾** menu lists
+4. **Switch them while editing.**  The **Add-ons** section at the top of the **≡** drawer lists
    what the document can run - what it started with plus what `available=`
    named, and by default every installed add-on - with a check box each.
    Ticking one mounts its panel and tools on the spot, unticking takes them
@@ -128,7 +128,7 @@ message travels.  Add-ons keep that shape.  They do not get a second channel:
     │         None  → whatever doc.replace(...) did
     └─ handle({"action": "addons", "enable": [...], "disable": [...]})
          └─ enable()/disable(): kinds, ops, methods on or off    _syncAddons(snap): mount / unmount to match
-            snap["addons_available"] → the Add-ons ▾ menu
+            snap["addons_available"] → the Add-ons switches (≡)
 ```
 
 * **One message.**  `{"action": "addon", "addon": name, "method": m, ...}` goes

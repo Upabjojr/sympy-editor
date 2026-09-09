@@ -33,6 +33,9 @@ var SympyEditor = (function () {
     minZoom: 0.25,
     maxZoom: 4,
     rememberZoom: false, // keep the zoom in localStorage across page loads (the mobile app does)
+    actions: null,       // {expr: [op names], matrix: [...], integral: [...]...}: what the two action menus offer, in
+                         // that order (a name may be {name, label}); a key left out means every registered op
+    longPress: 450,      // ms a finger must rest on the formula before it starts a range selection (touch screens)
     previewDelay: 250,   // ms after the last keystroke in the source line before it is previewed
     workingAfter: 400,   // ms a request may take before the spinner overlay appears
     interruptAfter: 2000, // ms after which the overlay offers to interrupt the computation
@@ -124,7 +127,7 @@ var SympyEditor = (function () {
     "<section><h3>Selecting</h3><ul>",
     "<li>Click the middle of anything to select it; click the same spot again for the enclosing expression.</li>",
     "<li><kbd>\u2191</kbd> enclosing, <kbd>\u2193</kbd> inside, <kbd>\u2190</kbd>/<kbd>\u2192</kbd> siblings, <kbd>Esc</kbd> deselects (the same arrows sit in the toolbar and under the selection).</li>",
-    "<li>Drag across terms to select a range; <kbd>Shift</kbd>+<kbd>\u2190</kbd>/<kbd>\u2192</kbd> grows and shrinks it.</li>",
+    "<li>Drag across terms to select a range; <kbd>Shift</kbd>+<kbd>\u2190</kbd>/<kbd>\u2192</kbd> grows and shrinks it. Dragging to the edge of the view scrolls the formula along and keeps taking in what appears, so a range can reach what lies beyond the screen.</li>",
     "<li>The line under the tools names the selection: its type and SymPy form.</li>",
     "</ul></section>",
     "<section><h3>Editing</h3><ul>",
@@ -151,10 +154,14 @@ var SympyEditor = (function () {
     "<li>In a sum, * binds just the two terms (x + y + z \u2192 xy + z); in a product, + splits it there (x\u22c5y\u22c5z \u2192 x + yz).</li>",
     "</ul></section>",
     "<section><h3>Applying functions</h3><ul>",
-    "<li><b>Transform \u25be</b> holds the general operations; a second menu appears with operations for the selection's type (Matrix, Integral, Equation\u2026). Picking one applies it at once, to the selection or, with nothing selected, to the whole expression.</li>",
-    "<li><b>Add-ons \u25be</b> switches on or off the add-ons installed beside the editor \u2014 a panel under the formula, tools, node types from other packages \u2014 without restarting anything; what an add-on kept waits for it to come back.</li>",
+    "<li>The four menus of the last row are one kind of box: it lists everything it offers when it takes the focus, narrows the list as you type, and \u2191/\u2193 + <kbd>Enter</kbd> (or a click) pick. The first group holds the <b>actions</b>: <b>Transform \u25be</b> for the general operations, and a second menu with the operations for the selection's type (Matrix, Integral, Equation\u2026). Picking one applies it at once, to the selection or, with nothing selected, to the whole expression.</li>",
+    "<li><b>Add-ons</b>, at the top of what <b>\u2261</b> opens, switches on or off the add-ons installed beside the editor \u2014 a panel under the formula, tools, node types from other packages \u2014 without restarting anything; what an add-on kept waits for it to come back. (With the sessions drawer off there is no \u2261, and the switches keep a button of their own on the strip.)</li>",
+    "<li>In a <b>matrix</b> or an <b>array</b> the four arrows move as it is drawn: <kbd>\u2190</kbd>/<kbd>\u2192</kbd> along the row, <kbd>\u2191</kbd>/<kbd>\u2193</kbd> between the rows \u2014 for the selection and for the caret alike. At the edge the usual meaning takes over: <kbd>\u2191</kbd> in the top row selects the matrix itself (again, its own parent), <kbd>\u2190</kbd>/<kbd>\u2192</kbd> step out of it. An array of any rank works the same way, because the rule follows the drawing: a rank-3 array is a row of matrices, so <kbd>\u2192</kbd> at the right edge of one block enters the next on the same line.</li>",
+    "<li>In a <b>matrix</b> (the matrix, or anything in one of its entries) the bar under the selection adds <b>+ row</b>, <b>+ col</b>, <b>\u2212 row</b>, <b>\u2212 col</b>: a new row or column of empty slots after the selected one (after the last, for the matrix itself), or the selected one taken away. The grip at the matrix\u2019s bottom-right corner <b>reshapes</b> it: the same entries laid out another way (SymPy\u2019s reshape, in reading order), so it snaps to the shapes that hold them all \u2014 12 entries go 1\u00d712, 2\u00d76, 3\u00d74, 4\u00d73, 6\u00d72, 12\u00d71 and nowhere else. Nothing is added or lost; the outline shows the shape it will take. To grow or shrink the matrix, use + row / + col / \u2212 row / \u2212 col.</li>",
     "<li><b>Methods \u25be</b> lists everything the selected object's class can do \u2014 .det(), .T, .diff()\u2026 \u2014 one pick calls it. A Lambda is itself a function: <b>( ) apply</b> evaluates it at the arguments you give.</li>",
     "<li>The <b>function box</b> searches all of SymPy: pick a function and fill the parameters it asks for; \u201cdiff(x)\u201d, \u201c.T\u201d, \u201cdet()\u201d typed in full apply as written. A container takes the selection as its contents: <i>Matrix</i> over x + y gives the 1\u00d71 matrix holding it.</li>",
+    "<li>The second group is the <b>library</b>: <b>Methods \u25be</b> lists everything the selected object's class can do \u2014 .det(), .T, .diff()\u2026 \u2014 one pick calls it. A Lambda is itself a function: <b>( ) apply</b> evaluates it at the arguments you give.</li>",
+    "<li>The <b>function box</b> beside it holds all of SymPy: pick a function and fill the parameters it asks for; \u201cdiff(x)\u201d, \u201c.T\u201d, \u201cdet()\u201d typed in full apply as written. A container takes the selection as its contents: <i>Matrix</i> over x + y gives the 1\u00d71 matrix holding it.</li>",
     "<li><b>unevaluated</b> builds the symbolic form (Determinant, Integral, sin(0)\u2026) instead of computing it; <i>Evaluate (doit)</i> computes it later.</li>",
     "<li>The <b>Symbols</b> panel under the formula declares new names and changes what a name stands for (symbol, function, matrix, assumptions).</li>",
     "</ul></section>",
@@ -167,7 +174,8 @@ var SympyEditor = (function () {
     "<section><h3>On a phone or tablet</h3><ul>",
     "<li>Tap to select; tap the selected node again to edit it.</li>",
     "<li>Tap a gap for a caret, tap the caret again to insert; tap an operator for its palette.</li>",
-    "<li>Drag to select a range; two fingers zoom; the <b>keyboard</b> button opens the keyboard for the selection.</li>",
+    "<li>Hold a finger still on a node to start a range, then drag over its neighbours; the <b>keyboard</b> button opens the keyboard for the selection.</li>",
+    "<li>Two fingers zoom the formula and, when it is wider or taller than the view, scroll it; one finger dragged across it scrolls it sideways. The arrows at the edges scroll a screen at a time and go away once the end is in sight.</li>",
     "</ul></section>",
     "<section><h3>Zoom and full screen</h3><ul>",
     "<li><kbd>Ctrl</kbd>+wheel, <kbd>Ctrl</kbd>+<kbd>+</kbd>/<kbd>\u2212</kbd>/<kbd>0</kbd>, pinch, or the \u2212/100%/+ buttons.</li>",
@@ -466,6 +474,16 @@ var SympyEditor = (function () {
       'stroke-linecap="round" stroke-linejoin="round"><path d="M8 13.2V3.2"/><path d="M3.9 7.3 8 3.2l4.1 4.1"/></g></svg>';
   }
 
+  /** A chevron for the strips at the edges of a formula that runs past the
+   *  view: a tall, flat arrow with nothing but the direction to it.  Drawn
+   *  for the reason the arrows are. */
+  function chevronSvg(dir) {
+    var deg = { up: 0, right: 90, down: 180, left: 270 }[dir];
+    return '<svg class="se-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
+      '<path transform="rotate(' + deg + ' 8 8)" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+      'stroke-linecap="round" stroke-linejoin="round" d="M3.5 10.2 8 5.7l4.5 4.5"/></svg>';
+  }
+
   /** A keyboard: a case, three keys and a space bar.  Drawn, not typed,
    *  for the reason the arrows are - iOS has no glyph for \u2328 (nor for
    *  \u21b6, \u21b7 or \u2630, which is why the buttons around it settled on
@@ -512,6 +530,16 @@ var SympyEditor = (function () {
    *  ancestor: one tinted box per changed region, over the node's whole
    *  visual extent, instead of an inline background per level (which paints
    *  the line box only - a fraction or matrix is then half covered). */
+  /** The shapes `n` entries can be laid out in: every pair of whole numbers
+   *  that multiplies to n, rows ascending.  A reshape rearranges the
+   *  entries it has - it never adds or drops one - so these are the only
+   *  shapes the grip may offer (SymPy's Matrix.reshape). */
+  function matrixShapes(n) {
+    var out = [];
+    for (var r = 1; r <= n; r++) if (n % r === 0) out.push([r, n / r]);
+    return out;
+  }
+
   function markBoxes(root, cls, boxCls) {
     var marked = root.querySelectorAll("." + cls);
     for (var i = 0; i < marked.length; i++) {
@@ -547,6 +575,125 @@ var SympyEditor = (function () {
     });
     return el;
   }
+
+  /** Put `panel` (absolutely positioned in `root`) under `anchor`, kept
+   *  inside the root's width. */
+  function placeUnder(root, panel, anchor) {
+    var rr = root.getBoundingClientRect(), ar = anchor.getBoundingClientRect();
+    panel.style.top = Math.round(ar.bottom - rr.top + 4) + "px";
+    panel.style.left = Math.round(Math.max(0, Math.min(ar.left - rr.left, root.clientWidth - panel.offsetWidth - 4))) + "px";
+  }
+
+  /** A pick list with a filter: the one control behind the four menus of
+   *  the apply row - the general actions, the type's own actions, the
+   *  methods of the selection's class and SymPy's functions.  A text box
+   *  that lists every value under it when it takes the focus and narrows
+   *  the list as one types (exact names first, then the ones that start
+   *  with the text, then the ones that contain it); ↑/↓ walk the list,
+   *  Enter and a click pick, Esc closes.  `opts`: `className` (the box's
+   *  own class, and `data-for` of its list), `placeholder` (the menu's
+   *  name), `title`, `onPick(value)`, and for the function box `onFocus`,
+   *  `onEscape`, `onTyped(text)` (true when the text was taken as typed)
+   *  and `freeText` (Enter on a text that matches nothing picks the text).
+   *  The list lives on `root`, floating over the page. */
+  function Picker(root, opts) {
+    var self = this;
+    this.opts = opts;
+    this.root = root;
+    this.items = [];
+    this.active = -1;
+    this.input = h("input", { class: "se-pick " + (opts.className || ""), type: "text",
+      placeholder: opts.placeholder || "", title: opts.title || "", spellcheck: "false", autocomplete: "off",
+      role: "combobox", "aria-expanded": "false", "aria-autocomplete": "list", "aria-haspopup": "listbox" });
+    this.menu = h("div", { class: "se-pick-menu", hidden: "", role: "listbox", "data-for": opts.className || "" });
+    this.input.addEventListener("focus", function () { if (opts.onFocus) opts.onFocus(); self.open(); });
+    this.input.addEventListener("click", function () { if (self.menu.hidden) self.open(); });   // a focused box clicked again reopens
+    this.input.addEventListener("input", function () { self.open(); });
+    this.input.addEventListener("blur", function () {
+      setTimeout(function () { if (document.activeElement !== self.input) self.close(); }, 150);
+    });
+    this.input.addEventListener("keydown", function (ev) {
+      ev.stopPropagation();   // the editor's keys (Delete, arrows...) are not for the formula here
+      if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+        ev.preventDefault();
+        if (self.menu.hidden) { self.open(); return; }
+        var rows = self._rows();
+        if (!rows.length) return;
+        self.active = (self.active + (ev.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length;
+        self._highlight();
+      } else if (ev.key === "Enter") {
+        ev.preventDefault();
+        var text = self.input.value.trim();
+        if (opts.onTyped && opts.onTyped(text)) { self.close(); return; }
+        var row = self.active >= 0 ? self._rows()[self.active] : null;
+        if (row) self.pick(row.getAttribute("data-name"));
+        else if (text && opts.freeText) self.pick(text);
+      } else if (ev.key === "Escape") {
+        ev.preventDefault();
+        self.input.value = "";
+        self.close();
+        if (opts.onEscape) opts.onEscape();
+      }
+    });
+    this.menu.addEventListener("mousedown", function (ev) { ev.preventDefault(); });   // the box keeps the focus
+    this.menu.addEventListener("click", function (ev) {
+      var row = ev.target.closest(".se-pick-item");
+      if (row) self.pick(row.getAttribute("data-name"));
+    });
+    root.appendChild(this.menu);
+  }
+  Picker.prototype.setItems = function (items) {
+    this.items = items || [];
+    if (!this.menu.hidden || document.activeElement === this.input) this.open();   // a list that arrives while the box has the focus shows
+  };
+  /** Show the list, narrowed to the box's text. */
+  Picker.prototype.open = function () {
+    if (this.input.disabled || this.input.hidden) return;
+    var q = this.input.value.trim().replace(/\(.*$/, "").toLowerCase();
+    var exact = [], starts = [], contains = [];
+    var keyOf = function (t) { return String(t || "").toLowerCase().replace(/^\./, ""); };
+    for (var i = 0; i < this.items.length; i++) {
+      var it = this.items[i];
+      if (!q) { starts.push(it); continue; }
+      var keys = [keyOf(it.value), keyOf(it.label)];
+      if (keys[0] === q || keys[1] === q) exact.push(it);
+      else if (keys.some(function (k) { return k.indexOf(q) === 0; })) starts.push(it);
+      else if (keys.some(function (k) { return k.indexOf(q) >= 0; })) contains.push(it);
+    }
+    var list = exact.concat(starts, contains);
+    this.menu.textContent = "";
+    for (var j = 0; j < list.length; j++) {
+      var item = list[j];
+      this.menu.appendChild(h("div", { class: "se-pick-item", role: "option", "data-name": item.value, title: item.doc || "" }, [
+        h("span", { class: "se-pick-name" }, [item.label || item.value]),
+        h("span", { class: "se-pick-doc" }, [item.doc || ""])
+      ]));
+    }
+    this.active = list.length ? 0 : -1;
+    this._highlight();
+    this.menu.hidden = !list.length;
+    this.input.setAttribute("aria-expanded", list.length ? "true" : "false");
+    if (list.length) placeUnder(this.root, this.menu, this.input);
+  };
+  Picker.prototype.close = function () {
+    this.menu.hidden = true;
+    this.input.setAttribute("aria-expanded", "false");
+  };
+  Picker.prototype.pick = function (value) {
+    this.close();
+    this.input.value = "";
+    this.opts.onPick(value);
+  };
+  Picker.prototype._rows = function () { return this.menu.querySelectorAll(".se-pick-item"); };
+  Picker.prototype._highlight = function () {
+    var rows = this._rows();
+    for (var i = 0; i < rows.length; i++) {
+      rows[i].classList.toggle("se-active", i === this.active);
+      if (i === this.active && rows[i].scrollIntoView) {
+        try { rows[i].scrollIntoView({ block: "nearest" }); } catch (e) { /* no options object */ }
+      }
+    }
+  };
 
   /* ------------------------------------------------------------------ */
   /* History viewer (no editor: any list of expressions)                 */
@@ -997,6 +1144,9 @@ var SympyEditor = (function () {
     _build() {
       var self = this;
       var o = this.opts;
+      // Settled before the strip is built: the add-ons' switches go on it only
+      // when there is no drawer to hold them (see where addonsMenu is made).
+      this._drawerWanted = !!(o.sessions && !o.readOnly);
       var root = h("div", { class: "sympy-editor" });
       this.root = root;
       this.buttons = {};
@@ -1086,30 +1236,66 @@ var SympyEditor = (function () {
       btn("copy", "Copy", "Copy the SymPy source of the selection, or of the whole expression (Ctrl+C / Ctrl+X / Ctrl+V work on selections and carets)");
       if (!o.readOnly) {
         btn("paste", "Paste", "Paste the clipboard over the selection, or at the caret (Ctrl+V)");
-        // 7. everything that can be applied, on a row of its own: the menus
-        //    on the left, the function box in the middle, the toggle right
+        // 7. everything that can be applied, on a row of its own, in two
+        //    groups boxed apart, and the toggle at the right.  The four
+        //    menus are one control (Picker): a box that lists its values
+        //    and narrows them as one types.
         block("apply").classList.add("se-block-wide");
-        // General menu: picking an operation applies it to the selection (or
-        // the whole expression) at once.
-        this.opsSelect = h("select", { class: "se-ops", title: "Transform the selection (or the whole expression)" });
-        current.appendChild(this.opsSelect);
-        // Type menu: the operations specific to the selection's type (Matrix,
-        // Integral, Equation...); picking one applies it at once.
-        this.typeMenu = h("select", { class: "se-typemenu", hidden: "", title: "Operations specific to the selected type" });
-        current.appendChild(this.typeMenu);
-        // Methods menu: what the selected object's class can do (the root
-        // expression when nothing is selected); picking one calls it, asking
-        // for parameters first when it needs any.  Each snapshot carries the
-        // lists of the types it introduces (see _fillMethods).
-        this.methodsMenu = h("select", { class: "se-methods", hidden: "",
-          title: "Methods of the selection's class (of the whole expression when nothing is selected): pick one to call it; a method with parameters asks for them" });
-        current.appendChild(this.methodsMenu);
-        // Function box: search SymPy's functions; a picked function that needs
-        // parameters asks for them (see _showFnForm).
-        this.fnInput = h("input", { class: "se-fn", type: "text", placeholder: "SymPy function… (search)",
+        // The actions: the general operations and the ones of the selection's
+        // type (Matrix, Integral, Equation...) - both lists chosen by
+        // `options.actions` (see _fillOps); picking one applies it to the
+        // selection (or the whole expression) at once.
+        var actions = h("div", { class: "se-group se-group-actions", role: "group", "aria-label": "Actions" });
+        current.appendChild(actions);
+        var backToFormula = function () { self.view.focus({ preventScroll: true }); };   // Esc in a menu
+        this.opsPicker = new Picker(root, { className: "se-ops", placeholder: "Transform \u25be",
+          title: "Transform the selection (or the whole expression): the general operations",
+          onEscape: backToFormula,
+          onPick: function (name) { self._applyOp(name, self.opsPicker.input); } });
+        actions.appendChild(this.opsPicker.input);
+        this.typePicker = new Picker(root, { className: "se-typemenu", placeholder: "Type \u25be",
+          title: "Operations specific to the selected type",
+          onEscape: backToFormula,
+          onPick: function (name) { self._applyOp(name, self.typePicker.input); } });
+        this.typePicker.input.hidden = true;
+        actions.appendChild(this.typePicker.input);
+        // The library: what the selected object's class can do (the root
+        // expression when nothing is selected) - every method, each snapshot
+        // carrying the lists of the types it introduces (see _fillMethods) -
+        // and every function of SymPy; a pick that needs parameters asks for
+        // them first (see _showFnForm).
+        var library = h("div", { class: "se-group se-group-library", role: "group", "aria-label": "Library" });
+        current.appendChild(library);
+        this.methodsPicker = new Picker(root, { className: "se-methods", placeholder: "Methods \u25be",
+          title: "Methods of the selection's class (of the whole expression when nothing is selected): pick one to call it; a method with parameters asks for them",
+          onEscape: backToFormula,
+          onPick: function (name) {
+            delete self._fnSigs["." + name];   // a method's signature depends on the type: never reuse another's
+            self._pickFn("." + name, self.methodsPicker.input);
+          } });
+        this.methodsPicker.input.hidden = true;
+        library.appendChild(this.methodsPicker.input);
+        this.fnPicker = new Picker(root, { className: "se-fn", placeholder: "SymPy function\u2026",
           title: "Apply any SymPy function or method to the selection (or the whole expression): type to search, Enter to pick; functions with parameters ask for them",
-          spellcheck: "false", autocomplete: "off" });
-        current.appendChild(this.fnInput);
+          freeText: true,
+          onFocus: function () {
+            // remember where the caret is: a function picked will be added there
+            self._fnCaret = self.caret && !self.selected && !self.range ? Object.assign({}, self.caret) : null;
+            self._loadFunctions();
+          },
+          onTyped: function (text) {
+            if (!/\(/.test(text)) return false;
+            self.callFunction(text);   // typed with arguments: as is
+            return true;
+          },
+          onEscape: function () { self._hideFnForm(); self.view.focus({ preventScroll: true }); },
+          onPick: function (name) { self._pickFn(name, self.fnPicker.input); } });
+        library.appendChild(this.fnPicker.input);
+        // The same boxes under the names the rest of the editor knows them by.
+        this.opsSelect = this.opsPicker.input;
+        this.typeMenu = this.typePicker.input;
+        this.methodsMenu = this.methodsPicker.input;
+        this.fnInput = this.fnPicker.input;
         // Unevaluated: a transformation or a function builds its symbolic
         // form (Determinant(M), Derivative(f, x)...) instead of computing.
         this.lazyBox = h("input", { type: "checkbox", class: "se-lazy-box" });
@@ -1121,22 +1307,27 @@ var SympyEditor = (function () {
                                                : "Transformations and functions compute their result");
         });
         current.appendChild(lazyLabel);
-        this.fnMenu = h("div", { class: "se-fn-menu", hidden: "", role: "listbox" });
         this.fnForm = h("div", { class: "se-fn-form", hidden: "" });
         this._fnNames = [];
         this._fnSigs = {};
-        this._fnActive = -1;
       }
       // 8. the add-ons that can be switched on or off: a menu of check boxes
       //    (shown only when the document's snapshot lists any, see _fillAddonsMenu)
       this.addonsBlock = null;
       this.addonsMenu = null;
+      this.addonsBtn = null;
       if (!o.readOnly) {
-        this.addonsBlock = h("div", { class: "se-block", "data-block": "addons", hidden: "" });
-        this.addonsBtn = h("button", { type: "button", "data-cmd": "addons", title: "Switch add-ons on or off: panels and tools from other packages" }, ["Add-ons \u25be"]);
-        this.addonsBlock.appendChild(this.addonsBtn);
-        this.tools.appendChild(this.addonsBlock);
         this.addonsMenu = h("div", { class: "se-addons-menu", hidden: "", role: "menu" });
+        // Where the switches live: at the top of the drawer the \u2261 button
+        // opens, so everything that is not about the formula itself is behind
+        // that one button.  With no drawer (sessions off) they would have
+        // nowhere to go, and keep their own button on the strip.
+        if (!this._drawerWanted) {
+          this.addonsBlock = h("div", { class: "se-block", "data-block": "addons", hidden: "" });
+          this.addonsBtn = h("button", { type: "button", "data-cmd": "addons", title: "Switch add-ons on or off: panels and tools from other packages" }, ["Add-ons \u25be"]);
+          this.addonsBlock.appendChild(this.addonsBtn);
+          this.tools.appendChild(this.addonsBlock);
+        }
       }
       this.status = h("span", { class: "se-status", "aria-live": "polite" });
       this.toolbar.appendChild(this.status);
@@ -1161,6 +1352,24 @@ var SympyEditor = (function () {
         self.view.focus({ preventScroll: true });
       });
       this.stage.appendChild(this.fullBtn);
+      // Strips along the edges of the view for a formula that runs past it:
+      // each is shown while there is something to scroll to on its side and
+      // scrolls a screen that way when pressed (see _updateScrollArrows).
+      this.scrollBtns = {};
+      var scrollTitles = { left: "Scroll the formula left", right: "Scroll the formula right",
+                           up: "Scroll the formula up", down: "Scroll the formula down" };
+      ["left", "right", "up", "down"].forEach(function (dir) {
+        var b = h("button", { type: "button", class: "se-scrollbtn se-scroll-" + dir, hidden: "",
+          title: scrollTitles[dir], "aria-label": scrollTitles[dir], tabindex: "-1" });
+        b.innerHTML = chevronSvg(dir);
+        b.addEventListener("click", function (ev) {
+          ev.preventDefault();
+          self.scrollByPage(dir);
+          self.view.focus({ preventScroll: true });
+        });
+        self.scrollBtns[dir] = b;
+        self.stage.appendChild(b);
+      });
       this.fullscreen = false;
       this.zoom = 1;
       this._applyZoom(this._initialZoom());
@@ -1217,10 +1426,22 @@ var SympyEditor = (function () {
           if (tab) self.showDrawerTab(tab.classList.contains("se-subtab-current") ? "sessions" : tab.getAttribute("data-tab"));
         });
         this.historyPane = h("div", { class: "se-drawer-pane", "data-pane": "history", hidden: "" }, [this.historyBody]);
+        // The add-ons' switches ride at the top of the drawer (see the note
+        // where addonsMenu is made): open in place, not a menu that drops.
+        this.addonsPane = null;
+        if (this.addonsMenu && !this.addonsBtn) {
+          this.addonsMenu.hidden = false;
+          this.addonsMenu.classList.add("se-addons-inline");
+          // A fold, shut to start with: the switches are set once in a while,
+          // and the sessions below them are what the drawer is opened for.
+          this.addonsPane = h("details", { class: "se-drawer-addons", hidden: "" }, [
+            h("summary", { class: "se-drawer-subhead" }, ["Add-ons"]),
+            this.addonsMenu
+          ]);
+        }
         this.drawer = h("aside", { class: "se-drawer", hidden: "", role: "dialog", "aria-label": "Sessions" }, [
-          h("div", { class: "se-drawer-head" }, [h("strong", {}, ["Sessions"]), close]),
-          this.sessionsBody
-        ]);
+          h("div", { class: "se-drawer-head" }, [h("strong", {}, ["Sessions"]), close])
+        ].concat(this.addonsPane ? [this.addonsPane] : []).concat([this.sessionsBody]));
         this.backdrop = h("div", { class: "se-backdrop", hidden: "" });
         this.backdrop.addEventListener("click", function () { self.closeDrawer(); });
         this.sessions = this.drawer;
@@ -1253,9 +1474,24 @@ var SympyEditor = (function () {
           abtn("delete", "Delete", "Remove entirely"),
           abtn("isolate", "Isolate", "Keep only this: it becomes the whole expression"),
           abtn("copy", "Copy", "Copy the SymPy source of the selection (Ctrl+C; Ctrl+X cuts, Ctrl+V pastes)"),
-          abtn("paste", "Paste", "Paste the clipboard over the selection (Ctrl+V)")
+          abtn("paste", "Paste", "Paste the clipboard over the selection (Ctrl+V)"),
+          // In a matrix (the matrix itself, or anything in one of its
+          // entries): its rows and columns.  Shown by _placeActions.
+          h("span", { class: "se-sep se-mat-sep", hidden: "" }),
+          abtn("matrow", "+ row", "New row of empty slots after this one (after the last, for the matrix itself)"),
+          abtn("matcol", "+ col", "New column of empty slots after this one (after the last, for the matrix itself)"),
+          abtn("matdelrow", "\u2212 row", "Delete this row (the last one, for the matrix itself)"),
+          abtn("matdelcol", "\u2212 col", "Delete this column (the last one, for the matrix itself)")
         ]);
         root.appendChild(this.actions);
+        // The grip at the bottom-right corner of a matrix: dragging it
+        // resizes the matrix - rows down, columns right (see _placeMatrixHandle).
+        this.matHandle = h("div", { class: "se-mat-handle",
+          title: "Drag to lay the same entries out in another shape: wider for more columns, taller for more rows. Only shapes that hold every entry (2\u00d76 for 12, not 5\u00d72) - nothing is added or lost. Use + row / + col to grow the matrix.",
+                                    role: "button", "aria-label": "Resize the matrix", tabindex: "-1" });
+        this.matGhost = h("div", { class: "se-mat-ghost", "aria-hidden": "true" }, [h("span", { class: "se-mat-ghost-label" })]);
+        this._matDrag = null;
+        this._matHandleCtx = null;
         // The palette shown under a selected operator: what it can become.
         var obtn = function (op, label, title) { return h("button", { type: "button", "data-op": op, title: title }, [label]); };
         this.opBar = h("div", { class: "se-opbar", hidden: "", role: "toolbar", "aria-label": "Operator" }, [
@@ -1308,7 +1544,8 @@ var SympyEditor = (function () {
       this._drag = null;      // pointer drag in progress: {anchor, moved}
       this._pointers = {};    // pointers currently down (id -> {x, y}), for pinching
       this._pinch = null;     // {dist, zoom} while two pointers are down
-      this._pan = null;       // {x, left, moved} while a drag scrolls the view sideways
+      this._pan = null;       // {x, y, left, top, moved} while a drag scrolls the view
+      this._hold = null;      // {id, x, y, leaf, timer} while a finger rests on the formula (a long press starts a range)
       this._suppressClick = false;
       this._pointerType = "mouse";   // of the last pointerdown: touch gets tap-to-edit
       this._boxes = { hover: [], select: [] };   // highlight overlays (see _visualRect)
@@ -1324,8 +1561,8 @@ var SympyEditor = (function () {
         h("div", { class: "se-spinner" }), h("div", { class: "se-loading-text" }, ["Loading…"]), this.interruptBtn
       ]);
       this.committed = null;   // the last snapshot that is not a preview (see _previewSource)
-      if (this.fnMenu) { root.appendChild(this.fnMenu); root.appendChild(this.fnForm); }
-      if (this.addonsMenu) root.appendChild(this.addonsMenu);
+      if (this.fnForm) root.appendChild(this.fnForm);
+      if (this.addonsMenu && this.addonsBtn) root.appendChild(this.addonsMenu);
       root.appendChild(this.overlay);
       this.host.appendChild(root);
       root.__sympyEditor = this;   // handy for debugging and tests
@@ -1471,8 +1708,8 @@ var SympyEditor = (function () {
     }
 
     _fillAddonsMenu(available) {
-      if (!this.addonsBlock) return;
-      this.addonsBlock.hidden = !available.length;
+      var host = this.addonsBlock || this.addonsPane;
+      if (host) host.hidden = !available.length;
       if (!this.addonsMenu) return;
       var self = this;
       this.addonsMenu.textContent = "";
@@ -1495,7 +1732,7 @@ var SympyEditor = (function () {
     }
 
     toggleAddonsMenu() {
-      if (!this.addonsMenu) return;
+      if (!this.addonsMenu || !this.addonsBtn) return;   // in the drawer it is always open
       if (!this.addonsMenu.hidden) { this.addonsMenu.hidden = true; return; }
       this.addonsMenu.hidden = false;
       this._placeUnder(this.addonsMenu, this.addonsBtn);
@@ -1599,6 +1836,9 @@ var SympyEditor = (function () {
         self.view.classList.toggle("se-gap", !!gap);
       });
       this.view.addEventListener("scroll", function () { self._gapCache = null; if (self.caret) self._hideCaret(); self._applySelection(); });
+      // A long press must not bring up the browser's own menu (Android
+      // offers one over anything held, and cancels the touch when it shows).
+      this.view.addEventListener("contextmenu", function (ev) { if (self._pointerType === "touch") ev.preventDefault(); });
       // Zoom with Ctrl/Cmd + wheel (a trackpad pinch arrives the same way); a
       // plain wheel over a formula wider than the view scrolls it sideways
       // (the view never scrolls vertically) and reaches the page at the ends.
@@ -1614,78 +1854,160 @@ var SympyEditor = (function () {
         self.view.scrollLeft = before + (ev.deltaX || ev.deltaY) * unit;
         if (self.view.scrollLeft !== before) ev.preventDefault();
       }, { passive: false });
-      // Two fingers pinch the formula, not the page: the browser must be told
-      // before it takes the gesture (one finger still scrolls the page
-      // vertically, see touch-action in the CSS).
+      // Two fingers pinch and scroll the formula, not the page: the browser
+      // must be told before it takes the gesture (one finger still scrolls
+      // the page vertically, see touch-action in the CSS) - and a finger that
+      // has started a range selection keeps it, wherever it goes next.
       this.view.addEventListener("touchstart", function (ev) { if (ev.touches.length >= 2) ev.preventDefault(); }, { passive: false });
-      this.view.addEventListener("touchmove", function (ev) { if (self._pinch) ev.preventDefault(); }, { passive: false });
+      this.view.addEventListener("touchmove", function (ev) { if (self._pinch || (self._drag && self._drag.held)) ev.preventDefault(); }, { passive: false });
       this.view.addEventListener("mouseleave", function () { self._setHover(null); });
       this.view.addEventListener("click", function (ev) { self._onClick(ev); });
-      // Dragging (mouse, touch or pen) over the formula selects a range.
+      // Dragging with a mouse or a pen over the formula selects a range.  A
+      // finger is different: a drag scrolls a formula that runs past the
+      // view (a finger cannot tell a glyph from the space beside it), a tap
+      // selects on the click that follows, and a finger held still on a node
+      // starts a range selection from it (_beginHold) - dragging on from
+      // there extends the range as a mouse drag does.
       this.view.addEventListener("pointerdown", function (ev) {
         self._pointerType = ev.pointerType || "mouse";
         self._clearChangeMarks();
+        self._suppressClick = false;      // the click that follows belongs to this press
         if (ev.pointerType === "mouse" && ev.button !== 0) return;
         self._pointers[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
         if (Object.keys(self._pointers).length === 2) {   // a second finger: a pinch, no longer a drag
           self._drag = null;
+          self._cancelHold();
           self._endPan();
-          self._pinch = { dist: self._pointerSpread(), zoom: self.zoom };
+          self._pinch = { dist: self._pointerSpread(), zoom: self.zoom, cx: self._pointerCentre(), cy: self._pointerCentreY() };
           return;
         }
         var leaf = self._leafAt(ev);
-        if (!leaf && self.view.scrollWidth > self.view.clientWidth) {
-          // Empty space of a formula wider than the view: dragging scrolls it.
+        var touch = ev.pointerType === "touch";
+        var overflow = self.view.scrollWidth > self.view.clientWidth || self.view.scrollHeight > self.view.clientHeight;
+        if (overflow && (!leaf || touch)) {
+          // Empty space of a formula that runs past the view - or, with a
+          // finger, anywhere on it: dragging scrolls it.
           self._drag = null;
-          self._pan = { x: ev.clientX, left: self.view.scrollLeft, moved: false, id: ev.pointerId };
+          self._pan = { x: ev.clientX, y: ev.clientY, left: self.view.scrollLeft, top: self.view.scrollTop, moved: false, id: ev.pointerId };
           if (ev.pointerType === "mouse" && self.view.setPointerCapture) {
             try { self.view.setPointerCapture(ev.pointerId); } catch (e) { /* not capturable */ }
           }
-          return;
+        } else {
+          self._drag = touch ? null : { anchor: leaf ? leaf.getAttribute("data-path") : null, moved: false };
         }
-        self._drag = { anchor: leaf ? leaf.getAttribute("data-path") : null, moved: false };
+        if (touch && leaf) {
+          self._cancelHold();
+          self._hold = { id: ev.pointerId, x: ev.clientX, y: ev.clientY, leaf: leaf,
+                         timer: setTimeout(function () { self._beginHold(); }, self.opts.longPress) };
+        }
       });
       this.view.addEventListener("pointermove", function (ev) {
         if (self._pointers[ev.pointerId]) self._pointers[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
+        var slop = ev.pointerType === "touch" ? 8 : 3;   // a finger trembles more than a mouse
+        if (self._hold && self._hold.id === ev.pointerId && Math.hypot(ev.clientX - self._hold.x, ev.clientY - self._hold.y) > slop) self._cancelHold();
         if (self._pinch) {
           if (Object.keys(self._pointers).length < 2) return;
-          self.setZoom(self._pinch.zoom * self._pointerSpread() / self._pinch.dist, self._pointerCentre());
+          // The fingers' centre drags the formula along (as far as there is
+          // formula beyond the view), and their spread zooms it about the centre.
+          var cx = self._pointerCentre(), cy = self._pointerCentreY();
+          self.view.scrollLeft -= cx - self._pinch.cx;
+          self.view.scrollTop -= cy - self._pinch.cy;
+          self._pinch.cx = cx; self._pinch.cy = cy;
+          self.setZoom(self._pinch.zoom * self._pointerSpread() / self._pinch.dist, cx);
           ev.preventDefault();
           return;
         }
         if (self._pan) {
           if (ev.pointerType === "mouse" && ev.buttons === 0) { self._endPan(); return; }
-          var dx = ev.clientX - self._pan.x;
-          if (Math.abs(dx) > 3) { self._pan.moved = true; self.view.classList.add("se-panning"); }
+          var dx = ev.clientX - self._pan.x, dy = ev.clientY - self._pan.y;
+          if (Math.abs(dx) > slop || Math.abs(dy) > slop) { self._pan.moved = true; self.view.classList.add("se-panning"); }
           self.view.scrollLeft = self._pan.left - dx;
+          self.view.scrollTop = self._pan.top - dy;
           if (self._pan.moved) ev.preventDefault();
           return;
         }
         var d = self._drag;
         if (!d || !d.anchor) return;
-        if (ev.pointerType === "mouse" && ev.buttons === 0) { self._drag = null; return; }
-        var leaf = self._leafAt(ev);
-        if (!leaf) return;
-        var lp = leaf.getAttribute("data-path");
-        if (!d.moved && lp === d.anchor) return;
-        d.moved = true;
-        self._dragSelect(d.anchor, lp);
+        if (ev.pointerType === "mouse" && ev.buttons === 0) { self._stopAutoScroll(); self._drag = null; return; }
+        d.x = ev.clientX;
+        d.y = ev.clientY;
+        self._extendDragTo(d.x, d.y);
+        self._autoScrollFor(d);          // at the edge: scroll, and take in what appears
         ev.preventDefault();
       });
       var endPointer = function (ev, cancelled) {
         delete self._pointers[ev.pointerId];
+        self._cancelHold();
+        self._stopAutoScroll();
         if (self._pinch && Object.keys(self._pointers).length < 2) {
           self._pinch = null;
           self._pointers = {};              // the finger left behind must not start anything
           self._suppressClick = true;
         }
         if (self._pan) { if (self._pan.moved && !cancelled) self._suppressClick = true; self._endPan(); }
-        if (self._drag && self._drag.moved && !cancelled) self._suppressClick = true;
+        // a range selection - dragged, or begun by a long press, which has
+        // selected already - is not followed by a click's selection on top
+        if (self._drag && (self._drag.moved || self._drag.held) && !cancelled) self._suppressClick = true;
         self._drag = null;
+        if (self._opsStale) self._fillOps();      // the strip catches up with what was selected
       };
       this.view.addEventListener("pointerup", function (ev) { endPointer(ev, false); });
       this.view.addEventListener("pointercancel", function (ev) { endPointer(ev, true); });
       this.view.addEventListener("dblclick", function (ev) { self._onDblClick(ev); });
+      // The matrix grip: a drag from it is a resize, never a selection or a
+      // scroll (the events stop here; the grip captures the pointer).  Each
+      // cell of the matrix as drawn is one step: the outline follows the
+      // pointer a row or a column at a time, and the size is sent on release.
+      if (this.matHandle) {
+        var hd = this.matHandle;
+        hd.addEventListener("pointerdown", function (ev) {
+          if (ev.pointerType === "mouse" && ev.button !== 0) return;
+          var ctx = self._matHandleCtx;
+          ev.stopPropagation();
+          if (!ctx || self.busy || self.loading) return;
+          ev.preventDefault();
+          try { hd.setPointerCapture(ev.pointerId); } catch (e) { /* not capturable */ }
+          self._matDrag = { id: ev.pointerId, x: ev.clientX, y: ev.clientY, ctx: ctx, rows: ctx.rows, cols: ctx.cols,
+                            cellW: Math.max(8, ctx.rect.width / ctx.cols), cellH: Math.max(8, ctx.rect.height / ctx.rows),
+                            shapes: matrixShapes(ctx.rows * ctx.cols) };
+          self._showMatrixGhost(ctx.rows, ctx.cols);
+        });
+        hd.addEventListener("pointermove", function (ev) {
+          var d = self._matDrag;
+          if (!d || ev.pointerId !== d.id) return;
+          ev.stopPropagation();
+          ev.preventDefault();
+          // The pointer asks for a box this wide and this tall; the shape is
+          // the one of `shapes` whose outline comes closest to it, so the
+          // drag can only ever land on a shape that holds every entry.
+          var wantW = d.ctx.rect.width + (ev.clientX - d.x), wantH = d.ctx.rect.height + (ev.clientY - d.y);
+          var best = null, bestAt = Infinity;
+          for (var i = 0; i < d.shapes.length; i++) {
+            var r = d.shapes[i][0], c = d.shapes[i][1];
+            var dw = c * d.cellW - wantW, dh = r * d.cellH - wantH;
+            var at = dw * dw + dh * dh;
+            if (at < bestAt) { bestAt = at; best = d.shapes[i]; }
+          }
+          if (!best) return;
+          d.rows = best[0];
+          d.cols = best[1];
+          self._showMatrixGhost(d.rows, d.cols);
+        });
+        var endMatDrag = function (ev, cancelled) {
+          var d = self._matDrag;
+          if (!d || ev.pointerId !== d.id) return;
+          ev.stopPropagation();
+          self._matDrag = null;
+          self._hideMatrixGhost();
+          try { hd.releasePointerCapture(ev.pointerId); } catch (e) { /* not captured */ }
+          if (!cancelled && (d.rows !== d.ctx.rows || d.cols !== d.ctx.cols)) self._matrixOp("reshape", d.rows, d.cols, d.ctx.path);
+          else self.view.focus({ preventScroll: true });
+        };
+        hd.addEventListener("pointerup", function (ev) { endMatDrag(ev, false); });
+        hd.addEventListener("pointercancel", function (ev) { endMatDrag(ev, true); });
+        hd.addEventListener("click", function (ev) { ev.stopPropagation(); });
+        hd.addEventListener("touchstart", function (ev) { ev.stopPropagation(); }, { passive: true });
+      }
       this.root.addEventListener("keydown", function (ev) {
         if (self.drawer && self.drawer.contains(ev.target)) return;   // Esc is handled at the document level while it is open
         if (self.symbols && self.symbols.contains(ev.target)) return;
@@ -1743,87 +2065,49 @@ var SympyEditor = (function () {
       if (typeof ResizeObserver === "function") {
         this._resizeObserver = new ResizeObserver(function () { self._relayout(); });
         this._resizeObserver.observe(this.view);
+        // The rendering's own size matters to the edge strips alone (see
+        // _watchRendering): the caret and the selection are left in place.
+        this._contentObserver = new ResizeObserver(function () { self._updateScrollArrows(); });
+        this._watchRendering();
       } else {
         onDocument("resize", this._relayout);   // (window resize bubbles to document in no browser; kept for symmetry)
         window.addEventListener("resize", this._relayout);
       }
       // The Add-ons menu closes on a click anywhere else, and on Escape.
       onDocument("pointerdown", function (ev) {
-        if (self.addonsMenu && !self.addonsMenu.hidden && !self.addonsMenu.contains(ev.target) && !(self.addonsBtn && self.addonsBtn.contains(ev.target))) self.addonsMenu.hidden = true;
+        if (self.addonsBtn && self.addonsMenu && !self.addonsMenu.hidden && !self.addonsMenu.contains(ev.target) && !self.addonsBtn.contains(ev.target)) self.addonsMenu.hidden = true;
       });
       if (this.addonsMenu) {
         this.addonsMenu.addEventListener("keydown", function (ev) {
-          if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); self.addonsMenu.hidden = true; self.addonsBtn.focus({ preventScroll: true }); }
+          if (ev.key === "Escape" && self.addonsBtn) { ev.preventDefault(); ev.stopPropagation(); self.addonsMenu.hidden = true; self.addonsBtn.focus({ preventScroll: true }); }
         });
       }
       // Copy / cut / paste while the formula has the focus (no clipboard permission needed).
       ["copy", "cut", "paste"].forEach(function (kind) {
         onDocument(kind, function (ev) { self._onClipboard(ev, kind); });
       });
-      var applyFromMenu = function (menu) {
-        var op = menu.value;
-        menu.selectedIndex = 0;
-        if (!op) return;
-        var path = self.range ? self.range.parent : (self.selected || "/");
-        var spec = (self.state.ops || []).filter(function (o) { return o.name === op; })[0];
-        if (spec && spec.params && spec.params.length) return self._askOpParams(spec, path, menu);
-        var msg = { action: "apply", path: path, op: op };
-        if (self.lazy()) msg.lazy = true;
-        if (self.range) msg.children = self._rangeIndices();
-        self.send(msg);
-        self.view.focus({ preventScroll: true });
-      };
-      if (this.fnInput) {
-        this.fnInput.addEventListener("focus", function () { self._loadFunctions(); self._filterFn(); });
-        this.fnInput.addEventListener("input", function () { self._filterFn(); });
-        this.fnInput.addEventListener("blur", function () { setTimeout(function () { if (document.activeElement !== self.fnInput) self._hideFnMenu(); }, 150); });
-        this.fnInput.addEventListener("focus", function () {
-          // remember where the caret is: a function picked will be added there
-          self._fnCaret = self.caret && !self.selected && !self.range ? Object.assign({}, self.caret) : null;
-        });
-        this.fnInput.addEventListener("keydown", function (ev) {
-          ev.stopPropagation();
-          var items = self.fnMenu.querySelectorAll(".se-fn-item");
-          if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
-            ev.preventDefault();
-            if (!items.length) return;
-            self._fnActive = (self._fnActive + (ev.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
-            self._highlightFn();
-          } else if (ev.key === "Enter") {
-            ev.preventDefault();
-            var text = self.fnInput.value.trim();
-            if (/\(/.test(text)) { self._hideFnMenu(); self.callFunction(text); return; }   // typed with arguments: as is
-            var pick = self._fnActive >= 0 && items[self._fnActive] ? items[self._fnActive].getAttribute("data-name") : text;
-            if (pick) self._pickFn(pick);
-          } else if (ev.key === "Escape") {
-            ev.preventDefault();
-            self._hideFnMenu();
-            self._hideFnForm();
-            self.fnInput.value = "";
-            self.view.focus({ preventScroll: true });
-          }
-        });
-        this.fnMenu.addEventListener("mousedown", function (ev) { ev.preventDefault(); });   // keep the focus in the box
-        this.fnMenu.addEventListener("click", function (ev) {
-          var item = ev.target.closest(".se-fn-item");
-          if (item) self._pickFn(item.getAttribute("data-name"));
-        });
-      }
-      [this.opsSelect, this.typeMenu].forEach(function (menu) {
-        if (!menu) return;
-        menu.addEventListener("change", function () { applyFromMenu(menu); });
-        menu.addEventListener("keydown", function (ev) { ev.stopPropagation(); });
-      });
-      if (this.methodsMenu) {
-        this.methodsMenu.addEventListener("change", function () {
-          var name = self.methodsMenu.value;
-          self.methodsMenu.selectedIndex = 0;
-          if (!name) return;
-          delete self._fnSigs["." + name];   // a method's signature depends on the type: never reuse another's
-          self._pickFn("." + name);
-        });
-        this.methodsMenu.addEventListener("keydown", function (ev) { ev.stopPropagation(); });
-      }
+    }
+
+    /** An action picked in one of the two action menus: applied to the
+     *  selection (or the whole expression) at once, or, when the op declares
+     *  parameters, asked for them under `anchor` first. */
+    _applyOp(op, anchor) {
+      if (!op || !this.state) return;
+      var path = this.range ? this.range.parent : (this.selected || "/");
+      var spec = (this.state.ops || []).filter(function (o) { return o.name === op; })[0];
+      if (spec && spec.params && spec.params.length) return this._askOpParams(spec, path, anchor);
+      var msg = { action: "apply", path: path, op: op };
+      if (this.lazy()) msg.lazy = true;
+      if (this.range) msg.children = this._rangeIndices();
+      this.send(msg);
+      this.view.focus({ preventScroll: true });
+    }
+
+    /** Change what the two action menus offer (`options.actions`) at any time. */
+    setActions(spec) {
+      this.opts.actions = spec || null;
+      this._opsKey = null;
+      this._fillOps();
     }
 
     /* ---- state ---- */
@@ -1876,11 +2160,15 @@ var SympyEditor = (function () {
       }
       this._fillOps();
       this._fillSymbols();
-      if (snap.functions && this.fnInput && !this._functionsLoaded) {
+      if (snap.functions && this.fnPicker && !this._functionsLoaded) {
         this._functionsLoaded = true;
         this._fnNames = snap.functions;
         this._fnSigs = snap.signatures || {};
-        if (document.activeElement === this.fnInput) this._filterFn();
+        var sigs = this._fnSigs;
+        this.fnPicker.setItems(this._fnNames.map(function (name) {
+          return { value: name, label: name, doc: sigs[name] && sigs[name].doc ? sigs[name].doc : "" };
+        }));
+        if (document.activeElement === this.fnInput) this.fnPicker.open();
       }
       if (snap.signature && this.fnInput) {
         this._fnSigs[snap.signature.name] = snap.signature;
@@ -1936,6 +2224,7 @@ var SympyEditor = (function () {
         }
       }
       this.view.classList.remove("se-empty");
+      this._watchRendering();
       var slots = this.state.placeholders || [];
       for (var si = 0; si < slots.length; si++) {
         var sels = this._els(slots[si]);
@@ -2095,6 +2384,7 @@ var SympyEditor = (function () {
         disp.classList.remove("se-changing");
         if (oldGhost.parentNode) oldGhost.parentNode.removeChild(oldGhost);
         if (newGhost.parentNode) newGhost.parentNode.removeChild(newGhost);
+        self._updateScrollArrows();      // the old ghost was as wide as the old formula
       };
       this._finishAnimation = finish;
       // A WebView older than Chrome 84 has no Animation.finished: its events
@@ -2119,33 +2409,62 @@ var SympyEditor = (function () {
      *  "integral"...), labelled with the most specific kind, and is hidden
      *  when there are none. */
     _fillOps() {
-      if (!this.opsSelect || !this.state) return;
+      if (!this.opsPicker || !this.state) return;
+      // Not while a drag is drawing the selection.  What the menus offer
+      // follows the selection: a single node has methods to call, a range of
+      // terms has none, so the Methods box came and went as the finger moved
+      // and the strip rewrapped under it - the whole panel jumping by a row,
+      // over and over.  The menus cannot be reached mid-drag anyway; they are
+      // filled once, when the finger lifts.
+      if (this._drag && (this._drag.moved || this._drag.held)) { this._opsStale = true; return; }
+      this._opsStale = false;
       var target = this.range ? this.range.parent : (this.selected || "/");
       var node = this.state.nodes ? this.state.nodes[target] : null;
       this._fillMethods(target, node);
       var kinds = node ? (node.kinds || [node.kind]) : [];
       var ops = this.state.ops || [];
-      var general = ops.filter(function (op) { return !op.kinds; });
-      var specific = ops.filter(function (op) {
+      var general = this._chosenActions(ops.filter(function (op) { return !op.kinds; }), ["expr"]);
+      var specific = this._chosenActions(ops.filter(function (op) {
         return op.kinds && op.kinds.some(function (k) { return kinds.indexOf(k) >= 0; });
-      });
-      var key = kinds.join(",") + "|" + JSON.stringify(ops.map(function (op) { return op.name; }));
+      }), kinds);
+      var entry = function (op) { return { value: op.name, label: op.label || op.name, doc: op.doc || "" }; };
+      var key = kinds.join(",") + "|" + JSON.stringify(general.concat(specific).map(function (op) { return [op.name, op.label]; }));
       if (key === this._opsKey) return;
       this._opsKey = key;
-      this.opsSelect.textContent = "";
-      var self = this;
-      this.opsSelect.appendChild(h("option", { value: "", disabled: "", selected: "" }, ["Transform \u25BE"]));
-      general.forEach(function (op) { self.opsSelect.appendChild(h("option", { value: op.name }, [op.label || op.name])); });
-      this.opsSelect.selectedIndex = 0;
-      if (!this.typeMenu) return;
-      this.typeMenu.textContent = "";
-      if (!specific.length) { this.typeMenu.hidden = true; return; }
+      this.opsPicker.setItems(general.map(entry));
+      this.opsPicker.input.hidden = !general.length;
+      if (!this.typePicker) return;
+      if (!specific.length) { this.typePicker.input.hidden = true; this.typePicker.close(); return; }
       var labels = this.state.kind_labels || {};
       var label = labels[kinds[0]] || (node && node.type) || "Type";
-      this.typeMenu.appendChild(h("option", { value: "", disabled: "", selected: "" }, [label + " \u25BE"]));
-      specific.forEach(function (op) { self.typeMenu.appendChild(h("option", { value: op.name }, [op.label || op.name])); });
-      this.typeMenu.selectedIndex = 0;
-      this.typeMenu.hidden = false;
+      this.typePicker.input.placeholder = label + " \u25BE";
+      this.typePicker.setItems(specific.map(entry));
+      this.typePicker.input.hidden = false;
+    }
+
+    /** The ops of `pool` that `options.actions` keeps for `keys` - "expr"
+     *  for the general menu, the selection's kinds (most specific first) for
+     *  the type menu - in the order it lists them, an entry being a name or
+     *  `{name, label}`; every op of the pool, in the registry's order, when
+     *  the option names none of the keys. */
+    _chosenActions(pool, keys) {
+      var spec = this.opts.actions;
+      if (!spec || typeof spec !== "object") return pool;
+      var listed = keys.filter(function (k) { return Array.isArray(spec[k]); });
+      if (!listed.length) return pool;
+      var byName = {};
+      pool.forEach(function (op) { byName[op.name] = op; });
+      var out = [], seen = {};
+      listed.forEach(function (k) {
+        spec[k].forEach(function (want) {
+          var name = typeof want === "string" ? want : (want && want.name);
+          var op = byName[name];
+          if (!op || seen[name]) return;
+          seen[name] = true;
+          out.push(typeof want === "object" && want.label ? Object.assign({}, op, { label: want.label }) : op);
+        });
+      });
+      return out;
     }
 
     /** The methods menu: the public methods and properties of the class of
@@ -2153,22 +2472,17 @@ var SympyEditor = (function () {
      *  cached).  Picking one goes through the function box flow - signature,
      *  parameter form when needed, then the call. */
     _fillMethods(target, node) {
-      if (!this.methodsMenu) return;
+      if (!this.methodsPicker) return;
       var tname = node && !this.range ? node.type : null;
       var entries = tname ? this._methodsCache[tname] : null;
-      if (!entries || !entries.length) { this.methodsMenu.hidden = true; this._methodsKey = null; return; }
+      if (!entries || !entries.length) { this.methodsPicker.input.hidden = true; this.methodsPicker.close(); this._methodsKey = null; return; }
       if (this._methodsKey !== tname) {
         this._methodsKey = tname;
-        this.methodsMenu.textContent = "";
-        this.methodsMenu.appendChild(h("option", { value: "", disabled: "", selected: "" }, ["Methods \u25BE"]));
-        for (var i = 0; i < entries.length; i++) {
-          var e = entries[i];
-          this.methodsMenu.appendChild(h("option", { value: e.name, title: e.doc || "" },
-            [e.label || (e.property ? "." + e.name : "." + e.name + "()")]));
-        }
-        this.methodsMenu.selectedIndex = 0;
+        this.methodsPicker.setItems(entries.map(function (e) {
+          return { value: e.name, label: e.label || (e.property ? "." + e.name : "." + e.name + "()"), doc: e.doc || "" };
+        }));
       }
-      this.methodsMenu.hidden = false;
+      this.methodsPicker.input.hidden = false;
     }
 
     /** The symbols panel: one row per name (used in the expression or merely
@@ -2270,18 +2584,41 @@ var SympyEditor = (function () {
      *  glyphs, so the event target's ancestors are not reliable: inspect the
      *  whole element stack at the pointer and keep the deepest path. */
     _leafAt(ev) {
-      var best = null;
-      if (ev && typeof ev.clientX === "number" && document.elementsFromPoint) {
-        var stack = document.elementsFromPoint(ev.clientX, ev.clientY);
-        for (var i = 0; i < stack.length; i++) {
-          var el = stack[i].closest ? stack[i].closest("[data-path]") : null;
-          if (!el || !this.view.contains(el)) continue;
-          if (!best || el.getAttribute("data-path").length > best.getAttribute("data-path").length) best = el;
-        }
-      }
+      var best = ev && typeof ev.clientX === "number" ? this._leafAtPoint(ev.clientX, ev.clientY) : null;
       if (!best && ev && ev.target && ev.target.closest) {
         var t = ev.target.closest("[data-path]");
         if (t && this.view.contains(t)) best = t;
+      }
+      return best;
+    }
+
+    /** The deepest annotated element drawn at a point, or null. */
+    _leafAtPoint(x, y) {
+      var best = null;
+      if (!document.elementsFromPoint) return null;
+      var stack = document.elementsFromPoint(x, y);
+      for (var i = 0; i < stack.length; i++) {
+        var el = stack[i].closest ? stack[i].closest("[data-path]") : null;
+        if (!el || !this.view.contains(el)) continue;
+        if (!best || el.getAttribute("data-path").length > best.getAttribute("data-path").length) best = el;
+      }
+      return best;
+    }
+
+    /** The annotated element nearest to a point, for a drag that has left
+     *  the formula: beyond its right edge the last thing on that line is
+     *  what the finger means, and beyond the bottom the lowest.  Ties go to
+     *  the deepest node, so a leaf wins over the box that holds it. */
+    _nearestLeafTo(x, y) {
+      var els = this.view.querySelectorAll("[data-path]");
+      var best = null, bestD = Infinity, bestLen = -1;
+      for (var i = 0; i < els.length; i++) {
+        var r = els[i].getBoundingClientRect();
+        if (!r.width && !r.height) continue;
+        var dx = x < r.left ? r.left - x : (x > r.right ? x - r.right : 0);
+        var dy = y < r.top ? r.top - y : (y > r.bottom ? y - r.bottom : 0);
+        var d = dx * dx + dy * dy, len = els[i].getAttribute("data-path").length;
+        if (d < bestD - 0.5 || (d <= bestD + 0.5 && len > bestLen)) { best = els[i]; bestD = d; bestLen = len; }
       }
       return best;
     }
@@ -2335,23 +2672,46 @@ var SympyEditor = (function () {
 
     /** Draw highlight boxes of `kind` ("hover" or "select") around `rects`
      *  (viewport rectangles); an empty list removes them. */
+    /** The highlight overlays for `kind`, moved to `rects`.
+     *
+     *  The boxes already up are reused: a drag re-selects on every pointer
+     *  move, and tearing the box out of the document only to put a new one
+     *  back leaves a frame with nothing drawn - the selection blinks all the
+     *  way through the drag.  Moving the same element instead lets CSS carry
+     *  it to its new size (.se-box-select), so it grows into the range.  A box
+     *  that is new (or was dropped by a re-render) must not animate from
+     *  wherever it happens to start: se-box-new holds the transition off for
+     *  its first frame. */
     _drawBoxes(kind, rects) {
-      var old = this._boxes[kind];
-      for (var i = 0; i < old.length; i++) if (old[i].parentNode) old[i].parentNode.removeChild(old[i]);
-      var boxes = [];
+      var boxes = this._boxes[kind] || (this._boxes[kind] = []);
       var vr = this.view.getBoundingClientRect();
-      var pad = 2;
+      var pad = 2, fresh = [];
+      // Only a drag glides: it is the one case where the box grows a little
+      // at a time under the finger.  Zooming, going full screen or a resize
+      // move it for reasons of layout, and there it must simply be where it
+      // belongs on the next frame.
+      var glide = kind === "select" && !!(this._drag && this._drag.moved);
+      while (boxes.length > rects.length) {
+        var gone = boxes.pop();
+        if (gone.parentNode) gone.parentNode.removeChild(gone);
+      }
       for (var j = 0; j < rects.length; j++) {
-        var r = rects[j];
-        var box = h("span", { class: "se-box se-box-" + kind, "aria-hidden": "true" });
+        var r = rects[j], box = boxes[j];
+        if (!box || box.parentNode !== this.view) {
+          box = h("span", { class: "se-box se-box-" + kind + " se-box-new", "aria-hidden": "true" });
+          boxes[j] = box;
+          this.view.appendChild(box);
+          fresh.push(box);
+        }
+        box.classList.toggle("se-box-glide", glide);
         box.style.left = Math.round(r.left - vr.left + this.view.scrollLeft - pad) + "px";
         box.style.top = Math.round(r.top - vr.top + this.view.scrollTop - pad) + "px";
         box.style.width = Math.round(r.width + 2 * pad) + "px";
         box.style.height = Math.round(r.height + 2 * pad) + "px";
-        this.view.appendChild(box);
-        boxes.push(box);
       }
-      this._boxes[kind] = boxes;
+      if (fresh.length) requestAnimationFrame(function () {
+        for (var k = 0; k < fresh.length; k++) fresh[k].classList.remove("se-box-new");
+      });
     }
 
     _unionRect(rects) {
@@ -2376,6 +2736,33 @@ var SympyEditor = (function () {
      *  parent, or extending the atom). */
     _selectChild() {
       if (this.range) { this.select(this._displayChildren(this.range.parent)[this.range.focus]); return; }
+      // From an operator, down goes to what the operator stands between: the
+      // caret at that very point, ready to type into.  Selecting an operator
+      // leaves `selected` empty, so without this it fell through to the
+      // "nothing is selected" case below and took the whole expression.
+      var j = this.junction;
+      if (j) {
+        // The place just to the right of the glyph, taken from the formula's
+        // own caret positions rather than made up: then <- and -> step away
+        // from it and back to it like any other place.  Which position that
+        // is depends on how the operator is drawn - between the two
+        // arguments for +, inside the right-hand one for the sign of -x, and
+        // an equation takes no new argument at all, so it is the point just
+        // before its right-hand side.
+        var jlist = this._caretPositions();
+        var gr = this._visualRect(j.el), gx = (gr.left + gr.right) / 2;
+        var after = null, before = null;
+        for (var q = 0; q < jlist.length; q++) {
+          var pos = jlist[q];
+          if (pos.x >= gx) { if (!after || pos.x < after.x) after = pos; }
+          else if (!before || pos.x > before.x) before = pos;
+        }
+        var pick = after || before;
+        if (pick) { this._showCaret(pick.gap, pick.x); return; }
+        this.junction = null;                       // nowhere to stand: take the right-hand term
+        this.select(this._displayChildren(j.path)[j.rightIndex] || j.path);
+        return;
+      }
       if (!this.selected) { this.select("/"); return; }
       var t = this.tree[this.selected];
       if (t && t.children.length) {
@@ -2420,7 +2807,9 @@ var SympyEditor = (function () {
     }
 
     _applySelection() {
+      this._updateScrollArrows();
       this._addonsNotify("onSelect", this.selected, this.range);
+      this._placeMatrixHandle();
       var old = this.view.querySelectorAll(".se-selected");
       for (var i = 0; i < old.length; i++) old[i].classList.remove("se-selected");
       this._drawBoxes("hover", []);
@@ -2572,9 +2961,14 @@ var SympyEditor = (function () {
         if (!ro) this.setOperator(k);
       } else if (this.junction && k === "ArrowUp") {
         this.select(this.junction.path);
-      } else if (this.junction && (k === "ArrowLeft" || k === "ArrowRight" || k === "ArrowDown")) {
-        var jj = this.junction, jkids = this.tree[jj.path].children;
+      } else if (this.junction && (k === "ArrowLeft" || k === "ArrowRight")) {
+        // leftIndex/rightIndex count the arguments as they are drawn, so the
+        // list they index has to be the drawn one: the tree's own order is
+        // not always what is on the screen (x**2 + y, sqrt(x) + y...).
+        var jj = this.junction, jkids = this._displayChildren(jj.path);
         this.select(jkids[k === "ArrowLeft" ? jj.leftIndex : jj.rightIndex]);
+        // (down is left to _selectChild, which drops to the caret between the
+        //  two - the same thing the toolbar's arrow does)
       } else if (this.junction && k === "Enter") {
         // nothing to edit in place: the palette (or a key) changes it
       } else if (this.range && k === "Escape") {
@@ -2597,11 +2991,14 @@ var SympyEditor = (function () {
       } else if (this.caret && k === "Enter") {
         if (!ro) this.beginInsert("");
       } else if (this.caret && (k === "ArrowLeft" || k === "ArrowRight")) {
-        this._moveCaret(k === "ArrowLeft" ? -1 : 1);
+        // In a grid the caret moves as the grid is drawn; at the end of a
+        // row the ordinary walk takes over (on to the next row, as a line of
+        // text does).
+        if (!this._gridCaretMove(k === "ArrowLeft" ? "left" : "right")) this._moveCaret(k === "ArrowLeft" ? -1 : 1);
       } else if (this.caret && k === "ArrowUp") {
-        this._selectBesideCaret();   // ↑ first selects the object the caret sits next to (then the ancestors)
+        if (!this._gridCaretMove("up")) this._selectBesideCaret();   // ↑ first selects the object the caret sits next to (then the ancestors)
       } else if (this.caret && k === "ArrowDown") {
-        // nothing to go into from a caret
+        this._gridCaretMove("down");   // in a grid: the row below; elsewhere nothing to go into from a caret
       } else if (this.caret && !ro && !mod && !ev.altKey && k.length === 1) {
         this.beginInsert(k);
       } else if (k === "Enter") {
@@ -2616,11 +3013,14 @@ var SympyEditor = (function () {
       } else if (k === "Delete") {
         if (!ro && this.selected && this.selected !== "/") this.send({ action: "delete", path: this.selected });
       } else if (k === "ArrowUp") {
-        if (this.selected) this._selectParent(this.selected);
+        if (this._gridMove("up")) { /* the cell above */ }
+        else if (this.selected) this._selectParent(this.selected);
       } else if (k === "ArrowDown") {
-        this._selectChild();
+        if (!this._gridMove("down")) this._selectChild();
       } else if (k === "ArrowLeft" || k === "ArrowRight") {
-        if (this.selected) this._moveSideways(k === "ArrowLeft" ? -1 : 1);
+        var dir = k === "ArrowLeft" ? "left" : "right";
+        if (this._gridMove(dir)) { /* the cell beside */ }
+        else if (this.selected) this._moveSideways(k === "ArrowLeft" ? -1 : 1);
         else this._caretAtEnd(k === "ArrowLeft" ? "start" : "end");
       } else if (!ro && !mod && !ev.altKey && k.length === 1 && this.selected) {
         this.beginEdit(this.selected, k);   // start replacing the selection with what is typed
@@ -2752,6 +3152,67 @@ var SympyEditor = (function () {
     }
 
     /** Show the floating action bar under a viewport rectangle (null hides it). */
+    /** The explicit matrix the selection is, or is inside of: `{path, rows,
+     *  cols}`, or null.  With nothing selected, the whole expression counts. */
+    _matrixContext() {
+      if (!this.state || !this.state.nodes || !this.tree) return null;
+      var p = this.range ? this.range.parent : (this.selected || "/");
+      while (p !== null && p !== undefined) {
+        var node = this.state.nodes[p];
+        if (node && node.matrix) return { path: p, rows: node.matrix.rows, cols: node.matrix.cols };
+        p = this.tree[p] ? this.tree[p].parent : null;
+      }
+      return null;
+    }
+
+    /** A matrix operation (see Document.edit_matrix) on the selection's
+     *  matrix: the row / column the selection is in, or the last ones. */
+    _matrixOp(op, rows, cols, path) {
+      if (this.opts.readOnly || this.closed) return;
+      var msg = { action: "matrix", op: op, path: path || (this.range ? this.range.parent : (this.selected || "/")) };
+      if (rows) { msg.rows = rows; msg.cols = cols; }
+      this.send(msg);
+      this.view.focus({ preventScroll: true });
+    }
+
+    /** Put the grip on the bottom-right corner of the selection's matrix (or
+     *  take it away).  The rendering is replaced on every state, so the
+     *  grip is appended again each time it is placed. */
+    _placeMatrixHandle() {
+      var hd = this.matHandle;
+      if (!hd) return;
+      var ctx = !this.closed && !this.input && !this._matDrag ? this._matrixContext() : null;
+      var el = ctx ? this._els(ctx.path)[0] : null;
+      if (!el || el.classList.contains("se-editing") || this.view.classList.contains("se-empty")) {
+        if (hd.parentNode) hd.parentNode.removeChild(hd);
+        this._matHandleCtx = null;
+        return;
+      }
+      var r = this._visualRect(el), vr = this.view.getBoundingClientRect();
+      hd.style.left = Math.round(r.right - vr.left + this.view.scrollLeft) + "px";
+      hd.style.top = Math.round(r.bottom - vr.top + this.view.scrollTop) + "px";
+      if (!hd.parentNode) this.view.appendChild(hd);
+      this._matHandleCtx = { path: ctx.path, rows: ctx.rows, cols: ctx.cols, rect: r };
+    }
+
+    /** The outline of the size the matrix will get, drawn over it while the
+     *  grip is dragged, with the size written in its corner. */
+    _showMatrixGhost(rows, cols) {
+      var d = this._matDrag;
+      if (!d) return;
+      var g = this.matGhost, vr = this.view.getBoundingClientRect(), r = d.ctx.rect;
+      g.style.left = Math.round(r.left - vr.left + this.view.scrollLeft) + "px";
+      g.style.top = Math.round(r.top - vr.top + this.view.scrollTop) + "px";
+      g.style.width = Math.round(d.cellW * cols) + "px";
+      g.style.height = Math.round(d.cellH * rows) + "px";
+      g.firstChild.textContent = rows + " \u00d7 " + cols + (rows === d.ctx.rows && cols === d.ctx.cols ? "" : " \u2014 " + (rows * cols) + " entries, rearranged");
+      if (!g.parentNode) this.view.appendChild(g);
+    }
+
+    _hideMatrixGhost() {
+      if (this.matGhost && this.matGhost.parentNode) this.matGhost.parentNode.removeChild(this.matGhost);
+    }
+
     _placeActions(rect) {
       if (!this.actions) return;
       // The bar acts on the formula.  While the source line has the focus the
@@ -2763,15 +3224,21 @@ var SympyEditor = (function () {
       var t = this.selected ? this.tree[this.selected] : null;
       var selNode = this.selected && !this.range ? this.state.nodes[this.selected] : null;
       var unwrapOk = !!(selNode && (selNode.nargs || selNode.parts));
+      var mctx = this._matrixContext();
+      var sep = this.actions.querySelector(".se-mat-sep");
+      if (sep) sep.hidden = !mctx;
       var buttons = this.actions.querySelectorAll("button");
       for (var i = 0; i < buttons.length; i++) {
         var cmd = buttons[i].getAttribute("data-cmd");
+        if (cmd.indexOf("mat") === 0) buttons[i].hidden = !mctx;
         buttons[i].disabled = cmd === "parent" ? !(this.range || (t && t.parent))
                             : cmd === "child" ? false
                             : cmd === "paste" ? false
                             : cmd === "unwrap" ? !unwrapOk
                             : cmd === "delete" ? !(this.range || this.selected)
                             : cmd === "isolate" ? !(this.range || (this.selected && this.selected !== "/"))
+                            : cmd === "matdelrow" ? !(mctx && mctx.rows > 1)
+                            : cmd === "matdelcol" ? !(mctx && mctx.cols > 1)
                             : false;
       }
       this.actions.hidden = false;
@@ -2904,51 +3371,16 @@ var SympyEditor = (function () {
       return this.range ? this.range.parent : (this.selected || "/");
     }
 
-    _filterFn() {
-      if (!this.fnInput || !this._functionsLoaded) return;
-      var q = this.fnInput.value.trim().replace(/\(.*$/, "").toLowerCase();
-      var names = this._fnNames;
-      var starts = [], contains = [];
-      for (var i = 0; i < names.length; i++) {
-        var n = names[i], l = n.toLowerCase();
-        if (!q) { if (starts.length < 12) starts.push(n); continue; }
-        if (l.indexOf(q) === 0) starts.push(n);
-        else if (l.indexOf(q) >= 0) contains.push(n);
-      }
-      var list = starts.concat(contains).slice(0, 12);
-      this.fnMenu.textContent = "";
-      var self = this;
-      list.forEach(function (name) {
-        var sig = self._fnSigs[name];
-        var item = h("div", { class: "se-fn-item", role: "option", "data-name": name }, [
-          h("span", { class: "se-fn-name" }, [name]),
-          h("span", { class: "se-fn-doc" }, [sig && sig.doc ? sig.doc : ""])
-        ]);
-        self.fnMenu.appendChild(item);
-      });
-      this._fnActive = list.length ? 0 : -1;
-      this._highlightFn();
-      this.fnMenu.hidden = !list.length;
-      this._placeUnder(this.fnMenu, this.fnInput);
-    }
-
-    _highlightFn() {
-      var items = this.fnMenu.querySelectorAll(".se-fn-item");
-      for (var i = 0; i < items.length; i++) items[i].classList.toggle("se-active", i === this._fnActive);
-    }
-
-    _hideFnMenu() { if (this.fnMenu) this.fnMenu.hidden = true; }
+    _hideFnMenu() { if (this.fnPicker) this.fnPicker.close(); }
     _hideFnForm() { if (this.fnForm) { this.fnForm.hidden = true; this.fnForm.textContent = ""; } }
 
-    _placeUnder(panel, anchor) {
-      var rr = this.root.getBoundingClientRect(), ar = anchor.getBoundingClientRect();
-      panel.style.top = Math.round(ar.bottom - rr.top + 4) + "px";
-      panel.style.left = Math.round(Math.max(0, Math.min(ar.left - rr.left, this.root.clientWidth - panel.offsetWidth - 4))) + "px";
-    }
+    _placeUnder(panel, anchor) { placeUnder(this.root, panel, anchor); }
 
-    /** A function was chosen: apply it, or ask for its parameters first. */
-    _pickFn(name) {
+    /** A function (or a method, `.name`) was chosen: apply it, or ask for
+     *  its parameters first - under `anchor`, the menu it came from. */
+    _pickFn(name, anchor) {
       this._hideFnMenu();
+      this._formAnchor = anchor || null;
       this.fnInput.value = name;
       if (this._insertFunctionAtCaret(name)) return;          // at a caret: added there, no parameters asked
       var sig = this._fnSigs[name];
@@ -3043,7 +3475,7 @@ var SympyEditor = (function () {
       buttons.querySelector(".se-fn-cancel").addEventListener("click", function () { self._hideFnForm(); self.view.focus({ preventScroll: true }); });
       this.fnForm.appendChild(buttons);
       this.fnForm.hidden = false;
-      this._placeUnder(this.fnForm, anchor || this.fnInput);
+      this._placeUnder(this.fnForm, anchor || this._formAnchor || this.fnInput);
       if (controls.length) controls[0].ctrl.focus();
     }
 
@@ -3094,6 +3526,7 @@ var SympyEditor = (function () {
       if (this.lazy()) msg.lazy = true;
       if (this.range) msg.children = this._rangeIndices();
       this.fnInput.value = "";
+      this._formAnchor = null;
       this._hideFnMenu();
       this.send(msg);
       this.view.focus({ preventScroll: true });
@@ -3674,7 +4107,13 @@ var SympyEditor = (function () {
       var out = [];
       for (var i = 0; i < list.length; i++) {
         var pos = list[i], last = out[out.length - 1];
-        if (last && (sameGap(last.gap, pos.gap) || (Math.abs(last.x - pos.x) < 1.5 && sameLine(last.gap, pos.gap)))) {
+        var merge = last && (sameGap(last.gap, pos.gap) || (Math.abs(last.x - pos.x) < 1.5 && sameLine(last.gap, pos.gap)));
+        // ... except where an operator is drawn between the two arguments:
+        // then "after the left one" and "before the right one" are either
+        // side of that glyph, two places on the screen a step apart, and
+        // each is a caret position of its own.
+        if (merge && sameGap(last.gap, pos.gap) && Math.abs(last.x - pos.x) >= 1.5 && self._gapHasOperator(pos.gap)) merge = false;
+        if (merge) {
           var better = (!pos.gap.extend && last.gap.extend) ||
             (!!pos.gap.extend === !!last.gap.extend && pos.gap.path.length > last.gap.path.length);
           if (better) out[out.length - 1] = pos;
@@ -3685,6 +4124,22 @@ var SympyEditor = (function () {
       return out;
     }
 
+    /** Is an operator glyph drawn inside this gap?  With one there, the gap's
+     *  two ends are either side of it and read as two places; with nothing
+     *  between them they are the same place, and merge. */
+    _gapHasOperator(gap) {
+      if (!gap || gap.extend || !gap.leftEl || !gap.rightEl || !document.elementsFromPoint) return false;
+      var stack = document.elementsFromPoint((gap.a + gap.b) / 2, (gap.top + gap.bottom) / 2);
+      for (var i = 0; i < stack.length; i++) {
+        var el = stack[i];
+        if (!this.view.contains(el) || el === this.view || el.querySelector("[data-path]")) continue;
+        if (gap.leftEl.contains(el) || gap.rightEl.contains(el)) return false;   // reached an argument: nothing between
+        var text = (el.textContent || "").trim();
+        if (text) return Object.prototype.hasOwnProperty.call(OPERATOR_GLYPHS, text);
+      }
+      return false;
+    }
+
     /** ←/→ at a caret: the previous/next caret position of the formula -
      *  out of the current node at its ends, into a composite neighbour. */
     _moveCaret(step) {
@@ -3692,8 +4147,7 @@ var SympyEditor = (function () {
       if (!at) return;
       var j = at.index + step;
       if (j < 0 || j >= at.count) return;
-      var g = at.list[j].gap;
-      this._showCaret(g, g.extend ? at.list[j].x : (step < 0 ? g.b : g.a));   // the near end of a gap
+      this._showCaret(at.list[j].gap, at.list[j].x);   // the place, on the side it is on
     }
 
     /** A caret at the first or the last position of the formula. */
@@ -3702,7 +4156,7 @@ var SympyEditor = (function () {
       var list = this._caretPositions();
       if (!list.length) return;
       var pos = list[which === "start" ? 0 : list.length - 1];
-      this._showCaret(pos.gap, pos.gap.extend ? pos.x : (which === "start" ? pos.gap.b : pos.gap.a));
+      this._showCaret(pos.gap, pos.x);
     }
 
     /** Where the caret is among the positions of the formula: {index, count}. */
@@ -3713,12 +4167,117 @@ var SympyEditor = (function () {
       var idx = -1, best = Infinity, mid = (cur.a + cur.b) / 2;
       for (var i = 0; i < list.length; i++) {
         var g = list[i].gap;
-        var same = g.path === cur.path && !!g.extend === !!cur.extend && (g.extend ? g.extend === cur.extend : g.index === cur.index);
+        var same = g.path === cur.path && !!g.extend === !!cur.extend
+                   && (g.extend ? g.extend === cur.extend
+                                : (g.index === cur.index && (g.attach || null) === (cur.attach || null)));
         var d = Math.abs(list[i].x - mid);
         if (same && d < best) { idx = i; best = d; }
       }
       if (idx < 0) for (var k = 0; k < list.length; k++) { var dk = Math.abs(list[k].x - mid); if (dk < best) { idx = k; best = dk; } }
       return { index: idx, count: list.length, list: list };
+    }
+
+    /* ---- moving through a grid: a matrix, or an array of any rank ---- */
+
+    /** The grid `path` is a cell of, or null.  The entries of an explicit
+     *  matrix and of an explicit array are one flat list of siblings - the
+     *  printer is what lays them out in two dimensions, a matrix as its rows
+     *  and columns, a rank-3 array as a row of matrices, a rank-4 one as a
+     *  matrix of matrices - so the arrows move through them by where they
+     *  are *drawn*, which is the same rule at every rank. */
+    _gridOf(path) {
+      if (!path || !this.state || !this.state.nodes || !this.tree[path]) return null;
+      var parent = this.tree[path].parent;
+      var pnode = parent ? this.state.nodes[parent] : null;
+      if (!pnode || !(pnode.matrix || pnode.array)) return null;
+      var cells = (this.tree[parent].children || []).filter(function (c) { return c !== parent; });
+      return cells.length > 1 ? { container: parent, cells: cells } : null;
+    }
+
+    /** The box a cell is drawn in (null when it is not on screen). */
+    _cellRect(path) {
+      var el = this._els(path)[0];
+      return el ? this._visualRect(el) : null;
+    }
+
+    /** The cell of `cells` next to `from` in the direction `dir` ("left",
+     *  "right", "up", "down"): the nearest one that lies that way *and*
+     *  shares the band across it - the same row of the drawing for left and
+     *  right, the same column for up and down.  Null at the edge of the
+     *  grid, where the caller does what it did before (a step out of the
+     *  matrix, or up to it). */
+    _gridNeighbour(from, cells, dir) {
+      var r0 = this._cellRect(from);
+      if (!r0) return null;
+      var horizontal = dir === "left" || dir === "right", sign = (dir === "right" || dir === "down") ? 1 : -1;
+      var mid = function (r) { return { x: (r.left + r.right) / 2, y: (r.top + r.bottom) / 2 }; };
+      var m0 = mid(r0), best = null, bestAt = Infinity, bestCross = Infinity;
+      for (var i = 0; i < cells.length; i++) {
+        if (cells[i] === from) continue;
+        var r = this._cellRect(cells[i]);
+        if (!r) continue;
+        var m = mid(r);
+        var along = horizontal ? (m.x - m0.x) * sign : (m.y - m0.y) * sign;
+        if (along <= 1) continue;                                   // not that way
+        var overlaps = horizontal ? (r.top < r0.bottom - 1 && r.bottom > r0.top + 1)
+                                  : (r.left < r0.right - 1 && r.right > r0.left + 1);
+        if (!overlaps) continue;                                    // another row (or column): not a step this way
+        var cross = horizontal ? Math.abs(m.y - m0.y) : Math.abs(m.x - m0.x);
+        if (along < bestAt - 0.5 || (Math.abs(along - bestAt) <= 0.5 && cross < bestCross)) {
+          best = cells[i]; bestAt = along; bestCross = cross;
+        }
+      }
+      return best;
+    }
+
+    /** ←/→/↑/↓ on a cell of a grid: the cell that way, as drawn.  True when
+     *  it moved; false at the grid's edge, where the ordinary meaning of the
+     *  key takes over (↑ selects the matrix itself, ←/→ step out of it). */
+    _gridTarget(dir) {
+      var grid = this._gridOf(this.selected);
+      return grid ? this._gridNeighbour(this.selected, grid.cells, dir) : null;
+    }
+
+    _gridMove(dir) {
+      var target = this._gridTarget(dir);
+      if (!target) return false;
+      this.select(target);
+      return true;
+    }
+
+    /** The same for a caret standing in a grid: the caret position that way,
+     *  among the positions of that grid (before and after its cells). */
+    _gridCaretTarget(dir) {
+      var cur = this.caret;
+      if (!cur) return null;
+      var grid = this._gridOf(cur.path);
+      if (!grid) return null;
+      var inside = grid.container === "/" ? function (p) { return p !== "/"; }
+                                          : function (p) { return p.indexOf(grid.container + "/") === 0; };
+      var list = this._caretPositions().filter(function (pos) { return inside(pos.gap.path); });
+      var horizontal = dir === "left" || dir === "right", sign = (dir === "right" || dir === "down") ? 1 : -1;
+      var x0 = (cur.a + cur.b) / 2, y0 = (cur.top + cur.bottom) / 2;
+      var best = null, bestAt = Infinity, bestCross = Infinity;
+      for (var i = 0; i < list.length; i++) {
+        var g = list[i].gap, x = list[i].x, y = (g.top + g.bottom) / 2;
+        var along = horizontal ? (x - x0) * sign : (y - y0) * sign;
+        if (along <= 1) continue;
+        var overlaps = horizontal ? (g.top < cur.bottom - 1 && g.bottom > cur.top + 1)
+                                  : Math.abs(x - x0) < Math.max(24, (cur.b - cur.a) + 24);
+        if (!overlaps) continue;
+        var cross = horizontal ? Math.abs(y - y0) : Math.abs(x - x0);
+        if (along < bestAt - 0.5 || (Math.abs(along - bestAt) <= 0.5 && cross < bestCross)) {
+          best = list[i]; bestAt = along; bestCross = cross;
+        }
+      }
+      return best;
+    }
+
+    _gridCaretMove(dir) {
+      var best = this._gridCaretTarget(dir);
+      if (!best) return false;
+      this._showCaret(best.gap, best.gap.extend ? best.x : (dir === "left" ? best.gap.b : best.gap.a));
+      return true;
     }
 
     /** The sibling ←/→ would select from `path` (null at the ends). */
@@ -3853,6 +4412,62 @@ var SympyEditor = (function () {
 
     /** Drag from glyph `a` to glyph `b`: the range of siblings between them
      *  in their nearest common rangeable ancestor (or that ancestor itself). */
+    /** Extend the drag's selection to what is under a point - or, once the
+     *  point has left the view, to the last thing that way: the hit test is
+     *  clamped to the view and falls back to the nearest node.  Without it a
+     *  finger dragged past the formula's edge found nothing under it (and, a
+     *  touch event's target being the node the finger started on, the range
+     *  snapped back to its anchor). */
+    _extendDragTo(x, y) {
+      var d = this._drag;
+      if (!d || !d.anchor || !this.state) return;
+      var r = this.view.getBoundingClientRect(), m = 2;
+      var cx = Math.min(Math.max(x, r.left + m), r.right - m);
+      var cy = Math.min(Math.max(y, r.top + m), r.bottom - m);
+      var leaf = this._leafAtPoint(cx, cy) || this._nearestLeafTo(cx, cy);
+      if (!leaf) return;
+      var lp = leaf.getAttribute("data-path");
+      if (!d.moved && lp === d.anchor) return;
+      d.moved = true;
+      this._dragSelect(d.anchor, lp);
+    }
+
+    /** A selection drag that reaches the edge of the view scrolls it, and
+     *  keeps extending over what comes into sight - the way to select what
+     *  lies beyond the screen.  The speed follows how far past the edge the
+     *  finger is; the loop stops when it comes back, when the view can
+     *  scroll no further, or when the drag ends. */
+    _autoScrollFor(d) {
+      // A third of the overshoot per frame, up to 16px: a finger just past
+      // the edge creeps, one well past it moves about a screen a second -
+      // fast enough to cross a long formula, slow enough to stop on a term.
+      var r = this.view.getBoundingClientRect(), margin = 28, top = 16;
+      var speed = function (pos, lo, hi) {
+        if (pos < lo + margin) return -Math.max(1.5, Math.min(top, (lo + margin - pos) / 3));
+        if (pos > hi - margin) return Math.max(1.5, Math.min(top, (pos - (hi - margin)) / 3));
+        return 0;
+      };
+      d.sx = speed(d.x, r.left, r.right);
+      d.sy = speed(d.y, r.top, r.bottom);
+      if (!d.sx && !d.sy) { this._stopAutoScroll(); return; }
+      if (this._autoScroll) return;
+      var self = this;
+      var step = function () {
+        var dd = self._drag;
+        if (!dd || (!dd.sx && !dd.sy)) { self._autoScroll = null; return; }
+        var left = self.view.scrollLeft, topNow = self.view.scrollTop;
+        self.view.scrollLeft = left + dd.sx;
+        self.view.scrollTop = topNow + dd.sy;
+        if (self.view.scrollLeft !== left || self.view.scrollTop !== topNow) self._extendDragTo(dd.x, dd.y);
+        self._autoScroll = requestAnimationFrame(step);
+      };
+      this._autoScroll = requestAnimationFrame(step);
+    }
+
+    _stopAutoScroll() {
+      if (this._autoScroll) { cancelAnimationFrame(this._autoScroll); this._autoScroll = null; }
+    }
+
     _dragSelect(a, b) {
       if (isAncestorOrSelf(a, b)) { this.select(a); return; }
       var p = this.tree[a] ? this.tree[a].parent : null;
@@ -3862,7 +4477,14 @@ var SympyEditor = (function () {
           if (ca === cb) { this.select(ca); return; }
           if (this.state.nodes[p].rangeable) {
             var kids = this._displayChildren(p);
-            this._setRange(p, kids.indexOf(ca), kids.indexOf(cb));
+            var ia = kids.indexOf(ca), ib = kids.indexOf(cb);
+            // Dragging over a part that is not one of the parent's own
+            // display children (an operator glyph between two terms, say)
+            // finds no index: keep the range as it stands rather than store
+            // a -1, which selects nothing and blinks the selection out from
+            // under the finger.
+            if (ia < 0 || ib < 0) return;
+            this._setRange(p, ia, ib);
           } else {
             this.select(p);
           }
@@ -4061,6 +4683,10 @@ var SympyEditor = (function () {
           return this.beginEdit(this.selected || "/");
         case "unwrap": return this.unwrapSelection();
         case "isolate": return this.isolateSelection();
+        case "matrow": return this._matrixOp("insert_row");
+        case "matcol": return this._matrixOp("insert_col");
+        case "matdelrow": return this._matrixOp("delete_row");
+        case "matdelcol": return this._matrixOp("delete_col");
         case "delete":
           if (this.junction) return this.setOperator("");
           if (this.range) return this.send({ action: "delete", path: this.range.parent, children: this._rangeIndices() });
@@ -4068,7 +4694,8 @@ var SympyEditor = (function () {
           if (this.selected) return this.send({ action: "delete", path: this.selected });
           return;
         case "child":
-          if (this.caret) return;    // nothing to go into from a caret
+          if (this.caret) { this._gridCaretMove("down"); return; }   // in a grid: the row below
+          if (this._gridMove("down")) return;
           return this._selectChild();
         case "drawer": return this.toggleDrawer();
         case "history": return this.showHistory();
@@ -4077,14 +4704,17 @@ var SympyEditor = (function () {
         case "left":
         case "right": {
           var step = cmd === "left" ? -1 : 1;
-          if (this.caret) return this._moveCaret(step);
+          var way = cmd === "left" ? "left" : "right";
+          if (this.caret) { if (!this._gridCaretMove(way)) this._moveCaret(step); return; }
           if (this.range) return this.select(this._displayChildren(this.range.parent)[this.range.focus]);
+          if (this._gridMove(way)) return;
           if (this.selected) return this._moveSideways(step);
           return this._caretAtEnd(step < 0 ? "start" : "end");
         }
         case "parent": {
-          if (this.caret) return this._selectBesideCaret();
+          if (this.caret) { if (!this._gridCaretMove("up")) this._selectBesideCaret(); return; }
           if (this.range) { this.select(this.range.parent); return; }
+          if (this._gridMove("up")) return;
           if (this.selected) this._selectParent(this.selected);
           return;
         }
@@ -4434,7 +5064,7 @@ var SympyEditor = (function () {
       if (snap && snap.history) this._history = snap.history;
       var sess = this._currentSession();
       var self = this;
-      return buildHistoryReport(hist, { title: "SymPy editor \u2014 history" + (sess && sess.name ? " of " + sess.name : ""),
+      return buildHistoryReport(hist, { title: "SymPy Editor \u2014 history" + (sess && sess.name ? " of " + sess.name : ""),
                                         katexCss: this.opts.katexCss, defaultAction: "Edit",
                                         stepExtra: function (step, i, prev) { return self._addonsStepHtml(step, i, prev); },
                                         extraCss: this._addonsHistoryCss() });
@@ -4494,7 +5124,7 @@ var SympyEditor = (function () {
     /** The Python script reproducing the history (built by the document). */
     async buildPython() {
       var sess = this._currentSession();
-      var title = "SymPy editor \u2014 history" + (sess && sess.name ? " of " + sess.name : "");
+      var title = "SymPy Editor \u2014 history" + (sess && sess.name ? " of " + sess.name : "");
       var snap = await this.backend.send({ action: "script", title: title }, function () {});
       if (!snap || !snap.script) throw new Error("No history to export");
       return snap.script;
@@ -4782,6 +5412,13 @@ var SympyEditor = (function () {
       body.textContent = "";
       var list = store.list.slice().sort(function (a, b) { return b.updated - a.updated; });
       if (this.buttons.drawer) this.buttons.drawer.title = "Sessions (" + list.length + ") and history";
+      // Starting a new one comes first: it is what the drawer is opened for
+      // as often as picking an old session out of the list under it.
+      var add = h("button", { type: "button", class: "se-session-new", title: "Start a new session: an empty formula, a copy of this one, or an example" }, ["New session\u2026"]);
+      add.disabled = !this._sessionsReady;
+      var addRow = h("div", { class: "se-session se-session-add" }, [add]);
+      add.addEventListener("click", function () { self._showSessionPicker(addRow); });
+      body.appendChild(addRow);
       list.forEach(function (sess) {
         var current = sess.id === store.current;
         var when = new Date(sess.updated || 0);
@@ -4823,11 +5460,6 @@ var SympyEditor = (function () {
         }
         body.appendChild(row);
       });
-      var add = h("button", { type: "button", class: "se-session-new", title: "Start a new session: an empty formula, a copy of this one, or an example" }, ["New session\u2026"]);
-      add.disabled = !this._sessionsReady;
-      var addRow = h("div", { class: "se-session se-session-add" }, [add]);
-      add.addEventListener("click", function () { self._showSessionPicker(addRow); });
-      body.appendChild(addRow);
       // The history of the current session: one row per step, the current one marked.
       var hist = this.historyBody;
       hist.textContent = "";
@@ -4982,12 +5614,86 @@ var SympyEditor = (function () {
       return pts.length ? pts.reduce(function (sum, p) { return sum + p.x; }, 0) / pts.length : undefined;
     }
 
+    _pointerCentreY() {
+      var pts = Object.keys(this._pointers).map(function (id) { return this._pointers[id]; }, this);
+      return pts.length ? pts.reduce(function (sum, p) { return sum + p.y; }, 0) / pts.length : undefined;
+    }
+
     _endPan() {
       if (this._pan && this.view.releasePointerCapture && this._pan.id !== undefined) {
         try { this.view.releasePointerCapture(this._pan.id); } catch (e) { /* not captured */ }
       }
       this._pan = null;
       this.view.classList.remove("se-panning");
+    }
+
+    /** The finger has rested on a node long enough: it is selected, and the
+     *  drag that may follow extends the selection to a range - the finger is
+     *  selecting now, not scrolling (a scroll it had begun ends here). */
+    _beginHold() {
+      var hold = this._hold;
+      this._hold = null;
+      if (!hold || this.closed || this.loading) return;
+      this._endPan();
+      var leaf = hold.leaf;
+      if (!leaf || !leaf.isConnected || !this.view.contains(leaf)) return;
+      var path = leaf.getAttribute("data-path");
+      this._gapCache = null;
+      this.select(path);
+      this.lastLeaf = path;
+      this._drag = { anchor: path, moved: false, held: true };
+      this.view.focus({ preventScroll: true });
+    }
+
+    /** Watch the rendering's size as well as the view's: the fonts arriving
+     *  after the first render widen the formula without resizing the view,
+     *  and the edge strips must follow.  Not through _relayout, which hides
+     *  the caret: an inline field opened at a caret changes this very size. */
+    _watchRendering() {
+      if (!this._contentObserver) return;
+      var el = this.view.querySelector(".katex-display, .katex");
+      if (el === this._watched) return;
+      if (this._watched) this._contentObserver.unobserve(this._watched);
+      this._watched = el || null;
+      if (el) this._contentObserver.observe(el);
+    }
+
+    _cancelHold() {
+      if (!this._hold) return;
+      clearTimeout(this._hold.timer);
+      this._hold = null;
+    }
+
+    /** Show the edge strips of the sides the formula runs past, hide the
+     *  others: once the end of the formula is in sight, its strip goes. */
+    _updateScrollArrows() {
+      var b = this.scrollBtns;
+      if (!b) return;
+      var v = this.view;
+      var maxX = v.scrollWidth - v.clientWidth, maxY = v.scrollHeight - v.clientHeight;
+      var hide = this.closed || v.classList.contains("se-empty");
+      b.left.hidden = hide || !(maxX > 1 && v.scrollLeft > 1);
+      b.right.hidden = hide || !(maxX > 1 && v.scrollLeft < maxX - 1);
+      b.up.hidden = hide || !(maxY > 1 && v.scrollTop > 1);
+      b.down.hidden = hide || !(maxY > 1 && v.scrollTop < maxY - 1);
+      // the full-screen button steps in from a strip's edge (see the CSS)
+      this.stage.classList.toggle("se-past-right", !b.right.hidden);
+      this.stage.classList.toggle("se-past-up", !b.up.hidden);
+    }
+
+    /** Scroll the view most of a screen in `dir` ("left", "right", "up",
+     *  "down"), smoothly where the browser can. */
+    scrollByPage(dir) {
+      var v = this.view;
+      var dx = dir === "left" ? -1 : dir === "right" ? 1 : 0;
+      var dy = dir === "up" ? -1 : dir === "down" ? 1 : 0;
+      var left = dx * Math.max(40, v.clientWidth * 0.7), top = dy * Math.max(40, v.clientHeight * 0.7);
+      var smooth = !(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+      if (typeof v.scrollBy === "function" && smooth) {
+        try { v.scrollBy({ left: left, top: top, behavior: "smooth" }); return; } catch (e) { /* no options object */ }
+      }
+      v.scrollLeft += left;
+      v.scrollTop += top;
     }
 
     /* ---- misc UI ---- */
@@ -5022,6 +5728,14 @@ var SympyEditor = (function () {
       var set = function (name, disabled) { if (b[name]) b[name].disabled = !!disabled; };
       var t = this.selected ? this.tree[this.selected] : null;
       var range = !!this.range;
+      // In a grid the arrows move as it is drawn, so a button is live when
+      // that move exists even where the plain walk has run out.
+      var self = this;
+      var inGrid = !dis && !range && (this.caret ? !!this._gridOf(this.caret.path) : !!this._gridOf(this.selected));
+      var gridWay = function (way) {
+        if (!inGrid) return false;
+        return self.caret ? !!self._gridCaretTarget(way) : !!self._gridTarget(way);
+      };
       set("undo", dis || !s.can_undo);
       set("redo", dis || !s.can_redo);
       set("edit", dis);
@@ -5030,12 +5744,12 @@ var SympyEditor = (function () {
       set("unwrap", dis || range || !this.selected || !(s.nodes && s.nodes[this.selected] && (s.nodes[this.selected].nargs || s.nodes[this.selected].parts)));
       set("isolate", dis || !(range || (this.selected && this.selected !== "/")));
       set("parent", dis || !(range || (t && t.parent) || this.caret));
-      set("child", dis || !!this.caret);
+      set("child", dis || (!!this.caret && !gridWay("down")));
       // ←/→: at a caret, the previous/next position (none at the ends); on a
       // selection, a sibling at some level; otherwise a caret at either end.
       var at = !dis && this.caret ? this._caretIndex() : null;
-      set("left", dis || (at ? at.index <= 0 : (this.selected && !range ? !this._sidewaysTarget(this.selected, -1) : false)));
-      set("right", dis || (at ? at.index >= at.count - 1 : (this.selected && !range ? !this._sidewaysTarget(this.selected, 1) : false)));
+      set("left", dis || (gridWay("left") ? false : (at ? at.index <= 0 : (this.selected && !range ? !this._sidewaysTarget(this.selected, -1) : false))));
+      set("right", dis || (gridWay("right") ? false : (at ? at.index >= at.count - 1 : (this.selected && !range ? !this._sidewaysTarget(this.selected, 1) : false))));
       set("copy", !s.src);
       set("paste", dis);
       set("history", dis);
@@ -5047,6 +5761,7 @@ var SympyEditor = (function () {
       set("addons", dis);
       if (this.opsSelect) this.opsSelect.disabled = dis;
       if (this.typeMenu) this.typeMenu.disabled = dis;
+      if (this.methodsMenu) this.methodsMenu.disabled = dis;
       for (var a = 0; a < this._addons.length; a++) {
         for (var t = 0; t < this._addons[a].tools.length; t++) this._addons[a].tools[t].button.disabled = dis;
       }
@@ -5056,6 +5771,7 @@ var SympyEditor = (function () {
      *  document: a notebook makes and disposes of many editors, and each
      *  listener left behind would keep its editor alive. */
     destroy() {
+      this._stopAutoScroll();
       this._addonsNotify("destroy");
       this._addons = [];
       this.closeDrawer();
@@ -5069,7 +5785,9 @@ var SympyEditor = (function () {
         document.removeEventListener("webkitfullscreenchange", this._fsListener);
         this._fsListener = null;
       }
+      this._cancelHold();
       if (this._resizeObserver) { this._resizeObserver.disconnect(); this._resizeObserver = null; }
+      if (this._contentObserver) { this._contentObserver.disconnect(); this._contentObserver = null; }
       if (this._relayout) window.removeEventListener("resize", this._relayout);
       if (this.root.parentNode) this.root.parentNode.removeChild(this.root);
     }

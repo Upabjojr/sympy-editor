@@ -53,7 +53,7 @@ import build_www  # noqa: E402
 
 from sympy_editor.html import default_urls  # noqa: E402
 
-NAME = "SymPy editor"
+NAME = "SymPy Editor"
 SHORT_NAME = "SymPy"
 THEME = "#3b82f6"
 BACKGROUND = "#ffffff"
@@ -185,8 +185,8 @@ SHELF = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Derivations \u2014 SymPy editor</title>
-<meta name="description" content="Worked mathematical derivations, step by step: what SymPy editor's history viewer is for.">
+<title>Derivations \u2014 SymPy Editor</title>
+<meta name="description" content="Worked mathematical derivations, step by step: what SymPy Editor's history viewer is for.">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="stylesheet" href="{katex_css}">
@@ -344,7 +344,7 @@ header a.button code {{ font-size: 0.85em; }}
 <main>
 <header>
   <p class="eyebrow">Free &amp; open source \u00b7 BSD 3-Clause</p>
-  <h1><img src="icon.svg" alt="" width="56" height="56"> SymPy editor</h1>
+  <h1><img src="icon.svg" alt="" width="56" height="56"> SymPy Editor</h1>
   <p>A click-to-edit editor for SymPy expressions: select a piece of a formula
   and change it in place - type over it, apply any SymPy function to it, pull
   it apart - with the formula drawn as mathematics the whole time, never as
@@ -432,7 +432,7 @@ DOC_PAGE = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{title} \u2014 SymPy editor</title>
+<title>{title} \u2014 SymPy Editor</title>
 <meta name="description" content="{description}">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <style>
@@ -469,7 +469,7 @@ footer {{ margin-top: 3rem; padding-top: 1.2rem; border-top: 1px solid #d0d7de;
 <body>
 <main>
 <header>
-  <nav class="crumbs"><a href="index.html">\u2190 SymPy editor</a></nav>
+  <nav class="crumbs"><a href="index.html">\u2190 SymPy Editor</a></nav>
   <h1><img src="icon.svg" alt="" width="44" height="44"> {title}</h1>
   <p class="lead">{lead}</p>
 </header>
@@ -539,8 +539,8 @@ def doc_pages(folder: Path) -> None:
     (folder / "LICENSE.txt").write_text(licence, encoding="utf-8")
     card = lambda icon, title, body: f'<section class="card">{DOC_ICONS[icon]}<div><h2>{title}</h2>{body}</div></section>'
     (folder / "license.html").write_text(DOC_PAGE.replace("\\u2014", "\u2014").replace("\\u2190", "\u2190").format(
-        title="License", description="SymPy editor is free software under the BSD 3-Clause License.",
-        lead="SymPy editor is free software, under the BSD 3-Clause License.",
+        title="License", description="SymPy Editor is free software under the BSD 3-Clause License.",
+        lead="SymPy Editor is free software, under the BSD 3-Clause License.",
         body=card("scale", "In short",
                   """<p>Use it, copy it, change it, redistribute it &mdash; commercially or
 not &mdash; as long as the copyright notice travels with it, and without
@@ -553,10 +553,10 @@ warranty. The short version is not the licence; the licence is:</p>""")
         encoding="utf-8")
     cards = "".join(card(icon, title, body) for icon, title, body in PRIVACY_CARDS)
     (folder / "privacy.html").write_text(DOC_PAGE.replace("\\u2014", "\u2014").replace("\\u2190", "\u2190").format(
-        title="Privacy", description="SymPy editor collects no data: the mathematics stays on your device.",
+        title="Privacy", description="SymPy Editor collects no data: the mathematics stays on your device.",
         lead="The short version: the editor computes on your device, and nothing you type is sent anywhere by us.",
         body=cards,
-        footer="This page describes SymPy editor 0.1.0 (September 2026). "
+        footer="This page describes SymPy Editor 0.1.0 (September 2026). "
                "If the facts change, this page changes with them."),
         encoding="utf-8")
 

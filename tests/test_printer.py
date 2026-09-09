@@ -277,3 +277,57 @@ def test_a_one_sided_limit_braces_its_direction():
     _, nodes = annotate(Limit(x / y, y, 0))
     paths = {format_path(p) for p in nodes}
     assert {"/", "/0", "/1", "/2", "/3"} <= paths
+
+
+def test_exact_srepr_round_trips_a_matrix_sum():
+    """SymPy's srepr writes an Add's terms in display order, not in the order
+    the expression holds them.  A commutative Add does not care - rebuilding
+    sorts them the same way again - but MatAdd keeps the order it was given
+    and compares unequal in another, so the round trip does not come back.
+    Paths here are argument positions, so that silently renames every term."""
+    from sympy import MatrixSymbol, srepr, sympify
+    from sympy_editor.printer import exact_srepr
+    A, B = MatrixSymbol("A", 2, 2), MatrixSymbol("B", 2, 2)
+    expr = A * B + 2 * A.T
+    ours = [str(a) for a in expr.args]
+    assert ours == ["2*A.T", "A*B"]
+    # what SymPy writes, read back through the same namespace the editor uses
+    from sympy.core.symbol import Str
+    ns = {"MatrixSymbol": MatrixSymbol, "Str": Str}
+    theirs = [str(a) for a in sympify(srepr(expr), locals=ns).args]
+    assert theirs != ours                                   # the upstream bug this guards
+    back = sympify(exact_srepr(expr), locals=ns)
+    assert [str(a) for a in back.args] == ours
+    assert back == expr
+
+
+def test_a_document_rebuilt_from_its_srepr_keeps_every_path():
+    """What a Pyodide page and the apps do: they are handed the expression as
+    an srepr and rebuild it, while the rendering shipped beside them names the
+    terms by position.  The two must agree, or the first edit lands on
+    another term."""
+    from sympy import MatrixSymbol, symbols
+    from sympy_editor import Document
+    from sympy_editor.printer import exact_srepr
+    x, y, z = symbols("x y z")
+    A, B = MatrixSymbol("A", 2, 2), MatrixSymbol("B", 2, 2)
+    for expr in (A * B + 2 * A.T, A + B, A * B + B * A, x + y + z, 1 + x**2 + x):
+        shipped = Document(expr).snapshot()["nodes"]
+        rebuilt = Document(exact_srepr(expr)).snapshot()["nodes"]
+        for path, node in shipped.items():
+            assert rebuilt[path]["src"] == node["src"], (expr, path)
+
+
+def test_editing_a_rebuilt_matrix_sum_changes_the_term_that_was_asked_for():
+    """The bug end to end: select A*B, replace it, and it is A*B that changes."""
+    from sympy import MatrixSymbol
+    from sympy_editor import Document
+    from sympy_editor.printer import exact_srepr
+    A, B = MatrixSymbol("A", 2, 2), MatrixSymbol("B", 2, 2)
+    expr = A * B + 2 * A.T
+    shipped = Document(expr).snapshot()["nodes"]
+    path = next(p for p, n in shipped.items() if n["src"] == "A*B")
+    doc = Document(exact_srepr(expr))                       # the page's own copy
+    assert doc.snapshot()["nodes"][path]["src"] == "A*B"    # same path, same term
+    doc.replace(path, "A*B + B*A")
+    assert str(doc.expr) == "A*B + B*A + 2*A.T"

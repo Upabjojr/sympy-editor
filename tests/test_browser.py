@@ -17,7 +17,7 @@ import pytest
 import re
 import time
 
-from sympy import Array, Matrix, MatrixSymbol, Symbol, pi, sin, symbols
+from sympy import Array, Matrix, MatrixSymbol, Symbol, pi, sin, sqrt, symbols
 
 from sympy_editor import Document, to_html
 from sympy_editor.html import default_urls
@@ -179,7 +179,7 @@ def test_ops_undo_redo_delete_and_errors(browser, served):
     srv, doc = served
     page = _open(browser, srv.url)
     _click(page, '/1')          # the fraction
-    page.locator(".se-ops").select_option("negate")  # picking applies at once
+    _pick(page, ".se-ops", "negate")  # picking applies at once
     page.wait_for_function("document.querySelector('.se-source').textContent.startsWith('-x**2')")
     assert doc.expr == -(x**2) / y - sin(x)
     page.keyboard.press("Control+z")
@@ -292,6 +292,29 @@ def _wait(predicate, timeout=5.0):
             return True
         time.sleep(0.05)
     return predicate()
+
+
+def _pick_menu(page, selector):
+    """The floating list of the picker whose box is `selector` (.se-ops, .se-typemenu, .se-methods, .se-fn)."""
+    return page.locator(f'.se-pick-menu[data-for="{selector.lstrip(".")}"]')
+
+
+def _menu_labels(page, selector):
+    """Open a picker (focus its box) and read the labels it lists; Esc closes it again."""
+    page.locator(selector).click()
+    menu = _pick_menu(page, selector)
+    menu.wait_for(state="visible")
+    labels = menu.locator(".se-pick-name").all_inner_texts()
+    page.keyboard.press("Escape")
+    return labels
+
+
+def _pick(page, selector, value):
+    """Pick `value` in a picker, the way a user does: open it, click the entry."""
+    page.locator(selector).click()
+    menu = _pick_menu(page, selector)
+    menu.wait_for(state="visible")
+    menu.locator(f'.se-pick-item[data-name="{value}"]').click()
 
 
 def test_click_between_terms_inserts(browser, serve_expr):
@@ -471,7 +494,7 @@ def test_shift_arrows_select_ranges(browser, serve_expr):
     page.keyboard.press("Shift+ArrowLeft")             # shrink back
     assert page.locator(".se-selected").count() == 2
     assert page.locator('.se-toolbar [data-cmd="delete"]').is_enabled()
-    _next_state(page, lambda: page.locator(".se-ops").select_option("negate"))   # an op acts on the range only
+    _next_state(page, lambda: _pick(page, ".se-ops", "negate"))   # an op acts on the range only
     assert doc.expr == a - b - c + d
     assert page.locator(".se-selected").count() == 0   # a new state drops the range
     kids = _display_children(page, "/")
@@ -540,22 +563,174 @@ def test_mouse_drag_selects_a_range(browser, serve_expr):
     assert page.errors == []
 
 
-def test_touch_drag_selects_a_range(browser, serve_expr):
+TOUCH_FIRE = """(type, p) => { const at = q => { const b = document.querySelector(`[data-path="${q}"]`).getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; };
+    const [x, y] = at(p); const el = document.elementFromPoint(x, y);
+    el.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, pointerType: 'touch', pointerId: 7, isPrimary: true, buttons: 1 })); }"""
+
+
+def _touch(page, type_, path):
+    page.evaluate("([t, p]) => (%s)(t, p)" % TOUCH_FIRE, [type_, path])
+
+
+def test_touch_long_press_selects_a_range(browser, serve_expr):
+    """A finger held still on a node starts a range selection: the node is
+    selected when the press has lasted, and dragging on extends the range.
+    A quick swipe selects nothing (it is how a phone scrolls a wide
+    formula - or the page), so a tap with a little shake stays a tap."""
     a, b, c = symbols("a b c")
     srv, doc = serve_expr(a + b + c)
     page = _open(browser, srv.url)
     kids = _display_children(page, "/")
-    page.evaluate(
-        """([p0, p1]) => {
-            const at = p => { const b = document.querySelector(`[data-path="${p}"]`).getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; };
-            const fire = (type, p) => { const [x, y] = at(p); const el = document.elementFromPoint(x, y);
-              el.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, pointerType: 'touch', pointerId: 7, isPrimary: true, buttons: 1 })); };
-            fire('pointerdown', p0); fire('pointermove', p1); fire('pointerup', p1);
-        }""", [kids[0], kids[1]])
+    # a swipe across two terms: not a selection
+    _touch(page, "pointerdown", kids[0]); _touch(page, "pointermove", kids[1]); _touch(page, "pointerup", kids[1])
+    assert page.locator(".se-selected").count() == 0
+    # the finger rests on a: after the long press a is selected...
+    _touch(page, "pointerdown", kids[0])
+    page.wait_for_timeout(100)
+    assert page.locator(".se-selected").count() == 0                   # not yet: a tap is still possible
+    assert _wait(lambda: page.locator(".se-status").inner_text() == "Symbol: a", timeout=2)
+    # ... and dragging on to b makes it a range
+    _touch(page, "pointermove", kids[1])
     assert page.locator(".se-selected").count() == 2
     assert page.locator(".se-status").inner_text() == "Add range: a + b"
+    _touch(page, "pointerup", kids[1])
+    page.locator(".se-view").dispatch_event("click")                 # the click that follows the finger changes nothing
+    assert page.locator(".se-status").inner_text() == "Add range: a + b"
+    # a long press that ends where it began leaves the node selected; the
+    # next tap on it opens the field, as a tap on any selected node does
+    _touch(page, "pointerdown", kids[2])
+    assert _wait(lambda: page.locator(".se-status").inner_text() == "Symbol: c", timeout=2)
+    _touch(page, "pointerup", kids[2])
+    assert page.locator(".se-selected").count() == 1
+    # a finger that moves away before the press has lasted starts nothing
+    _touch(page, "pointerdown", kids[0]); page.wait_for_timeout(100); _touch(page, "pointermove", kids[1])
+    page.wait_for_timeout(600)
+    assert page.locator(".se-status").inner_text() == "Symbol: c"
+    _touch(page, "pointerup", kids[1])
     assert page.evaluate("getComputedStyle(document.querySelector('.se-view')).touchAction").startswith("pan-y")
+    assert page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.opts.longPress") == 450
     assert page.errors == []
+
+
+def test_mouse_drag_still_selects_a_range_at_once(browser, serve_expr):
+    a, b, c = symbols("a b c")
+    srv, doc = serve_expr(a + b + c)
+    page = _open(browser, srv.url)
+    kids = _display_children(page, "/")
+    x0, y0 = _center(page, kids[0])
+    x1, y1 = _center(page, kids[1])
+    page.mouse.move(x0, y0)
+    page.mouse.down()
+    page.mouse.move(x1, y1, steps=3)
+    page.mouse.up()
+    assert page.locator(".se-status").inner_text() == "Add range: a + b"
+    assert page.errors == []
+
+
+def test_two_fingers_scroll_a_wide_formula_and_the_edge_arrows(browser, serve_expr):
+    """A formula wider than the view: a strip with a chevron sits on the edge
+    it runs past, scrolls a screen when pressed, and goes once the end is in
+    sight; two fingers moving together scroll it (their spread still
+    zooms); one finger dragged across it - on the glyphs too - scrolls it
+    sideways and selects nothing."""
+    terms = symbols("a0:24")
+    srv, doc = serve_expr(sum(t**2 for t in terms))
+    ctx = browser.new_context(has_touch=True, is_mobile=True, viewport={"width": 400, "height": 800})
+    page = ctx.new_page()
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(srv.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    view = page.locator(".se-view")
+    scroll_left = lambda: page.evaluate("document.querySelector('.se-view').scrollLeft")
+    max_left = page.evaluate("(() => { const v = document.querySelector('.se-view'); return v.scrollWidth - v.clientWidth; })()")
+    assert max_left > 200
+    left, right = page.locator(".se-scroll-left"), page.locator(".se-scroll-right")
+    up, down = page.locator(".se-scroll-up"), page.locator(".se-scroll-down")
+    # at the start only the right strip shows, tall and flat along the edge
+    assert right.is_visible() and not left.is_visible() and not up.is_visible() and not down.is_visible()
+    rb, vb = right.bounding_box(), view.bounding_box()
+    assert abs(rb["x"] + rb["width"] - (vb["x"] + vb["width"])) < 3 and rb["width"] < 50
+    assert rb["width"] >= 32                                              # a finger's target on a touch screen
+    # It runs the height of the view but for the corner the full-screen
+    # button keeps (that button no longer steps aside, so the strip does):
+    # they must not overlap, or the button would swallow the strip's taps.
+    fb = page.locator(".se-fullbtn").bounding_box()
+    assert rb["height"] > vb["height"] - 4 - fb["height"] - 8, (rb, vb, fb)
+    assert rb["y"] >= fb["y"] + fb["height"] - 1, (rb, fb)
+    # pressing it scrolls most of a screen; the left strip appears
+    right.tap()
+    assert _wait(lambda: scroll_left() > 150)
+    assert _wait(lambda: left.is_visible())
+    assert page.locator(".se-selected").count() == 0
+    # at the end the right strip goes
+    page.evaluate("document.querySelector('.se-view').scrollLeft = 1e6")
+    assert _wait(lambda: not right.is_visible()) and left.is_visible()
+    page.evaluate("document.querySelector('.se-view').scrollLeft = 0")
+    assert _wait(lambda: right.is_visible() and not left.is_visible())
+    # two fingers moving together scroll the formula without zooming it
+    zoom = lambda: page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.zoom")
+    page.evaluate("""() => { const v = document.querySelector('.se-view'), r = v.getBoundingClientRect();
+        const y = r.top + r.height / 2, cx = r.left + r.width / 2;
+        const ev = (type, id, x) => v.dispatchEvent(new PointerEvent(type, {bubbles: true, cancelable: true, clientX: x, clientY: y, pointerType: 'touch', pointerId: id, isPrimary: id === 1, buttons: 1}));
+        ev('pointerdown', 1, cx - 30); ev('pointerdown', 2, cx + 30);
+        for (let i = 1; i <= 10; i++) { ev('pointermove', 1, cx - 30 - 10 * i); ev('pointermove', 2, cx + 30 - 10 * i); }   // a finger at a time, as they arrive
+        ev('pointerup', 1, cx - 130); ev('pointerup', 2, cx - 70); }""")
+    assert abs(zoom() - 1) < 0.01 and 85 <= scroll_left() <= 115
+    assert page.locator(".se-selected").count() == 0
+    # ... and moving apart while sliding does both
+    page.evaluate("""() => { const v = document.querySelector('.se-view'), r = v.getBoundingClientRect();
+        const y = r.top + r.height / 2, cx = r.left + r.width / 2;
+        const ev = (type, id, x) => v.dispatchEvent(new PointerEvent(type, {bubbles: true, cancelable: true, clientX: x, clientY: y, pointerType: 'touch', pointerId: id, isPrimary: id === 1, buttons: 1}));
+        ev('pointerdown', 1, cx - 30); ev('pointerdown', 2, cx + 30);
+        ev('pointermove', 1, cx - 90); ev('pointermove', 2, cx + 30);
+        ev('pointerup', 1, cx - 90); ev('pointerup', 2, cx + 30); }""")
+    assert abs(zoom() - 2) < 0.01 and scroll_left() > 110
+    page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.setZoom(1)")
+    page.evaluate("document.querySelector('.se-view').scrollLeft = 200")
+    # one finger dragged over the glyphs scrolls the formula and selects nothing
+    kids = _display_children(page, "/")
+    x0, y0 = page.evaluate("""() => { const v = document.querySelector('.se-view').getBoundingClientRect();
+        for (const el of document.querySelectorAll('.se-view [data-path]')) { const r = el.getBoundingClientRect();
+            if (r.left > v.left + 60 && r.right < v.right - 60 && r.width > 4) return [r.left + r.width / 2, r.top + r.height / 2]; } }""")
+    assert page.evaluate("([x, y]) => !!document.elementFromPoint(x, y).closest('[data-path]')", [x0, y0])   # the finger lands on a glyph
+    page.evaluate("""([x, y]) => { const v = document.querySelector('.se-view');
+        const ev = (type, px) => v.dispatchEvent(new PointerEvent(type, {bubbles: true, cancelable: true, clientX: px, clientY: y, pointerType: 'touch', pointerId: 3, isPrimary: true, buttons: 1}));
+        ev('pointerdown', x); ev('pointermove', x + 40); ev('pointermove', x + 80); ev('pointerup', x + 80); }""", [x0, y0])
+    assert 110 <= scroll_left() <= 130 and page.locator(".se-selected").count() == 0 and page.locator(".se-caret").count() == 0
+    # a formula that fits shows no strip at all
+    page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.send({action: 'set', src: 'x + y'})")
+    page.wait_for_function("document.querySelector('.se-source').textContent === 'x + y'")
+    assert _wait(lambda: not right.is_visible() and not left.is_visible())
+    assert doc.expr == x + y
+    assert errors == []
+    ctx.close()
+
+
+def test_the_edge_arrows_scroll_a_tall_formula_in_full_screen(browser, serve_expr):
+    """In full screen the view has a height of its own, so a tall formula
+    scrolls vertically too: the strips at the top and the bottom."""
+    from sympy import Matrix
+
+    srv, doc = serve_expr(Matrix(30, 1, lambda i, j: symbols("a%d" % i)))
+    page = browser.new_page(viewport={"width": 600, "height": 300})
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(srv.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    up, down = page.locator(".se-scroll-up"), page.locator(".se-scroll-down")
+    assert not up.is_visible() and not down.is_visible()      # on the page the view grows with the formula
+    page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.setFullscreen(true)")
+    assert _wait(lambda: down.is_visible()) and not up.is_visible()
+    down.click()
+    scroll_top = lambda: page.evaluate("document.querySelector('.se-view').scrollTop")
+    assert _wait(lambda: scroll_top() > 100)
+    assert _wait(lambda: up.is_visible())
+    page.evaluate("document.querySelector('.se-view').scrollTop = 1e6")
+    assert _wait(lambda: not down.is_visible()) and up.is_visible()
+    page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.setFullscreen(false)")
+    assert _wait(lambda: not up.is_visible() and not down.is_visible())
+    assert errors == []
 
 
 def test_selection_box_covers_tall_content(browser, serve_expr):
@@ -746,24 +921,24 @@ def test_type_menu_shows_the_selection_type_operations(browser, serve_expr):
     assert menu.is_visible()                              # nothing selected: the whole (matrix) expression is the target
     page.locator(".se-view").focus()
     page.keyboard.press("ArrowDown")                      # select it explicitly
-    assert menu.is_visible() and menu.locator("option").first.inner_text().startswith("Matrix")
-    labels = menu.locator("option").all_inner_texts()
+    assert menu.is_visible() and menu.get_attribute("placeholder").startswith("Matrix")
+    labels = _menu_labels(page, ".se-typemenu")
     assert "Transpose" in labels and "Determinant" in labels
-    assert "Transpose" not in page.locator(".se-ops option").all_inner_texts()   # not in the general dropdown
+    assert "Transpose" not in _menu_labels(page, ".se-ops")   # not in the general menu
     _click(page, "/2/0")                                  # the x entry: a plain scalar, no type menu
     assert page.locator(".se-status").inner_text() == "Symbol: x"
     assert not menu.is_visible()
     page.keyboard.press("ArrowUp")                        # the matrix itself
     assert page.locator(".se-status").inner_text().startswith("ImmutableDenseMatrix")
-    _next_state(page, lambda: menu.select_option("determinant"))   # picking applies at once
+    _next_state(page, lambda: _pick(page, ".se-typemenu", "determinant"))   # picking applies at once
     assert doc.expr == x - y * z
     assert not menu.is_visible()                          # the result is a scalar: no type menu
     srv2, doc2 = serve_expr(Integral(x**2, (x, 0, 1)) + y)
     page = _open(browser, srv2.url)
     _select(page, next(k for k, v in doc2.snapshot()["nodes"].items() if v["type"] == "Integral"))
     menu = page.locator(".se-typemenu")
-    assert menu.locator("option").first.inner_text().startswith("Integral")
-    _next_state(page, lambda: menu.select_option("evaluate"))
+    assert menu.get_attribute("placeholder").startswith("Integral")
+    _next_state(page, lambda: _pick(page, ".se-typemenu", "evaluate"))
     assert doc2.expr == y + symbols("x") ** 0 / 3 or str(doc2.expr) == "y + 1/3"
     assert page.errors == []
 
@@ -826,13 +1001,18 @@ def test_edge_of_a_matrix_entry_extends_it(browser, serve_expr):
     r = _rect(page, zpath)
     page.mouse.click((r["l"] + r["r"]) / 2, r["y"])       # the middle of a glyph still selects it
     assert page.locator(".se-status").inner_text() == "Symbol: z" and page.locator(".se-caret").count() == 0
-    # ↓ on an atom gives a caret after it and lifts the selection entirely; ↑ from a caret selects that atom first
+    # ↓ on an atom gives a caret after it and lifts the selection entirely
     page.keyboard.press("ArrowDown")
     assert page.locator(".se-caret").count() == 1 and page.locator(".se-selected").count() == 0
     assert page.locator(".se-box-select").count() == 0 and page.locator(".se-source mark").count() == 0
     assert not page.locator(".se-actions").is_visible()
+    # ↑ inside a matrix is a row up (the caret is in the bottom row here), and
+    # the row above having none, the next ↑ selects what the caret is beside -
+    # the way out of a grid, and what ↑ does at a caret everywhere else
     page.keyboard.press("ArrowUp")
-    assert page.locator(".se-status").inner_text() == "Symbol: z"
+    assert page.locator(".se-status").inner_text().startswith("Type after Symbol x")
+    page.keyboard.press("ArrowUp")
+    assert page.locator(".se-status").inner_text() == "Symbol: x"
     assert page.errors == []
 
 
@@ -930,11 +1110,11 @@ def test_array_tools_ask_for_their_axes(browser, serve_expr):
     _click(page, "/")
     menu = page.locator(".se-typemenu")
     menu.wait_for(state="visible")
-    labels = menu.locator("option").all_inner_texts()
+    labels = _menu_labels(page, ".se-typemenu")
     assert any("Permute axes" in t for t in labels) and any("Contract axes" in t for t in labels)
     assert any("As matrix" in t for t in labels)
 
-    menu.select_option("permutedims")               # asks before doing anything
+    _pick(page, ".se-typemenu", "permutedims")      # asks before doing anything
     form = page.locator(".se-fn-form")
     form.wait_for(state="visible")
     assert doc.expr == Array([[1, 2], [3, 4]])
@@ -943,10 +1123,10 @@ def test_array_tools_ask_for_their_axes(browser, serve_expr):
     assert doc.expr == Array([[1, 3], [2, 4]])
 
     _click(page, "/")
-    _next_state(page, lambda: page.locator(".se-typemenu").select_option("tomatrix"))
+    _next_state(page, lambda: _pick(page, ".se-typemenu", "tomatrix"))
     assert doc.expr == Matrix([[1, 3], [2, 4]])
     _click(page, "/")
-    _next_state(page, lambda: page.locator(".se-typemenu").select_option("to_array"))
+    _next_state(page, lambda: _pick(page, ".se-typemenu", "to_array"))
     assert doc.expr == Array([[1, 3], [2, 4]])
     assert page.errors == []
 
@@ -1074,10 +1254,10 @@ def test_function_box_search_prompt_and_paste_button(browser, serve_expr):
     assert not page.locator(".se-loading").is_visible()     # no overlay on the HTTP backend
     fn = page.locator(".se-fn")
     fn.click()
-    page.wait_for_function("document.querySelectorAll('.se-fn-item').length > 0")   # the list appears on focus
+    page.wait_for_function("document.querySelectorAll('.se-pick-menu[data-for=se-fn] .se-pick-item').length > 0")   # the list appears on focus
     fn.fill("sol")
-    menu = page.locator(".se-fn-menu")
-    assert menu.is_visible() and menu.locator(".se-fn-item").first.get_attribute("data-name") == "solve"
+    menu = _pick_menu(page, ".se-fn")
+    assert menu.is_visible() and menu.locator(".se-pick-item").first.get_attribute("data-name") == "solve"
     page.keyboard.press("Enter")                              # pick solve: it needs a symbol -> a prompt
     form = page.locator(".se-fn-form")
     assert form.is_visible() and "solve(" in form.locator(".se-fn-title").inner_text()
@@ -1284,7 +1464,7 @@ def test_long_computation_shows_spinner_and_can_be_interrupted(browser):
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
         page = _open(browser, srv.url)
-        page.select_option(".se-ops", "forever")
+        _pick(page, ".se-ops", "forever")
         overlay = page.locator(".se-loading")
         _wait(lambda: overlay.is_visible())
         assert "Take forever" in overlay.inner_text() and page.locator(".se-spinner").is_visible()
@@ -1295,7 +1475,7 @@ def test_long_computation_shows_spinner_and_can_be_interrupted(browser):
         assert "Interrupted" in page.locator(".se-error").inner_text()
         assert not overlay.is_visible() and doc.expr == x + 1
         # the editor works normally afterwards; a transformation that changes nothing says so
-        _next_state(page, lambda: page.select_option(".se-ops", "expand"))
+        _next_state(page, lambda: _pick(page, ".se-ops", "expand"))
         assert page.locator(".se-error").is_hidden()
         assert _wait(lambda: page.locator(".se-status").inner_text().startswith("No change: Expand"))
         assert page.errors == []
@@ -1341,14 +1521,22 @@ def test_arrow_buttons_move_the_selection_and_the_caret(browser, serve_expr):
     # with a caret, the buttons move it between the terms
     page.keyboard.press("Tab")                                     # caret after b
     assert page.locator(".se-caret").count() == 1
-    gap = "(() => { const c = document.querySelector('.sympy-editor').__sympyEditor.caret; return [c.index, document.querySelector('.se-caret').getBoundingClientRect().left]; })()"
-    i1, x1 = page.evaluate(gap)
+    gap = "(() => { const c = document.querySelector('.sympy-editor').__sympyEditor.caret; return [c.index, c.attach || null, document.querySelector('.se-caret').getBoundingClientRect().left]; })()"
+    i1, at1, x1 = page.evaluate(gap)
     page.locator('.se-toolbar [data-cmd="right"]').click()
-    i2, x2 = page.evaluate(gap)
-    assert i2 == i1 + 1 and x2 > x1
+    i2, at2, x2 = page.evaluate(gap)
+    # The operator is drawn between the two terms, so the first step to the
+    # right crosses it: the same gap, its other side.
+    assert (i2, at2) == (i1, "right") and at1 == "left" and x2 > x1
+    page.locator('.se-toolbar [data-cmd="right"]').click()
+    i2b, at2b, x2b = page.evaluate(gap)
+    assert i2b == i1 + 1 and x2b > x2                              # and the next step reaches the next gap
     page.locator('.se-toolbar [data-cmd="left"]').click()
-    i3, x3 = page.evaluate(gap)
-    assert i3 == i1 and x3 < x2                                    # back in the previous gap (at its near end, like the ← key)
+    i3, at3, x3 = page.evaluate(gap)
+    assert (i3, at3) == (i2, at2) and x3 < x2b                     # back the way it came
+    page.locator('.se-toolbar [data-cmd="left"]').click()          # and back to where it started
+    i4, at4, x4 = page.evaluate(gap)
+    assert (i4, at4) == (i1, at1) and x4 == x1
     # with a caret, ↓ is disabled and ↑ selects the atom the caret is attached to
     assert page.locator('.se-toolbar [data-cmd="child"]').is_disabled()
     assert page.locator('.se-toolbar [data-cmd="parent"]').is_enabled()
@@ -1368,31 +1556,42 @@ def test_caret_walks_through_atoms_across_levels(browser, serve_expr):
     kids = _display_children(page, "/")
     _click(page, kids[0])                                          # a
     page.keyboard.press("Tab")                                     # caret after a (the gap before c)
-    caret = "(() => { const c = document.querySelector('.sympy-editor').__sympyEditor.caret; return c && {path: c.path, extend: c.extend || null, index: c.index, x: document.querySelector('.se-caret').getBoundingClientRect().left}; })()"
+    caret = "(() => { const c = document.querySelector('.sympy-editor').__sympyEditor.caret; return c && {path: c.path, extend: c.extend || null, index: c.index, attach: c.attach || null, x: document.querySelector('.se-caret').getBoundingClientRect().left}; })()"
     start = page.evaluate(caret)
-    assert start["path"] == "/" and start["index"] == 1
+    assert (start["path"], start["index"], start["attach"]) == ("/", 1, "left")
     right = page.locator('.se-toolbar [data-cmd="right"]')
     steps = []
-    for _ in range(4):
+    for _ in range(6):
         assert right.is_enabled()
         right.click()
         steps.append(page.evaluate(caret))
-    # gap before sin(b), into sin: before b, after b, out of sin: the end of the sum, where → is disabled
-    assert [(c["path"], c["extend"], c["index"]) for c in steps] == [("/", None, 2), (pb, "before", 0), (pb, "after", 0), ("/", None, 3)]
-    assert all(steps[i]["x"] > steps[i - 1]["x"] for i in range(1, 4)) and steps[0]["x"] > start["x"]
+    # Each + is drawn between its terms, so it has a place either side of it
+    # (that is what decides which term a bare factor typed there joins);
+    # then into sin: before b, after b, and out of it to the end of the sum,
+    # where → is disabled.
+    assert [(c["path"], c["extend"], c["index"], c["attach"]) for c in steps] == [
+        ("/", None, 1, "right"),
+        ("/", None, 2, "left"), ("/", None, 2, "right"),
+        (pb, "before", 0, None), (pb, "after", 0, None),
+        ("/", None, 3, "left")]
+    assert all(steps[i]["x"] > steps[i - 1]["x"] for i in range(1, 6)) and steps[0]["x"] > start["x"]
     assert right.is_disabled()
     # back: the same positions in reverse, strictly leftwards, down to the start of the sum, where ← is disabled
     left = page.locator('.se-toolbar [data-cmd="left"]')
     back = []
-    for _ in range(5):
+    for _ in range(7):
         assert left.is_enabled()
         left.click()
         back.append(page.evaluate(caret))
-    assert [(c["path"], c["extend"], c["index"]) for c in back] == [(pb, "after", 0), (pb, "before", 0), ("/", None, 2), ("/", None, 1), ("/", None, 0)]
-    assert all(back[i]["x"] < back[i - 1]["x"] for i in range(1, 5))
+    assert [(c["path"], c["extend"], c["index"], c["attach"]) for c in back] == [
+        (pb, "after", 0, None), (pb, "before", 0, None),
+        ("/", None, 2, "right"), ("/", None, 2, "left"),
+        ("/", None, 1, "right"), ("/", None, 1, "left"),
+        ("/", None, 0, "right")]
+    assert all(back[i]["x"] < back[i - 1]["x"] for i in range(1, 7))
     assert left.is_disabled() and right.is_enabled()
     # ↑ from the caret before b selects b
-    for _ in range(3):
+    for _ in range(5):
         right.click()
     assert page.evaluate(caret)["extend"] == "before"
     page.locator('.se-toolbar [data-cmd="parent"]').click()
@@ -1645,10 +1844,10 @@ def test_unevaluated_toggle(browser, serve_expr):
     page.locator(".se-view").focus()
     page.keyboard.press("ArrowDown")                                          # the whole matrix
     menu = page.locator(".se-typemenu")                                       # the matrix tools
-    _next_state(page, lambda: menu.select_option("determinant"))
+    _next_state(page, lambda: _pick(page, ".se-typemenu", "determinant"))
     assert isinstance(doc.expr, Determinant)
     assert doc.snapshot()["latex_plain"].startswith("\\left|")                    # |M|, not -2
-    _next_state(page, lambda: page.select_option(".se-ops", "doit"))
+    _next_state(page, lambda: _pick(page, ".se-ops", "doit"))
     assert doc.expr == -2
     page.locator(".se-lazy-box").uncheck()
     page.locator(".se-view").focus()
@@ -1656,7 +1855,7 @@ def test_unevaluated_toggle(browser, serve_expr):
     _next_state(page, lambda: page.keyboard.press("Control+z"))
     page.keyboard.press("Escape")                                             # (the selection followed the undo)
     page.keyboard.press("ArrowDown")
-    _next_state(page, lambda: menu.select_option("determinant"))
+    _next_state(page, lambda: _pick(page, ".se-typemenu", "determinant"))
     assert doc.expr == -2
     assert page.errors == []
 
@@ -1677,7 +1876,7 @@ def test_selection_follows_the_change(browser, serve_expr):
     assert doc.expr == Eq(sin(x)**2 + cos(x), 1)
     sel = page.locator(".se-selected").get_attribute("data-path")
     assert doc.snapshot()["nodes"][sel]["src"] == "cos(x)"                           # not sin(x)**2, which took its path
-    _next_state(page, lambda: page.select_option(".se-ops", "expand_trig"))          # no change of cos(x): still selected
+    _next_state(page, lambda: _pick(page, ".se-ops", "expand_trig"))          # no change of cos(x): still selected
     assert doc.snapshot()["nodes"][page.locator(".se-selected").get_attribute("data-path")]["src"] == "cos(x)"
     # a replacement that SymPy moves elsewhere in the sum is followed
     srv, doc = serve_expr(x + y)
@@ -1726,7 +1925,7 @@ def test_history_report_is_self_contained_and_works_offline(browser, serve_expr,
     page.keyboard.press("ArrowUp")
     page.keyboard.type("cos(y)")
     _next_state(page, lambda: page.keyboard.press("Enter"))
-    _next_state(page, lambda: page.select_option(".se-ops", "factor"))
+    _next_state(page, lambda: _pick(page, ".se-ops", "factor"))
     assert doc.expr == x**2 + cos(y)
     html = page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.buildReport()")
     assert html.startswith("<!DOCTYPE html>") and "data:font/woff2;base64," in html
@@ -2018,7 +2217,7 @@ def test_pyodide_worker_interrupt_and_sessions(browser, tmp_path):
         _next_state(page, lambda: page.locator(".se-interrupt").click())
         assert "Interrupted" in page.locator(".se-error").inner_text()
         # Python restarts on the next request; the document is back from its last state
-        _next_state(page, lambda: page.select_option(".se-ops", "expand"))
+        _next_state(page, lambda: _pick(page, ".se-ops", "expand"))
         assert _wait(lambda: page.locator(".se-loading").is_hidden(), timeout=180)
         assert page.evaluate(f"{ed}.state.src") == str(big)
         # the drawer (☰) lists the sessions - the first one so far - and the history of the current one
@@ -2146,17 +2345,17 @@ def test_methods_menu_lists_and_calls_class_methods(browser, serve_expr):
     menu = page.locator(".se-methods")
     # Nothing selected: the root expression's class, fetched once, then shown.
     assert _wait(lambda: menu.is_visible())
-    assert menu.locator("option").first.inner_text().startswith("Methods")
-    opts = menu.locator("option").all_inner_texts()
+    assert menu.get_attribute("placeholder").startswith("Methods")
+    opts = _menu_labels(page, ".se-methods")
     assert ".det()" in opts and ".T" in opts and ".rank()" in opts
     assert not any(o.startswith(".is_") for o in opts) and ".args" not in opts
     # A method without required parameters is applied at once.
-    menu.select_option("det")
+    _pick(page, ".se-methods", "det")
     page.wait_for_function("document.querySelector('.se-source').textContent.trim() === '-2'")
     assert str(doc.expr) == "-2"
     # The result is another type: its list is fetched and shown in turn.
     assert _wait(lambda: menu.is_visible())
-    opts = menu.locator("option").all_inner_texts()
+    opts = _menu_labels(page, ".se-methods")
     assert ".det()" not in opts and ".round()" in opts       # the Integer's list, not the matrix's
     assert page.errors == []
 
@@ -2592,8 +2791,8 @@ def test_a_lambda_can_be_applied_to_arguments(browser, serve_expr):
     page = _open(browser, srv.url)
     menu = page.locator(".se-methods")
     assert _wait(lambda: menu.is_visible())
-    assert "( ) apply" in menu.locator("option").all_inner_texts()
-    menu.select_option("__call__")
+    assert "( ) apply" in _menu_labels(page, ".se-methods")
+    _pick(page, ".se-methods", "__call__")
     form = page.locator(".se-fn-form")
     form.wait_for(state="visible")
     form.locator("input").first.fill("3")
@@ -2809,20 +3008,72 @@ def test_a_history_plays_as_a_slideshow(browser, tmp_path):
     page.close()
 
 
-def test_the_three_menus_are_one_size(browser, serve_expr):
-    """Transform, the type menu and Methods are one set of controls, so they
-    are one size.  A select takes the width of its widest option, which made
-    the three of them three different widths sitting side by side."""
+def test_the_four_menus_are_one_control_in_two_groups(browser, serve_expr):
+    """Transform, the type menu, Methods and the function box are one control
+    - a box with a filter over a list of every value - so they are one size
+    and one look; the first two sit in the actions group, the other two in
+    the library group, boxed apart."""
     from sympy import Matrix
 
     srv, doc = serve_expr(Matrix([[1, 2], [3, 4]]))       # a type with a menu of its own
     page = _open(browser, srv.url)
     assert _wait(lambda: page.locator(".se-methods").is_visible() and page.locator(".se-typemenu").is_visible())
-    widths = page.evaluate("""() => ['.se-ops', '.se-typemenu', '.se-methods']
-        .map(s => Math.round(document.querySelector(s).getBoundingClientRect().width))""")
-    assert len(set(widths)) == 1, widths
-    assert widths[0] > 100, widths                        # and wide enough to read
+    boxes = page.evaluate("""() => ['.se-ops', '.se-typemenu', '.se-methods', '.se-fn'].map(s => {
+        const el = document.querySelector(s), r = el.getBoundingClientRect();
+        return {tag: el.tagName, role: el.getAttribute('role'), pick: el.classList.contains('se-pick'),
+                width: Math.round(r.width), height: Math.round(r.height), group: el.parentNode.className}; })""")
+    assert all(b["tag"] == "INPUT" and b["role"] == "combobox" and b["pick"] for b in boxes), boxes
+    assert len({b["width"] for b in boxes}) == 1 and len({b["height"] for b in boxes}) == 1, boxes
+    assert boxes[0]["width"] > 100, boxes                 # and wide enough to read
+    assert boxes[0]["group"] == boxes[1]["group"] == "se-group se-group-actions"
+    assert boxes[2]["group"] == boxes[3]["group"] == "se-group se-group-library"
+    # the two groups are boxed apart: each has a border of its own, and a gap lies between them
+    gap = page.evaluate("""() => { const a = document.querySelector('.se-group-actions').getBoundingClientRect(),
+        b = document.querySelector('.se-group-library').getBoundingClientRect();
+        return {gap: b.left - a.right, border: getComputedStyle(document.querySelector('.se-group-actions')).borderTopWidth}; }""")
+    assert gap["gap"] >= 4 and gap["border"] != "0px", gap
+    # every one of them lists all its values on focus, narrowed by what is typed
+    page.locator(".se-fn").click()
+    assert _wait(lambda: page.evaluate("document.querySelector('.sympy-editor').__sympyEditor._functionsLoaded"), timeout=10)
+    total = page.evaluate("document.querySelector('.sympy-editor').__sympyEditor._fnNames.length")
+    assert _pick_menu(page, ".se-fn").locator(".se-pick-item").count() == total and total > 100
+    page.locator(".se-fn").fill("sinh")
+    names = _pick_menu(page, ".se-fn").locator(".se-pick-item").evaluate_all("els => els.map(e => e.getAttribute('data-name'))")
+    assert names[0] == "sinh" and all("sinh" in n for n in names) and "asinh" in names
+    page.keyboard.press("Escape")
+    assert not _pick_menu(page, ".se-fn").is_visible() and page.locator(".se-fn").input_value() == ""
     assert page.errors == []
+
+
+def test_the_action_menus_are_chosen_by_the_actions_option(browser, tmp_path):
+    """options.actions names, per menu, the ops to offer and their order -
+    "expr" for Transform, a kind for the type menu - and relabels one with
+    {name, label}; the library (Methods, the functions) is never trimmed."""
+    from sympy import Matrix
+    from sympy_editor import to_html
+
+    path = tmp_path / "actions.html"
+    path.write_text(to_html(Matrix([[1, 2], [3, 4]]), options={"actions": {
+        "expr": ["expand", {"name": "factor", "label": "Factorise"}, "simplify", "no_such_op"],
+        "matrix": ["determinant", "transpose"],
+    }}), encoding="utf-8")
+    page = browser.new_page()
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(path.as_uri())
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    assert _menu_labels(page, ".se-ops") == ["Expand", "Factorise", "Simplify"]        # chosen, ordered, relabelled; unknown names ignored
+    assert _menu_labels(page, ".se-typemenu") == ["Determinant", "Transpose"]
+    assert _wait(lambda: page.locator(".se-methods").is_visible())
+    assert len(_menu_labels(page, ".se-methods")) > 20                              # the library is whole
+    # changed at any time
+    page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.setActions({expr: ['simplify']})")
+    assert _menu_labels(page, ".se-ops") == ["Simplify"]
+    labels = _menu_labels(page, ".se-typemenu")
+    assert "Inverse" in labels and "Determinant" in labels                          # no matrix key any more: every matrix op
+    page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.setActions(null)")
+    assert "Cancel" in _menu_labels(page, ".se-ops")
+    assert errors == []
 
 
 def test_up_and_down_walk_into_a_determinant_s_matrix(browser, serve_expr):
@@ -3056,11 +3307,11 @@ def test_the_app_wears_its_own_icon_beside_its_name(browser, serve_expr):
         const text = document.querySelector('h1').textContent.trim();
         return {mark: [mark.x, mark.y, mark.height], h1: [h1.x, h1.y, h1.height], bar: [bar.y], text};
     }""")
-    assert where["text"] == "SymPy editor"
+    assert where["text"] == "SymPy Editor"
     # the mark is decorative: the words beside it are the heading, and the
     # licence note inside the drawing is not part of what the heading says
     assert page.locator("h1 .page-logo").get_attribute("aria-hidden") == "true"
-    assert page.locator("h1").inner_text() == "SymPy editor"
+    assert page.locator("h1").inner_text() == "SymPy Editor"
     # on the title's line: same left edge as the heading, centred on it, and
     # about as tall as the words rather than a picture of its own
     assert abs(where["mark"][0] - where["h1"][0]) < 2
@@ -3074,7 +3325,7 @@ def test_the_app_wears_its_own_icon_beside_its_name(browser, serve_expr):
     page.goto(srv2.url)
     page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
     assert page.locator(".page-logo").count() == 0
-    assert page.locator("h1").inner_text() == "SymPy editor"
+    assert page.locator("h1").inner_text() == "SymPy Editor"
     assert page.errors == []
 
 
@@ -3346,6 +3597,347 @@ def test_a_caret_in_the_source_line_is_a_caret_in_the_formula(browser, serve_exp
     assert page.errors == []
 
 
+
+def test_a_drag_keeps_the_selection_painted_the_whole_way(browser, serve_expr):
+    """Dragging after a long press used to blink the selection out and back.
+    Two causes, both fixed: the overlay box was torn out of the document and
+    a new one put back on every pointer move (a frame with nothing drawn),
+    and a finger over a part that is not one of the parent's own display
+    children - the operator between two terms - found no index and stored a
+    focus of -1, which selects nothing at all."""
+    terms = symbols("a0:20")
+    srv, doc = serve_expr(sum(t**2 for t in terms))
+    ctx = browser.new_context(has_touch=True, is_mobile=True, viewport={"width": 380, "height": 620})
+    page = ctx.new_page()
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(srv.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    kids = _display_children(page, "/")
+    at = lambda p: page.evaluate("p => { const b = document.querySelector(`[data-path=\"${p}\"]`).getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; }", p)
+    x0, y0 = at(kids[0])
+    fire = """([t, x, y]) => { const v = document.querySelector('.se-view');
+        const start = document.elementFromPoint(%s, %s) || v;
+        (t === 'pointerdown' ? start : v).dispatchEvent(new PointerEvent(t,
+          {bubbles: true, cancelable: true, clientX: x, clientY: y, pointerType: 'touch', pointerId: 7, isPrimary: true, buttons: 1})); }""" % (x0, y0)
+    page.evaluate("a => (%s)(a)" % fire, ["pointerdown", x0, y0])
+    page.wait_for_selector(".se-selected[data-path]", timeout=10000)      # the long press took hold
+    # count both the frames with no box at all and the boxes ever created:
+    # one box should be made and then moved, never replaced
+    page.evaluate("""() => { window.__gaps = 0; window.__samples = 0; window.__born = 0;
+        new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(n => {
+            if (n.classList && n.classList.contains('se-box-select')) window.__born++; })))
+          .observe(document.querySelector('.se-view'), {childList: true});
+        window.__t = setInterval(() => { window.__samples++;
+            if (!document.querySelector('.se-box-select')) window.__gaps++; }, 16); }""")
+    right, mid = page.evaluate("(() => { const r = document.querySelector('.se-view').getBoundingClientRect(); return [r.right, (r.top + r.bottom) / 2]; })()")
+    for step in range(14):
+        page.evaluate("a => (%s)(a)" % fire, ["pointermove", x0 + (right - x0) * step / 8.0, mid])
+        page.wait_for_timeout(60)
+    page.wait_for_timeout(300)
+    page.evaluate("() => clearInterval(window.__t)")
+    gaps, samples, born = page.evaluate("() => [window.__gaps, window.__samples, window.__born]")
+    assert page.evaluate("(() => document.querySelector('.se-box-select').classList.contains('se-box-glide'))()") is True
+    page.evaluate("a => (%s)(a)" % fire, ["pointerup", right, mid])
+    assert samples > 20                                    # the sampling really ran
+    assert gaps == 0, f"the selection vanished for {gaps} of {samples} frames"
+    assert born <= 1, f"the box was rebuilt {born} times instead of being moved"
+    reach = page.evaluate("(() => { const r = document.querySelector('.sympy-editor').__sympyEditor.range; return r ? Math.abs(r.focus - r.anchor) + 1 : 0; })()")
+    assert reach >= 4, reach                               # a -1 focus used to cut this back to nothing
+    assert errors == []
+    ctx.close()
+
+
+def test_the_selection_box_glides_only_while_a_drag_extends_it(browser, served):
+    """The box is moved rather than replaced, so CSS can carry it to the new
+    range while the finger is drawing it.  Only then: a box moved by a zoom
+    or by going full screen belongs at its new place at once, and a box just
+    drawn must not fly in from wherever it started."""
+    srv, doc = served
+    page = _open(browser, srv.url)
+    page.locator('[data-path="/"]').click(force=True)
+    page.wait_for_selector(".se-box-select")
+    box = ".se-box-select"
+    # se-box-new is dropped on the frame after the box is made: wait for that
+    # rather than race it - a loaded runner can be a while getting there.
+    page.wait_for_function("() => { const b = document.querySelector('%s'); return b && !b.classList.contains('se-box-new'); }" % box, timeout=10000)
+    assert page.evaluate("(() => document.querySelector('%s').classList.contains('se-box-glide'))()" % box) is False
+    assert page.evaluate("(() => getComputedStyle(document.querySelector('%s')).transitionDuration)()" % box) == "0s"
+    # the rule is there for the drag: with the class on, it animates
+    page.evaluate("(() => document.querySelector('%s').classList.add('se-box-glide'))()" % box)
+    assert page.evaluate("(() => getComputedStyle(document.querySelector('%s')).transitionDuration)()" % box) != "0s"
+    assert page.errors == []
+
+
+
+def test_the_tool_strip_holds_still_while_a_drag_selects(browser, serve_expr):
+    """What the menus offer follows the selection: a single node has methods
+    to call, a range of terms has none.  So the Methods box came and went as
+    the finger moved, the strip rewrapped, and the editing box below it
+    jumped by a row over and over.  The strip is left alone for the length of
+    the drag and filled once the finger lifts."""
+    terms = symbols("a0:14")
+    srv, doc = serve_expr(sum(sqrt(t) / (t**2 + 1) for t in terms) + sin(x))
+    ctx = browser.new_context(has_touch=True, is_mobile=True, viewport={"width": 380, "height": 620})
+    page = ctx.new_page()
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(srv.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    kids = _display_children(page, "/")
+    at = lambda q: page.evaluate("p => { const b = document.querySelector(`[data-path=\"${p}\"]`).getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; }", q)
+    x0, y0 = at(kids[0])
+    fire = """([t, x, y]) => { const v = document.querySelector('.se-view');
+        const s = document.elementFromPoint(%s, %s) || v;
+        (t === 'pointerdown' ? s : v).dispatchEvent(new PointerEvent(t,
+          {bubbles: true, cancelable: true, clientX: x, clientY: y, pointerType: 'touch', pointerId: 7, isPrimary: true, buttons: 1})); }""" % (x0, y0)
+    page.evaluate("a => (%s)(a)" % fire, ["pointerdown", x0, y0])
+    page.wait_for_selector(".se-selected[data-path]", timeout=10000)
+    # watch the strip's height and where the editing box starts, all through the drag
+    page.evaluate("""() => { window.__m = [];
+        window.__t = setInterval(() => window.__m.push([
+            Math.round(document.querySelector('.se-toolbar').getBoundingClientRect().height),
+            Math.round(document.querySelector('.se-stage').getBoundingClientRect().top)]), 16); }""")
+    right, mid = page.evaluate("(() => { const r = document.querySelector('.se-view').getBoundingClientRect(); return [r.right, (r.top + r.bottom) / 2]; })()")
+    for step in range(12):
+        page.evaluate("a => (%s)(a)" % fire, ["pointermove", x0 + (right - x0) * step / 7.0, mid])
+        page.wait_for_timeout(60)
+    page.wait_for_timeout(200)
+    page.evaluate("() => clearInterval(window.__t)")
+    samples = page.evaluate("() => window.__m")
+    assert len(samples) > 20, len(samples)
+    heights = {s[0] for s in samples}
+    tops = {s[1] for s in samples}
+    assert len(heights) == 1, f"the strip changed height while dragging: {sorted(heights)}"
+    assert len(tops) == 1, f"the editing box moved while dragging: {sorted(tops)}"
+    # the finger up, the menus catch up: a range of terms has no class methods
+    page.evaluate("a => (%s)(a)" % fire, ["pointerup", right, mid])
+    reach = page.evaluate("(() => { const r = document.querySelector('.sympy-editor').__sympyEditor.range; return r ? Math.abs(r.focus - r.anchor) + 1 : 0; })()")
+    assert reach >= 3, reach
+    assert _wait(lambda: page.evaluate("(() => document.querySelector('.se-methods').getBoundingClientRect().width)()") == 0)
+    assert errors == []
+    ctx.close()
+
+
+def test_down_from_an_operator_drops_to_the_caret_it_stands_for(browser, serve_expr):
+    """An operator selected, down goes to the point it sits at - the caret
+    between the two terms it joins.  The toolbar's arrow calls _selectChild
+    straight off, and that had no case for an operator: it fell through to
+    "nothing is selected" and took the whole expression instead."""
+    for how in ("button", "key"):
+        srv, doc = serve_expr(x + y + Symbol("z"))
+        page = _open(browser, srv.url)
+        plus = page.evaluate("""() => { const v = document.querySelector('.se-view');
+            for (const el of v.querySelectorAll('*')) {
+                if (el.querySelector('[data-path]')) continue;
+                if ((el.textContent || '').trim() === '+') {
+                    const r = el.getBoundingClientRect();
+                    return [r.left + r.width / 2, r.top + r.height / 2]; } }
+            return null; }""")
+        assert plus, "no + glyph found"
+        page.mouse.click(plus[0], plus[1])
+        ed = "document.querySelector('.sympy-editor').__sympyEditor"
+        assert _wait(lambda: page.evaluate(f"(() => !!{ed}.junction)()"))
+        if how == "button":
+            page.locator('.se-toolbar [data-cmd="child"]').click()
+        else:
+            page.locator(".se-view").press("ArrowDown")
+        assert _wait(lambda: page.evaluate(f"(() => !!{ed}.caret)()")), how
+        state = page.evaluate(f"(() => ({{sel: {ed}.selected, path: {ed}.caret.path, index: {ed}.caret.index}}))()")
+        assert state["sel"] is None, (how, state)          # not the whole expression, as it used to be
+        assert [state["path"], state["index"]] == ["/", 1], (how, state)
+        # plainly on one side of the glyph, not adrift in the middle of it
+        caret_x = page.evaluate("(() => { const c = document.querySelector('.se-caret').getBoundingClientRect(); return c.left + c.width / 2; })()")
+        assert caret_x > plus[0], (how, caret_x, plus[0])
+        # and it really is an insertion point: nothing is selected, so nothing
+        # can be overwritten (before the fix the term on the right was
+        # selected and typing replaced it).  What a term typed there joins is
+        # test_either_side_of_an_operator_is_a_place_of_its_own.
+        assert page.locator(".se-selected").count() == 0, how
+        page.locator(".se-view").type("5", delay=40)
+        page.keyboard.press("Enter")
+        assert _wait(lambda: str(doc.expr) == "x + 5*y + z", timeout=20), (how, str(doc.expr))
+        assert page.errors == []
+        page.close()
+
+
+def test_left_and_right_from_an_operator_take_the_terms_it_joins(browser, serve_expr):
+    """Sideways still picks the operands - and by the order they are drawn in,
+    which is not always the order the tree keeps them in."""
+    srv, doc = serve_expr(x**2 + y)
+    page = _open(browser, srv.url)
+    plus = page.evaluate("""() => { const v = document.querySelector('.se-view');
+        for (const el of v.querySelectorAll('*')) {
+            if (el.querySelector('[data-path]')) continue;
+            if ((el.textContent || '').trim() === '+') {
+                const r = el.getBoundingClientRect();
+                return [r.left + r.width / 2, r.top + r.height / 2]; } }
+        return null; }""")
+    ed = "document.querySelector('.sympy-editor').__sympyEditor"
+    page.mouse.click(plus[0], plus[1])
+    assert _wait(lambda: page.evaluate(f"(() => !!{ed}.junction)()"))
+    drawn = page.evaluate(f"(() => {ed}._displayChildren({ed}.junction.path))()")
+    page.locator(".se-view").press("ArrowRight")
+    assert _wait(lambda: page.evaluate(f"(() => {ed}.selected)()") == drawn[1])
+    page.mouse.click(plus[0], plus[1])
+    assert _wait(lambda: page.evaluate(f"(() => !!{ed}.junction)()"))
+    page.locator(".se-view").press("ArrowLeft")
+    assert _wait(lambda: page.evaluate(f"(() => {ed}.selected)()") == drawn[0])
+    assert page.errors == []
+
+
+@pytest.mark.parametrize("expr_src, want_right, want_left", [
+    ("x + y + z", "x + 5*y + z", "5*x + y + z"),
+    ("x - y", "x - 5*y", "5*x - y"),
+    ("Eq(x, y)", "Eq(x, 5*y)", "Eq(5*x, y)"),
+])
+def test_either_side_of_an_operator_is_a_place_of_its_own(browser, serve_expr, expr_src, want_right, want_left):
+    """An operator is drawn between its two arguments, so the point before it
+    and the point after it are two places, and the arrows visit both.  Which
+    one the caret is on decides which neighbour a bare term typed there joins:
+    a 5 to the right of + multiplies the right-hand term.  Both used to be one
+    place (the gap they share was merged away), and with no side to it the
+    insertion always took the left-hand term.
+
+    How the operator is drawn differs - between the arguments for +, inside
+    the right-hand one for the sign of -y, and an equation takes no new
+    argument at all - so the place is looked up among the formula's own caret
+    positions rather than worked out from the gap."""
+    from sympy import sympify
+    expr = sympify(expr_src)
+    for side, want in (("right", want_right), ("left", want_left)):
+        srv, doc = serve_expr(expr)
+        page = _open(browser, srv.url)
+        ed = "document.querySelector('.sympy-editor').__sympyEditor"
+        glyph = page.evaluate("""() => { const v = document.querySelector('.se-view');
+            const ops = ['+', '\u2212', '-', '=', '\u22c5'];
+            for (const el of v.querySelectorAll('*')) {
+                if (el.querySelector('[data-path]')) continue;
+                const t = (el.textContent || '').trim();
+                if (ops.includes(t)) { const r = el.getBoundingClientRect();
+                    if (r.width) return [r.left + r.width / 2, r.top + r.height / 2]; } }
+            return null; }""")
+        assert glyph, expr_src
+        page.mouse.click(glyph[0], glyph[1])
+        assert _wait(lambda: page.evaluate(f"(() => !!{ed}.junction)()")), expr_src
+        page.locator('.se-toolbar [data-cmd="child"]').click()
+        assert _wait(lambda: page.evaluate(f"(() => !!{ed}.caret)()")), (expr_src, side)
+        if side == "left":
+            page.locator(".se-view").press("ArrowLeft")     # the other side of the glyph
+            page.wait_for_timeout(250)
+        caret_x = page.evaluate("(() => { const c = document.querySelector('.se-caret').getBoundingClientRect(); return c.left + c.width / 2; })()")
+        if side == "right":
+            assert caret_x > glyph[0], (expr_src, side, caret_x, glyph[0])
+        else:
+            assert caret_x < glyph[0], (expr_src, side, caret_x, glyph[0])
+        page.locator(".se-view").type("5", delay=40)
+        page.keyboard.press("Enter")
+        assert _wait(lambda: str(doc.expr) == want, timeout=20), (expr_src, side, str(doc.expr), want)
+        assert page.errors == []
+        page.close()
+
+
+def test_the_arrows_visit_both_sides_of_an_operator(browser, serve_expr):
+    """Stepping used to skip one of them: the two sides share a gap, and the
+    caret positions were merged by gap, so the pair counted as one place."""
+    srv, doc = serve_expr(x + y + Symbol("z"))
+    page = _open(browser, srv.url)
+    ed = "document.querySelector('.sympy-editor').__sympyEditor"
+    places = page.evaluate(f"""(() => {ed}._caretPositions().map(q =>
+        q.gap.extend ? 'ext' : ('#' + q.gap.index + '/' + q.gap.attach)))()""")
+    for i in (1, 2):                                   # both + signs offer both sides
+        assert f"#{i}/left" in places and f"#{i}/right" in places, places
+    # and walking rightwards passes through each of them in turn
+    page.locator(".se-view").click(position={"x": 3, "y": 10})
+    page.keyboard.press("Home") if False else None
+    page.evaluate(f"(() => {ed}._caretAtEnd('start'))()")
+    seen = []
+    for _ in range(len(places)):
+        seen.append(page.evaluate(f"""(() => {{ const c = {ed}.caret;
+            return c ? (c.extend ? 'ext' : ('#' + c.index + '/' + c.attach)) : null; }})()"""))
+        page.locator(".se-view").press("ArrowRight")
+        page.wait_for_timeout(120)
+    for i in (1, 2):
+        assert f"#{i}/left" in seen and f"#{i}/right" in seen, seen
+    assert page.errors == []
+
+def test_new_session_leads_the_list(browser, serve_expr):
+    """Starting one is as much what the drawer is opened for as picking an old
+    one out of the list, so it sits above the sessions rather than under them."""
+    srv, doc = serve_expr(x + y, options={"sessions": True})
+    page = browser.new_page()
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(srv.url)
+    # two sessions in the store, so there is a list for the row to lead
+    page.evaluate("""() => localStorage.setItem('sympy-editor:sessions', JSON.stringify(
+        {current: 'a', list: [{id: 'a', name: 'x + y', updated: 2}, {id: 'b', name: 'sin(x)', updated: 1}]}))""")
+    page.reload()
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    page.locator('[data-cmd="drawer"]').click()
+    page.wait_for_selector(".se-session-add", state="visible", timeout=10000)
+    rows = page.evaluate("(() => [...document.querySelectorAll('.se-sessions > .se-session')].map(r => r.className))()")
+    assert len(rows) == 3, rows                       # the new-session row and the two sessions
+    assert "se-session-add" in rows[0], rows          # leading them, not trailing
+    assert "se-session-add" not in rows[1] and "se-session-add" not in rows[2], rows
+    assert errors == []
+    page.close()
+
+
+def test_the_full_screen_button_keeps_its_corner(browser, serve_expr):
+    """It is the one fixed landmark of the editing box: it used to step inward
+    when a scroll strip appeared, so it drifted towards the middle as the
+    formula was scrolled."""
+    terms = symbols("a0:20")
+    srv, doc = serve_expr(sum(t**2 for t in terms))
+    page = browser.new_page(viewport={"width": 560, "height": 400})
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(srv.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    corner = lambda: page.evaluate("""(() => {
+        const s = document.querySelector('.se-stage').getBoundingClientRect();
+        const f = document.querySelector('.se-fullbtn').getBoundingClientRect();
+        return [Math.round(s.right - f.right), Math.round(f.top - s.top)]; })()""")
+    start = corner()
+    page.evaluate("() => { const v = document.querySelector('.se-view'); v.scrollLeft = v.scrollWidth; }")
+    page.wait_for_timeout(400)
+    scrolled = corner()
+    page.evaluate("() => { const v = document.querySelector('.se-view'); v.scrollLeft = 0; }")
+    page.wait_for_timeout(400)
+    assert start == scrolled == corner(), f"{start} -> {scrolled} -> {corner()}"
+    assert errors == []
+    page.close()
+
+
+def test_the_add_ons_switches_sit_at_the_top_of_the_drawer(browser, serve_expr):
+    """They used to be a menu of their own on the strip; they belong with
+    everything else that is not about the formula, behind the one button."""
+    addon, Boxed = _demo_addon()
+    doc = Document(x + y, available=[addon])
+    srv = EditorServer(doc, port=0, options={"sessions": True})
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        page = _open(browser, srv.url)
+        assert page.locator('.se-toolbar [data-cmd="addons"]').count() == 0
+        page.locator('[data-cmd="drawer"]').click()
+        page.wait_for_selector(".se-drawer-addons", state="visible", timeout=10000)
+        panes = page.evaluate("(() => [...document.querySelector('.se-drawer').children].map(c => c.className))()")
+        assert "se-drawer-addons" in panes[1], panes      # right under the head, above the sessions
+        # it is a fold, shut until it is wanted
+        assert page.evaluate("(() => document.querySelector('.se-drawer-addons').open)()") is False
+        assert not page.locator(".se-drawer-addons input").is_visible()
+        page.locator(".se-drawer-addons .se-drawer-subhead").click()
+        box = page.locator(".se-drawer-addons input")
+        assert box.count() == 1 and box.is_visible() and not box.is_checked()
+        box.check()                                       # and it still switches the add-on on
+        page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)
+        assert list(doc.addons) == ["demo"]
+        assert page.errors == []
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
 def test_the_history_close_button_sits_in_the_corner(browser, serve_expr):
     """However the strip wraps, closing is in the top right corner."""
     srv, doc = serve_expr((x + y) ** 2)
@@ -3354,7 +3946,7 @@ def test_the_history_close_button_sits_in_the_corner(browser, serve_expr):
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.goto(srv.url)
     page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
-    _next_state(page, lambda: page.select_option(".se-ops", "expand"))   # a second step, so there is a player
+    _next_state(page, lambda: _pick(page, ".se-ops", "expand"))   # a second step, so there is a player
     page.locator('.se-toolbar [data-cmd="history"]').click()
     page.wait_for_selector(".se-history-view")
     assert _wait(lambda: page.locator(".se-history-head .se-play").is_visible())
@@ -3383,7 +3975,7 @@ def test_a_session_can_be_given_a_name(browser, tmp_path):
     page.goto(path.as_uri())
     page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
     page.locator('[data-cmd="drawer"]').click()
-    row = page.locator(".se-session").first
+    row = page.locator(".se-session:not(.se-session-add)").first   # "New session…" leads the list now
     assert _wait(lambda: row.locator(".se-session-row > code").inner_text() == "x + y")
 
     row.locator(".se-session-rename").first.click()
@@ -3396,22 +3988,22 @@ def test_a_session_can_be_given_a_name(browser, tmp_path):
     # the formula changes; the name the user gave stays
     page.keyboard.press("Escape")                            # close the drawer (its backdrop covers the tools)
     assert _wait(lambda: page.locator(".se-drawer").is_hidden())
-    _next_state(page, lambda: page.select_option(".se-ops", "expand"))
+    _next_state(page, lambda: _pick(page, ".se-ops", "expand"))
     page.locator('[data-cmd="drawer"]').click()
-    assert _wait(lambda: page.locator(".se-session").first.locator(".se-session-row > code").inner_text() == "Simplifying the Hamiltonian")
+    assert _wait(lambda: page.locator(".se-session:not(.se-session-add)").first.locator(".se-session-row > code").inner_text() == "Simplifying the Hamiltonian")
     # it survives a reload, like the sessions themselves
     page.reload()
     page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
     page.locator('[data-cmd="drawer"]').click()
-    assert _wait(lambda: page.locator(".se-session").first.locator(".se-session-row > code").inner_text() == "Simplifying the Hamiltonian")
+    assert _wait(lambda: page.locator(".se-session:not(.se-session-add)").first.locator(".se-session-row > code").inner_text() == "Simplifying the Hamiltonian")
 
     # emptying the name hands the session back to its formula
-    page.locator(".se-session").first.locator(".se-session-rename").first.click()
-    field = page.locator(".se-session").first.locator("input.se-session-name")
+    page.locator(".se-session:not(.se-session-add)").first.locator(".se-session-rename").first.click()
+    field = page.locator(".se-session:not(.se-session-add)").first.locator("input.se-session-name")
     field.wait_for()
     field.fill("")
     field.press("Enter")
-    assert _wait(lambda: page.locator(".se-session").first.locator(".se-session-row > code").inner_text() != "Simplifying the Hamiltonian")
+    assert _wait(lambda: page.locator(".se-session:not(.se-session-add)").first.locator(".se-session-row > code").inner_text() != "Simplifying the Hamiltonian")
     assert errors == []
     page.close()
 
@@ -3423,7 +4015,7 @@ def test_the_history_strip_opens_in_its_final_shape(browser, serve_expr):
     steps, and merely become usable."""
     srv, doc = serve_expr((x + y) ** 2)
     page = _open(browser, srv.url)
-    _next_state(page, lambda: page.select_option(".se-ops", "expand"))     # two steps: there is a player
+    _next_state(page, lambda: _pick(page, ".se-ops", "expand"))     # two steps: there is a player
     GEOM = """() => {
         const out = {};
         for (const el of document.querySelectorAll('.se-history-head button, .se-history-head select, .se-history-head .se-play-count')) {
@@ -3848,3 +4440,191 @@ def test_a_function_at_a_caret_is_added_there(browser, serve_expr):
     page.wait_for_function("document.querySelector('.se-source').textContent.includes('cos(')")
     assert "cos(" in str(doc.expr) and "sin(x)" in str(doc.expr)
     assert page.errors == []
+
+
+def test_matrix_rows_columns_and_the_resize_grip(browser, serve_expr):
+    """In a matrix the action bar adds and removes rows and columns of the
+    selection's row / column, and the grip on the bottom-right corner resizes
+    the matrix by dragging, a cell at a time, with an outline of the size it
+    will get.  Outside a matrix none of it shows."""
+    from sympy import Function, Matrix
+    from sympy_editor.printer import is_placeholder
+
+    srv, doc = serve_expr(x + Function("f")(Matrix([[5, 6], [7, 8]])))   # a matrix inside an expression, a scalar beside it
+    page = _open(browser, srv.url)
+    nodes = doc.snapshot()["nodes"]
+    mats = [k for k, v in nodes.items() if v.get("matrix")]
+    entry7 = next(k for k, v in nodes.items() if v["src"] == "7")
+    xpath = next(k for k, v in nodes.items() if v["src"] == "x")
+    bar = page.locator(".se-actions")
+    grip = page.locator(".se-mat-handle")
+    # a scalar factor beside the matrix: no matrix tools
+    _click(page, xpath)
+    assert bar.is_visible() and not bar.locator('[data-cmd="matrow"]').is_visible() and grip.count() == 0
+    # the entry 7 (row 1, column 0 of the second matrix): + row adds a row of slots after it
+    _click(page, entry7)
+    assert bar.locator('[data-cmd="matrow"]').is_visible() and bar.locator('[data-cmd="matdelcol"]').is_visible()
+    assert grip.count() == 1 and grip.is_visible()
+    mat = [k for k in mats if entry7.startswith(k)][0]
+    mbox = page.evaluate("p => document.querySelector('.sympy-editor').__sympyEditor._visualRect(document.querySelector(`[data-path=\"${p}\"]`))", mat)
+    gbox = grip.bounding_box()
+    assert abs(gbox["x"] + gbox["width"] / 2 - mbox["right"]) < 6 and abs(gbox["y"] + gbox["height"] / 2 - mbox["bottom"]) < 6   # on the corner
+    _next_state(page, lambda: bar.locator('[data-cmd="matrow"]').click())
+    shaped = lambda shape: next(m for m in doc.expr.find(lambda e: getattr(e, "is_Matrix", False) and getattr(e, "shape", None) == shape))
+    big = shaped((3, 2))
+    assert big[1, 0] == 7 and all(is_placeholder(e) for e in big[2, :])          # after the row of 7
+    # the new slot is selected (a template's first slot, likewise); − col removes its column
+    sel = page.locator(".se-selected[data-path]").first.get_attribute("data-path")
+    assert doc.snapshot()["nodes"][sel].get("placeholder")
+    _next_state(page, lambda: bar.locator('[data-cmd="matdelcol"]').click())
+    big = shaped((3, 1))
+    assert big[0, 0] == 6 and big[1, 0] == 8                                     # column 0 went (7 with it)
+    # the grip reshapes: the same entries laid out another way.  The 3 x 1
+    # here has three entries, so the only shapes are 3 x 1 and 1 x 3 - a drag
+    # to the right cannot make it wider without making it shorter.
+    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "8"))
+    ctx = page.evaluate("document.querySelector('.sympy-editor').__sympyEditor._matHandleCtx")
+    assert ctx["rows"] == 3 and ctx["cols"] == 1
+    before = sorted(str(e) for e in shaped((3, 1)))
+    cell_w, cell_h = ctx["rect"]["width"] / ctx["cols"], ctx["rect"]["height"] / ctx["rows"]
+    gbox = grip.bounding_box()
+    gx, gy = gbox["x"] + gbox["width"] / 2, gbox["y"] + gbox["height"] / 2
+    ghost = page.locator(".se-mat-ghost")
+    page.mouse.move(gx, gy)
+    page.mouse.down()
+    page.mouse.move(gx + 2 * cell_w, gy - 2 * cell_h, steps=6)                        # wider, shorter
+    assert ghost.is_visible() and ghost.locator(".se-mat-ghost-label").inner_text() == "1 \u00d7 3 \u2014 3 entries, rearranged"
+    page.mouse.move(gx + 6 * cell_w, gy + 6 * cell_h, steps=6)                        # far out: still a shape that fits
+    assert ghost.locator(".se-mat-ghost-label").inner_text() in ("3 \u00d7 1", "1 \u00d7 3 \u2014 3 entries, rearranged")
+    page.mouse.move(gx + 2 * cell_w, gy - 2 * cell_h, steps=4)
+    assert page.locator(".se-selected[data-path]").count() >= 1                       # the drag selected nothing new
+    _next_state(page, lambda: page.mouse.up())
+    assert ghost.count() == 0
+    wide = shaped((1, 3))
+    assert sorted(str(e) for e in wide) == before                                     # every entry kept, none added
+    assert [str(e) for e in wide] == ["6", "8", "_1"] or [str(e) for e in wide][0] == "6"
+    # back to a column, and the entries are still the same three
+    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "8"))
+    ctx = page.evaluate("document.querySelector('.sympy-editor').__sympyEditor._matHandleCtx")
+    cell_w, cell_h = ctx["rect"]["width"] / ctx["cols"], ctx["rect"]["height"] / ctx["rows"]
+    gbox = grip.bounding_box()
+    gx, gy = gbox["x"] + gbox["width"] / 2, gbox["y"] + gbox["height"] / 2
+    page.mouse.move(gx, gy)
+    page.mouse.down()
+    page.mouse.move(gx - 2 * cell_w, gy + 3 * cell_h, steps=6)
+    _next_state(page, lambda: page.mouse.up())
+    assert sorted(str(e) for e in shaped((3, 1))) == before
+    # a drag back to the same size changes nothing
+    seq = page.locator(".sympy-editor").get_attribute("data-seq")
+    gbox = grip.bounding_box()
+    page.mouse.move(gbox["x"] + gbox["width"] / 2, gbox["y"] + gbox["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(gbox["x"] + gbox["width"] / 2 + 3, gbox["y"] + gbox["height"] / 2 + 2, steps=2)
+    page.mouse.up()
+    page.wait_for_timeout(150)
+    assert page.locator(".sympy-editor").get_attribute("data-seq") == seq
+    assert page.errors == []
+
+
+def test_arrows_move_through_a_matrix_as_it_is_drawn(browser, serve_expr):
+    """In a grid the four arrows are directional: the entries of a matrix are
+    a flat list of siblings (paths /2/0.. in reading order), so ← → used to
+    wrap from the end of a row to the start of the next and ↑ ↓ walked the
+    tree instead of the rows.  They follow the drawing now, for the
+    selection and for the caret alike."""
+    from sympy import Matrix
+    srv, doc = serve_expr(Matrix([[1, 2, 3], [4, 5, 6]]))
+    page = _open(browser, srv.url)
+    nodes = doc.snapshot()["nodes"]
+    at = lambda v: next(k for k, n in nodes.items() if n["src"] == v)
+    here = lambda: nodes[page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.selected")]["src"]
+    _select(page, at("1"))
+    for key, expect in [("ArrowRight", "2"), ("ArrowRight", "3"), ("ArrowDown", "6"),
+                        ("ArrowLeft", "5"), ("ArrowLeft", "4"), ("ArrowUp", "1")]:
+        page.keyboard.press(key)
+        page.wait_for_function("document.querySelector('.se-selected[data-path]') && document.querySelector('.se-status').textContent.endsWith(%r)" % expect)
+        assert here() == expect, key
+    # the edges: ← at the first cell has nowhere to go inside the grid, and ↑
+    # at the top row hands over to the tree - the matrix itself
+    page.keyboard.press("ArrowUp")
+    page.wait_for_function("document.querySelector('.sympy-editor').__sympyEditor.selected === '/'")
+    assert page.locator(".se-status").inner_text().endswith("Matrix([[1, 2, 3], [4, 5, 6]])")
+    # the caret moves the same way: ← → along the row, ↑ ↓ between rows
+    _select(page, at("5"))
+    page.keyboard.press("ArrowDown")                                  # the bottom row: a caret beside the cell
+    page.wait_for_selector(".se-caret")
+    caret = lambda: page.evaluate("(() => { const c = document.querySelector('.sympy-editor').__sympyEditor.caret; return c && c.path + ':' + (c.extend || c.index); })()")
+    assert caret() and caret().startswith(at("5"))
+    page.keyboard.press("ArrowUp")                                    # the row above, not out of the grid
+    page.wait_for_function("document.querySelector('.se-status').textContent.includes('Symbol') || document.querySelector('.se-caret')")
+    assert caret().startswith(at("2")) and page.locator(".se-selected").count() == 0
+    page.keyboard.press("ArrowRight")
+    assert caret().startswith(at("2")) or caret().startswith(at("3"))  # along the row, never down to the next
+    assert page.errors == []
+
+
+def test_arrows_cross_the_blocks_of_an_n_dim_array(browser, serve_expr):
+    """A rank-3 array is drawn as a row of matrices, a rank-4 one as a matrix
+    of matrices: the same rule serves every rank, because it follows what is
+    drawn - → at the right edge of a block enters the next block on the same
+    visual row, ↓ stays inside the block."""
+    from sympy import Array
+    srv, doc = serve_expr(Array([[[1, 2], [3, 4]], [[5, 6], [7, 8]]]))
+    page = _open(browser, srv.url)
+    nodes = doc.snapshot()["nodes"]
+    at = lambda v: next(k for k, n in nodes.items() if n["src"] == v)
+    here = lambda: nodes[page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.selected")]["src"]
+    _select(page, at("1"))
+    # [1 2; 3 4] [5 6; 7 8]: the rows on screen are "1 2 5 6" and "3 4 7 8"
+    for key, expect in [("ArrowRight", "2"), ("ArrowRight", "5"), ("ArrowRight", "6"),
+                        ("ArrowDown", "8"), ("ArrowLeft", "7"), ("ArrowLeft", "4"), ("ArrowUp", "2")]:
+        page.keyboard.press(key)
+        page.wait_for_function("document.querySelector('.se-status').textContent.endsWith(%r)" % expect)
+        assert here() == expect, key
+    assert page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.nodes['/'].array") == {"shape": [2, 2, 2]}
+    assert page.errors == []
+def test_a_drag_past_the_edge_scrolls_and_keeps_selecting(browser, serve_expr):
+    """A range dragged to the edge of the view: the formula scrolls along and
+    the range takes in what comes into sight, so it can reach terms that were
+    off the screen.  Before, the finger leaving the formula found nothing
+    under it - and a touch event's target being the node the drag started on,
+    the range snapped back to its anchor."""
+    terms = symbols("a0:24")
+    srv, doc = serve_expr(sum(t**2 for t in terms))
+    ctx = browser.new_context(has_touch=True, is_mobile=True, viewport={"width": 400, "height": 800})
+    page = ctx.new_page()
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(srv.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    scroll_left = lambda: page.evaluate("document.querySelector('.se-view').scrollLeft")
+    max_left = page.evaluate("(() => { const v = document.querySelector('.se-view'); return v.scrollWidth - v.clientWidth; })()")
+    assert max_left > 200 and scroll_left() == 0
+    kids = _display_children(page, "/")
+    at = lambda p: page.evaluate("p => { const b = document.querySelector(`[data-path=\"${p}\"]`).getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; }", p)
+    # a touch keeps sending its moves to the element the finger started on
+    # (implicit pointer capture), wherever the finger has got to: the view
+    fire = """([t, x, y]) => { const start = document.elementFromPoint(%s, %s) || document.querySelector('.se-view');
+        const el = t === 'pointerdown' ? start : document.querySelector('.se-view');
+        el.dispatchEvent(new PointerEvent(t, { bubbles: true, cancelable: true, clientX: x, clientY: y, pointerType: 'touch', pointerId: 7, isPrimary: true, buttons: 1 })); }"""
+    # a long press on the first term, then a drag out past the right edge
+    x0, y0 = at(kids[0])
+    fire = fire % (x0, y0)
+    page.evaluate("([t, x, y]) => (%s)([t, x, y])" % fire, ["pointerdown", x0, y0])
+    page.wait_for_selector(".se-selected[data-path]")                        # the press selected it
+    view = page.evaluate("(() => { const r = document.querySelector('.se-view').getBoundingClientRect(); return [r.right, (r.top + r.bottom) / 2]; })()")
+    page.evaluate("([t, x, y]) => (%s)([t, x, y])" % fire, ["pointermove", view[0] + 60, view[1]])
+    assert _wait(lambda: scroll_left() > 80)                       # it scrolls itself along
+    assert _wait(lambda: page.evaluate("!!document.querySelector('.sympy-editor').__sympyEditor.range"))
+    grew = page.evaluate("(() => { const r = document.querySelector('.sympy-editor').__sympyEditor.range; return Math.abs(r.focus - r.anchor); })()")
+    assert _wait(lambda: page.evaluate("(() => { const r = document.querySelector('.sympy-editor').__sympyEditor.range; return Math.abs(r.focus - r.anchor); })()") > grew)
+    # the range holds terms that were off the screen when the drag began
+    reach = page.evaluate("(() => { const r = document.querySelector('.sympy-editor').__sympyEditor.range; return Math.abs(r.focus - r.anchor) + 1; })()")
+    assert reach >= 4, reach
+    page.evaluate("([t, x, y]) => (%s)([t, x, y])" % fire, ["pointerup", view[0] + 60, view[1]])
+    page.wait_for_timeout(200)
+    stopped = scroll_left()
+    page.wait_for_timeout(300)
+    assert scroll_left() == stopped                                          # the finger up, the scrolling stops
+    assert page.evaluate("document.querySelector('.sympy-editor').__sympyEditor._autoScroll") in (None, 0)
+    assert errors == []

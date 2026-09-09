@@ -87,7 +87,7 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | Previous / next sibling (or move the caret; with nothing selected, a caret at the start / the end) | **←** / **→** (toolbar and action bar) | ←/→ |
 | Select enclosing expression | click again on the same spot, or **↑** | ↑ |
 | Go inside: the sub-expression you came up from, or the first one (on an atom: a caret after it) | **↓** (toolbar or action bar) | ↓ |
-| Select a range of adjacent terms / factors | drag across them (mouse, touch or pen) | Shift+→ / Shift+← grow and shrink the range; ←/→/↓ collapse it, ↑ selects the whole sum/product |
+| Select a range of adjacent terms / factors | drag across them (mouse or pen); on a touch screen hold a finger still on the first one until it is selected, then drag | Shift+→ / Shift+← grow and shrink the range; ←/→/↓ collapse it, ↑ selects the whole sum/product |
 | Replace selection by typing | | just start typing (SymPy syntax) |
 | Change the operator between two arguments | click the operator itself (`+`, `−`, `⋅`, `=`, the `−` of `x − y`...): it is selected and a small palette appears; pick `+ − × ÷ ^ =` or **Delete** (side by side, the two multiply: `x + y` → `xy`) | with the operator selected, type `+ - * / ^ = < > & \|`; Del removes it; Esc deselects; ←/→/↓ select an argument, ↑ the node.  In a sum `*` binds just the two terms (`x + y + z` → `xy + z`); in a product `+` splits it there (`x·y·z` → `x + yz`).  A lone operator typed at a caret does the same |
 | Type at a caret | click **between** two terms, or at the edge of an object: a caret appears; what you type is spliced between its neighbours like in a text editor: operators you type are used as written, a missing one means juxtaposition (`cos(t)` after `x` gives `x cos(t)`), `+`/`-` bind at the sum level (`x z` with `+y+` typed between gives `x + y + z`), `, …` adds a function argument | Tab / Shift+Tab put the caret after / before the selection; ←/→ walk it through the formula like a text cursor (into a composite neighbour, out of a node at its ends); ↑ selects the object it is attached to (↓ does nothing at a caret); Enter opens an empty field; Esc removes it |
@@ -101,17 +101,19 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | Remove the node but keep its argument (`cos(θ)` → `θ`, `∫f dx` → `f`) | **Unwrap** | Backspace — a node with several arguments (`x²`: the base or the exponent, a sum, a fraction) asks which one to leave, with the one ↑ came from ready to confirm |
 | Put the node inside a function (`x` → `cos(x)`, `f(x)`, `∫x dx`) | `Document.wrap(path, "cos")` / `{"action": "wrap"}` | — (the function box **calls** a function; wrap builds without computing) |
 | Keep only the selection (it becomes the whole expression) | **Isolate** | Ctrl+Shift+I |
-| Transform the selection | pick an operation in the **Transform ▾** menu (general) or the type menu ("Matrix ▾", "Array ▾"...): it applies at once, or asks for what it needs first (the array tools want their axes) | |
+| Moving in a matrix or an array | ← → ↑ ↓ | directional, as it is drawn: along the row, between the rows, for the selection and the caret alike (an array of any rank too - a rank-3 one is a row of matrices, and → crosses into the next block). At the edge the usual meaning takes over: ↑ in the top row selects the matrix itself |
+| Rows and columns of a matrix | in a matrix (the matrix, or anything in an entry) the action bar has **+ row** / **+ col** (a new row / column of empty slots after the selected one; after the last for the matrix itself) and **− row** / **− col** (the selected one removed); the **grip** at the matrix's bottom-right corner *reshapes* it when dragged - the same entries laid out another way, so it snaps to the shapes that hold them all (12 entries: 1×12, 2×6, 3×4, 4×3, 6×2, 12×1), nothing added or lost | `Document.insert_row/insert_col/delete_row/delete_col(path)`, `reshape_matrix(path, rows, cols)`, `resize_matrix(...)` (grows and truncates), `{"action": "matrix", "op", "rows", "cols"}` |
+| Transform the selection | pick an operation in the **Transform ▾** menu (general) or the type menu ("Matrix ▾", "Array ▾"...) - the first group of the last toolbar row, both lists chosen by `options={"actions": ...}`: it applies at once, or asks for what it needs first (the array tools want their axes) | |
 | Matrix ↔ array | "Matrix ▾ → As array"; "Array ▾ → As matrix (rank 2)" — a `MatrixSymbol` becomes an `ArraySymbol` (entries stay implicit), an explicit matrix an explicit array | |
 | Array tools | "Array ▾" (for explicit arrays *and* array symbols): permute axes `(1, 0)`, contract axes `(0, 1)`, diagonal over axes, reshape, rank, explicit entries | |
 | Reshape | "Matrix ▾" / "Array ▾" → Reshape… — a matrix reshaped to a rank other than 2 becomes an array | |
 | Derive by array | **Transform ▾** → Derive by array… — by `x` or `[x, y]`, for an expression (its gradient), a matrix or an array, symbolic or explicit | |
 | Copy / cut / paste a part | **Copy** / **Paste** (toolbar or action bar) | Ctrl+C / Ctrl+X copy the selection's SymPy source; Ctrl+V pastes over a selection or at a caret |
-| Apply any SymPy function | the **function box** in the toolbar: type to search SymPy's functions, pick one; a function that needs parameters asks for them (symbol parameters offer the selection's free symbols — `solve` on `sin(x)cos(y)` asks x or y); `diff(x)`, `.T`, `det()` typed in full apply as written | |
-| Call a method of the selection's class | the **Methods** menu lists the public methods and properties of the selected object's class (of the whole expression when nothing is selected) — `.det()`, `.T`, `.rref()` on a matrix, `.diff()`, `.as_poly()` on an expression; picking one calls it, and a method that needs parameters asks for them.  A `Lambda` is itself a function: its menu starts with **( ) apply**, which asks for the arguments and evaluates it there (`(3)` in the function box does the same) | |
+| Apply any SymPy function | the **function box** in the toolbar (the library group, beside Methods): it lists every function of SymPy, type to narrow the list, pick one; a function that needs parameters asks for them (symbol parameters offer the selection's free symbols — `solve` on `sin(x)cos(y)` asks x or y); `diff(x)`, `.T`, `det()` typed in full apply as written | |
+| Call a method of the selection's class | the **Methods** menu (the library group) lists every public method and property of the selected object's class (of the whole expression when nothing is selected) — `.det()`, `.T`, `.rref()` on a matrix, `.diff()`, `.as_poly()` on an expression; picking one calls it, and a method that needs parameters asks for them.  A `Lambda` is itself a function: its menu starts with **( ) apply**, which asks for the arguments and evaluates it there (`(3)` in the function box does the same) | |
 | Undo / redo | ↺ / ↻ | Ctrl+Z / Ctrl+Shift+Z |
 | Zoom the formula | **−** / **100%** (reset) / **+**, Ctrl+mouse wheel, pinch with two fingers | Ctrl+plus / Ctrl+minus / Ctrl+0 |
-| Scroll a formula wider than the view | the scrollbar, the mouse wheel over the formula, or drag its empty space (one finger on a phone) | |
+| Scroll a formula wider (or, in full screen, taller) than the view | the arrow strips along the edges it runs past (each scrolls a screen and goes once that end is in sight), the scrollbar, the mouse wheel over the formula, a drag on its empty space; on a phone one finger dragged anywhere across it, or two fingers moving together | |
 
 A small action bar appears under whatever is selected — ↑ parent, ↓ inside,
 Edit, Unwrap, Delete, Copy — so these actions are one click or one tap away
@@ -126,12 +128,16 @@ removes its terms, an operation picked in a menu transforms just those terms.
 
 On phones and tablets: tap to select, **tap the selected node again to edit
 it**, tap a gap for a caret and tap it again to insert, tap an operator to
-change it from its palette, drag to select a
-range; the toolbar has ↑
+change it from its palette; **hold a finger still on a node** until it is
+selected, then drag across its neighbours to select a range - dragging to the
+edge of the view scrolls the formula along and keeps taking in what appears,
+so the range reaches terms that were off the screen; the toolbar has ↑
 for the parent and a keyboard button that opens the keyboard for the selection, the
 caret or the whole expression; the menus apply an operation as soon as it is
-picked.  Two fingers zoom the formula, a drag on its empty space scrolls it
-sideways, and vertical swipes still scroll the page.
+picked.  Two fingers zoom the formula and, when it is larger than the view,
+scroll it; one finger dragged across it scrolls it sideways (a plain swipe
+never selects, so a tap that wobbles is still a tap); the arrow strips at the
+edges scroll a screen at a time; and vertical swipes still scroll the page.
 Transformations act on the selected sub-expression only (on the whole formula
 when nothing is selected).
 
@@ -176,19 +182,46 @@ scalar context can still be a 3×3 matrix symbol — and from Python the same is
 `edit(expr, symbols=[MatrixSymbol("C", 3, 3)])` or
 `w.document.declare("C", "MatrixSymbol", 3, 3)`.
 
-The **Transform ▾** menu holds the general ops (simplify, expand, factor,
-...) and applies one as soon as it is picked.  Operations specific to the selection's *type* appear in a
-separate highlighted **type menu** next to it, labelled with the type
+The last row of the toolbar holds what can be applied, in two groups boxed
+apart.  The four menus in them are one kind of control: a box that lists
+everything it offers when it takes the focus, narrows the list as you type,
+and picks with ↑/↓ + Enter or a click.
+
+The first group is the **actions**.  The **Transform ▾** menu holds the
+general ops (simplify, expand, factor, ...) and applies one as soon as it is
+picked.  Operations specific to the selection's *type* appear in the
+**type menu** next to it, labelled with the type
 ("Matrix ▾", "Integral ▾", "Equation ▾"...), and apply as soon as you pick
 one: transpose / inverse / trace / determinant / `as_explicit` for matrices,
 evaluate / numeric value / expand or simplify the function inside for
 integrals, sums, derivatives and limits, swap sides / move everything to the
 left / simplify or expand both sides for equations, `tomatrix` for arrays.
+Both lists are yours to choose: `options={"actions": {...}}` names, per
+menu, the ops to offer and their order - `"expr"` for Transform, a kind
+(`"matrix"`, `"integral"`, `"relational"`...) for the type menu of
+selections of that kind; an entry is an op's name, or `{"name": ...,
+"label": ...}` to relabel it; a key left out keeps every registered op:
+
+```python
+edit(expr, options={"actions": {
+    "expr": ["simplify", "expand", {"name": "factor", "label": "Factorise"}],
+    "matrix": ["transpose", "determinant", "inverse"],
+}})
+```
+
+The second group is the **library**, which is never trimmed: the
+**Methods ▾** menu lists every public method and property of the selected
+object's class, and the **function box** every function of SymPy.
 
 Matrices (dense and sparse), `MatrixSymbol` expressions, block matrices,
 determinants/traces and N-dimensional `Array`s are supported: every entry is
 selectable and editable, and the container is rebuilt around the edit (see
-`examples/demo_matrices.py` and `examples/demo_matrices.ipynb`).
+`examples/demo_matrices.py` and `examples/demo_matrices.ipynb`).  An explicit
+matrix also changes shape in place: with the matrix or one of its entries
+selected, the action bar adds and removes rows and columns (new entries are
+empty slots to fill, like a template's), and the grip at its bottom-right
+corner reshapes it by dragging: the same entries laid out another way, as
+`Matrix.reshape` does, snapping to the shapes that hold every one of them.
 
 Register your own transformations, for every selection or only for some
 kinds (`"matrix"`, `"array"`, `"scalar"`; the mapping from kinds to SymPy
@@ -458,7 +491,7 @@ save_html(expr, "page.html", addons=["tree", "plot"])                  # a self-
 serve(expr, addons=["matching"])                                       # the local server
 ```
 
-The toolbar's **Add-ons ▾** menu switches any installed add-on on or off
+The **Add-ons** section at the top of the **≡** drawer switches any installed add-on on or off
 while editing.  Not installed?  A module name (`addons=["sympy_editor_tree"]`)
 or the object itself (`addons=[ADDON]`) work too; `python addons/demo.py`
 builds a page with the four drafts straight from the checkout.
@@ -476,7 +509,10 @@ KaTeX turns that into `<span data-path="/1/0">`, so the DOM knows which node
 of the expression tree each glyph belongs to.  Editing operations
 (`Document.replace/delete/insert/operator/apply/call/undo/redo`) rebuild the
 tree and re-render.
-See `AGENTS.md` for the architecture and design notes.
+See `AGENTS.md` for the architecture and design notes, and
+[`docs/cursor-and-selection.md`](docs/cursor-and-selection.md) for what the
+cursor and the selection do - the one description the page, the server, the
+Jupyter widget and the apps all follow.
 
 ## Dependencies and licences
 

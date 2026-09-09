@@ -16,6 +16,9 @@ What comes out:
   adaptive icon wants, with everything inside the central 72dp the launcher
   is guaranteed to show;
 * `android/app/src/main/res/mipmap-*/`  the PNGs the Android app ships;
+* `android/app/src/debug/res/mipmap-*/`  the same wearing a bug badge, for a
+  debug build (org.sympy.editor.debug), so the two apps are told apart on the
+  launcher at a glance;
 * `ios/SymPyEditor/Assets.xcassets/AppIcon.appiconset/`  the iOS app icon,
   the single 1024x1024 Xcode has wanted since 14;
 * `mobile/icon/icon-512.png`         Google Play's listing icon;
@@ -35,6 +38,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ICON = HERE / "icon"
 RES = HERE / "android/app/src/main/res"
+DEBUG_RES = HERE / "android/app/src/debug/res"      # the debug build's icons, badged
 IOS_ICONS = HERE / "ios/SymPyEditor/Assets.xcassets/AppIcon.appiconset"
 
 #: The mark's own drawing, in the source SVG's 750x750 user units (measured
@@ -47,6 +51,8 @@ DENSITIES = [("mdpi", 1), ("hdpi", 1.5), ("xhdpi", 2), ("xxhdpi", 3), ("xxxhdpi"
 
 BACKGROUND = "#f7f3e6"      # parchment, out of the cube's own palette
 BACKGROUND_EDGE = "#efe8d3"
+BADGE = "#c0392b"           # the debug badge: a red disc, warning-coloured against the parchment
+BADGE_MARK = "#ffffff"
 
 
 def mark_group(box: tuple[float, float, float, float], indent: str = "  ") -> str:
@@ -87,20 +93,46 @@ def pencil(cx: float, cy: float, length: float, angle: float = -38, indent: str 
     return o + f"{indent}</g>\n"
 
 
-def foreground_svg() -> str:
+def bug_badge(cx: float, cy: float, r: float, indent: str = "  ") -> str:
+    """The debug mark: a bug on a red disc, for the corner of the icon of a
+    debug build.  Drawn from a few strokes rather than a glyph, because at
+    48px the badge is 18px across: a round body, a head, a stripe down the
+    back and three legs a side - a shape with legs is all that survives, and
+    all that is needed to tell the two apps apart on a launcher."""
+    b = r * 0.62                                     # the body's half-height
+    leg = 'stroke="%s" stroke-width="%.2f" stroke-linecap="round"' % (BADGE_MARK, r * 0.13)
+    legs = "".join(
+        f'\n{indent}  <line x1="{cx - b * 0.72:.2f}" y1="{cy + dy:.2f}" x2="{cx - b * 1.25:.2f}" y2="{cy + dy * 1.7:.2f}" {leg}/>'
+        f'\n{indent}  <line x1="{cx + b * 0.72:.2f}" y1="{cy + dy:.2f}" x2="{cx + b * 1.25:.2f}" y2="{cy + dy * 1.7:.2f}" {leg}/>'
+        for dy in (-b * 0.5, 0.0, b * 0.5))
+    return (f'{indent}<g>\n'
+            f'{indent}  <circle cx="{cx:.2f}" cy="{cy:.2f}" r="{r:.2f}" fill="{BADGE}"/>'
+            f'{legs}\n'
+            f'{indent}  <ellipse cx="{cx:.2f}" cy="{cy + b * 0.12:.2f}" rx="{b * 0.72:.2f}" ry="{b * 0.86:.2f}" fill="{BADGE_MARK}"/>\n'
+            f'{indent}  <circle cx="{cx:.2f}" cy="{cy - b * 0.85:.2f}" r="{b * 0.34:.2f}" fill="{BADGE_MARK}"/>\n'
+            f'{indent}  <line x1="{cx:.2f}" y1="{cy - b * 0.6:.2f}" x2="{cx:.2f}" y2="{cy + b * 0.95:.2f}" '
+            f'stroke="{BADGE}" stroke-width="{r * 0.11:.2f}" stroke-linecap="round"/>\n'
+            f'{indent}</g>\n')
+
+
+def foreground_svg(debug: bool = False) -> str:
     """The art alone, in the 108dp box: everything that must be seen lives in
-    the central 72dp, since a launcher may mask away the rest."""
+    the central 72dp, since a launcher may mask away the rest.  With `debug`
+    the bug badge sits in the bottom-right of that safe area, so a mask of
+    any shape keeps it."""
     art = mark_group((19.0, 23.0, 70.0, 46.0), indent="  ")
+    badge = bug_badge(74.0, 74.0, 13.0) if debug else ""
     return ('<?xml version="1.0" encoding="UTF-8"?>\n'
             '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
             'width="108" height="108" viewBox="0 0 108 108">\n'
-            "  <title>SymPy editor</title>\n"
+            f"  <title>SymPy Editor{' (debug)' if debug else ''}</title>\n"
             f"{art}\n"
             f"{pencil(57.0, 61.0, 68.0)}"
+            f"{badge}"
             "</svg>\n")
 
 
-def master_svg(size: int = 512, round_shape: bool = False) -> str:
+def master_svg(size: int = 512, round_shape: bool = False, debug: bool = False) -> str:
     """The whole icon, background and all: the store's listing and the PNGs
     for launchers that do not do adaptive icons.  `round_shape` draws the
     background as a circle, for the round variant those launchers ask for."""
@@ -111,13 +143,14 @@ def master_svg(size: int = 512, round_shape: bool = False) -> str:
     return ('<?xml version="1.0" encoding="UTF-8"?>\n'
             f'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
             f'width="{s}" height="{s}" viewBox="0 0 {s} {s}">\n'
-            "  <title>SymPy editor</title>\n"
+            f"  <title>SymPy Editor{' (debug)' if debug else ''}</title>\n"
             "  <defs><linearGradient id=\"bg\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"1\">"
             f'<stop offset="0" stop-color="{BACKGROUND}"/>'
             f'<stop offset="1" stop-color="{BACKGROUND_EDGE}"/></linearGradient></defs>\n'
             f"{shape}\n"
             f"{art}\n"
             f"{pencil(0.58 * s, 0.64 * s, 0.78 * s)}"
+            f"{bug_badge(0.76 * s, 0.76 * s, 0.17 * s) if debug else ''}"
             "</svg>\n")
 
 
@@ -202,6 +235,17 @@ def main() -> int:
     (adaptive / "ic_launcher_round.xml").write_text(ADAPTIVE, encoding="utf-8")
     (RES / "values").mkdir(parents=True, exist_ok=True)
     (RES / "values/ic_launcher_background.xml").write_text(COLOURS, encoding="utf-8")
+    # The debug build's own icons, in its source set: Android merges them
+    # over the ones above, so "SymPy Editor (debug)" wears the badge and the
+    # store app is left alone (mobile/android/app/src/debug/res).
+    (ICON / "icon-debug.svg").write_text(master_svg(debug=True), encoding="utf-8")
+    (ICON / "icon-debug-round.svg").write_text(master_svg(round_shape=True, debug=True), encoding="utf-8")
+    (ICON / "icon-debug-foreground.svg").write_text(foreground_svg(debug=True), encoding="utf-8")
+    for suffix, scale in DENSITIES:
+        out = DEBUG_RES / f"mipmap-{suffix}"
+        render(ICON / "icon-debug.svg", out / "ic_launcher.png", round(48 * scale))
+        render(ICON / "icon-debug-round.svg", out / "ic_launcher_round.png", round(48 * scale))
+        render(ICON / "icon-debug-foreground.svg", out / "ic_launcher_foreground.png", round(108 * scale))
     render(ICON / "icon.svg", ICON / "icon-512.png", 512)       # Google Play's listing icon
     render(ICON / "icon.svg", ICON / "icon-1024.png", 1024)     # the App Store's
     IOS_ICONS.mkdir(parents=True, exist_ok=True)
@@ -209,7 +253,7 @@ def main() -> int:
     flatten(IOS_ICONS / "icon-1024.png")                        # iOS rejects an icon with alpha
     (IOS_ICONS / "Contents.json").write_text(IOS_CONTENTS, encoding="utf-8")
     (IOS_ICONS.parent / "Contents.json").write_text(ASSETS_CONTENTS, encoding="utf-8")
-    print("Wrote the mipmaps under", RES, ", the iOS icon under", IOS_ICONS,
+    print("Wrote the mipmaps under", RES, ", the badged ones under", DEBUG_RES, ", the iOS icon under", IOS_ICONS,
           "and", ICON / "icon-512.png", "/", ICON / "icon-1024.png")
     return 0
 

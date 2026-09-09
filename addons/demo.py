@@ -42,9 +42,9 @@ def main(argv=None) -> int:
     # Two on to start with, the others a click away in the Add-ons menu.
     doc = Document(sin(x) ** 2 / x + cos(x) ** 2, addons=[tree, plot], available=[matching, latex])
     if args.serve:
-        serve(doc, title="SymPy editor - add-ons")
+        serve(doc, title="SymPy Editor - add-ons")
         return 0
-    save_html(doc, args.out, title="SymPy editor - add-ons")
+    save_html(doc, args.out, title="SymPy Editor - add-ons")
     print("wrote", args.out)
     return 0
 

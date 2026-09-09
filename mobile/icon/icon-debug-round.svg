@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="512" height="512" viewBox="0 0 512 512">
-  <title>SymPy Editor</title>
+  <title>SymPy Editor (debug)</title>
   <defs><linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f7f3e6"/><stop offset="1" stop-color="#efe8d3"/></linearGradient></defs>
   <circle cx="256.0" cy="256.0" r="256.0" fill="url(#bg)"/>
   <g transform="translate(23.881,35.269) scale(0.60685)">
@@ -122,5 +122,17 @@
     <rect x="83.87" y="6.89" width="227.64" height="39.04" fill="#d9932b" stroke="none"/>
     <path d="M311.50,-45.93 L399.36,0 L311.50,45.93 Z" fill="#e8c79a"/>
     <path d="M369.49,-15.61 L399.36,0 L369.49,15.61 Z" fill="#3a3f45" stroke="none"/>
+  </g>
+  <g>
+    <circle cx="389.12" cy="389.12" r="87.04" fill="#c0392b"/>
+    <line x1="350.27" y1="362.14" x2="321.66" y2="343.25" stroke="#ffffff" stroke-width="11.32" stroke-linecap="round"/>
+    <line x1="427.97" y1="362.14" x2="456.58" y2="343.25" stroke="#ffffff" stroke-width="11.32" stroke-linecap="round"/>
+    <line x1="350.27" y1="389.12" x2="321.66" y2="389.12" stroke="#ffffff" stroke-width="11.32" stroke-linecap="round"/>
+    <line x1="427.97" y1="389.12" x2="456.58" y2="389.12" stroke="#ffffff" stroke-width="11.32" stroke-linecap="round"/>
+    <line x1="350.27" y1="416.10" x2="321.66" y2="434.99" stroke="#ffffff" stroke-width="11.32" stroke-linecap="round"/>
+    <line x1="427.97" y1="416.10" x2="456.58" y2="434.99" stroke="#ffffff" stroke-width="11.32" stroke-linecap="round"/>
+    <ellipse cx="389.12" cy="395.60" rx="38.85" ry="46.41" fill="#ffffff"/>
+    <circle cx="389.12" cy="343.25" r="18.35" fill="#ffffff"/>
+    <line x1="389.12" y1="356.74" x2="389.12" y2="440.39" stroke="#c0392b" stroke-width="9.57" stroke-linecap="round"/>
   </g>
 </svg>

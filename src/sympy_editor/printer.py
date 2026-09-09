@@ -67,6 +67,7 @@ from sympy.core.function import AppliedUndef
 from sympy.core.operations import AssocOp, LatticeOp
 from sympy.sets.sets import FiniteSet, Intersection, Union
 from sympy.printing.latex import LatexPrinter, latex
+from sympy.printing.repr import ReprPrinter
 from sympy.printing.str import StrPrinter
 
 #: Path steps are ``args`` indices or the names of virtual parts (see
@@ -888,6 +889,44 @@ def strip_annotations(tex: str, command: str = r"\htmlData") -> str:
         i = end + 1
     return "".join(out)
 
+
+
+class ExactReprPrinter(ReprPrinter):
+    """``srepr`` that reads back as the very same expression.
+
+    SymPy's own :meth:`ReprPrinter._print_Add` writes the terms in *display*
+    order (``_as_ordered_terms``) rather than in the order the expression
+    holds them.  For a commutative ``Add`` that is harmless - rebuilding the
+    expression sorts the terms the same way again - but ``MatAdd`` keeps its
+    arguments in the order it was handed and compares unequal against the
+    same terms in another order, so the round trip does not come back::
+
+        >>> from sympy import MatrixSymbol, srepr, sympify
+        >>> A = MatrixSymbol("A", 2, 2); B = MatrixSymbol("B", 2, 2)
+        >>> e = A*B + 2*A.T
+        >>> [str(a) for a in e.args]
+        ['2*A.T', 'A*B']
+        >>> [str(a) for a in sympify(srepr(e)).args]      # doctest: +SKIP
+        ['A*B', '2*A.T']
+
+    That matters here because the paths this editor works in - ``/0``, ``/1``
+    - are argument positions.  A page or an app is handed the expression as
+    an ``srepr`` and rebuilds it; with the terms in another order every path
+    names a different term than it did in the rendering that was shipped
+    beside it, and the first edit lands on the wrong one.
+
+    So the arguments are written as they are.  Reported upstream; until it is
+    fixed there, use :func:`exact_srepr` for anything that has to come back.
+    """
+
+    def _print_Add(self, expr, order=None):
+        return "%s(%s)" % (type(expr).__name__, ", ".join(self._print(a) for a in expr.args))
+
+
+def exact_srepr(expr: Basic, **settings) -> str:
+    """``srepr(expr)`` that rebuilds into an expression equal to ``expr``,
+    arguments in the same order (see :class:`ExactReprPrinter`)."""
+    return ExactReprPrinter(settings).doprint(expr)
 
 def _match_brace(tex: str, start: int) -> int:
     """Index of the ``}`` matching the ``{`` at ``start`` (or -1)."""
