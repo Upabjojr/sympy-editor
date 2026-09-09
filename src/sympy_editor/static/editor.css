@@ -372,6 +372,49 @@
   .se-fullbtn { opacity: 0.5; padding: 0; min-width: 44px; min-height: 44px; top: 2px; right: 2px; }
 }
 @media (prefers-reduced-motion: reduce) { .se-fullbtn { transition: none; } }
+/* A formula that runs past the view: a tall, flat strip along each edge
+ * there is more formula beyond, fading into the view so the formula shows
+ * through, with nothing but a chevron on it.  Pressing one scrolls a screen
+ * that way; the strip goes as soon as the end of the formula is in sight
+ * (Editor._updateScrollArrows, on every scroll, zoom and resize). */
+.se-scrollbtn {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--se-muted);
+  opacity: 0.7;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: opacity 0.12s ease, color 0.12s ease;
+}
+.se-scrollbtn[hidden] { display: none; }
+.se-scrollbtn .se-icon { width: 1.1rem; height: 1.1rem; }
+.se-scroll-left, .se-scroll-right { top: 1px; bottom: 1px; width: 1.7rem; }
+.se-scroll-up, .se-scroll-down { left: 1px; right: 1px; height: 1.7rem; }
+.se-scroll-left { left: 1px; border-radius: 0.4rem 0 0 0.4rem; background: linear-gradient(to right, var(--se-surface) 55%, transparent); }
+.se-scroll-right { right: 1px; border-radius: 0 0.4rem 0.4rem 0; background: linear-gradient(to left, var(--se-surface) 55%, transparent); }
+.se-scroll-up { top: 1px; border-radius: 0.4rem 0.4rem 0 0; background: linear-gradient(to bottom, var(--se-surface) 55%, transparent); }
+.se-scroll-down { bottom: 1px; border-radius: 0 0 0.4rem 0.4rem; background: linear-gradient(to top, var(--se-surface) 55%, transparent); }
+.se-scrollbtn:active { opacity: 1; color: rgb(var(--se-accent)); }
+.se-scrollbtn:focus-visible { outline: none; box-shadow: inset 0 0 0 2px rgba(var(--se-accent), 0.45); }
+/* the corner button steps in from an edge a strip runs along - on a short
+ * view it would otherwise sit right on the strip's chevron */
+.se-stage.se-past-right .se-fullbtn { right: calc(1.7rem + 4px); }
+.se-stage.se-past-up .se-fullbtn { top: calc(1.7rem + 4px); }
+@media (any-pointer: coarse) {
+  .se-scroll-left, .se-scroll-right { width: 2.4rem; }
+  .se-scroll-up, .se-scroll-down { height: 2.4rem; }
+  .se-scrollbtn .se-icon { width: 1.4rem; height: 1.4rem; }
+  .se-stage.se-past-right .se-fullbtn { right: calc(2.4rem + 2px); }
+  .se-stage.se-past-up .se-fullbtn { top: calc(2.4rem + 2px); }
+}
+@media (prefers-reduced-motion: reduce) { .se-scrollbtn { transition: none; } }
 
 /* Full screen: the editor covers the page, and the editing area takes every
  * pixel the tools and the source line leave over. */
@@ -924,6 +967,7 @@
   .se-sym button:hover:not(:disabled), .se-session button:hover:not(:disabled), .se-step:hover:not(:disabled) { background: rgba(var(--se-accent), 0.12); }
   .se-session[role="button"]:hover { background: rgba(var(--se-accent), 0.08); }
   .se-fn-item:hover { background: rgba(var(--se-accent), 0.14); }
+  .se-scrollbtn:hover { opacity: 1; color: rgb(var(--se-accent)); }
   .se-source[contenteditable]:hover { background: rgba(var(--se-accent), 0.06); }
 }
 

@@ -540,22 +540,168 @@ def test_mouse_drag_selects_a_range(browser, serve_expr):
     assert page.errors == []
 
 
-def test_touch_drag_selects_a_range(browser, serve_expr):
+TOUCH_FIRE = """(type, p) => { const at = q => { const b = document.querySelector(`[data-path="${q}"]`).getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; };
+    const [x, y] = at(p); const el = document.elementFromPoint(x, y);
+    el.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, pointerType: 'touch', pointerId: 7, isPrimary: true, buttons: 1 })); }"""
+
+
+def _touch(page, type_, path):
+    page.evaluate("([t, p]) => (%s)(t, p)" % TOUCH_FIRE, [type_, path])
+
+
+def test_touch_long_press_selects_a_range(browser, serve_expr):
+    """A finger held still on a node starts a range selection: the node is
+    selected when the press has lasted, and dragging on extends the range.
+    A quick swipe selects nothing (it is how a phone scrolls a wide
+    formula - or the page), so a tap with a little shake stays a tap."""
     a, b, c = symbols("a b c")
     srv, doc = serve_expr(a + b + c)
     page = _open(browser, srv.url)
     kids = _display_children(page, "/")
-    page.evaluate(
-        """([p0, p1]) => {
-            const at = p => { const b = document.querySelector(`[data-path="${p}"]`).getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; };
-            const fire = (type, p) => { const [x, y] = at(p); const el = document.elementFromPoint(x, y);
-              el.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, pointerType: 'touch', pointerId: 7, isPrimary: true, buttons: 1 })); };
-            fire('pointerdown', p0); fire('pointermove', p1); fire('pointerup', p1);
-        }""", [kids[0], kids[1]])
+    # a swipe across two terms: not a selection
+    _touch(page, "pointerdown", kids[0]); _touch(page, "pointermove", kids[1]); _touch(page, "pointerup", kids[1])
+    assert page.locator(".se-selected").count() == 0
+    # the finger rests on a: after the long press a is selected...
+    _touch(page, "pointerdown", kids[0])
+    page.wait_for_timeout(100)
+    assert page.locator(".se-selected").count() == 0                   # not yet: a tap is still possible
+    assert _wait(lambda: page.locator(".se-status").inner_text() == "Symbol: a", timeout=2)
+    # ... and dragging on to b makes it a range
+    _touch(page, "pointermove", kids[1])
     assert page.locator(".se-selected").count() == 2
     assert page.locator(".se-status").inner_text() == "Add range: a + b"
+    _touch(page, "pointerup", kids[1])
+    page.locator(".se-view").dispatch_event("click")                 # the click that follows the finger changes nothing
+    assert page.locator(".se-status").inner_text() == "Add range: a + b"
+    # a long press that ends where it began leaves the node selected; the
+    # next tap on it opens the field, as a tap on any selected node does
+    _touch(page, "pointerdown", kids[2])
+    assert _wait(lambda: page.locator(".se-status").inner_text() == "Symbol: c", timeout=2)
+    _touch(page, "pointerup", kids[2])
+    assert page.locator(".se-selected").count() == 1
+    # a finger that moves away before the press has lasted starts nothing
+    _touch(page, "pointerdown", kids[0]); page.wait_for_timeout(100); _touch(page, "pointermove", kids[1])
+    page.wait_for_timeout(600)
+    assert page.locator(".se-status").inner_text() == "Symbol: c"
+    _touch(page, "pointerup", kids[1])
     assert page.evaluate("getComputedStyle(document.querySelector('.se-view')).touchAction").startswith("pan-y")
+    assert page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.opts.longPress") == 450
     assert page.errors == []
+
+
+def test_mouse_drag_still_selects_a_range_at_once(browser, serve_expr):
+    a, b, c = symbols("a b c")
+    srv, doc = serve_expr(a + b + c)
+    page = _open(browser, srv.url)
+    kids = _display_children(page, "/")
+    x0, y0 = _center(page, kids[0])
+    x1, y1 = _center(page, kids[1])
+    page.mouse.move(x0, y0)
+    page.mouse.down()
+    page.mouse.move(x1, y1, steps=3)
+    page.mouse.up()
+    assert page.locator(".se-status").inner_text() == "Add range: a + b"
+    assert page.errors == []
+
+
+def test_two_fingers_scroll_a_wide_formula_and_the_edge_arrows(browser, serve_expr):
+    """A formula wider than the view: a strip with a chevron sits on the edge
+    it runs past, scrolls a screen when pressed, and goes once the end is in
+    sight; two fingers moving together scroll it (their spread still
+    zooms); one finger dragged across it - on the glyphs too - scrolls it
+    sideways and selects nothing."""
+    terms = symbols("a0:24")
+    srv, doc = serve_expr(sum(t**2 for t in terms))
+    ctx = browser.new_context(has_touch=True, is_mobile=True, viewport={"width": 400, "height": 800})
+    page = ctx.new_page()
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(srv.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    view = page.locator(".se-view")
+    scroll_left = lambda: page.evaluate("document.querySelector('.se-view').scrollLeft")
+    max_left = page.evaluate("(() => { const v = document.querySelector('.se-view'); return v.scrollWidth - v.clientWidth; })()")
+    assert max_left > 200
+    left, right = page.locator(".se-scroll-left"), page.locator(".se-scroll-right")
+    up, down = page.locator(".se-scroll-up"), page.locator(".se-scroll-down")
+    # at the start only the right strip shows, tall and flat along the edge
+    assert right.is_visible() and not left.is_visible() and not up.is_visible() and not down.is_visible()
+    rb, vb = right.bounding_box(), view.bounding_box()
+    assert abs(rb["x"] + rb["width"] - (vb["x"] + vb["width"])) < 3 and rb["height"] > vb["height"] - 4 and rb["width"] < 50
+    assert rb["width"] >= 32                                              # a finger's target on a touch screen
+    # pressing it scrolls most of a screen; the left strip appears
+    right.tap()
+    assert _wait(lambda: scroll_left() > 150)
+    assert _wait(lambda: left.is_visible())
+    assert page.locator(".se-selected").count() == 0
+    # at the end the right strip goes
+    page.evaluate("document.querySelector('.se-view').scrollLeft = 1e6")
+    assert _wait(lambda: not right.is_visible()) and left.is_visible()
+    page.evaluate("document.querySelector('.se-view').scrollLeft = 0")
+    assert _wait(lambda: right.is_visible() and not left.is_visible())
+    # two fingers moving together scroll the formula without zooming it
+    zoom = lambda: page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.zoom")
+    page.evaluate("""() => { const v = document.querySelector('.se-view'), r = v.getBoundingClientRect();
+        const y = r.top + r.height / 2, cx = r.left + r.width / 2;
+        const ev = (type, id, x) => v.dispatchEvent(new PointerEvent(type, {bubbles: true, cancelable: true, clientX: x, clientY: y, pointerType: 'touch', pointerId: id, isPrimary: id === 1, buttons: 1}));
+        ev('pointerdown', 1, cx - 30); ev('pointerdown', 2, cx + 30);
+        for (let i = 1; i <= 10; i++) { ev('pointermove', 1, cx - 30 - 10 * i); ev('pointermove', 2, cx + 30 - 10 * i); }   // a finger at a time, as they arrive
+        ev('pointerup', 1, cx - 130); ev('pointerup', 2, cx - 70); }""")
+    assert abs(zoom() - 1) < 0.01 and 85 <= scroll_left() <= 115
+    assert page.locator(".se-selected").count() == 0
+    # ... and moving apart while sliding does both
+    page.evaluate("""() => { const v = document.querySelector('.se-view'), r = v.getBoundingClientRect();
+        const y = r.top + r.height / 2, cx = r.left + r.width / 2;
+        const ev = (type, id, x) => v.dispatchEvent(new PointerEvent(type, {bubbles: true, cancelable: true, clientX: x, clientY: y, pointerType: 'touch', pointerId: id, isPrimary: id === 1, buttons: 1}));
+        ev('pointerdown', 1, cx - 30); ev('pointerdown', 2, cx + 30);
+        ev('pointermove', 1, cx - 90); ev('pointermove', 2, cx + 30);
+        ev('pointerup', 1, cx - 90); ev('pointerup', 2, cx + 30); }""")
+    assert abs(zoom() - 2) < 0.01 and scroll_left() > 110
+    page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.setZoom(1)")
+    page.evaluate("document.querySelector('.se-view').scrollLeft = 200")
+    # one finger dragged over the glyphs scrolls the formula and selects nothing
+    kids = _display_children(page, "/")
+    x0, y0 = page.evaluate("""() => { const v = document.querySelector('.se-view').getBoundingClientRect();
+        for (const el of document.querySelectorAll('.se-view [data-path]')) { const r = el.getBoundingClientRect();
+            if (r.left > v.left + 60 && r.right < v.right - 60 && r.width > 4) return [r.left + r.width / 2, r.top + r.height / 2]; } }""")
+    assert page.evaluate("([x, y]) => !!document.elementFromPoint(x, y).closest('[data-path]')", [x0, y0])   # the finger lands on a glyph
+    page.evaluate("""([x, y]) => { const v = document.querySelector('.se-view');
+        const ev = (type, px) => v.dispatchEvent(new PointerEvent(type, {bubbles: true, cancelable: true, clientX: px, clientY: y, pointerType: 'touch', pointerId: 3, isPrimary: true, buttons: 1}));
+        ev('pointerdown', x); ev('pointermove', x + 40); ev('pointermove', x + 80); ev('pointerup', x + 80); }""", [x0, y0])
+    assert 110 <= scroll_left() <= 130 and page.locator(".se-selected").count() == 0 and page.locator(".se-caret").count() == 0
+    # a formula that fits shows no strip at all
+    page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.send({action: 'set', src: 'x + y'})")
+    page.wait_for_function("document.querySelector('.se-source').textContent === 'x + y'")
+    assert _wait(lambda: not right.is_visible() and not left.is_visible())
+    assert doc.expr == x + y
+    assert errors == []
+    ctx.close()
+
+
+def test_the_edge_arrows_scroll_a_tall_formula_in_full_screen(browser, serve_expr):
+    """In full screen the view has a height of its own, so a tall formula
+    scrolls vertically too: the strips at the top and the bottom."""
+    from sympy import Matrix
+
+    srv, doc = serve_expr(Matrix(30, 1, lambda i, j: symbols("a%d" % i)))
+    page = browser.new_page(viewport={"width": 600, "height": 300})
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(srv.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    up, down = page.locator(".se-scroll-up"), page.locator(".se-scroll-down")
+    assert not up.is_visible() and not down.is_visible()      # on the page the view grows with the formula
+    page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.setFullscreen(true)")
+    assert _wait(lambda: down.is_visible()) and not up.is_visible()
+    down.click()
+    scroll_top = lambda: page.evaluate("document.querySelector('.se-view').scrollTop")
+    assert _wait(lambda: scroll_top() > 100)
+    assert _wait(lambda: up.is_visible())
+    page.evaluate("document.querySelector('.se-view').scrollTop = 1e6")
+    assert _wait(lambda: not down.is_visible()) and up.is_visible()
+    page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.setFullscreen(false)")
+    assert _wait(lambda: not up.is_visible() and not down.is_visible())
+    assert errors == []
 
 
 def test_selection_box_covers_tall_content(browser, serve_expr):
@@ -3996,3 +4142,48 @@ def test_arrows_cross_the_blocks_of_an_n_dim_array(browser, serve_expr):
         assert here() == expect, key
     assert page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.nodes['/'].array") == {"shape": [2, 2, 2]}
     assert page.errors == []
+def test_a_drag_past_the_edge_scrolls_and_keeps_selecting(browser, serve_expr):
+    """A range dragged to the edge of the view: the formula scrolls along and
+    the range takes in what comes into sight, so it can reach terms that were
+    off the screen.  Before, the finger leaving the formula found nothing
+    under it - and a touch event's target being the node the drag started on,
+    the range snapped back to its anchor."""
+    terms = symbols("a0:24")
+    srv, doc = serve_expr(sum(t**2 for t in terms))
+    ctx = browser.new_context(has_touch=True, is_mobile=True, viewport={"width": 400, "height": 800})
+    page = ctx.new_page()
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(srv.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    scroll_left = lambda: page.evaluate("document.querySelector('.se-view').scrollLeft")
+    max_left = page.evaluate("(() => { const v = document.querySelector('.se-view'); return v.scrollWidth - v.clientWidth; })()")
+    assert max_left > 200 and scroll_left() == 0
+    kids = _display_children(page, "/")
+    at = lambda p: page.evaluate("p => { const b = document.querySelector(`[data-path=\"${p}\"]`).getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; }", p)
+    # a touch keeps sending its moves to the element the finger started on
+    # (implicit pointer capture), wherever the finger has got to: the view
+    fire = """([t, x, y]) => { const start = document.elementFromPoint(%s, %s) || document.querySelector('.se-view');
+        const el = t === 'pointerdown' ? start : document.querySelector('.se-view');
+        el.dispatchEvent(new PointerEvent(t, { bubbles: true, cancelable: true, clientX: x, clientY: y, pointerType: 'touch', pointerId: 7, isPrimary: true, buttons: 1 })); }"""
+    # a long press on the first term, then a drag out past the right edge
+    x0, y0 = at(kids[0])
+    fire = fire % (x0, y0)
+    page.evaluate("([t, x, y]) => (%s)([t, x, y])" % fire, ["pointerdown", x0, y0])
+    page.wait_for_selector(".se-selected[data-path]")                        # the press selected it
+    view = page.evaluate("(() => { const r = document.querySelector('.se-view').getBoundingClientRect(); return [r.right, (r.top + r.bottom) / 2]; })()")
+    page.evaluate("([t, x, y]) => (%s)([t, x, y])" % fire, ["pointermove", view[0] + 60, view[1]])
+    assert _wait(lambda: scroll_left() > 80)                       # it scrolls itself along
+    assert _wait(lambda: page.evaluate("!!document.querySelector('.sympy-editor').__sympyEditor.range"))
+    grew = page.evaluate("(() => { const r = document.querySelector('.sympy-editor').__sympyEditor.range; return Math.abs(r.focus - r.anchor); })()")
+    assert _wait(lambda: page.evaluate("(() => { const r = document.querySelector('.sympy-editor').__sympyEditor.range; return Math.abs(r.focus - r.anchor); })()") > grew)
+    # the range holds terms that were off the screen when the drag began
+    reach = page.evaluate("(() => { const r = document.querySelector('.sympy-editor').__sympyEditor.range; return Math.abs(r.focus - r.anchor) + 1; })()")
+    assert reach >= 4, reach
+    page.evaluate("([t, x, y]) => (%s)([t, x, y])" % fire, ["pointerup", view[0] + 60, view[1]])
+    page.wait_for_timeout(200)
+    stopped = scroll_left()
+    page.wait_for_timeout(300)
+    assert scroll_left() == stopped                                          # the finger up, the scrolling stops
+    assert page.evaluate("document.querySelector('.sympy-editor').__sympyEditor._autoScroll") in (None, 0)
+    assert errors == []
