@@ -483,7 +483,7 @@ save_html(expr, "page.html", addons=["tree", "plot"])                  # a self-
 serve(expr, addons=["matching"])                                       # the local server
 ```
 
-The toolbar's **Add-ons ▾** menu switches any installed add-on on or off
+The **Add-ons** section at the top of the **≡** drawer switches any installed add-on on or off
 while editing.  Not installed?  A module name (`addons=["sympy_editor_tree"]`)
 or the object itself (`addons=[ADDON]`) work too; `python addons/demo.py`
 builds a page with the three drafts straight from the checkout.

@@ -650,8 +650,14 @@ def test_two_fingers_scroll_a_wide_formula_and_the_edge_arrows(browser, serve_ex
     # at the start only the right strip shows, tall and flat along the edge
     assert right.is_visible() and not left.is_visible() and not up.is_visible() and not down.is_visible()
     rb, vb = right.bounding_box(), view.bounding_box()
-    assert abs(rb["x"] + rb["width"] - (vb["x"] + vb["width"])) < 3 and rb["height"] > vb["height"] - 4 and rb["width"] < 50
+    assert abs(rb["x"] + rb["width"] - (vb["x"] + vb["width"])) < 3 and rb["width"] < 50
     assert rb["width"] >= 32                                              # a finger's target on a touch screen
+    # It runs the height of the view but for the corner the full-screen
+    # button keeps (that button no longer steps aside, so the strip does):
+    # they must not overlap, or the button would swallow the strip's taps.
+    fb = page.locator(".se-fullbtn").bounding_box()
+    assert rb["height"] > vb["height"] - 4 - fb["height"] - 8, (rb, vb, fb)
+    assert rb["y"] >= fb["y"] + fb["height"] - 1, (rb, fb)
     # pressing it scrolls most of a screen; the left strip appears
     right.tap()
     assert _wait(lambda: scroll_left() > 150)
@@ -3571,6 +3577,128 @@ def test_a_caret_in_the_source_line_is_a_caret_in_the_formula(browser, serve_exp
     assert page.evaluate("(() => { const e = document.querySelector('.sympy-editor').__sympyEditor; return e.caret.index; })()") == 2
     assert page.errors == []
 
+
+
+def test_a_drag_keeps_the_selection_painted_the_whole_way(browser, serve_expr):
+    """Dragging after a long press used to blink the selection out and back.
+    Two causes, both fixed: the overlay box was torn out of the document and
+    a new one put back on every pointer move (a frame with nothing drawn),
+    and a finger over a part that is not one of the parent's own display
+    children - the operator between two terms - found no index and stored a
+    focus of -1, which selects nothing at all."""
+    terms = symbols("a0:20")
+    srv, doc = serve_expr(sum(t**2 for t in terms))
+    ctx = browser.new_context(has_touch=True, is_mobile=True, viewport={"width": 380, "height": 620})
+    page = ctx.new_page()
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(srv.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    kids = _display_children(page, "/")
+    at = lambda p: page.evaluate("p => { const b = document.querySelector(`[data-path=\"${p}\"]`).getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; }", p)
+    x0, y0 = at(kids[0])
+    fire = """([t, x, y]) => { const v = document.querySelector('.se-view');
+        const start = document.elementFromPoint(%s, %s) || v;
+        (t === 'pointerdown' ? start : v).dispatchEvent(new PointerEvent(t,
+          {bubbles: true, cancelable: true, clientX: x, clientY: y, pointerType: 'touch', pointerId: 7, isPrimary: true, buttons: 1})); }""" % (x0, y0)
+    page.evaluate("a => (%s)(a)" % fire, ["pointerdown", x0, y0])
+    page.wait_for_selector(".se-selected[data-path]", timeout=10000)      # the long press took hold
+    # count both the frames with no box at all and the boxes ever created:
+    # one box should be made and then moved, never replaced
+    page.evaluate("""() => { window.__gaps = 0; window.__samples = 0; window.__born = 0;
+        new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(n => {
+            if (n.classList && n.classList.contains('se-box-select')) window.__born++; })))
+          .observe(document.querySelector('.se-view'), {childList: true});
+        window.__t = setInterval(() => { window.__samples++;
+            if (!document.querySelector('.se-box-select')) window.__gaps++; }, 16); }""")
+    right, mid = page.evaluate("(() => { const r = document.querySelector('.se-view').getBoundingClientRect(); return [r.right, (r.top + r.bottom) / 2]; })()")
+    for step in range(14):
+        page.evaluate("a => (%s)(a)" % fire, ["pointermove", x0 + (right - x0) * step / 8.0, mid])
+        page.wait_for_timeout(60)
+    page.wait_for_timeout(300)
+    page.evaluate("() => clearInterval(window.__t)")
+    gaps, samples, born = page.evaluate("() => [window.__gaps, window.__samples, window.__born]")
+    assert page.evaluate("(() => document.querySelector('.se-box-select').classList.contains('se-box-glide'))()") is True
+    page.evaluate("a => (%s)(a)" % fire, ["pointerup", right, mid])
+    assert samples > 20                                    # the sampling really ran
+    assert gaps == 0, f"the selection vanished for {gaps} of {samples} frames"
+    assert born <= 1, f"the box was rebuilt {born} times instead of being moved"
+    reach = page.evaluate("(() => { const r = document.querySelector('.sympy-editor').__sympyEditor.range; return r ? Math.abs(r.focus - r.anchor) + 1 : 0; })()")
+    assert reach >= 4, reach                               # a -1 focus used to cut this back to nothing
+    assert errors == []
+    ctx.close()
+
+
+def test_the_selection_box_glides_only_while_a_drag_extends_it(browser, served):
+    """The box is moved rather than replaced, so CSS can carry it to the new
+    range while the finger is drawing it.  Only then: a box moved by a zoom
+    or by going full screen belongs at its new place at once, and a box just
+    drawn must not fly in from wherever it started."""
+    srv, doc = served
+    page = _open(browser, srv.url)
+    page.locator('[data-path="/"]').click(force=True)
+    page.wait_for_selector(".se-box-select")
+    box = ".se-box-select"
+    # se-box-new is dropped on the frame after the box is made: wait for that
+    # rather than race it - a loaded runner can be a while getting there.
+    page.wait_for_function("() => { const b = document.querySelector('%s'); return b && !b.classList.contains('se-box-new'); }" % box, timeout=10000)
+    assert page.evaluate("(() => document.querySelector('%s').classList.contains('se-box-glide'))()" % box) is False
+    assert page.evaluate("(() => getComputedStyle(document.querySelector('%s')).transitionDuration)()" % box) == "0s"
+    # the rule is there for the drag: with the class on, it animates
+    page.evaluate("(() => document.querySelector('%s').classList.add('se-box-glide'))()" % box)
+    assert page.evaluate("(() => getComputedStyle(document.querySelector('%s')).transitionDuration)()" % box) != "0s"
+    assert page.errors == []
+
+
+def test_the_full_screen_button_keeps_its_corner(browser, serve_expr):
+    """It is the one fixed landmark of the editing box: it used to step inward
+    when a scroll strip appeared, so it drifted towards the middle as the
+    formula was scrolled."""
+    terms = symbols("a0:20")
+    srv, doc = serve_expr(sum(t**2 for t in terms))
+    page = browser.new_page(viewport={"width": 560, "height": 400})
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(srv.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    corner = lambda: page.evaluate("""(() => {
+        const s = document.querySelector('.se-stage').getBoundingClientRect();
+        const f = document.querySelector('.se-fullbtn').getBoundingClientRect();
+        return [Math.round(s.right - f.right), Math.round(f.top - s.top)]; })()""")
+    start = corner()
+    page.evaluate("() => { const v = document.querySelector('.se-view'); v.scrollLeft = v.scrollWidth; }")
+    page.wait_for_timeout(400)
+    scrolled = corner()
+    page.evaluate("() => { const v = document.querySelector('.se-view'); v.scrollLeft = 0; }")
+    page.wait_for_timeout(400)
+    assert start == scrolled == corner(), f"{start} -> {scrolled} -> {corner()}"
+    assert errors == []
+    page.close()
+
+
+def test_the_add_ons_switches_sit_at_the_top_of_the_drawer(browser, serve_expr):
+    """They used to be a menu of their own on the strip; they belong with
+    everything else that is not about the formula, behind the one button."""
+    addon, Boxed = _demo_addon()
+    doc = Document(x + y, available=[addon])
+    srv = EditorServer(doc, port=0, options={"sessions": True})
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        page = _open(browser, srv.url)
+        assert page.locator('.se-toolbar [data-cmd="addons"]').count() == 0
+        page.locator('[data-cmd="drawer"]').click()
+        page.wait_for_selector(".se-drawer-addons", state="visible", timeout=10000)
+        panes = page.evaluate("(() => [...document.querySelector('.se-drawer').children].map(c => c.className))()")
+        assert "se-drawer-addons" in panes[1], panes      # right under the head, above the sessions
+        box = page.locator(".se-drawer-addons input")
+        assert box.count() == 1 and not box.is_checked()
+        box.check()                                       # and it still switches the add-on on
+        page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)
+        assert list(doc.addons) == ["demo"]
+        assert page.errors == []
+    finally:
+        srv.shutdown()
+        srv.server_close()
 
 def test_the_history_close_button_sits_in_the_corner(browser, serve_expr):
     """However the strip wraps, closing is in the top right corner."""

@@ -841,7 +841,7 @@ the front end hooks `historyStep` (an element for the drawer's rows,
 styles for the report, `buildHistoryReport`'s `stepExtra`/`extraCss`) draw
 it under the step - the tree add-on shows every step's tree.  `Editor._syncAddons` mounts
 and unmounts (`_mountAddon`/`_unmountAddon`) to match each snapshot, and
-`_fillAddonsMenu` builds the toolbar's **Add-ons ▾** menu
+`_fillAddonsMenu` builds the **Add-ons** switches at the top of the ≡ drawer
 (`data-block="addons"`, `.se-addons-menu`).  Rules: the add-on packages in
 `addons/` are separate distributions, never imported by `sympy_editor`; a
 change to the contract comes with `tests/test_addons.py`, and to the front
