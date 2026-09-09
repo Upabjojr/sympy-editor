@@ -19,3 +19,19 @@
 .se-addon-plot .plot-note.error { color: var(--se-error); }
 .se-addon-plot .plot-shown { color: var(--se-muted); font-family: var(--se-mono); }
 .se-addon-plot .plot-sliders label.plot-unset { color: var(--se-error); }
+
+/* The picture has stopped following because sampling it was too slow: said
+ * where the reason belongs, with the way back beside it. */
+.se-addon-plot .plot-note.plot-paused { color: var(--se-muted); }
+.se-addon-plot .plot-again {
+  margin-left: 0.4rem;
+  font: inherit;
+  font-size: 12px;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--se-border);
+  border-radius: 0.3rem;
+  background: var(--se-btn);
+  color: inherit;
+  cursor: pointer;
+}
+.se-addon-plot .plot-again:hover { background: var(--se-btn-hover); }
