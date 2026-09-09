@@ -22,6 +22,7 @@ from sympy.core.function import AppliedUndef
 from sympy.core.symbol import Str
 from sympy.matrices.expressions import MatrixExpr
 from sympy.matrices import MatrixBase
+from sympy.tensor.array import NDimArray
 from sympy.parsing.sympy_parser import (
     convert_xor,
     implicit_multiplication_application,
@@ -1081,6 +1082,142 @@ class Document:
         sub = self._extract_range(self.expr, p, children) if children is not None else self._get_at(self.expr, p)
         return self._commit(sub)
 
+    # -- explicit matrices: rows, columns, shape ----------------------------
+
+    MATRIX_OPS = ("insert_row", "insert_col", "delete_row", "delete_col", "resize", "reshape")
+
+    def _enclosing_matrix(self, path: PathLike):
+        """The explicit matrix at ``path`` or around it: ``(matrix path,
+        matrix, cell)``, ``cell`` being the ``(row, col)`` of the entry the
+        path is in, or ``None`` when the path is the matrix itself."""
+        p = self._path(path)
+        for k in range(len(p), -1, -1):
+            try:
+                node = self._get_at(self.expr, p[:k])
+            except Exception:
+                continue
+            if not isinstance(node, MatrixBase):
+                continue
+            rel = p[k:]
+            cell = None
+            # args are (rows, cols, entries): a Tuple of the entries in reading
+            # order for a dense matrix, a Dict of {(row, col): entry} for a sparse one
+            if len(rel) >= 2 and rel[0] == 2 and isinstance(rel[1], int):
+                entries = node.args[2]
+                try:
+                    if isinstance(entries, sympy.Dict):
+                        key = entries.args[rel[1]].args[0]
+                        cell = (int(key.args[0]), int(key.args[1]))
+                    else:
+                        cell = divmod(int(rel[1]), int(node.cols))
+                except Exception:
+                    cell = None
+            return p[:k], node, cell
+        raise ValueError("Not a matrix, nor inside one")
+
+    def _fresh_placeholders(self):
+        """An endless supply of empty slots (``_1``, ``_2``...) whose names
+        are not in the expression yet."""
+        taken = {s.name for s in self.expr.atoms(Symbol) if PLACEHOLDER_RE.match(s.name)}
+        n = 1
+        while True:
+            if f"_{n}" not in taken:
+                taken.add(f"_{n}")
+                yield Placeholder(f"_{n}")
+            n += 1
+
+    def edit_matrix(self, path: PathLike, op: str, rows: Optional[int] = None, cols: Optional[int] = None) -> Basic:
+        """Change the shape of the explicit matrix at ``path`` or around it -
+        ``path`` may be an entry of the matrix, or anything inside one.
+
+        ``op`` is one of :data:`MATRIX_OPS`: ``"insert_row"`` / ``"insert_col"``
+        add a row (column) after the one the path is in - at the end when the
+        path is the matrix itself; ``"delete_row"`` / ``"delete_col"`` remove the
+        row (column) the path is in - the last one for the matrix itself;
+        ``"resize"`` makes it ``rows`` x ``cols``, keeping what fits from the
+        top-left corner; ``"reshape"`` lays the same entries out in another
+        shape (SymPy's ``Matrix.reshape``, in reading order), so it takes only
+        a ``rows`` x ``cols`` that multiplies to the number of entries there
+        already are - nothing is added and nothing is lost.  New entries (the
+        insertions, and what ``resize`` cannot fill) are empty slots
+        (placeholders, ``_1``, ``_2``...).  The matrix keeps its class (dense
+        or sparse, mutable or not); a matrix never loses its last row or
+        column.
+        """
+        if op not in self.MATRIX_OPS:
+            raise ValueError(f"Unknown matrix operation {op!r}; one of {', '.join(self.MATRIX_OPS)}")
+        mpath, mat, cell = self._enclosing_matrix(path)
+        r, c = int(mat.rows), int(mat.cols)
+        grid = [list(row) for row in mat.tolist()]
+        fresh = self._fresh_placeholders()
+        if op == "insert_row":
+            at = cell[0] + 1 if cell else r
+            grid.insert(at, [next(fresh) for _ in range(c)])
+        elif op == "insert_col":
+            at = cell[1] + 1 if cell else c
+            for row in grid:
+                row.insert(at, next(fresh))
+        elif op == "delete_row":
+            if r <= 1:
+                raise ValueError("The matrix has a single row: delete the matrix itself instead")
+            del grid[cell[0] if cell else r - 1]
+        elif op == "delete_col":
+            if c <= 1:
+                raise ValueError("The matrix has a single column: delete the matrix itself instead")
+            at = cell[1] if cell else c - 1
+            for row in grid:
+                del row[at]
+        else:
+            try:
+                nr, nc = int(rows), int(cols)   # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                raise ValueError(f"{op} needs the numbers of rows and columns") from None
+            if nr < 1 or nc < 1:
+                raise ValueError("A matrix needs at least one row and one column")
+            if op == "reshape":
+                # The same entries in another shape: only a shape that holds
+                # them all, and no empty slot - what SymPy's reshape does.
+                if nr * nc != r * c:
+                    raise ValueError(f"{r}x{c} has {r * c} entries and {nr}x{nc} holds {nr * nc}: a reshape keeps every "
+                                     f"entry, so the two must agree ({self._shapes_for(r * c)})")
+                new = mat.reshape(nr, nc)
+                return self._commit(self._replace_at(self.expr, mpath, new))
+            grid = [[grid[i][j] if i < r and j < c else next(fresh) for j in range(nc)] for i in range(nr)]
+        new = type(mat)(grid)
+        return self._commit(self._replace_at(self.expr, mpath, new))
+
+    @staticmethod
+    def _shapes_for(count: int) -> str:
+        """The shapes ``count`` entries can be laid out in, for a message."""
+        return ", ".join(f"{r}x{count // r}" for r in range(1, count + 1) if count % r == 0)
+
+    def insert_row(self, path: PathLike) -> Basic:
+        """A new row of empty slots after the one at ``path`` (see :meth:`edit_matrix`)."""
+        return self.edit_matrix(path, "insert_row")
+
+    def insert_col(self, path: PathLike) -> Basic:
+        """A new column of empty slots after the one at ``path``."""
+        return self.edit_matrix(path, "insert_col")
+
+    def delete_row(self, path: PathLike) -> Basic:
+        """Remove the row of the matrix that ``path`` is in."""
+        return self.edit_matrix(path, "delete_row")
+
+    def delete_col(self, path: PathLike) -> Basic:
+        """Remove the column of the matrix that ``path`` is in."""
+        return self.edit_matrix(path, "delete_col")
+
+    def resize_matrix(self, path: PathLike, rows: int, cols: int) -> Basic:
+        """Make the matrix at (or around) ``path`` ``rows`` x ``cols``,
+        keeping what fits from the top-left corner (see :meth:`edit_matrix`)."""
+        return self.edit_matrix(path, "resize", rows, cols)
+
+    def reshape_matrix(self, path: PathLike, rows: int, cols: int) -> Basic:
+        """The same entries of the matrix at (or around) ``path`` laid out as
+        ``rows`` x ``cols`` (``Matrix.reshape``); the shape must hold exactly
+        the entries there are."""
+        return self.edit_matrix(path, "reshape", rows, cols)
+
     def _keep_candidates(self, node: Basic) -> List[TypingTuple[Union[int, str], Basic]]:
         """What ``unwrap`` could leave in the node's place, as (``keep`` key,
         value): the virtual parts of a node shown as a fraction or after a
@@ -1488,6 +1625,16 @@ class Document:
             info["parts"] = [name for name, _value in parts]
         if is_placeholder(node):
             info["placeholder"] = True
+        if isinstance(node, MatrixBase):
+            # an explicit matrix: the front end offers its row/column tools and
+            # the corner handle that resizes it (see edit_matrix)
+            info["matrix"] = {"rows": int(node.rows), "cols": int(node.cols)}
+        elif isinstance(node, NDimArray):
+            # An explicit array: its entries are one flat list of arguments,
+            # as a matrix's are, and the printer lays them out in two
+            # dimensions (a rank-3 array is a row of matrices).  The shape
+            # says how; the front end moves through them by what is drawn.
+            info["array"] = {"shape": [int(d) for d in node.shape]}
         # What unwrap could keep, when there is more than one candidate: the
         # front end asks which argument to leave instead of picking for the user.
         choices = self._keep_candidates(node)
@@ -1524,6 +1671,7 @@ class Document:
         ``{"action": "apply", "path": "/", "op": "expand"[, "args": ["(1, 0)"]]}``
         (``args`` for an op that declares ``params``, such as the array tools),
         ``{"action": "delete", "path": "/1"}``, ``{"action": "set", "src": ...}``,
+        ``{"action": "matrix", "path", "op": "insert_row" | "insert_col" | "delete_row" | "delete_col" | "resize" | "reshape", "rows", "cols"}``,
         ``{"action": "insert", "path": "/", "index": 2, "src": "y", "left": 1}``,
         ``{"action": "extend", "path": "/2/0", "side": "after", "src": "+ 1"}``,
         ``{"action": "unwrap", "path": "/1", "keep": 0}`` (keep an argument, drop the node),
@@ -1605,6 +1753,8 @@ class Document:
                 self.wrap(path, str(message.get("func", "")), str(message.get("args", "") or ""), children=children)
             elif action == "isolate":
                 self.isolate(path, children=children)
+            elif action == "matrix":
+                self.edit_matrix(path, str(message.get("op", "")), message.get("rows"), message.get("cols"))
             elif action == "call":
                 self.call(path, str(message.get("func", "")), children=children, lazy=bool(message.get("lazy")))
             elif action == "functions":
@@ -1723,6 +1873,14 @@ class Document:
                 return f"Unwrap {node()}"
             if action == "isolate":
                 return f"Isolate {node()}"
+            if action == "matrix":
+                op = str(message.get("op", ""))
+                if op == "resize":
+                    return f"Matrix: resize to {message.get('rows')}×{message.get('cols')}"
+                if op == "reshape":
+                    return f"Matrix: reshape to {message.get('rows')}×{message.get('cols')}"
+                return "Matrix: " + {"insert_row": "new row", "insert_col": "new column",
+                                     "delete_row": "delete row", "delete_col": "delete column"}.get(op, op)
             if action in ("retype", "declare"):
                 return f"{'Retype' if action == 'retype' else 'Declare'} {message.get('name')} as {message.get('type', 'Symbol')}"
         except Exception:

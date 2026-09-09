@@ -205,6 +205,54 @@ Two conventions between printer, document and front end:
   parameter form when required, then `call` (the per-type signature is
   never reused across types).  `{"action": "methods", "path"}` returns a
   snapshot with the target's list included regardless.
+- **Matrix rows, columns and shape.**  `Document.edit_matrix(path, op,
+  rows, cols)` (`insert_row`, `insert_col`, `delete_row`, `delete_col`,
+  `resize`; the named wrappers `insert_row(path)`... and `resize_matrix`)
+  changes the explicit matrix at `path` *or around it*: `_enclosing_matrix`
+  walks the path's prefixes up to the first `MatrixBase` and reads the cell
+  from the rest (`/2/k` of a dense matrix is entry `divmod(k, cols)`; `/2/i`
+  of a sparse one is the i-th item of its `Dict`, whose key is the cell), so
+  a selection anywhere inside an entry names its row and column; the
+  matrix itself means the last row / column.  New entries are fresh
+  placeholders (`_fresh_placeholders`); the class is kept (`type(mat)(grid)`,
+  dense or sparse); the last row or column is never deleted.  Message:
+  `{"action": "matrix", "op", "path", "rows", "cols"}`, labelled "Matrix:
+  new row" ... in the history.  `_node_info` marks explicit matrices with
+  `matrix: {rows, cols}`; the front end's `_matrixContext()` walks the
+  selection's ancestors to the nearest such node, `_placeActions` shows the
+  `+ row / + col / − row / − col` buttons (`matrow`...) of the action bar
+  for it, and `_placeMatrixHandle` (from `_applySelection`) puts the grip
+  `.se-mat-handle` on the matrix's bottom-right corner - re-appended to the
+  view at every state, like the boxes, since the rendering is replaced.
+  Dragging the grip (its own pointer listeners stop propagation and capture
+  the pointer; `touch-action: none`) moves a `.se-mat-ghost` outline and
+  sends **`reshape`** on release: the drag rearranges the entries the matrix
+  has, it does not grow or shrink it, so the outline snaps to the shapes
+  that hold them all (`matrixShapes(rows * cols)`, the divisor pairs; the
+  nearest by the outline's size, `cellW = width / cols`).  `+ row / + col /
+  − row / − col` are what add and remove entries.  Two operations, kept
+  apart on purpose: `resize` (rows x cols as asked, top-left kept, the rest
+  empty slots) is the Python API's, `reshape` (`Matrix.reshape`, reading
+  order, the product must match) is the grip's - a drag that silently
+  dropped entries off the bottom of a matrix is the thing this avoids.
+- **Moving through a grid.**  The entries of an explicit matrix and of an
+  explicit `NDimArray` are one flat list of siblings (`/2/0`, `/2/1`... in
+  reading order: the `Tuple` that holds them is transparent), so nothing in
+  the paths says where a cell is drawn - `←/→` used to wrap from the end of
+  a row to the start of the next and `↑/↓` walked the tree.  Inside such a
+  node the four arrows are *geometric* instead: `_gridOf(path)` (the parent
+  carries `matrix: {rows, cols}` or `array: {shape}` in the snapshot) gives
+  the cells, `_gridNeighbour` picks the nearest one that lies that way *and*
+  shares the band across it (the same drawn row for `←/→`, the same column
+  for `↑/↓`), `_gridMove` moves the selection and `_gridCaretMove` the caret
+  (over `_caretPositions()` restricted to the grid).  Nothing is special
+  about a rank: a rank-3 array is drawn as a row of matrices, so the same
+  rule crosses its blocks.  At the edge of the grid each key falls back to
+  what it did before - `↑` in the top row selects the matrix, `←/→` step out
+  of it, so every cell stays reachable and the way out is unchanged.  The
+  keys and the toolbar/action-bar arrows go through the same `command()`
+  cases, and `_updateToolbar` asks `_gridTarget`/`_gridCaretTarget` (dry
+  runs) so a button is live exactly when the move exists.
 - **Loading overlay.**  Backend progress messages go through
   `Editor._report`: texts mentioning loading/waiting show `.se-loading` (a
   blocking spinner overlay, keys and clicks ignored) until the message
