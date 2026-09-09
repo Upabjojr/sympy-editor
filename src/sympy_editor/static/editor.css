@@ -814,6 +814,54 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
 }
 .se-actions[hidden], .se-opbar[hidden] { display: none; }
+.se-actions .se-mat-sep { margin: 0 0.2rem; }
+.se-actions .se-mat-sep[hidden], .se-actions button[hidden] { display: none; }
+/* Explicit matrices: the grip on the bottom-right corner resizes the matrix
+ * by dragging (rows down, columns right); the ghost is the outline of the
+ * size it will get, with that size written in its corner.  Both are placed
+ * in the view like the selection boxes (Editor._placeMatrixHandle). */
+.se-mat-handle {
+  position: absolute;
+  z-index: 5;
+  width: 14px;
+  height: 14px;
+  margin: -6px 0 0 -6px;
+  box-sizing: border-box;
+  border: 1px solid rgba(var(--se-accent), 0.85);
+  border-radius: 3px;
+  background: var(--se-bg);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.22);
+  cursor: nwse-resize;
+  touch-action: none;
+}
+.se-mat-handle::after {   /* two diagonal strokes: a grip */
+  content: "";
+  position: absolute;
+  inset: 2px;
+  background: linear-gradient(135deg, transparent 38%, rgb(var(--se-accent)) 38% 50%, transparent 50% 66%, rgb(var(--se-accent)) 66% 78%, transparent 78%);
+}
+.se-mat-ghost {
+  position: absolute;
+  z-index: 4;
+  pointer-events: none;
+  box-sizing: border-box;
+  border: 1.5px dashed rgb(var(--se-accent));
+  border-radius: 3px;
+  background: rgba(var(--se-accent), 0.08);
+}
+.se-mat-ghost-label {   /* top-right: the action bar sits under the matrix, over its bottom corner */
+  position: absolute;
+  right: 2px;
+  top: 2px;
+  padding: 0 4px;
+  font-family: var(--se-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgb(var(--se-accent));
+  background: var(--se-bg);
+  border-radius: 2px;
+  white-space: nowrap;
+}
 .se-opbar button { min-width: 2em; font-weight: 600; }
 .se-view .se-selected:not([data-path]) { color: rgb(var(--se-accent)); }
 
@@ -879,6 +927,7 @@
   }
   .se-lazy { font-size: 14px; }
   .se-lazy-box { width: 1.1rem; height: 1.1rem; }
+  .se-mat-handle { width: 24px; height: 24px; margin: -10px 0 0 -10px; }   /* a finger's target */
   .se-view { font-size: calc(1.6em * var(--se-zoom, 1)); padding: 0.8rem 0.5rem; }
   .se-inline { font-size: 0.9em; }
   .sympy-editor { min-width: 0; width: 100%; }

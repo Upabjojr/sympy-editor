@@ -153,6 +153,8 @@ var SympyEditor = (function () {
     "<section><h3>Applying functions</h3><ul>",
     "<li><b>Transform \u25be</b> holds the general operations; a second menu appears with operations for the selection's type (Matrix, Integral, Equation\u2026). Picking one applies it at once, to the selection or, with nothing selected, to the whole expression.</li>",
     "<li><b>Add-ons \u25be</b> switches on or off the add-ons installed beside the editor \u2014 a panel under the formula, tools, node types from other packages \u2014 without restarting anything; what an add-on kept waits for it to come back.</li>",
+    "<li>In a <b>matrix</b> or an <b>array</b> the four arrows move as it is drawn: <kbd>\u2190</kbd>/<kbd>\u2192</kbd> along the row, <kbd>\u2191</kbd>/<kbd>\u2193</kbd> between the rows \u2014 for the selection and for the caret alike. At the edge the usual meaning takes over: <kbd>\u2191</kbd> in the top row selects the matrix itself (again, its own parent), <kbd>\u2190</kbd>/<kbd>\u2192</kbd> step out of it. An array of any rank works the same way, because the rule follows the drawing: a rank-3 array is a row of matrices, so <kbd>\u2192</kbd> at the right edge of one block enters the next on the same line.</li>",
+    "<li>In a <b>matrix</b> (the matrix, or anything in one of its entries) the bar under the selection adds <b>+ row</b>, <b>+ col</b>, <b>\u2212 row</b>, <b>\u2212 col</b>: a new row or column of empty slots after the selected one (after the last, for the matrix itself), or the selected one taken away. The grip at the matrix\u2019s bottom-right corner <b>reshapes</b> it: the same entries laid out another way (SymPy\u2019s reshape, in reading order), so it snaps to the shapes that hold them all \u2014 12 entries go 1\u00d712, 2\u00d76, 3\u00d74, 4\u00d73, 6\u00d72, 12\u00d71 and nowhere else. Nothing is added or lost; the outline shows the shape it will take. To grow or shrink the matrix, use + row / + col / \u2212 row / \u2212 col.</li>",
     "<li><b>Methods \u25be</b> lists everything the selected object's class can do \u2014 .det(), .T, .diff()\u2026 \u2014 one pick calls it. A Lambda is itself a function: <b>( ) apply</b> evaluates it at the arguments you give.</li>",
     "<li>The <b>function box</b> searches all of SymPy: pick a function and fill the parameters it asks for; \u201cdiff(x)\u201d, \u201c.T\u201d, \u201cdet()\u201d typed in full apply as written. A container takes the selection as its contents: <i>Matrix</i> over x + y gives the 1\u00d71 matrix holding it.</li>",
     "<li><b>unevaluated</b> builds the symbolic form (Determinant, Integral, sin(0)\u2026) instead of computing it; <i>Evaluate (doit)</i> computes it later.</li>",
@@ -512,6 +514,16 @@ var SympyEditor = (function () {
    *  ancestor: one tinted box per changed region, over the node's whole
    *  visual extent, instead of an inline background per level (which paints
    *  the line box only - a fraction or matrix is then half covered). */
+  /** The shapes `n` entries can be laid out in: every pair of whole numbers
+   *  that multiplies to n, rows ascending.  A reshape rearranges the
+   *  entries it has - it never adds or drops one - so these are the only
+   *  shapes the grip may offer (SymPy's Matrix.reshape). */
+  function matrixShapes(n) {
+    var out = [];
+    for (var r = 1; r <= n; r++) if (n % r === 0) out.push([r, n / r]);
+    return out;
+  }
+
   function markBoxes(root, cls, boxCls) {
     var marked = root.querySelectorAll("." + cls);
     for (var i = 0; i < marked.length; i++) {
@@ -1253,9 +1265,24 @@ var SympyEditor = (function () {
           abtn("delete", "Delete", "Remove entirely"),
           abtn("isolate", "Isolate", "Keep only this: it becomes the whole expression"),
           abtn("copy", "Copy", "Copy the SymPy source of the selection (Ctrl+C; Ctrl+X cuts, Ctrl+V pastes)"),
-          abtn("paste", "Paste", "Paste the clipboard over the selection (Ctrl+V)")
+          abtn("paste", "Paste", "Paste the clipboard over the selection (Ctrl+V)"),
+          // In a matrix (the matrix itself, or anything in one of its
+          // entries): its rows and columns.  Shown by _placeActions.
+          h("span", { class: "se-sep se-mat-sep", hidden: "" }),
+          abtn("matrow", "+ row", "New row of empty slots after this one (after the last, for the matrix itself)"),
+          abtn("matcol", "+ col", "New column of empty slots after this one (after the last, for the matrix itself)"),
+          abtn("matdelrow", "\u2212 row", "Delete this row (the last one, for the matrix itself)"),
+          abtn("matdelcol", "\u2212 col", "Delete this column (the last one, for the matrix itself)")
         ]);
         root.appendChild(this.actions);
+        // The grip at the bottom-right corner of a matrix: dragging it
+        // resizes the matrix - rows down, columns right (see _placeMatrixHandle).
+        this.matHandle = h("div", { class: "se-mat-handle",
+          title: "Drag to lay the same entries out in another shape: wider for more columns, taller for more rows. Only shapes that hold every entry (2\u00d76 for 12, not 5\u00d72) - nothing is added or lost. Use + row / + col to grow the matrix.",
+                                    role: "button", "aria-label": "Resize the matrix", tabindex: "-1" });
+        this.matGhost = h("div", { class: "se-mat-ghost", "aria-hidden": "true" }, [h("span", { class: "se-mat-ghost-label" })]);
+        this._matDrag = null;
+        this._matHandleCtx = null;
         // The palette shown under a selected operator: what it can become.
         var obtn = function (op, label, title) { return h("button", { type: "button", "data-op": op, title: title }, [label]); };
         this.opBar = h("div", { class: "se-opbar", hidden: "", role: "toolbar", "aria-label": "Operator" }, [
@@ -1904,6 +1931,60 @@ var SympyEditor = (function () {
       this.view.addEventListener("pointerup", function (ev) { endPointer(ev, false); });
       this.view.addEventListener("pointercancel", function (ev) { endPointer(ev, true); });
       this.view.addEventListener("dblclick", function (ev) { self._onDblClick(ev); });
+      // The matrix grip: a drag from it is a resize, never a selection or a
+      // scroll (the events stop here; the grip captures the pointer).  Each
+      // cell of the matrix as drawn is one step: the outline follows the
+      // pointer a row or a column at a time, and the size is sent on release.
+      if (this.matHandle) {
+        var hd = this.matHandle;
+        hd.addEventListener("pointerdown", function (ev) {
+          if (ev.pointerType === "mouse" && ev.button !== 0) return;
+          var ctx = self._matHandleCtx;
+          ev.stopPropagation();
+          if (!ctx || self.busy || self.loading) return;
+          ev.preventDefault();
+          try { hd.setPointerCapture(ev.pointerId); } catch (e) { /* not capturable */ }
+          self._matDrag = { id: ev.pointerId, x: ev.clientX, y: ev.clientY, ctx: ctx, rows: ctx.rows, cols: ctx.cols,
+                            cellW: Math.max(8, ctx.rect.width / ctx.cols), cellH: Math.max(8, ctx.rect.height / ctx.rows),
+                            shapes: matrixShapes(ctx.rows * ctx.cols) };
+          self._showMatrixGhost(ctx.rows, ctx.cols);
+        });
+        hd.addEventListener("pointermove", function (ev) {
+          var d = self._matDrag;
+          if (!d || ev.pointerId !== d.id) return;
+          ev.stopPropagation();
+          ev.preventDefault();
+          // The pointer asks for a box this wide and this tall; the shape is
+          // the one of `shapes` whose outline comes closest to it, so the
+          // drag can only ever land on a shape that holds every entry.
+          var wantW = d.ctx.rect.width + (ev.clientX - d.x), wantH = d.ctx.rect.height + (ev.clientY - d.y);
+          var best = null, bestAt = Infinity;
+          for (var i = 0; i < d.shapes.length; i++) {
+            var r = d.shapes[i][0], c = d.shapes[i][1];
+            var dw = c * d.cellW - wantW, dh = r * d.cellH - wantH;
+            var at = dw * dw + dh * dh;
+            if (at < bestAt) { bestAt = at; best = d.shapes[i]; }
+          }
+          if (!best) return;
+          d.rows = best[0];
+          d.cols = best[1];
+          self._showMatrixGhost(d.rows, d.cols);
+        });
+        var endMatDrag = function (ev, cancelled) {
+          var d = self._matDrag;
+          if (!d || ev.pointerId !== d.id) return;
+          ev.stopPropagation();
+          self._matDrag = null;
+          self._hideMatrixGhost();
+          try { hd.releasePointerCapture(ev.pointerId); } catch (e) { /* not captured */ }
+          if (!cancelled && (d.rows !== d.ctx.rows || d.cols !== d.ctx.cols)) self._matrixOp("reshape", d.rows, d.cols, d.ctx.path);
+          else self.view.focus({ preventScroll: true });
+        };
+        hd.addEventListener("pointerup", function (ev) { endMatDrag(ev, false); });
+        hd.addEventListener("pointercancel", function (ev) { endMatDrag(ev, true); });
+        hd.addEventListener("click", function (ev) { ev.stopPropagation(); });
+        hd.addEventListener("touchstart", function (ev) { ev.stopPropagation(); }, { passive: true });
+      }
       this.root.addEventListener("keydown", function (ev) {
         if (self.drawer && self.drawer.contains(ev.target)) return;   // Esc is handled at the document level while it is open
         if (self.symbols && self.symbols.contains(ev.target)) return;
@@ -2639,6 +2720,7 @@ var SympyEditor = (function () {
 
     _applySelection() {
       this._addonsNotify("onSelect", this.selected, this.range);
+      this._placeMatrixHandle();
       var old = this.view.querySelectorAll(".se-selected");
       for (var i = 0; i < old.length; i++) old[i].classList.remove("se-selected");
       this._drawBoxes("hover", []);
@@ -2815,11 +2897,14 @@ var SympyEditor = (function () {
       } else if (this.caret && k === "Enter") {
         if (!ro) this.beginInsert("");
       } else if (this.caret && (k === "ArrowLeft" || k === "ArrowRight")) {
-        this._moveCaret(k === "ArrowLeft" ? -1 : 1);
+        // In a grid the caret moves as the grid is drawn; at the end of a
+        // row the ordinary walk takes over (on to the next row, as a line of
+        // text does).
+        if (!this._gridCaretMove(k === "ArrowLeft" ? "left" : "right")) this._moveCaret(k === "ArrowLeft" ? -1 : 1);
       } else if (this.caret && k === "ArrowUp") {
-        this._selectBesideCaret();   // ↑ first selects the object the caret sits next to (then the ancestors)
+        if (!this._gridCaretMove("up")) this._selectBesideCaret();   // ↑ first selects the object the caret sits next to (then the ancestors)
       } else if (this.caret && k === "ArrowDown") {
-        // nothing to go into from a caret
+        this._gridCaretMove("down");   // in a grid: the row below; elsewhere nothing to go into from a caret
       } else if (this.caret && !ro && !mod && !ev.altKey && k.length === 1) {
         this.beginInsert(k);
       } else if (k === "Enter") {
@@ -2834,11 +2919,14 @@ var SympyEditor = (function () {
       } else if (k === "Delete") {
         if (!ro && this.selected && this.selected !== "/") this.send({ action: "delete", path: this.selected });
       } else if (k === "ArrowUp") {
-        if (this.selected) this._selectParent(this.selected);
+        if (this._gridMove("up")) { /* the cell above */ }
+        else if (this.selected) this._selectParent(this.selected);
       } else if (k === "ArrowDown") {
-        this._selectChild();
+        if (!this._gridMove("down")) this._selectChild();
       } else if (k === "ArrowLeft" || k === "ArrowRight") {
-        if (this.selected) this._moveSideways(k === "ArrowLeft" ? -1 : 1);
+        var dir = k === "ArrowLeft" ? "left" : "right";
+        if (this._gridMove(dir)) { /* the cell beside */ }
+        else if (this.selected) this._moveSideways(k === "ArrowLeft" ? -1 : 1);
         else this._caretAtEnd(k === "ArrowLeft" ? "start" : "end");
       } else if (!ro && !mod && !ev.altKey && k.length === 1 && this.selected) {
         this.beginEdit(this.selected, k);   // start replacing the selection with what is typed
@@ -2970,6 +3058,67 @@ var SympyEditor = (function () {
     }
 
     /** Show the floating action bar under a viewport rectangle (null hides it). */
+    /** The explicit matrix the selection is, or is inside of: `{path, rows,
+     *  cols}`, or null.  With nothing selected, the whole expression counts. */
+    _matrixContext() {
+      if (!this.state || !this.state.nodes || !this.tree) return null;
+      var p = this.range ? this.range.parent : (this.selected || "/");
+      while (p !== null && p !== undefined) {
+        var node = this.state.nodes[p];
+        if (node && node.matrix) return { path: p, rows: node.matrix.rows, cols: node.matrix.cols };
+        p = this.tree[p] ? this.tree[p].parent : null;
+      }
+      return null;
+    }
+
+    /** A matrix operation (see Document.edit_matrix) on the selection's
+     *  matrix: the row / column the selection is in, or the last ones. */
+    _matrixOp(op, rows, cols, path) {
+      if (this.opts.readOnly || this.closed) return;
+      var msg = { action: "matrix", op: op, path: path || (this.range ? this.range.parent : (this.selected || "/")) };
+      if (rows) { msg.rows = rows; msg.cols = cols; }
+      this.send(msg);
+      this.view.focus({ preventScroll: true });
+    }
+
+    /** Put the grip on the bottom-right corner of the selection's matrix (or
+     *  take it away).  The rendering is replaced on every state, so the
+     *  grip is appended again each time it is placed. */
+    _placeMatrixHandle() {
+      var hd = this.matHandle;
+      if (!hd) return;
+      var ctx = !this.closed && !this.input && !this._matDrag ? this._matrixContext() : null;
+      var el = ctx ? this._els(ctx.path)[0] : null;
+      if (!el || el.classList.contains("se-editing") || this.view.classList.contains("se-empty")) {
+        if (hd.parentNode) hd.parentNode.removeChild(hd);
+        this._matHandleCtx = null;
+        return;
+      }
+      var r = this._visualRect(el), vr = this.view.getBoundingClientRect();
+      hd.style.left = Math.round(r.right - vr.left + this.view.scrollLeft) + "px";
+      hd.style.top = Math.round(r.bottom - vr.top + this.view.scrollTop) + "px";
+      if (!hd.parentNode) this.view.appendChild(hd);
+      this._matHandleCtx = { path: ctx.path, rows: ctx.rows, cols: ctx.cols, rect: r };
+    }
+
+    /** The outline of the size the matrix will get, drawn over it while the
+     *  grip is dragged, with the size written in its corner. */
+    _showMatrixGhost(rows, cols) {
+      var d = this._matDrag;
+      if (!d) return;
+      var g = this.matGhost, vr = this.view.getBoundingClientRect(), r = d.ctx.rect;
+      g.style.left = Math.round(r.left - vr.left + this.view.scrollLeft) + "px";
+      g.style.top = Math.round(r.top - vr.top + this.view.scrollTop) + "px";
+      g.style.width = Math.round(d.cellW * cols) + "px";
+      g.style.height = Math.round(d.cellH * rows) + "px";
+      g.firstChild.textContent = rows + " \u00d7 " + cols + (rows === d.ctx.rows && cols === d.ctx.cols ? "" : " \u2014 " + (rows * cols) + " entries, rearranged");
+      if (!g.parentNode) this.view.appendChild(g);
+    }
+
+    _hideMatrixGhost() {
+      if (this.matGhost && this.matGhost.parentNode) this.matGhost.parentNode.removeChild(this.matGhost);
+    }
+
     _placeActions(rect) {
       if (!this.actions) return;
       // The bar acts on the formula.  While the source line has the focus the
@@ -2981,15 +3130,21 @@ var SympyEditor = (function () {
       var t = this.selected ? this.tree[this.selected] : null;
       var selNode = this.selected && !this.range ? this.state.nodes[this.selected] : null;
       var unwrapOk = !!(selNode && (selNode.nargs || selNode.parts));
+      var mctx = this._matrixContext();
+      var sep = this.actions.querySelector(".se-mat-sep");
+      if (sep) sep.hidden = !mctx;
       var buttons = this.actions.querySelectorAll("button");
       for (var i = 0; i < buttons.length; i++) {
         var cmd = buttons[i].getAttribute("data-cmd");
+        if (cmd.indexOf("mat") === 0) buttons[i].hidden = !mctx;
         buttons[i].disabled = cmd === "parent" ? !(this.range || (t && t.parent))
                             : cmd === "child" ? false
                             : cmd === "paste" ? false
                             : cmd === "unwrap" ? !unwrapOk
                             : cmd === "delete" ? !(this.range || this.selected)
                             : cmd === "isolate" ? !(this.range || (this.selected && this.selected !== "/"))
+                            : cmd === "matdelrow" ? !(mctx && mctx.rows > 1)
+                            : cmd === "matdelcol" ? !(mctx && mctx.cols > 1)
                             : false;
       }
       this.actions.hidden = false;
@@ -3939,6 +4094,109 @@ var SympyEditor = (function () {
       return { index: idx, count: list.length, list: list };
     }
 
+    /* ---- moving through a grid: a matrix, or an array of any rank ---- */
+
+    /** The grid `path` is a cell of, or null.  The entries of an explicit
+     *  matrix and of an explicit array are one flat list of siblings - the
+     *  printer is what lays them out in two dimensions, a matrix as its rows
+     *  and columns, a rank-3 array as a row of matrices, a rank-4 one as a
+     *  matrix of matrices - so the arrows move through them by where they
+     *  are *drawn*, which is the same rule at every rank. */
+    _gridOf(path) {
+      if (!path || !this.state || !this.state.nodes || !this.tree[path]) return null;
+      var parent = this.tree[path].parent;
+      var pnode = parent ? this.state.nodes[parent] : null;
+      if (!pnode || !(pnode.matrix || pnode.array)) return null;
+      var cells = (this.tree[parent].children || []).filter(function (c) { return c !== parent; });
+      return cells.length > 1 ? { container: parent, cells: cells } : null;
+    }
+
+    /** The box a cell is drawn in (null when it is not on screen). */
+    _cellRect(path) {
+      var el = this._els(path)[0];
+      return el ? this._visualRect(el) : null;
+    }
+
+    /** The cell of `cells` next to `from` in the direction `dir` ("left",
+     *  "right", "up", "down"): the nearest one that lies that way *and*
+     *  shares the band across it - the same row of the drawing for left and
+     *  right, the same column for up and down.  Null at the edge of the
+     *  grid, where the caller does what it did before (a step out of the
+     *  matrix, or up to it). */
+    _gridNeighbour(from, cells, dir) {
+      var r0 = this._cellRect(from);
+      if (!r0) return null;
+      var horizontal = dir === "left" || dir === "right", sign = (dir === "right" || dir === "down") ? 1 : -1;
+      var mid = function (r) { return { x: (r.left + r.right) / 2, y: (r.top + r.bottom) / 2 }; };
+      var m0 = mid(r0), best = null, bestAt = Infinity, bestCross = Infinity;
+      for (var i = 0; i < cells.length; i++) {
+        if (cells[i] === from) continue;
+        var r = this._cellRect(cells[i]);
+        if (!r) continue;
+        var m = mid(r);
+        var along = horizontal ? (m.x - m0.x) * sign : (m.y - m0.y) * sign;
+        if (along <= 1) continue;                                   // not that way
+        var overlaps = horizontal ? (r.top < r0.bottom - 1 && r.bottom > r0.top + 1)
+                                  : (r.left < r0.right - 1 && r.right > r0.left + 1);
+        if (!overlaps) continue;                                    // another row (or column): not a step this way
+        var cross = horizontal ? Math.abs(m.y - m0.y) : Math.abs(m.x - m0.x);
+        if (along < bestAt - 0.5 || (Math.abs(along - bestAt) <= 0.5 && cross < bestCross)) {
+          best = cells[i]; bestAt = along; bestCross = cross;
+        }
+      }
+      return best;
+    }
+
+    /** ←/→/↑/↓ on a cell of a grid: the cell that way, as drawn.  True when
+     *  it moved; false at the grid's edge, where the ordinary meaning of the
+     *  key takes over (↑ selects the matrix itself, ←/→ step out of it). */
+    _gridTarget(dir) {
+      var grid = this._gridOf(this.selected);
+      return grid ? this._gridNeighbour(this.selected, grid.cells, dir) : null;
+    }
+
+    _gridMove(dir) {
+      var target = this._gridTarget(dir);
+      if (!target) return false;
+      this.select(target);
+      return true;
+    }
+
+    /** The same for a caret standing in a grid: the caret position that way,
+     *  among the positions of that grid (before and after its cells). */
+    _gridCaretTarget(dir) {
+      var cur = this.caret;
+      if (!cur) return null;
+      var grid = this._gridOf(cur.path);
+      if (!grid) return null;
+      var inside = grid.container === "/" ? function (p) { return p !== "/"; }
+                                          : function (p) { return p.indexOf(grid.container + "/") === 0; };
+      var list = this._caretPositions().filter(function (pos) { return inside(pos.gap.path); });
+      var horizontal = dir === "left" || dir === "right", sign = (dir === "right" || dir === "down") ? 1 : -1;
+      var x0 = (cur.a + cur.b) / 2, y0 = (cur.top + cur.bottom) / 2;
+      var best = null, bestAt = Infinity, bestCross = Infinity;
+      for (var i = 0; i < list.length; i++) {
+        var g = list[i].gap, x = list[i].x, y = (g.top + g.bottom) / 2;
+        var along = horizontal ? (x - x0) * sign : (y - y0) * sign;
+        if (along <= 1) continue;
+        var overlaps = horizontal ? (g.top < cur.bottom - 1 && g.bottom > cur.top + 1)
+                                  : Math.abs(x - x0) < Math.max(24, (cur.b - cur.a) + 24);
+        if (!overlaps) continue;
+        var cross = horizontal ? Math.abs(y - y0) : Math.abs(x - x0);
+        if (along < bestAt - 0.5 || (Math.abs(along - bestAt) <= 0.5 && cross < bestCross)) {
+          best = list[i]; bestAt = along; bestCross = cross;
+        }
+      }
+      return best;
+    }
+
+    _gridCaretMove(dir) {
+      var best = this._gridCaretTarget(dir);
+      if (!best) return false;
+      this._showCaret(best.gap, best.gap.extend ? best.x : (dir === "left" ? best.gap.b : best.gap.a));
+      return true;
+    }
+
     /** The sibling ←/→ would select from `path` (null at the ends). */
     _sidewaysTarget(path, step) {
       var cur = path;
@@ -4279,6 +4537,10 @@ var SympyEditor = (function () {
           return this.beginEdit(this.selected || "/");
         case "unwrap": return this.unwrapSelection();
         case "isolate": return this.isolateSelection();
+        case "matrow": return this._matrixOp("insert_row");
+        case "matcol": return this._matrixOp("insert_col");
+        case "matdelrow": return this._matrixOp("delete_row");
+        case "matdelcol": return this._matrixOp("delete_col");
         case "delete":
           if (this.junction) return this.setOperator("");
           if (this.range) return this.send({ action: "delete", path: this.range.parent, children: this._rangeIndices() });
@@ -4286,7 +4548,8 @@ var SympyEditor = (function () {
           if (this.selected) return this.send({ action: "delete", path: this.selected });
           return;
         case "child":
-          if (this.caret) return;    // nothing to go into from a caret
+          if (this.caret) { this._gridCaretMove("down"); return; }   // in a grid: the row below
+          if (this._gridMove("down")) return;
           return this._selectChild();
         case "drawer": return this.toggleDrawer();
         case "history": return this.showHistory();
@@ -4295,14 +4558,17 @@ var SympyEditor = (function () {
         case "left":
         case "right": {
           var step = cmd === "left" ? -1 : 1;
-          if (this.caret) return this._moveCaret(step);
+          var way = cmd === "left" ? "left" : "right";
+          if (this.caret) { if (!this._gridCaretMove(way)) this._moveCaret(step); return; }
           if (this.range) return this.select(this._displayChildren(this.range.parent)[this.range.focus]);
+          if (this._gridMove(way)) return;
           if (this.selected) return this._moveSideways(step);
           return this._caretAtEnd(step < 0 ? "start" : "end");
         }
         case "parent": {
-          if (this.caret) return this._selectBesideCaret();
+          if (this.caret) { if (!this._gridCaretMove("up")) this._selectBesideCaret(); return; }
           if (this.range) { this.select(this.range.parent); return; }
+          if (this._gridMove("up")) return;
           if (this.selected) this._selectParent(this.selected);
           return;
         }
@@ -5240,6 +5506,14 @@ var SympyEditor = (function () {
       var set = function (name, disabled) { if (b[name]) b[name].disabled = !!disabled; };
       var t = this.selected ? this.tree[this.selected] : null;
       var range = !!this.range;
+      // In a grid the arrows move as it is drawn, so a button is live when
+      // that move exists even where the plain walk has run out.
+      var self = this;
+      var inGrid = !dis && !range && (this.caret ? !!this._gridOf(this.caret.path) : !!this._gridOf(this.selected));
+      var gridWay = function (way) {
+        if (!inGrid) return false;
+        return self.caret ? !!self._gridCaretTarget(way) : !!self._gridTarget(way);
+      };
       set("undo", dis || !s.can_undo);
       set("redo", dis || !s.can_redo);
       set("edit", dis);
@@ -5248,12 +5522,12 @@ var SympyEditor = (function () {
       set("unwrap", dis || range || !this.selected || !(s.nodes && s.nodes[this.selected] && (s.nodes[this.selected].nargs || s.nodes[this.selected].parts)));
       set("isolate", dis || !(range || (this.selected && this.selected !== "/")));
       set("parent", dis || !(range || (t && t.parent) || this.caret));
-      set("child", dis || !!this.caret);
+      set("child", dis || (!!this.caret && !gridWay("down")));
       // ←/→: at a caret, the previous/next position (none at the ends); on a
       // selection, a sibling at some level; otherwise a caret at either end.
       var at = !dis && this.caret ? this._caretIndex() : null;
-      set("left", dis || (at ? at.index <= 0 : (this.selected && !range ? !this._sidewaysTarget(this.selected, -1) : false)));
-      set("right", dis || (at ? at.index >= at.count - 1 : (this.selected && !range ? !this._sidewaysTarget(this.selected, 1) : false)));
+      set("left", dis || (gridWay("left") ? false : (at ? at.index <= 0 : (this.selected && !range ? !this._sidewaysTarget(this.selected, -1) : false))));
+      set("right", dis || (gridWay("right") ? false : (at ? at.index >= at.count - 1 : (this.selected && !range ? !this._sidewaysTarget(this.selected, 1) : false))));
       set("copy", !s.src);
       set("paste", dis);
       set("history", dis);
