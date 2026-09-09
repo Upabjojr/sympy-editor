@@ -27,7 +27,7 @@ Documentation = "https://upabjojr.github.io/sympy-editor/"
 
 [project.optional-dependencies]
 jupyter = ["anywidget>=0.9"]
-test = ["pytest"]
+test = ["pytest", "pillow"]   # tests/test_browser.py reads screenshots back (the change tint)
 
 [tool.setuptools.packages.find]
 where = ["src"]

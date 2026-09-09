@@ -2150,9 +2150,21 @@ def test_pyodide_page_preloads_the_runtime(browser, tmp_path):
     page = browser.new_page()
     page.goto(path.as_uri())
     page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
-    page.wait_for_function("document.querySelector('.se-status').textContent.includes('Python')", timeout=30000)
+    # The runtime starts loading on its own, with no edit asked for: the
+    # blocking overlay comes up and reports where it has got to.  It reports
+    # two phases - the Pyodide runtime, then SymPy - and which of them is
+    # showing when we look is a race (Pyodide comes from the browser cache in
+    # a moment, the SymPy wheel takes far longer), so either one counts.
+    phase = re.compile(r"Python|SymPy")
+    page.wait_for_function(
+        """() => { const o = document.querySelector('.se-loading');
+                   const t = document.querySelector('.se-loading-text');
+                   return o && !o.hidden && t && /Python|SymPy/.test(t.textContent); }""",
+        timeout=60000)
     assert page.locator(".se-loading").is_visible()            # a blocking overlay while Python loads
-    assert "Python" in page.locator(".se-loading-text").inner_text()
+    assert phase.search(page.locator(".se-loading-text").inner_text())
+    # (the status line mirrors the overlay only while it has nothing else to
+    #  say, so it is not asserted here - the overlay is the reliable signal)
     page.wait_for_function("window.__sympyEditorPyodide && window.__sympyEditorPyodide.docs === 1", timeout=180000)
     page.wait_for_function("document.querySelector('.se-loading').hidden", timeout=30000)
     assert page.locator(".se-status").inner_text().startswith("Click to select")   # back to the idle hint, no edit happened
