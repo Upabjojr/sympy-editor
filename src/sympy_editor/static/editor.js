@@ -1821,9 +1821,11 @@ var SympyEditor = (function () {
           self.command(cmd);
           // Back to the formula - unless the command put the focus in a field
           // (Delete on the whole expression edits in the source line: taking
-          // the focus away would blur it and bring the expression back).
+          // the focus away would blur it and bring the expression back), the
+          // editor's own or one in an add-on's panel.
           var active = document.activeElement;
-          if (cmd !== "edit" && cmd !== "keyboard" && active !== self.source && active !== self.input && active !== self.emptyField) self.view.focus({ preventScroll: true });
+          var inAddon = !!(active && active.closest && active.closest(".se-addon"));
+          if (cmd !== "edit" && cmd !== "keyboard" && active !== self.source && active !== self.input && active !== self.emptyField && !inAddon) self.view.focus({ preventScroll: true });
         }
       });
       this.view.addEventListener("mousemove", function (ev) {

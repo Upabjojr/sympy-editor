@@ -148,7 +148,9 @@ that do not occur in the current expression become plain symbols - unless the
 node being replaced is a matrix, in which case they become `MatrixSymbol`s of
 its shape (so `C.T` typed over `B` in `A*B` works).  Ancestors are rebuilt
 with SymPy's normal automatic evaluation (replacing `y` by `-x` in `x + y`
-gives `0`).
+gives `0`).  LaTeX is not typed input: the
+[LaTeX add-on](addons/sympy_editor_latex/README.md) reads it, with its
+ambiguities laid open (see [Add-ons](#add-ons)).
 
 **Names vs. SymPy functions.**  A typed name is resolved in this order: a
 symbol declared in the Symbols panel (or passed as `symbols=`), a name already
@@ -464,11 +466,17 @@ The editor can be extended from outside: an add-on is a package of its own
 that gives a document node types from another library, transformations,
 data beside every snapshot and methods of its own, and a panel of HTML and
 JavaScript under the formula - through one contract,
-`sympy_editor.addons.Addon`, and one message.  Three drafts live in
+`sympy_editor.addons.Addon`, and one message.  Four drafts live in
 [`addons/`](addons/README.md): the expression tree as an editable graph,
-the graph of the selection drawn by Plotly.js, and rewrite rules with
+the graph of the selection drawn by Plotly.js, rewrite rules with
 wildcards matched many-to-one by
-[sympy-matching](https://github.com/Upabjojr/sympy-matching).
+[sympy-matching](https://github.com/Upabjojr/sympy-matching), and LaTeX
+import - a box under the formula that reads LaTeX with an Earley parser
+(through [Lark](https://github.com/lark-parser/lark)), offers a menu for
+every ambiguous part (`f(x)` applied or multiplied, how far `\sin x \cos y`
+reaches) and a switch for every constant name (`\pi` the constant, or a
+symbol called `pi`), and puts the reading over the selection or in place of
+the whole expression.
 
 An add-on is a package of its own, made by anyone, found by the editor
 once it is installed (`pip install -e addons/sympy_editor_tree` for a
@@ -486,7 +494,7 @@ serve(expr, addons=["matching"])                                       # the loc
 The **Add-ons** section at the top of the **≡** drawer switches any installed add-on on or off
 while editing.  Not installed?  A module name (`addons=["sympy_editor_tree"]`)
 or the object itself (`addons=[ADDON]`) work too; `python addons/demo.py`
-builds a page with the three drafts straight from the checkout.
+builds a page with the four drafts straight from the checkout.
 `addons/README.md` describes the architecture, and `addons/template/` is
 an add-on to copy when writing your own.
 

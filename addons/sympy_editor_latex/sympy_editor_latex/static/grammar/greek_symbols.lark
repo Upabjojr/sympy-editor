@@ -1,0 +1,47 @@
+// sympy-editor's copy of SymPy's grammar (BSD), extended: see latex.lark.
+// Greek symbols
+// TODO: Shouold we include the uppercase variants for the symbols where the uppercase variant doesn't have a separate meaning?
+ALPHA: "\\alpha"
+BETA: "\\beta"
+GAMMA: "\\gamma"
+DELTA: "\\delta" // TODO: Should this be included? Delta usually denotes other things.
+EPSILON: "\\epsilon" |  "\\varepsilon"
+ZETA: "\\zeta"
+ETA: "\\eta"
+THETA: "\\theta" | "\\vartheta"
+// TODO: Should I add iota to the list?
+KAPPA: "\\kappa"
+LAMBDA: "\\lambda" // TODO: What about the uppercase variant?
+MU: "\\mu"
+NU: "\\nu"
+XI: "\\xi"
+// pi and sigma are here (SymPy's grammar left them out): whether \pi is the
+// constant or a plain symbol is the reader's decision (see CONSTANTS), not
+// the grammar's.
+PI: "\\pi" | "\\varpi"
+RHO: "\\rho" | "\\varrho"
+SIGMA: "\\sigma" | "\\varsigma"
+IOTA: "\\iota"
+TAU: "\\tau"
+UPSILON: "\\upsilon"
+PHI: "\\phi" | "\\varphi"
+CHI: "\\chi"
+PSI: "\\psi"
+OMEGA: "\\omega"
+
+// the uppercase letters that have no other meaning in the grammar
+GAMMA_UP: "\\Gamma"
+DELTA_UP: "\\Delta"
+THETA_UP: "\\Theta"
+LAMBDA_UP: "\\Lambda"
+XI_UP: "\\Xi"
+PI_UP: "\\Pi"
+SIGMA_UP: "\\Sigma"
+UPSILON_UP: "\\Upsilon"
+PHI_UP: "\\Phi"
+PSI_UP: "\\Psi"
+OMEGA_UP: "\\Omega"
+
+GREEK_SYMBOL: ALPHA | BETA | GAMMA | DELTA | EPSILON | ZETA | ETA | THETA | IOTA | KAPPA
+    | LAMBDA | MU | NU | XI | PI | RHO | SIGMA | TAU | UPSILON | PHI | CHI | PSI | OMEGA
+    | GAMMA_UP | DELTA_UP | THETA_UP | LAMBDA_UP | XI_UP | PI_UP | SIGMA_UP | UPSILON_UP | PHI_UP | PSI_UP | OMEGA_UP

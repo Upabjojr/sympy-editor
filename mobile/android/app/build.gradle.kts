@@ -71,6 +71,7 @@ chaquopy {
             // the bundled add-ons' requirements (addons/*/addon.json "requires";
             // a test keeps this list in step with the manifests)
             install("sympy-matching>=0.0.4")
+            install("lark>=1.1")
         }
     }
 }
