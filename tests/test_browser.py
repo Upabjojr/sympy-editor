@@ -2498,10 +2498,9 @@ def test_the_tools_are_laid_out_in_columns(browser, serve_expr):
         return out;
     }""")
     by = {b["name"]: b for b in blocks}
-    assert {"session", "zoom", "nav", "edit", "clip", "apply", "addons"} <= set(by), blocks
+    assert {"session", "zoom", "nav", "edit", "clip", "apply"} <= set(by), blocks
     rows = sorted({b["top"] for b in blocks})
-    assert len(rows) == 4, blocks                                  # two rows of three, the wide one, the Add-ons menu
-    assert by["addons"]["top"] == rows[3] and by["addons"]["left"] <= 1, blocks   # always there: it installs add-ons too
+    assert len(rows) == 3, blocks                                  # two rows of three, then the wide one
     # a block never breaks apart: what belongs together stays on one line
     assert by["session"]["top"] == by["zoom"]["top"] == by["nav"]["top"]
     assert by["edit"]["top"] == by["clip"]["top"]
@@ -3921,7 +3920,9 @@ def test_addons_install_from_a_zip_file_and_remove(browser, tmp_path, monkeypatc
     monkeypatch.setenv("SYMPY_EDITOR_USER_ADDONS", str(user))
     monkeypatch.setattr(addons_mod, "USER_ADDONS_DIR", None)
     archive = _addon_zip(tmp_path)
-    doc = Document(x + y)
+    # a document that knows an add-on: the Add-ons menu is on the toolbar,
+    # and the installer at the foot of it is what this test drives
+    doc = Document(x + y, available=[_demo_addon()[0]])
     srv = EditorServer(doc, port=0)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
@@ -3930,7 +3931,7 @@ def test_addons_install_from_a_zip_file_and_remove(browser, tmp_path, monkeypatc
         menu = page.locator(".se-addons-menu")
         assert menu.is_visible() and "Install an add-on" in menu.inner_text()
         assert "runs in this app" in menu.locator(".se-addons-warning").inner_text()
-        assert menu.locator(".se-addon-row").count() == 0                     # nothing installed yet
+        assert menu.locator(".se-addon-remove").count() == 0                  # the add-on it knows is not one the user installed
         # a file: what it holds is listed, with a check box
         menu.locator(".se-addon-file-input").set_input_files(str(archive))
         found = menu.locator(".se-addons-found .se-addon-found")
@@ -4016,7 +4017,7 @@ def test_addons_install_from_a_github_repository(browser, tmp_path, monkeypatch)
             return route.fulfill(status=200, headers={"Access-Control-Allow-Origin": "*"}, body=content if isinstance(content, bytes) else content.encode())
         return route.fulfill(status=404, headers={"Access-Control-Allow-Origin": "*"}, body="no")
 
-    doc = Document(x + y)
+    doc = Document(x + y, available=[_demo_addon()[0]])      # so the Add-ons menu, and its installer, are on the toolbar
     srv = EditorServer(doc, port=0)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:

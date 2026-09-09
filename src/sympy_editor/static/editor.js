@@ -1530,10 +1530,13 @@ var SympyEditor = (function () {
 
     _fillAddonsMenu(available) {
       if (!this.addonsBlock) return;
-      // The menu is there when something can be switched - or installed:
-      // an editor with nothing yet still offers the way to get an add-on.
+      // The menu is there when the document knows an add-on - the shipped
+      // configurations all name some, so the installer below is reachable.
+      // It does not appear for a document that knows none: a permanent extra
+      // row of the toolbar costs every user more than it gains the few who
+      // start from nothing (pip, or a page built with `available=`).
       var canInstall = !this.opts.readOnly && !!(this.backend && this.backend.send);
-      this.addonsBlock.hidden = !available.length && !canInstall;
+      this.addonsBlock.hidden = !available.length;
       if (!this.addonsMenu) return;
       var self = this;
       this.addonsMenu.textContent = "";
