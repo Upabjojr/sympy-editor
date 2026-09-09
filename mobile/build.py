@@ -50,7 +50,7 @@ def run(cmd, cwd=None, env=None):
     subprocess.run(cmd, cwd=cwd, env=env, check=True)
 
 
-def build_www(cdn: bool, *, android: bool = False, native: bool = False) -> None:
+def build_www(cdn: bool, *, android: bool = False, native: bool = False, debug: bool = False) -> None:
     cmd = [sys.executable, str(HERE / "build_www.py")]
     if cdn:
         cmd.append("--cdn")
@@ -58,7 +58,16 @@ def build_www(cdn: bool, *, android: bool = False, native: bool = False) -> None
         cmd.append("--android")
     if native:
         cmd.append("--native")
+    if debug:
+        cmd.append("--debug")
     run(cmd)
+
+
+#: What a debug build calls itself.  It is a second application -
+#: org.sympy.editor.debug - so everything that names it says which one it is:
+#: the launcher's label (build.gradle.kts), the title over the formula and
+#: the icon beside it (build_www.py), and the launcher icon (make_icons.py).
+DEBUG_TITLE = "SymPy editor (debug)"
 
 
 def download(url: str, dest: Path) -> Path:
@@ -191,16 +200,16 @@ def android_env() -> dict:
     return env
 
 
-def make_icons(needed: Path) -> None:
-    """Draw the app's icons, unless ``needed`` - the one this platform would
-    miss first - is already there.
+def make_icons(*needed: Path) -> None:
+    """Draw the app's icons, unless every ``needed`` one - those this
+    platform would miss first - is already there.
 
     They are build products - no PNG is committed - so a fresh checkout has
     the SVGs and this makes the rest.  Without them the manifest points at a
     `@mipmap/ic_launcher` that does not exist, or the asset catalogue has no
     AppIcon, and the build stops.
     """
-    if needed.is_file():
+    if all(p.is_file() for p in needed):
         return
     if not shutil.which("rsvg-convert"):
         sys.exit("the icons are missing and rsvg-convert is not installed "
@@ -209,9 +218,14 @@ def make_icons(needed: Path) -> None:
 
 
 def android_build(release: bool, cdn: bool) -> list[Path]:
-    build_www(cdn, android=True)
+    # A debug build is its own application (see build.gradle.kts): its bundle
+    # says so over the formula, and its icons - drawn into src/debug/res -
+    # wear a bug badge, so neither the page nor the launcher leaves any doubt
+    # about which of the two is open.
+    build_www(cdn, android=True, debug=not release)
     copy_python_sources(ANDROID / "app" / "src" / "main" / "python")
-    make_icons(ANDROID / "app/src/main/res/mipmap-mdpi/ic_launcher.png")
+    make_icons(ANDROID / "app/src/main/res/mipmap-mdpi/ic_launcher.png",
+               ANDROID / "app/src/debug/res/mipmap-mdpi/ic_launcher.png")
     gradlew = ANDROID / ("gradlew.bat" if platform.system() == "Windows" else "gradlew")
     tasks = ["assembleRelease", "bundleRelease"] if release else ["assembleDebug"]
     run([str(gradlew), "--no-daemon", *tasks], cwd=ANDROID, env=android_env())

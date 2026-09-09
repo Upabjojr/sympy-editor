@@ -398,7 +398,11 @@ def test_the_ios_app_leaves_openssl_behind():
 
 
 def test_the_ios_build_number_counts_the_commits():
-    import mobile.build as build
+    # by path, as the other tests load it: `mobile` is a directory of scripts,
+    # not an importable package, so an installed checkout has no such module
+    spec = importlib.util.spec_from_file_location("mobile_build", ROOT / "mobile" / "build.py")
+    build = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(build)
     assert build.build_number().isdigit()
 
 
@@ -507,3 +511,65 @@ def test_the_android_app_installs_what_the_addons_require():
     gradle = (ROOT / "mobile" / "android" / "app" / "build.gradle.kts").read_text(encoding="utf-8")
     for req in build.addon_requirements():
         assert f'install("{req}")' in gradle, req
+
+
+def test_a_debug_build_is_its_own_application():
+    """A debug APK is signed with the debug key, which no release is, and
+    Android refuses to update an app with a differently signed one: sharing
+    the application id would mean uninstalling the store app - and its
+    sessions with it - to try a build.  The debug build is its own
+    application instead, named apart on the launcher, and the FileProvider's
+    authority follows the id so the two never collide."""
+    gradle = (ROOT / "mobile" / "android" / "app" / "build.gradle.kts").read_text(encoding="utf-8")
+    manifest = (ROOT / "mobile" / "android" / "app" / "src" / "main" / "AndroidManifest.xml").read_text(encoding="utf-8")
+    assert 'applicationId = "org.sympy.editor"' in gradle
+    assert 'applicationIdSuffix = ".debug"' in gradle and 'versionNameSuffix = "-debug"' in gradle
+    assert 'manifestPlaceholders["appLabel"] = "SymPy editor"' in gradle          # the release's name
+    assert 'manifestPlaceholders["appLabel"] = "SymPy editor (debug)"' in gradle  # and the debug one's
+    assert 'android:label="${appLabel}"' in manifest
+    assert 'android:authorities="${applicationId}.fileprovider"' in manifest
+    kotlin = (ROOT / "mobile/android/app/src/main/java/org/sympy/editor/MainActivity.kt").read_text(encoding="utf-8")
+    assert '"$packageName.fileprovider"' in kotlin        # the id it was installed under, not a written-out one
+
+
+@pytest.mark.skipif(not shutil.which("rsvg-convert"), reason="needs librsvg (rsvg-convert)")
+def test_a_debug_build_says_debug_everywhere_it_is_named(tmp_path):
+    """The debug build is a second application on the phone, so each place
+    that names it says which one it is: the launcher (its label), the page
+    over the formula (the bundle's title) and the icon (a bug badge, drawn
+    into the debug source set, which Android merges over the main one)."""
+    import subprocess
+
+    Image = pytest.importorskip("PIL.Image", reason="needs Pillow to read the icons")
+
+    spec = importlib.util.spec_from_file_location("mobile_build", ROOT / "mobile" / "build.py")
+    build = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(build)
+    assert build.DEBUG_TITLE == "SymPy editor (debug)"
+    # the bundle takes the title it is given
+    mod = _load_builder()
+    out = mod.build(tmp_path / "www", native=True, cdn=True, debug=True)
+    page = (out / "index.html").read_text(encoding="utf-8")
+    assert "<title>SymPy editor (debug)</title>" in page and ">SymPy editor (debug)<" in page
+    plain = mod.build(tmp_path / "www2", native=True, cdn=True).joinpath("index.html").read_text(encoding="utf-8")
+    assert "<title>SymPy editor</title>" in plain
+    # the icon beside the title wears the badge too, so the running app is
+    # told apart at a glance and not only on the launcher
+    assert "(debug)</title>" in page and page.count("#c0392b") >= 1 and "#c0392b" not in plain
+    # and the icons: the debug source set has its own, badged, at every density
+    subprocess.run([sys.executable, str(ROOT / "mobile/make_icons.py")], cwd=ROOT, check=True, capture_output=True)
+    main_res, debug_res = ROOT / "mobile/android/app/src/main/res", ROOT / "mobile/android/app/src/debug/res"
+    for density in ("mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi"):
+        for name in ("ic_launcher.png", "ic_launcher_round.png", "ic_launcher_foreground.png"):
+            badged, plain_icon = debug_res / f"mipmap-{density}" / name, main_res / f"mipmap-{density}" / name
+            assert badged.is_file(), (density, name)
+            assert badged.read_bytes() != plain_icon.read_bytes(), (density, name)   # the badge is there
+    # the badge is red, in the bottom-right corner, and inside the 72dp a
+    # launcher must show (the foreground may be masked to any shape)
+    with Image.open(debug_res / "mipmap-xxhdpi/ic_launcher_foreground.png") as image:
+        side, rgb = image.size[0], image.convert("RGB")
+        px = rgb.getpixel((int(side * 0.685), int(side * 0.685)))
+    assert px[0] > 140 and px[1] < 90 and px[2] < 90, px
+    with Image.open(debug_res / "mipmap-xxhdpi/ic_launcher_foreground.png") as image:
+        box = [v * 108 / image.size[0] for v in image.split()[-1].getbbox()]
+    assert box[0] >= 18 and box[1] >= 18 and box[2] <= 90 and box[3] <= 90, box

@@ -87,7 +87,7 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | Previous / next sibling (or move the caret; with nothing selected, a caret at the start / the end) | **←** / **→** (toolbar and action bar) | ←/→ |
 | Select enclosing expression | click again on the same spot, or **↑** | ↑ |
 | Go inside: the sub-expression you came up from, or the first one (on an atom: a caret after it) | **↓** (toolbar or action bar) | ↓ |
-| Select a range of adjacent terms / factors | drag across them (mouse, touch or pen) | Shift+→ / Shift+← grow and shrink the range; ←/→/↓ collapse it, ↑ selects the whole sum/product |
+| Select a range of adjacent terms / factors | drag across them (mouse or pen); on a touch screen hold a finger still on the first one until it is selected, then drag | Shift+→ / Shift+← grow and shrink the range; ←/→/↓ collapse it, ↑ selects the whole sum/product |
 | Replace selection by typing | | just start typing (SymPy syntax) |
 | Change the operator between two arguments | click the operator itself (`+`, `−`, `⋅`, `=`, the `−` of `x − y`...): it is selected and a small palette appears; pick `+ − × ÷ ^ =` or **Delete** (side by side, the two multiply: `x + y` → `xy`) | with the operator selected, type `+ - * / ^ = < > & \|`; Del removes it; Esc deselects; ←/→/↓ select an argument, ↑ the node.  In a sum `*` binds just the two terms (`x + y + z` → `xy + z`); in a product `+` splits it there (`x·y·z` → `x + yz`).  A lone operator typed at a caret does the same |
 | Type at a caret | click **between** two terms, or at the edge of an object: a caret appears; what you type is spliced between its neighbours like in a text editor: operators you type are used as written, a missing one means juxtaposition (`cos(t)` after `x` gives `x cos(t)`), `+`/`-` bind at the sum level (`x z` with `+y+` typed between gives `x + y + z`), `, …` adds a function argument | Tab / Shift+Tab put the caret after / before the selection; ←/→ walk it through the formula like a text cursor (into a composite neighbour, out of a node at its ends); ↑ selects the object it is attached to (↓ does nothing at a caret); Enter opens an empty field; Esc removes it |
@@ -113,7 +113,7 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | Call a method of the selection's class | the **Methods** menu lists the public methods and properties of the selected object's class (of the whole expression when nothing is selected) — `.det()`, `.T`, `.rref()` on a matrix, `.diff()`, `.as_poly()` on an expression; picking one calls it, and a method that needs parameters asks for them.  A `Lambda` is itself a function: its menu starts with **( ) apply**, which asks for the arguments and evaluates it there (`(3)` in the function box does the same) | |
 | Undo / redo | ↺ / ↻ | Ctrl+Z / Ctrl+Shift+Z |
 | Zoom the formula | **−** / **100%** (reset) / **+**, Ctrl+mouse wheel, pinch with two fingers | Ctrl+plus / Ctrl+minus / Ctrl+0 |
-| Scroll a formula wider than the view | the scrollbar, the mouse wheel over the formula, or drag its empty space (one finger on a phone) | |
+| Scroll a formula wider (or, in full screen, taller) than the view | the arrow strips along the edges it runs past (each scrolls a screen and goes once that end is in sight), the scrollbar, the mouse wheel over the formula, a drag on its empty space; on a phone one finger dragged anywhere across it, or two fingers moving together | |
 
 A small action bar appears under whatever is selected — ↑ parent, ↓ inside,
 Edit, Unwrap, Delete, Copy — so these actions are one click or one tap away
@@ -128,12 +128,16 @@ removes its terms, an operation picked in a menu transforms just those terms.
 
 On phones and tablets: tap to select, **tap the selected node again to edit
 it**, tap a gap for a caret and tap it again to insert, tap an operator to
-change it from its palette, drag to select a
-range; the toolbar has ↑
+change it from its palette; **hold a finger still on a node** until it is
+selected, then drag across its neighbours to select a range - dragging to the
+edge of the view scrolls the formula along and keeps taking in what appears,
+so the range reaches terms that were off the screen; the toolbar has ↑
 for the parent and a keyboard button that opens the keyboard for the selection, the
 caret or the whole expression; the menus apply an operation as soon as it is
-picked.  Two fingers zoom the formula, a drag on its empty space scrolls it
-sideways, and vertical swipes still scroll the page.
+picked.  Two fingers zoom the formula and, when it is larger than the view,
+scroll it; one finger dragged across it scrolls it sideways (a plain swipe
+never selects, so a tap that wobbles is still a tap); the arrow strips at the
+edges scroll a screen at a time; and vertical swipes still scroll the page.
 Transformations act on the selected sub-expression only (on the whole formula
 when nothing is selected).
 
