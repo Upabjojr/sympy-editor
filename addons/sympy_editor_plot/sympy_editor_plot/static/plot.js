@@ -229,8 +229,13 @@ SympyEditor.registerAddon("plot", {
     area.addEventListener("touchstart", function (ev) {
       if (plotly && ev.touches.length === 1) {
         // not a drag yet: which way the finger goes decides, so that a
-        // scroll down the page over the picture still scrolls the page
+        // scroll down the page over the picture still scrolls the page.
+        // Stopped here all the same, without preventing the default: Plotly
+        // would otherwise read the drag as its mouse zoom box and pull the
+        // range about on a gesture meant for the page.  Not preventing the
+        // default is what leaves the page free to scroll.
         drag = { x: ev.touches[0].clientX, y: ev.touches[0].clientY, range: currentRange(), moving: false };
+        ev.stopPropagation();
       }
       if (!plotly || ev.touches.length !== 2) { pinch = null; return; }
       drag = null;
@@ -245,11 +250,12 @@ SympyEditor.registerAddon("plot", {
     }, true);
 
     area.addEventListener("touchmove", function (ev) {
+      if (drag && drag.spent) { ev.stopPropagation(); return; }   // the page has this one
       if (drag && !pinch && ev.touches.length === 1) {
         var dx = ev.touches[0].clientX - drag.x, dy = ev.touches[0].clientY - drag.y;
         if (!drag.moving) {
           if (Math.abs(dx) < DRAG_SLOP && Math.abs(dy) < DRAG_SLOP) return;   // too early to say
-          if (Math.abs(dy) > Math.abs(dx)) { drag = null; return; }           // downwards: the page's, not ours
+          if (Math.abs(dy) > Math.abs(dx)) { drag = { spent: true }; return; }   // downwards: the page's, not ours
           drag.moving = true;
         }
         ev.preventDefault();
