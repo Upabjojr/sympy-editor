@@ -113,7 +113,7 @@ class EditorServer(ThreadingHTTPServer):
         *,
         host: str = "127.0.0.1",
         port: int = 0,
-        title: str = "SymPy editor",
+        title: str = "SymPy Editor",
         options: Optional[Dict[str, Any]] = None,
         urls: Optional[Dict[str, str]] = None,
         logo: str = "",
@@ -173,7 +173,7 @@ def serve(
     open_browser: bool = True,
     block: bool = True,
     verbose: bool = False,
-    title: str = "SymPy editor",
+    title: str = "SymPy Editor",
     options: Optional[Dict[str, Any]] = None,
     urls: Optional[Dict[str, str]] = None,
     **document_kwargs,
@@ -188,7 +188,7 @@ def serve(
     """
     document = expr if isinstance(expr, Document) else Document(expr, **document_kwargs)
     server = EditorServer(document, host=host, port=port, title=title, options=options, urls=urls, verbose=verbose)
-    print(f"SymPy editor running at {server.url}" + (" (press Done in the browser or Ctrl+C to finish)" if block else ""))
+    print(f"SymPy Editor running at {server.url}" + (" (press Done in the browser or Ctrl+C to finish)" if block else ""))
     if open_browser:
         webbrowser.open(server.url)
     if not block:

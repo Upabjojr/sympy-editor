@@ -89,10 +89,10 @@ def test_the_ios_export_options_name_the_profile_and_its_certificate():
     automatic = plistlib.loads(export_options("development", "ABCDE12345"))
     assert automatic["signingStyle"] == "automatic" and automatic["teamID"] == "ABCDE12345"
     assert "provisioningProfiles" not in automatic
-    manual = plistlib.loads(export_options("app-store-connect", "ABCDE12345", "SymPy editor App Store"))
+    manual = plistlib.loads(export_options("app-store-connect", "ABCDE12345", "SymPy Editor App Store"))
     assert manual["method"] == "app-store-connect" and manual["signingStyle"] == "manual"
     assert manual["signingCertificate"] == "Apple Distribution"
-    assert manual["provisioningProfiles"] == {"org.sympy.editor": "SymPy editor App Store"}
+    assert manual["provisioningProfiles"] == {"org.sympy.editor": "SymPy Editor App Store"}
     assert plistlib.loads(export_options("development", "T", "p"))["signingCertificate"] == "Apple Development"
     with pytest.raises(SystemExit):
         export_options("enterprise", "T")
@@ -306,14 +306,14 @@ def test_the_app_view_wears_the_icon_and_is_the_same_on_both_phones(tmp_path):
     phone."""
     mod = _load_builder()
     logo = mod.app_logo()
-    assert logo.startswith("<svg") and "SymPy editor" in logo      # the icon, inline, no XML header
+    assert logo.startswith("<svg") and "SymPy Editor" in logo      # the icon, inline, no XML header
     assert logo in (ROOT / "mobile/icon/icon.svg").read_text(encoding="utf-8")   # the launcher's own art
 
     page = mod.build(tmp_path / "www", cdn=True).joinpath("index.html").read_text(encoding="utf-8")
     # on the title's line, in the page itself - not in the editor's options:
     # the mark belongs to the window, not to the tools
     assert '<h1><span class="page-logo" aria-hidden="true"><svg' in page
-    assert "</svg></span>SymPy editor</h1>" in page
+    assert "</svg></span>SymPy Editor</h1>" in page
     assert '"logo"' not in page.split("</h1>", 1)[1]
 
     # neither app puts anything of its own around the page
@@ -419,12 +419,12 @@ def test_the_apps_bundle_the_addons_one_folder_each(tmp_path):
     spec.loader.exec_module(build)
     dest = build.copy_python_sources(tmp_path / "python")
     folders = sorted(p.name for p in (dest / "addons").iterdir())
-    assert folders == ["sympy_editor_matching", "sympy_editor_plot", "sympy_editor_tree"]   # the template is not shipped
+    assert folders == ["sympy_editor_latex", "sympy_editor_matching", "sympy_editor_plot", "sympy_editor_tree"]   # the template is not shipped
     for folder in folders:
         assert (dest / "addons" / folder / "addon.json").is_file()
         assert not (dest / "addons" / folder / "tests").exists()            # nothing of the test suites
     assert (dest / "addons" / "sympy_editor_tree" / "sympy_editor_tree" / "static" / "tree.js").is_file()
-    assert build.addon_requirements() == ["sympy-matching>=0.0.4"]
+    assert build.addon_requirements() == ["lark>=1.1", "sympy-matching>=0.0.4"]
     # the staged module, in a process of its own, as the app runs it
     code = f"""
 import json, sys
@@ -439,8 +439,8 @@ print(json.dumps(snap["addons"]), snap["tree"]["head"], "registerAddon" in snap[
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=300)
     assert out.returncode == 0, out.stderr
     lines = out.stdout.strip().splitlines()
-    assert json.loads(lines[0]) == ["matching", "plot", "tree"]
-    assert lines[1] == '["matching", "plot", "tree"] []'                               # listed, all off
+    assert json.loads(lines[0]) == ["latex", "matching", "plot", "tree"]
+    assert lines[1] == '["latex", "matching", "plot", "tree"] []'                               # listed, all off
     assert lines[2] == '["tree"] Add True'
 
 
@@ -497,7 +497,7 @@ def test_the_native_bundle_names_the_addons_and_remembers_the_switches(tmp_path)
     mod = _load_builder()
     out = mod.build(tmp_path / "www", native=True)
     page = (out / "index.html").read_text(encoding="utf-8")
-    assert all(m in page for m in ("sympy_editor_matching", "sympy_editor_plot", "sympy_editor_tree"))
+    assert all(m in page for m in ("sympy_editor_latex", "sympy_editor_matching", "sympy_editor_plot", "sympy_editor_tree"))
     assert "sympy_editor_addon_template" not in page                        # the template is not shipped
     assert '"rememberAddons": true' in page and '"addons": []' in page             # off at start, a click away
 
@@ -524,8 +524,8 @@ def test_a_debug_build_is_its_own_application():
     manifest = (ROOT / "mobile" / "android" / "app" / "src" / "main" / "AndroidManifest.xml").read_text(encoding="utf-8")
     assert 'applicationId = "org.sympy.editor"' in gradle
     assert 'applicationIdSuffix = ".debug"' in gradle and 'versionNameSuffix = "-debug"' in gradle
-    assert 'manifestPlaceholders["appLabel"] = "SymPy editor"' in gradle          # the release's name
-    assert 'manifestPlaceholders["appLabel"] = "SymPy editor (debug)"' in gradle  # and the debug one's
+    assert 'manifestPlaceholders["appLabel"] = "SymPy Editor"' in gradle          # the release's name
+    assert 'manifestPlaceholders["appLabel"] = "SymPy Editor (debug)"' in gradle  # and the debug one's
     assert 'android:label="${appLabel}"' in manifest
     assert 'android:authorities="${applicationId}.fileprovider"' in manifest
     kotlin = (ROOT / "mobile/android/app/src/main/java/org/sympy/editor/MainActivity.kt").read_text(encoding="utf-8")
@@ -545,14 +545,14 @@ def test_a_debug_build_says_debug_everywhere_it_is_named(tmp_path):
     spec = importlib.util.spec_from_file_location("mobile_build", ROOT / "mobile" / "build.py")
     build = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(build)
-    assert build.DEBUG_TITLE == "SymPy editor (debug)"
+    assert build.DEBUG_TITLE == "SymPy Editor (debug)"
     # the bundle takes the title it is given
     mod = _load_builder()
     out = mod.build(tmp_path / "www", native=True, cdn=True, debug=True)
     page = (out / "index.html").read_text(encoding="utf-8")
-    assert "<title>SymPy editor (debug)</title>" in page and ">SymPy editor (debug)<" in page
+    assert "<title>SymPy Editor (debug)</title>" in page and ">SymPy Editor (debug)<" in page
     plain = mod.build(tmp_path / "www2", native=True, cdn=True).joinpath("index.html").read_text(encoding="utf-8")
-    assert "<title>SymPy editor</title>" in plain
+    assert "<title>SymPy Editor</title>" in plain
     # the icon beside the title wears the badge too, so the running app is
     # told apart at a glance and not only on the launcher
     assert "(debug)</title>" in page and page.count("#c0392b") >= 1 and "#c0392b" not in plain

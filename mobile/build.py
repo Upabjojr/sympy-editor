@@ -67,7 +67,7 @@ def build_www(cdn: bool, *, android: bool = False, native: bool = False, debug: 
 #: org.sympy.editor.debug - so everything that names it says which one it is:
 #: the launcher's label (build.gradle.kts), the title over the formula and
 #: the icon beside it (build_www.py), and the launcher icon (make_icons.py).
-DEBUG_TITLE = "SymPy editor (debug)"
+DEBUG_TITLE = "SymPy Editor (debug)"
 
 
 def download(url: str, dest: Path) -> Path:

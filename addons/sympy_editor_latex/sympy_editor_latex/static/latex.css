@@ -1,0 +1,33 @@
+/* The LaTeX panel, scoped under the box the editor gives the add-on. */
+.se-addon-latex .ltx-panel { display: flex; flex-direction: column; gap: 0.4rem; font-size: 12px; }
+.se-addon-latex .ltx-row { display: flex; gap: 0.4rem; align-items: stretch; }
+.se-addon-latex .ltx-input {
+  flex: 1 1 auto; min-width: 0; resize: vertical;
+  font: inherit; font-family: var(--se-mono); font-size: 13px; line-height: 1.35;
+  padding: 0.3rem 0.5rem; border: 1px solid var(--se-border); border-radius: 0.3rem;
+  background: var(--se-field); color: inherit;
+}
+.se-addon-latex .ltx-input:focus { outline: 2px solid rgba(var(--se-accent), 0.6); outline-offset: -1px; }
+.se-addon-latex button {
+  font: inherit; font-size: 12px; line-height: 1.2; padding: 0.2rem 0.6rem;
+  border: 1px solid var(--se-border); border-radius: 0.3rem; background: var(--se-btn); color: inherit; cursor: pointer;
+  box-shadow: var(--se-btn-edge), var(--se-btn-shadow);
+}
+.se-addon-latex button:disabled { opacity: 0.4; cursor: default; box-shadow: none; background: none; }
+.se-addon-latex .ltx-preview { font-size: 1.25em; min-height: 1.4em; padding: 0.2rem 0.3rem; }
+.se-addon-latex .ltx-busy .ltx-preview { opacity: 0.6; }
+.se-addon-latex .ltx-src { font-family: var(--se-mono); color: var(--se-muted); word-break: break-word; }
+.se-addon-latex .ltx-note { min-height: 1.2em; color: var(--se-muted); }
+.se-addon-latex .ltx-note.error { color: var(--se-error); }
+.se-addon-latex .ltx-ambig, .se-addon-latex .ltx-consts { display: flex; flex-direction: column; gap: 0.25rem; }
+.se-addon-latex .ltx-point { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }
+.se-addon-latex .ltx-fragment { font-family: var(--se-mono); padding: 0 0.3rem; border-radius: 0.25rem; background: rgba(var(--se-accent), 0.1); }
+.se-addon-latex .ltx-choice { font: inherit; font-size: 12px; max-width: 100%; padding: 0.15rem 0.3rem; border: 1px solid var(--se-border); border-radius: 0.3rem; background: var(--se-btn); color: inherit; }
+.se-addon-latex .ltx-shown { color: var(--se-muted); }
+.se-addon-latex .ltx-const { display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer; }
+.se-addon-latex .ltx-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.se-addon-latex .ltx-insert-all { border-color: rgba(var(--se-accent), 0.8); background: rgba(var(--se-accent), 0.12); }
+@media (any-pointer: coarse) {
+  .se-addon-latex button, .se-addon-latex .ltx-choice { font-size: 14px; padding: 0.45rem 0.7rem; min-height: 2.2rem; }
+  .se-addon-latex .ltx-input { font-size: 15px; }
+}

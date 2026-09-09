@@ -21,7 +21,7 @@ mobile/
 ```
 
 Both apps bundle the add-ons of `addons/` (one folder each, see
-`build.py`), and take more at run time: the page's **Add-ons ▾** menu
+`build.py`), and take more at run time: the page's **Add-ons** section
 installs an add-on from a GitHub repository (fetched by the WebView) or a
 `.zip` (the system's file picker: `onShowFileChooser` on Android, WKWebView's
 own on iOS) into the app's data - `HOME/sympy-editor/addons` on Android
@@ -55,7 +55,7 @@ Windows equivalents) when neither `ANDROID_HOME` nor `local.properties` is set.
 
 ```bash
 python mobile/build.py android            # debug APK, signed with the debug key: install with adb
-                                          #   (it is org.sympy.editor.debug, "SymPy editor (debug)" on the
+                                          #   (it is org.sympy.editor.debug, "SymPy Editor (debug)" on the
                                           #    launcher, so it sits beside an installed release instead of
                                           #    refusing to update it - their signatures differ)
 python mobile/build.py android --release  # release APK + AAB (for Google Play)
@@ -107,7 +107,7 @@ is a certificate of your own in the keychain and a profile you name:
 
 ```bash
 security import distribution.p12 -k ~/Library/Keychains/login.keychain-db -T /usr/bin/codesign   # once
-IOS_TEAM_ID=... IOS_PROVISIONING_PROFILE="SymPy editor App Store" python mobile/build.py ios --method app-store-connect
+IOS_TEAM_ID=... IOS_PROVISIONING_PROFILE="SymPy Editor App Store" python mobile/build.py ios --method app-store-connect
 ```
 
 The profile (App Store type, for `org.sympy.editor` and that certificate,

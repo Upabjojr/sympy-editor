@@ -62,7 +62,7 @@ to itself (`problems(diagram)`).
 ## Install
 
 This add-on is **not bundled** with the apps: it is the example of an
-add-on installed from the editor's **Add-ons ▾** menu -
+add-on installed from the editor's **Add-ons** section -
 
 - from this repository: paste `https://github.com/Upabjojr/sympy-editor`
   (or the folder's URL,

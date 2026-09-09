@@ -13,9 +13,10 @@ addons/
   sympy_editor_tree/        the expression tree as an editable graph      (no dependency)
   sympy_editor_plot/        the graph of the selection, drawn by Plotly.js (numpy optional)
   sympy_editor_matching/    rewrite rules matched many-to-one              (sympy-matching)
-  sympy_editor_feynman/     path integrals of QED as Feynman diagrams, drawn and editable  (no dependency; not bundled: install it from the menu)
+  sympy_editor_latex/       LaTeX in: a first reading, every ambiguity a choice, constants as switches (lark)
+  sympy_editor_feynman/     path integrals of QED as Feynman diagrams, drawn and editable  (no dependency; not bundled: install it while editing)
   demo.py                   a page with the drafts, to try them in a browser
-  pack.py                   zips an add-on folder for "From a file…" in the Add-ons menu
+  pack.py                   zips an add-on folder for "From a file…" in the Add-ons section
 ```
 
 All of them are **drafts**: they work end to end (each has tests, and the
@@ -34,6 +35,7 @@ entry point, the way pytest learns of its plugins.
    pip install -e addons/sympy_editor_tree
    pip install -e addons/sympy_editor_plot        # numpy is optional: pip install -e "addons/sympy_editor_plot[fast]"
    pip install -e addons/sympy_editor_matching    # pulls sympy-matching
+   pip install -e addons/sympy_editor_latex       # pulls lark (pure Python)
    ```
 
    A published add-on is `pip install sympy-editor-whatever`.  The editor
@@ -62,7 +64,7 @@ entry point, the way pytest learns of its plugins.
    with the three drafts (no install needed, it reads them from the
    checkout), `python addons/demo.py --serve` runs them on the local server.
 
-4. **Switch them while editing.**  The toolbar's **Add-ons ▾** menu lists
+4. **Switch them while editing.**  The **Add-ons** section at the top of the **≡** drawer lists
    what the document can run - what it started with plus what `available=`
    named, and by default every installed add-on - with a check box each.
    Ticking one mounts its panel and tools on the spot, unticking takes them
@@ -78,7 +80,8 @@ documents that have it on, and off elsewhere.
 
 ## Installing while editing
 
-The **Add-ons ▾** menu ends with *Install an add-on*: paste the URL of a
+The **Add-ons** section of the **≡** drawer (its own button on the strip
+when the drawer is off) ends with *Install an add-on*: paste the URL of a
 GitHub repository (`https://github.com/user/repo`, a folder in it,
 `user/repo`) or of a `.zip`, or choose a `.zip` with *From a file…*.  The
 page lists the add-ons it finds - every `addon.json` with its package
@@ -173,7 +176,7 @@ message travels.  Add-ons keep that shape.  They do not get a second channel:
     │         None  → whatever doc.replace(...) did
     └─ handle({"action": "addons", "enable": [...], "disable": [...]})
          └─ enable()/disable(): kinds, ops, methods on or off    _syncAddons(snap): mount / unmount to match
-            snap["addons_available"] → the Add-ons ▾ menu
+            snap["addons_available"] → the Add-ons switches (≡)
 ```
 
 * **One message.**  `{"action": "addon", "addon": name, "method": m, ...}` goes

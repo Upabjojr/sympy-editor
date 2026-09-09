@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="108" height="108" viewBox="0 0 108 108">
-  <title>SymPy editor</title>
+  <title>SymPy Editor</title>
   <g transform="translate(15.408,16.963) scale(0.10089)">
     <title>SymPy logo, the mark alone</title><desc>SymPy's own logo (doc/src/logo/sympy.svg in sympy/sympy) with the wordmark removed: an icon has no room for text.  Its author, Fredrik Johansson, wrote in the original file: "I created this logo and permit its free use on the same terms as the rest of Sympy's code and documentation."</desc><defs id="defs3252">
     <linearGradient id="linearGradient51087">

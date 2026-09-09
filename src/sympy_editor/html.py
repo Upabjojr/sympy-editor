@@ -27,9 +27,10 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
-from sympy import Basic, srepr
+from sympy import Basic
 
 from .document import Document
+from .printer import exact_srepr as srepr   # srepr that reads back unchanged (SymPy's reorders MatAdd)
 from .examples import examples
 from .history import History
 
@@ -223,7 +224,7 @@ _PAGE = """<!DOCTYPE html>
 """
 
 
-def render_page(config: Dict[str, Any], title: str = "SymPy editor", head: str = "",
+def render_page(config: Dict[str, Any], title: str = "SymPy Editor", head: str = "",
                 element_id: Optional[str] = None, logo: str = "") -> str:
     """The full page; ``head`` is extra markup for its ``<head>`` (a web app
     manifest, meta tags, a service-worker registration...); ``element_id``
@@ -245,7 +246,7 @@ def to_html(
     full_page: bool = True,
     editable: bool = True,
     backend: Optional[str] = None,
-    title: str = "SymPy editor",
+    title: str = "SymPy Editor",
     options: Optional[Dict[str, Any]] = None,
     urls: Optional[Dict[str, str]] = None,
     head: str = "",

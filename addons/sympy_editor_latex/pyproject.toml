@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sympy-editor-latex"
+version = "0.0.1"
+description = "A sympy-editor add-on: LaTeX in, with its ambiguities and constants as choices"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "BSD-3-Clause" }
+dependencies = ["sympy-editor", "lark>=1.1"]
+
+[project.entry-points."sympy_editor.addons"]
+latex = "sympy_editor_latex:ADDON"
+
+[tool.setuptools.packages.find]
+include = ["sympy_editor_latex*"]
+
+[tool.setuptools.package-data]
+sympy_editor_latex = ["static/*", "static/grammar/*"]

@@ -125,7 +125,7 @@ def foreground_svg(debug: bool = False) -> str:
     return ('<?xml version="1.0" encoding="UTF-8"?>\n'
             '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
             'width="108" height="108" viewBox="0 0 108 108">\n'
-            f"  <title>SymPy editor{' (debug)' if debug else ''}</title>\n"
+            f"  <title>SymPy Editor{' (debug)' if debug else ''}</title>\n"
             f"{art}\n"
             f"{pencil(57.0, 61.0, 68.0)}"
             f"{badge}"
@@ -143,7 +143,7 @@ def master_svg(size: int = 512, round_shape: bool = False, debug: bool = False) 
     return ('<?xml version="1.0" encoding="UTF-8"?>\n'
             f'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
             f'width="{s}" height="{s}" viewBox="0 0 {s} {s}">\n'
-            f"  <title>SymPy editor{' (debug)' if debug else ''}</title>\n"
+            f"  <title>SymPy Editor{' (debug)' if debug else ''}</title>\n"
             "  <defs><linearGradient id=\"bg\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"1\">"
             f'<stop offset="0" stop-color="{BACKGROUND}"/>'
             f'<stop offset="1" stop-color="{BACKGROUND_EDGE}"/></linearGradient></defs>\n'
@@ -236,7 +236,7 @@ def main() -> int:
     (RES / "values").mkdir(parents=True, exist_ok=True)
     (RES / "values/ic_launcher_background.xml").write_text(COLOURS, encoding="utf-8")
     # The debug build's own icons, in its source set: Android merges them
-    # over the ones above, so "SymPy editor (debug)" wears the badge and the
+    # over the ones above, so "SymPy Editor (debug)" wears the badge and the
     # store app is left alone (mobile/android/app/src/debug/res).
     (ICON / "icon-debug.svg").write_text(master_svg(debug=True), encoding="utf-8")
     (ICON / "icon-debug-round.svg").write_text(master_svg(round_shape=True, debug=True), encoding="utf-8")

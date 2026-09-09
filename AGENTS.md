@@ -1,5 +1,9 @@
 # AGENTS.md — notes for coding agents and contributors
 
+The behaviour of the cursor and the selection - every state, every key, and
+what differs on a touch screen - is written down in
+`docs/cursor-and-selection.md`.  Change that file with the behaviour.
+
 ## What this project is
 
 A WYSIWYG editor for SymPy expressions.  Requirements set by the project owner:
@@ -58,7 +62,7 @@ src/sympy_editor/
                 and methods from a package outside this one; see addons/.
 tests/          pytest suite (printer round-trips, document ops, HTML, server).
 examples/       demo.py generates demo.html / runs the server.
-addons/         Add-on drafts, each a package of its own (tree, plot, matching, feynman).
+addons/         Add-on drafts, each a package of its own (tree, plot, matching, latex, feynman).
 ```
 
 Data flow: Python `Document.snapshot()` → JSON (`latex`, `latex_plain`,
@@ -873,7 +877,7 @@ the front end hooks `historyStep` (an element for the drawer's rows,
 styles for the report, `buildHistoryReport`'s `stepExtra`/`extraCss`) draw
 it under the step - the tree add-on shows every step's tree.  `Editor._syncAddons` mounts
 and unmounts (`_mountAddon`/`_unmountAddon`) to match each snapshot, and
-`_fillAddonsMenu` builds the toolbar's **Add-ons ▾** menu
+`_fillAddonsMenu` builds the **Add-ons** switches at the top of the ≡ drawer
 (`data-block="addons"`, `.se-addons-menu`).  Rules: the add-on packages in
 `addons/` are separate distributions, never imported by `sympy_editor`; a
 change to the contract comes with `tests/test_addons.py`, and to the front

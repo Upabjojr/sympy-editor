@@ -137,7 +137,7 @@ def app_logo(debug: bool = False) -> str:
 DEBUG_SUFFIX = " (debug)"
 
 
-def build(out: Path, *, cdn: bool = False, cache: Path | None = None, expr=None, title: str = "SymPy editor",
+def build(out: Path, *, cdn: bool = False, cache: Path | None = None, expr=None, title: str = "SymPy Editor",
           head: str = "", native: bool = False, addons_dir: Path | None = None, debug: bool = False) -> Path:
     """Write the bundle to ``out``; ``head`` is extra ``<head>`` markup (the
     web app's manifest and service worker, see ``webapp/build.py``).
@@ -186,7 +186,7 @@ def main(argv=None) -> int:
     ap.add_argument("--android", action="store_true", help="also copy the bundle to mobile/android/app/src/main/assets/www")
     ap.add_argument("--native", action="store_true",
                     help="the host application runs Python (the Android app): no Pyodide in the bundle")
-    ap.add_argument("--title", default="SymPy editor", help="the page's title, over the formula")
+    ap.add_argument("--title", default="SymPy Editor", help="the page's title, over the formula")
     ap.add_argument("--debug", action="store_true",
                     help="a debug build: the title says so and the icon beside it wears the bug badge")
     args = ap.parse_args(argv)
