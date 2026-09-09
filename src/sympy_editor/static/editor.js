@@ -1947,6 +1947,7 @@ var SympyEditor = (function () {
         // selected already - is not followed by a click's selection on top
         if (self._drag && (self._drag.moved || self._drag.held) && !cancelled) self._suppressClick = true;
         self._drag = null;
+        if (self._opsStale) self._fillOps();      // the strip catches up with what was selected
       };
       this.view.addEventListener("pointerup", function (ev) { endPointer(ev, false); });
       this.view.addEventListener("pointercancel", function (ev) { endPointer(ev, true); });
@@ -2407,6 +2408,14 @@ var SympyEditor = (function () {
      *  when there are none. */
     _fillOps() {
       if (!this.opsPicker || !this.state) return;
+      // Not while a drag is drawing the selection.  What the menus offer
+      // follows the selection: a single node has methods to call, a range of
+      // terms has none, so the Methods box came and went as the finger moved
+      // and the strip rewrapped under it - the whole panel jumping by a row,
+      // over and over.  The menus cannot be reached mid-drag anyway; they are
+      // filled once, when the finger lifts.
+      if (this._drag && (this._drag.moved || this._drag.held)) { this._opsStale = true; return; }
+      this._opsStale = false;
       var target = this.range ? this.range.parent : (this.selected || "/");
       var node = this.state.nodes ? this.state.nodes[target] : null;
       this._fillMethods(target, node);
