@@ -33,6 +33,8 @@ var SympyEditor = (function () {
     minZoom: 0.25,
     maxZoom: 4,
     rememberZoom: false, // keep the zoom in localStorage across page loads (the mobile app does)
+    actions: null,       // {expr: [op names], matrix: [...], integral: [...]...}: what the two action menus offer, in
+                         // that order (a name may be {name, label}); a key left out means every registered op
     longPress: 450,      // ms a finger must rest on the formula before it starts a range selection (touch screens)
     previewDelay: 250,   // ms after the last keystroke in the source line before it is previewed
     workingAfter: 400,   // ms a request may take before the spinner overlay appears
@@ -152,12 +154,14 @@ var SympyEditor = (function () {
     "<li>In a sum, * binds just the two terms (x + y + z \u2192 xy + z); in a product, + splits it there (x\u22c5y\u22c5z \u2192 x + yz).</li>",
     "</ul></section>",
     "<section><h3>Applying functions</h3><ul>",
-    "<li><b>Transform \u25be</b> holds the general operations; a second menu appears with operations for the selection's type (Matrix, Integral, Equation\u2026). Picking one applies it at once, to the selection or, with nothing selected, to the whole expression.</li>",
+    "<li>The four menus of the last row are one kind of box: it lists everything it offers when it takes the focus, narrows the list as you type, and \u2191/\u2193 + <kbd>Enter</kbd> (or a click) pick. The first group holds the <b>actions</b>: <b>Transform \u25be</b> for the general operations, and a second menu with the operations for the selection's type (Matrix, Integral, Equation\u2026). Picking one applies it at once, to the selection or, with nothing selected, to the whole expression.</li>",
     "<li><b>Add-ons \u25be</b> switches on or off the add-ons installed beside the editor \u2014 a panel under the formula, tools, node types from other packages \u2014 without restarting anything; what an add-on kept waits for it to come back.</li>",
     "<li>In a <b>matrix</b> or an <b>array</b> the four arrows move as it is drawn: <kbd>\u2190</kbd>/<kbd>\u2192</kbd> along the row, <kbd>\u2191</kbd>/<kbd>\u2193</kbd> between the rows \u2014 for the selection and for the caret alike. At the edge the usual meaning takes over: <kbd>\u2191</kbd> in the top row selects the matrix itself (again, its own parent), <kbd>\u2190</kbd>/<kbd>\u2192</kbd> step out of it. An array of any rank works the same way, because the rule follows the drawing: a rank-3 array is a row of matrices, so <kbd>\u2192</kbd> at the right edge of one block enters the next on the same line.</li>",
     "<li>In a <b>matrix</b> (the matrix, or anything in one of its entries) the bar under the selection adds <b>+ row</b>, <b>+ col</b>, <b>\u2212 row</b>, <b>\u2212 col</b>: a new row or column of empty slots after the selected one (after the last, for the matrix itself), or the selected one taken away. The grip at the matrix\u2019s bottom-right corner <b>reshapes</b> it: the same entries laid out another way (SymPy\u2019s reshape, in reading order), so it snaps to the shapes that hold them all \u2014 12 entries go 1\u00d712, 2\u00d76, 3\u00d74, 4\u00d73, 6\u00d72, 12\u00d71 and nowhere else. Nothing is added or lost; the outline shows the shape it will take. To grow or shrink the matrix, use + row / + col / \u2212 row / \u2212 col.</li>",
     "<li><b>Methods \u25be</b> lists everything the selected object's class can do \u2014 .det(), .T, .diff()\u2026 \u2014 one pick calls it. A Lambda is itself a function: <b>( ) apply</b> evaluates it at the arguments you give.</li>",
     "<li>The <b>function box</b> searches all of SymPy: pick a function and fill the parameters it asks for; \u201cdiff(x)\u201d, \u201c.T\u201d, \u201cdet()\u201d typed in full apply as written. A container takes the selection as its contents: <i>Matrix</i> over x + y gives the 1\u00d71 matrix holding it.</li>",
+    "<li>The second group is the <b>library</b>: <b>Methods \u25be</b> lists everything the selected object's class can do \u2014 .det(), .T, .diff()\u2026 \u2014 one pick calls it. A Lambda is itself a function: <b>( ) apply</b> evaluates it at the arguments you give.</li>",
+    "<li>The <b>function box</b> beside it holds all of SymPy: pick a function and fill the parameters it asks for; \u201cdiff(x)\u201d, \u201c.T\u201d, \u201cdet()\u201d typed in full apply as written. A container takes the selection as its contents: <i>Matrix</i> over x + y gives the 1\u00d71 matrix holding it.</li>",
     "<li><b>unevaluated</b> builds the symbolic form (Determinant, Integral, sin(0)\u2026) instead of computing it; <i>Evaluate (doit)</i> computes it later.</li>",
     "<li>The <b>Symbols</b> panel under the formula declares new names and changes what a name stands for (symbol, function, matrix, assumptions).</li>",
     "</ul></section>",
@@ -571,6 +575,125 @@ var SympyEditor = (function () {
     });
     return el;
   }
+
+  /** Put `panel` (absolutely positioned in `root`) under `anchor`, kept
+   *  inside the root's width. */
+  function placeUnder(root, panel, anchor) {
+    var rr = root.getBoundingClientRect(), ar = anchor.getBoundingClientRect();
+    panel.style.top = Math.round(ar.bottom - rr.top + 4) + "px";
+    panel.style.left = Math.round(Math.max(0, Math.min(ar.left - rr.left, root.clientWidth - panel.offsetWidth - 4))) + "px";
+  }
+
+  /** A pick list with a filter: the one control behind the four menus of
+   *  the apply row - the general actions, the type's own actions, the
+   *  methods of the selection's class and SymPy's functions.  A text box
+   *  that lists every value under it when it takes the focus and narrows
+   *  the list as one types (exact names first, then the ones that start
+   *  with the text, then the ones that contain it); ↑/↓ walk the list,
+   *  Enter and a click pick, Esc closes.  `opts`: `className` (the box's
+   *  own class, and `data-for` of its list), `placeholder` (the menu's
+   *  name), `title`, `onPick(value)`, and for the function box `onFocus`,
+   *  `onEscape`, `onTyped(text)` (true when the text was taken as typed)
+   *  and `freeText` (Enter on a text that matches nothing picks the text).
+   *  The list lives on `root`, floating over the page. */
+  function Picker(root, opts) {
+    var self = this;
+    this.opts = opts;
+    this.root = root;
+    this.items = [];
+    this.active = -1;
+    this.input = h("input", { class: "se-pick " + (opts.className || ""), type: "text",
+      placeholder: opts.placeholder || "", title: opts.title || "", spellcheck: "false", autocomplete: "off",
+      role: "combobox", "aria-expanded": "false", "aria-autocomplete": "list", "aria-haspopup": "listbox" });
+    this.menu = h("div", { class: "se-pick-menu", hidden: "", role: "listbox", "data-for": opts.className || "" });
+    this.input.addEventListener("focus", function () { if (opts.onFocus) opts.onFocus(); self.open(); });
+    this.input.addEventListener("click", function () { if (self.menu.hidden) self.open(); });   // a focused box clicked again reopens
+    this.input.addEventListener("input", function () { self.open(); });
+    this.input.addEventListener("blur", function () {
+      setTimeout(function () { if (document.activeElement !== self.input) self.close(); }, 150);
+    });
+    this.input.addEventListener("keydown", function (ev) {
+      ev.stopPropagation();   // the editor's keys (Delete, arrows...) are not for the formula here
+      if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+        ev.preventDefault();
+        if (self.menu.hidden) { self.open(); return; }
+        var rows = self._rows();
+        if (!rows.length) return;
+        self.active = (self.active + (ev.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length;
+        self._highlight();
+      } else if (ev.key === "Enter") {
+        ev.preventDefault();
+        var text = self.input.value.trim();
+        if (opts.onTyped && opts.onTyped(text)) { self.close(); return; }
+        var row = self.active >= 0 ? self._rows()[self.active] : null;
+        if (row) self.pick(row.getAttribute("data-name"));
+        else if (text && opts.freeText) self.pick(text);
+      } else if (ev.key === "Escape") {
+        ev.preventDefault();
+        self.input.value = "";
+        self.close();
+        if (opts.onEscape) opts.onEscape();
+      }
+    });
+    this.menu.addEventListener("mousedown", function (ev) { ev.preventDefault(); });   // the box keeps the focus
+    this.menu.addEventListener("click", function (ev) {
+      var row = ev.target.closest(".se-pick-item");
+      if (row) self.pick(row.getAttribute("data-name"));
+    });
+    root.appendChild(this.menu);
+  }
+  Picker.prototype.setItems = function (items) {
+    this.items = items || [];
+    if (!this.menu.hidden || document.activeElement === this.input) this.open();   // a list that arrives while the box has the focus shows
+  };
+  /** Show the list, narrowed to the box's text. */
+  Picker.prototype.open = function () {
+    if (this.input.disabled || this.input.hidden) return;
+    var q = this.input.value.trim().replace(/\(.*$/, "").toLowerCase();
+    var exact = [], starts = [], contains = [];
+    var keyOf = function (t) { return String(t || "").toLowerCase().replace(/^\./, ""); };
+    for (var i = 0; i < this.items.length; i++) {
+      var it = this.items[i];
+      if (!q) { starts.push(it); continue; }
+      var keys = [keyOf(it.value), keyOf(it.label)];
+      if (keys[0] === q || keys[1] === q) exact.push(it);
+      else if (keys.some(function (k) { return k.indexOf(q) === 0; })) starts.push(it);
+      else if (keys.some(function (k) { return k.indexOf(q) >= 0; })) contains.push(it);
+    }
+    var list = exact.concat(starts, contains);
+    this.menu.textContent = "";
+    for (var j = 0; j < list.length; j++) {
+      var item = list[j];
+      this.menu.appendChild(h("div", { class: "se-pick-item", role: "option", "data-name": item.value, title: item.doc || "" }, [
+        h("span", { class: "se-pick-name" }, [item.label || item.value]),
+        h("span", { class: "se-pick-doc" }, [item.doc || ""])
+      ]));
+    }
+    this.active = list.length ? 0 : -1;
+    this._highlight();
+    this.menu.hidden = !list.length;
+    this.input.setAttribute("aria-expanded", list.length ? "true" : "false");
+    if (list.length) placeUnder(this.root, this.menu, this.input);
+  };
+  Picker.prototype.close = function () {
+    this.menu.hidden = true;
+    this.input.setAttribute("aria-expanded", "false");
+  };
+  Picker.prototype.pick = function (value) {
+    this.close();
+    this.input.value = "";
+    this.opts.onPick(value);
+  };
+  Picker.prototype._rows = function () { return this.menu.querySelectorAll(".se-pick-item"); };
+  Picker.prototype._highlight = function () {
+    var rows = this._rows();
+    for (var i = 0; i < rows.length; i++) {
+      rows[i].classList.toggle("se-active", i === this.active);
+      if (i === this.active && rows[i].scrollIntoView) {
+        try { rows[i].scrollIntoView({ block: "nearest" }); } catch (e) { /* no options object */ }
+      }
+    }
+  };
 
   /* ------------------------------------------------------------------ */
   /* History viewer (no editor: any list of expressions)                 */
@@ -1110,30 +1233,66 @@ var SympyEditor = (function () {
       btn("copy", "Copy", "Copy the SymPy source of the selection, or of the whole expression (Ctrl+C / Ctrl+X / Ctrl+V work on selections and carets)");
       if (!o.readOnly) {
         btn("paste", "Paste", "Paste the clipboard over the selection, or at the caret (Ctrl+V)");
-        // 7. everything that can be applied, on a row of its own: the menus
-        //    on the left, the function box in the middle, the toggle right
+        // 7. everything that can be applied, on a row of its own, in two
+        //    groups boxed apart, and the toggle at the right.  The four
+        //    menus are one control (Picker): a box that lists its values
+        //    and narrows them as one types.
         block("apply").classList.add("se-block-wide");
-        // General menu: picking an operation applies it to the selection (or
-        // the whole expression) at once.
-        this.opsSelect = h("select", { class: "se-ops", title: "Transform the selection (or the whole expression)" });
-        current.appendChild(this.opsSelect);
-        // Type menu: the operations specific to the selection's type (Matrix,
-        // Integral, Equation...); picking one applies it at once.
-        this.typeMenu = h("select", { class: "se-typemenu", hidden: "", title: "Operations specific to the selected type" });
-        current.appendChild(this.typeMenu);
-        // Methods menu: what the selected object's class can do (the root
-        // expression when nothing is selected); picking one calls it, asking
-        // for parameters first when it needs any.  Each snapshot carries the
-        // lists of the types it introduces (see _fillMethods).
-        this.methodsMenu = h("select", { class: "se-methods", hidden: "",
-          title: "Methods of the selection's class (of the whole expression when nothing is selected): pick one to call it; a method with parameters asks for them" });
-        current.appendChild(this.methodsMenu);
-        // Function box: search SymPy's functions; a picked function that needs
-        // parameters asks for them (see _showFnForm).
-        this.fnInput = h("input", { class: "se-fn", type: "text", placeholder: "SymPy function… (search)",
+        // The actions: the general operations and the ones of the selection's
+        // type (Matrix, Integral, Equation...) - both lists chosen by
+        // `options.actions` (see _fillOps); picking one applies it to the
+        // selection (or the whole expression) at once.
+        var actions = h("div", { class: "se-group se-group-actions", role: "group", "aria-label": "Actions" });
+        current.appendChild(actions);
+        var backToFormula = function () { self.view.focus({ preventScroll: true }); };   // Esc in a menu
+        this.opsPicker = new Picker(root, { className: "se-ops", placeholder: "Transform \u25be",
+          title: "Transform the selection (or the whole expression): the general operations",
+          onEscape: backToFormula,
+          onPick: function (name) { self._applyOp(name, self.opsPicker.input); } });
+        actions.appendChild(this.opsPicker.input);
+        this.typePicker = new Picker(root, { className: "se-typemenu", placeholder: "Type \u25be",
+          title: "Operations specific to the selected type",
+          onEscape: backToFormula,
+          onPick: function (name) { self._applyOp(name, self.typePicker.input); } });
+        this.typePicker.input.hidden = true;
+        actions.appendChild(this.typePicker.input);
+        // The library: what the selected object's class can do (the root
+        // expression when nothing is selected) - every method, each snapshot
+        // carrying the lists of the types it introduces (see _fillMethods) -
+        // and every function of SymPy; a pick that needs parameters asks for
+        // them first (see _showFnForm).
+        var library = h("div", { class: "se-group se-group-library", role: "group", "aria-label": "Library" });
+        current.appendChild(library);
+        this.methodsPicker = new Picker(root, { className: "se-methods", placeholder: "Methods \u25be",
+          title: "Methods of the selection's class (of the whole expression when nothing is selected): pick one to call it; a method with parameters asks for them",
+          onEscape: backToFormula,
+          onPick: function (name) {
+            delete self._fnSigs["." + name];   // a method's signature depends on the type: never reuse another's
+            self._pickFn("." + name, self.methodsPicker.input);
+          } });
+        this.methodsPicker.input.hidden = true;
+        library.appendChild(this.methodsPicker.input);
+        this.fnPicker = new Picker(root, { className: "se-fn", placeholder: "SymPy function\u2026",
           title: "Apply any SymPy function or method to the selection (or the whole expression): type to search, Enter to pick; functions with parameters ask for them",
-          spellcheck: "false", autocomplete: "off" });
-        current.appendChild(this.fnInput);
+          freeText: true,
+          onFocus: function () {
+            // remember where the caret is: a function picked will be added there
+            self._fnCaret = self.caret && !self.selected && !self.range ? Object.assign({}, self.caret) : null;
+            self._loadFunctions();
+          },
+          onTyped: function (text) {
+            if (!/\(/.test(text)) return false;
+            self.callFunction(text);   // typed with arguments: as is
+            return true;
+          },
+          onEscape: function () { self._hideFnForm(); self.view.focus({ preventScroll: true }); },
+          onPick: function (name) { self._pickFn(name, self.fnPicker.input); } });
+        library.appendChild(this.fnPicker.input);
+        // The same boxes under the names the rest of the editor knows them by.
+        this.opsSelect = this.opsPicker.input;
+        this.typeMenu = this.typePicker.input;
+        this.methodsMenu = this.methodsPicker.input;
+        this.fnInput = this.fnPicker.input;
         // Unevaluated: a transformation or a function builds its symbolic
         // form (Determinant(M), Derivative(f, x)...) instead of computing.
         this.lazyBox = h("input", { type: "checkbox", class: "se-lazy-box" });
@@ -1145,11 +1304,9 @@ var SympyEditor = (function () {
                                                : "Transformations and functions compute their result");
         });
         current.appendChild(lazyLabel);
-        this.fnMenu = h("div", { class: "se-fn-menu", hidden: "", role: "listbox" });
         this.fnForm = h("div", { class: "se-fn-form", hidden: "" });
         this._fnNames = [];
         this._fnSigs = {};
-        this._fnActive = -1;
       }
       // 8. the add-ons that can be switched on or off: a menu of check boxes
       //    (shown only when the document's snapshot lists any, see _fillAddonsMenu)
@@ -1382,7 +1539,7 @@ var SympyEditor = (function () {
         h("div", { class: "se-spinner" }), h("div", { class: "se-loading-text" }, ["Loading…"]), this.interruptBtn
       ]);
       this.committed = null;   // the last snapshot that is not a preview (see _previewSource)
-      if (this.fnMenu) { root.appendChild(this.fnMenu); root.appendChild(this.fnForm); }
+      if (this.fnForm) root.appendChild(this.fnForm);
       if (this.addonsMenu) root.appendChild(this.addonsMenu);
       root.appendChild(this.overlay);
       this.host.appendChild(root);
@@ -2127,70 +2284,28 @@ var SympyEditor = (function () {
       ["copy", "cut", "paste"].forEach(function (kind) {
         onDocument(kind, function (ev) { self._onClipboard(ev, kind); });
       });
-      var applyFromMenu = function (menu) {
-        var op = menu.value;
-        menu.selectedIndex = 0;
-        if (!op) return;
-        var path = self.range ? self.range.parent : (self.selected || "/");
-        var spec = (self.state.ops || []).filter(function (o) { return o.name === op; })[0];
-        if (spec && spec.params && spec.params.length) return self._askOpParams(spec, path, menu);
-        var msg = { action: "apply", path: path, op: op };
-        if (self.lazy()) msg.lazy = true;
-        if (self.range) msg.children = self._rangeIndices();
-        self.send(msg);
-        self.view.focus({ preventScroll: true });
-      };
-      if (this.fnInput) {
-        this.fnInput.addEventListener("focus", function () { self._loadFunctions(); self._filterFn(); });
-        this.fnInput.addEventListener("input", function () { self._filterFn(); });
-        this.fnInput.addEventListener("blur", function () { setTimeout(function () { if (document.activeElement !== self.fnInput) self._hideFnMenu(); }, 150); });
-        this.fnInput.addEventListener("focus", function () {
-          // remember where the caret is: a function picked will be added there
-          self._fnCaret = self.caret && !self.selected && !self.range ? Object.assign({}, self.caret) : null;
-        });
-        this.fnInput.addEventListener("keydown", function (ev) {
-          ev.stopPropagation();
-          var items = self.fnMenu.querySelectorAll(".se-fn-item");
-          if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
-            ev.preventDefault();
-            if (!items.length) return;
-            self._fnActive = (self._fnActive + (ev.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
-            self._highlightFn();
-          } else if (ev.key === "Enter") {
-            ev.preventDefault();
-            var text = self.fnInput.value.trim();
-            if (/\(/.test(text)) { self._hideFnMenu(); self.callFunction(text); return; }   // typed with arguments: as is
-            var pick = self._fnActive >= 0 && items[self._fnActive] ? items[self._fnActive].getAttribute("data-name") : text;
-            if (pick) self._pickFn(pick);
-          } else if (ev.key === "Escape") {
-            ev.preventDefault();
-            self._hideFnMenu();
-            self._hideFnForm();
-            self.fnInput.value = "";
-            self.view.focus({ preventScroll: true });
-          }
-        });
-        this.fnMenu.addEventListener("mousedown", function (ev) { ev.preventDefault(); });   // keep the focus in the box
-        this.fnMenu.addEventListener("click", function (ev) {
-          var item = ev.target.closest(".se-fn-item");
-          if (item) self._pickFn(item.getAttribute("data-name"));
-        });
-      }
-      [this.opsSelect, this.typeMenu].forEach(function (menu) {
-        if (!menu) return;
-        menu.addEventListener("change", function () { applyFromMenu(menu); });
-        menu.addEventListener("keydown", function (ev) { ev.stopPropagation(); });
-      });
-      if (this.methodsMenu) {
-        this.methodsMenu.addEventListener("change", function () {
-          var name = self.methodsMenu.value;
-          self.methodsMenu.selectedIndex = 0;
-          if (!name) return;
-          delete self._fnSigs["." + name];   // a method's signature depends on the type: never reuse another's
-          self._pickFn("." + name);
-        });
-        this.methodsMenu.addEventListener("keydown", function (ev) { ev.stopPropagation(); });
-      }
+    }
+
+    /** An action picked in one of the two action menus: applied to the
+     *  selection (or the whole expression) at once, or, when the op declares
+     *  parameters, asked for them under `anchor` first. */
+    _applyOp(op, anchor) {
+      if (!op || !this.state) return;
+      var path = this.range ? this.range.parent : (this.selected || "/");
+      var spec = (this.state.ops || []).filter(function (o) { return o.name === op; })[0];
+      if (spec && spec.params && spec.params.length) return this._askOpParams(spec, path, anchor);
+      var msg = { action: "apply", path: path, op: op };
+      if (this.lazy()) msg.lazy = true;
+      if (this.range) msg.children = this._rangeIndices();
+      this.send(msg);
+      this.view.focus({ preventScroll: true });
+    }
+
+    /** Change what the two action menus offer (`options.actions`) at any time. */
+    setActions(spec) {
+      this.opts.actions = spec || null;
+      this._opsKey = null;
+      this._fillOps();
     }
 
     /* ---- state ---- */
@@ -2243,11 +2358,15 @@ var SympyEditor = (function () {
       }
       this._fillOps();
       this._fillSymbols();
-      if (snap.functions && this.fnInput && !this._functionsLoaded) {
+      if (snap.functions && this.fnPicker && !this._functionsLoaded) {
         this._functionsLoaded = true;
         this._fnNames = snap.functions;
         this._fnSigs = snap.signatures || {};
-        if (document.activeElement === this.fnInput) this._filterFn();
+        var sigs = this._fnSigs;
+        this.fnPicker.setItems(this._fnNames.map(function (name) {
+          return { value: name, label: name, doc: sigs[name] && sigs[name].doc ? sigs[name].doc : "" };
+        }));
+        if (document.activeElement === this.fnInput) this.fnPicker.open();
       }
       if (snap.signature && this.fnInput) {
         this._fnSigs[snap.signature.name] = snap.signature;
@@ -2488,33 +2607,54 @@ var SympyEditor = (function () {
      *  "integral"...), labelled with the most specific kind, and is hidden
      *  when there are none. */
     _fillOps() {
-      if (!this.opsSelect || !this.state) return;
+      if (!this.opsPicker || !this.state) return;
       var target = this.range ? this.range.parent : (this.selected || "/");
       var node = this.state.nodes ? this.state.nodes[target] : null;
       this._fillMethods(target, node);
       var kinds = node ? (node.kinds || [node.kind]) : [];
       var ops = this.state.ops || [];
-      var general = ops.filter(function (op) { return !op.kinds; });
-      var specific = ops.filter(function (op) {
+      var general = this._chosenActions(ops.filter(function (op) { return !op.kinds; }), ["expr"]);
+      var specific = this._chosenActions(ops.filter(function (op) {
         return op.kinds && op.kinds.some(function (k) { return kinds.indexOf(k) >= 0; });
-      });
-      var key = kinds.join(",") + "|" + JSON.stringify(ops.map(function (op) { return op.name; }));
+      }), kinds);
+      var entry = function (op) { return { value: op.name, label: op.label || op.name, doc: op.doc || "" }; };
+      var key = kinds.join(",") + "|" + JSON.stringify(general.concat(specific).map(function (op) { return [op.name, op.label]; }));
       if (key === this._opsKey) return;
       this._opsKey = key;
-      this.opsSelect.textContent = "";
-      var self = this;
-      this.opsSelect.appendChild(h("option", { value: "", disabled: "", selected: "" }, ["Transform \u25BE"]));
-      general.forEach(function (op) { self.opsSelect.appendChild(h("option", { value: op.name }, [op.label || op.name])); });
-      this.opsSelect.selectedIndex = 0;
-      if (!this.typeMenu) return;
-      this.typeMenu.textContent = "";
-      if (!specific.length) { this.typeMenu.hidden = true; return; }
+      this.opsPicker.setItems(general.map(entry));
+      this.opsPicker.input.hidden = !general.length;
+      if (!this.typePicker) return;
+      if (!specific.length) { this.typePicker.input.hidden = true; this.typePicker.close(); return; }
       var labels = this.state.kind_labels || {};
       var label = labels[kinds[0]] || (node && node.type) || "Type";
-      this.typeMenu.appendChild(h("option", { value: "", disabled: "", selected: "" }, [label + " \u25BE"]));
-      specific.forEach(function (op) { self.typeMenu.appendChild(h("option", { value: op.name }, [op.label || op.name])); });
-      this.typeMenu.selectedIndex = 0;
-      this.typeMenu.hidden = false;
+      this.typePicker.input.placeholder = label + " \u25BE";
+      this.typePicker.setItems(specific.map(entry));
+      this.typePicker.input.hidden = false;
+    }
+
+    /** The ops of `pool` that `options.actions` keeps for `keys` - "expr"
+     *  for the general menu, the selection's kinds (most specific first) for
+     *  the type menu - in the order it lists them, an entry being a name or
+     *  `{name, label}`; every op of the pool, in the registry's order, when
+     *  the option names none of the keys. */
+    _chosenActions(pool, keys) {
+      var spec = this.opts.actions;
+      if (!spec || typeof spec !== "object") return pool;
+      var listed = keys.filter(function (k) { return Array.isArray(spec[k]); });
+      if (!listed.length) return pool;
+      var byName = {};
+      pool.forEach(function (op) { byName[op.name] = op; });
+      var out = [], seen = {};
+      listed.forEach(function (k) {
+        spec[k].forEach(function (want) {
+          var name = typeof want === "string" ? want : (want && want.name);
+          var op = byName[name];
+          if (!op || seen[name]) return;
+          seen[name] = true;
+          out.push(typeof want === "object" && want.label ? Object.assign({}, op, { label: want.label }) : op);
+        });
+      });
+      return out;
     }
 
     /** The methods menu: the public methods and properties of the class of
@@ -2522,22 +2662,17 @@ var SympyEditor = (function () {
      *  cached).  Picking one goes through the function box flow - signature,
      *  parameter form when needed, then the call. */
     _fillMethods(target, node) {
-      if (!this.methodsMenu) return;
+      if (!this.methodsPicker) return;
       var tname = node && !this.range ? node.type : null;
       var entries = tname ? this._methodsCache[tname] : null;
-      if (!entries || !entries.length) { this.methodsMenu.hidden = true; this._methodsKey = null; return; }
+      if (!entries || !entries.length) { this.methodsPicker.input.hidden = true; this.methodsPicker.close(); this._methodsKey = null; return; }
       if (this._methodsKey !== tname) {
         this._methodsKey = tname;
-        this.methodsMenu.textContent = "";
-        this.methodsMenu.appendChild(h("option", { value: "", disabled: "", selected: "" }, ["Methods \u25BE"]));
-        for (var i = 0; i < entries.length; i++) {
-          var e = entries[i];
-          this.methodsMenu.appendChild(h("option", { value: e.name, title: e.doc || "" },
-            [e.label || (e.property ? "." + e.name : "." + e.name + "()")]));
-        }
-        this.methodsMenu.selectedIndex = 0;
+        this.methodsPicker.setItems(entries.map(function (e) {
+          return { value: e.name, label: e.label || (e.property ? "." + e.name : "." + e.name + "()"), doc: e.doc || "" };
+        }));
       }
-      this.methodsMenu.hidden = false;
+      this.methodsPicker.input.hidden = false;
     }
 
     /** The symbols panel: one row per name (used in the expression or merely
@@ -3371,51 +3506,16 @@ var SympyEditor = (function () {
       return this.range ? this.range.parent : (this.selected || "/");
     }
 
-    _filterFn() {
-      if (!this.fnInput || !this._functionsLoaded) return;
-      var q = this.fnInput.value.trim().replace(/\(.*$/, "").toLowerCase();
-      var names = this._fnNames;
-      var starts = [], contains = [];
-      for (var i = 0; i < names.length; i++) {
-        var n = names[i], l = n.toLowerCase();
-        if (!q) { if (starts.length < 12) starts.push(n); continue; }
-        if (l.indexOf(q) === 0) starts.push(n);
-        else if (l.indexOf(q) >= 0) contains.push(n);
-      }
-      var list = starts.concat(contains).slice(0, 12);
-      this.fnMenu.textContent = "";
-      var self = this;
-      list.forEach(function (name) {
-        var sig = self._fnSigs[name];
-        var item = h("div", { class: "se-fn-item", role: "option", "data-name": name }, [
-          h("span", { class: "se-fn-name" }, [name]),
-          h("span", { class: "se-fn-doc" }, [sig && sig.doc ? sig.doc : ""])
-        ]);
-        self.fnMenu.appendChild(item);
-      });
-      this._fnActive = list.length ? 0 : -1;
-      this._highlightFn();
-      this.fnMenu.hidden = !list.length;
-      this._placeUnder(this.fnMenu, this.fnInput);
-    }
-
-    _highlightFn() {
-      var items = this.fnMenu.querySelectorAll(".se-fn-item");
-      for (var i = 0; i < items.length; i++) items[i].classList.toggle("se-active", i === this._fnActive);
-    }
-
-    _hideFnMenu() { if (this.fnMenu) this.fnMenu.hidden = true; }
+    _hideFnMenu() { if (this.fnPicker) this.fnPicker.close(); }
     _hideFnForm() { if (this.fnForm) { this.fnForm.hidden = true; this.fnForm.textContent = ""; } }
 
-    _placeUnder(panel, anchor) {
-      var rr = this.root.getBoundingClientRect(), ar = anchor.getBoundingClientRect();
-      panel.style.top = Math.round(ar.bottom - rr.top + 4) + "px";
-      panel.style.left = Math.round(Math.max(0, Math.min(ar.left - rr.left, this.root.clientWidth - panel.offsetWidth - 4))) + "px";
-    }
+    _placeUnder(panel, anchor) { placeUnder(this.root, panel, anchor); }
 
-    /** A function was chosen: apply it, or ask for its parameters first. */
-    _pickFn(name) {
+    /** A function (or a method, `.name`) was chosen: apply it, or ask for
+     *  its parameters first - under `anchor`, the menu it came from. */
+    _pickFn(name, anchor) {
       this._hideFnMenu();
+      this._formAnchor = anchor || null;
       this.fnInput.value = name;
       if (this._insertFunctionAtCaret(name)) return;          // at a caret: added there, no parameters asked
       var sig = this._fnSigs[name];
@@ -3510,7 +3610,7 @@ var SympyEditor = (function () {
       buttons.querySelector(".se-fn-cancel").addEventListener("click", function () { self._hideFnForm(); self.view.focus({ preventScroll: true }); });
       this.fnForm.appendChild(buttons);
       this.fnForm.hidden = false;
-      this._placeUnder(this.fnForm, anchor || this.fnInput);
+      this._placeUnder(this.fnForm, anchor || this._formAnchor || this.fnInput);
       if (controls.length) controls[0].ctrl.focus();
     }
 
@@ -3561,6 +3661,7 @@ var SympyEditor = (function () {
       if (this.lazy()) msg.lazy = true;
       if (this.range) msg.children = this._rangeIndices();
       this.fnInput.value = "";
+      this._formAnchor = null;
       this._hideFnMenu();
       this.send(msg);
       this.view.focus({ preventScroll: true });
@@ -5763,6 +5864,7 @@ var SympyEditor = (function () {
       set("addons", dis);
       if (this.opsSelect) this.opsSelect.disabled = dis;
       if (this.typeMenu) this.typeMenu.disabled = dis;
+      if (this.methodsMenu) this.methodsMenu.disabled = dis;
       for (var a = 0; a < this._addons.length; a++) {
         for (var t = 0; t < this._addons[a].tools.length; t++) this._addons[a].tools[t].button.disabled = dis;
       }

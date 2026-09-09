@@ -150,7 +150,7 @@
 }
 .se-icon { display: block; width: 1.2em; height: 1.2em; }
 .se-zoom { display: inline-flex; align-items: center; gap: 0.25rem; white-space: nowrap; }   /* one block: wraps as a unit */
-.se-toolbar button, .se-ops {
+.se-toolbar button {
   font: inherit;
   font-size: 12px;
   line-height: 1.2;
@@ -171,41 +171,59 @@
   box-shadow: var(--se-btn-shadow-down);
   transform: translateY(0.5px);
 }
-.se-toolbar button:focus-visible, .se-ops:focus-visible, .se-typemenu:focus-visible, .se-methods:focus-visible,
+.se-toolbar button:focus-visible,
 .se-actions button:focus-visible, .se-opbar button:focus-visible {
   outline: 2px solid rgba(var(--se-accent), 0.55);
   outline-offset: 1px;
 }
-.se-toolbar button:disabled, .se-ops:disabled, .se-typemenu:disabled, .se-methods:disabled {
+.se-toolbar button:disabled {
   background: none;                       /* flat and quiet: nothing to press */
   box-shadow: none;
 }
 @media (prefers-reduced-motion: reduce) {
-  .se-toolbar button, .se-ops, .se-actions button, .se-opbar button { transition: none; }
+  .se-toolbar button, .se-pick, .se-actions button, .se-opbar button { transition: none; }
 }
-/* The three menus are one set of controls, so they are one size: a select
- * otherwise takes the width of its widest option, which made Transform,
- * the type menu and Methods three different widths side by side.  Two of
- * them fit across a phone at this width. */
-.se-ops, .se-typemenu, .se-methods { width: 10rem; max-width: 100%; }
-.se-lazy { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 12px; cursor: pointer; white-space: nowrap; user-select: none; }
-.se-lazy input { margin: 0; }
-.se-fn {
+/* The apply row: two groups boxed apart - the actions (Transform and the
+ * type's own menu, both lists chosen by options.actions) and the library
+ * (every method of the class, every function of SymPy) - then the toggle.
+ * The four menus are one control (Picker, .se-pick): a field that lists its
+ * values under it and narrows them as one types, so they are one size, one
+ * look, and read as menus through the chevron at their right. */
+.se-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.3rem;
+  border: 1px solid var(--se-rule);
+  border-radius: 0.45rem;
+  background: rgba(127, 127, 127, 0.06);
+}
+.se-group-actions { border-color: rgba(var(--se-accent), 0.4); background: rgba(var(--se-accent), 0.07); }
+.se-pick {
   font: inherit;
   font-size: 12px;
   line-height: 1.2;
-  padding: 0.2rem 0.5rem;
-  flex: 1 1 12rem;
-  min-width: 0;
-  max-width: 24rem;
+  padding: 0.2rem 1.4rem 0.2rem 0.5rem;
+  width: 10rem;
+  max-width: 100%;
+  box-sizing: border-box;
   border: 1px solid var(--se-border);
   border-radius: 0.3rem;
-  background: var(--se-field);
+  background: var(--se-field) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 6 8 10.5 12.5 6' fill='none' stroke='%23888' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 0.4rem center / 0.65rem;
   box-shadow: inset 0 1px 2px rgba(16, 24, 40, 0.05);   /* a field is sunken, a button is raised */
   color: inherit;
+  cursor: pointer;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
 }
-.se-fn:focus { outline: 2px solid rgba(var(--se-accent), 0.6); outline-offset: -1px; }
-.se-fn-menu, .se-fn-form, .se-addons-menu {
+.se-pick::placeholder { color: var(--se-fg); opacity: 0.85; }   /* the menu's name, not a hint */
+.se-pick:focus { outline: 2px solid rgba(var(--se-accent), 0.6); outline-offset: -1px; cursor: text; }
+.se-pick:focus::placeholder { opacity: 0.45; }
+.se-pick[hidden] { display: none; }
+.se-pick:disabled { opacity: 0.4; cursor: default; }
+.se-lazy { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 12px; cursor: pointer; white-space: nowrap; user-select: none; }
+.se-lazy input { margin: 0; }
+.se-pick-menu, .se-fn-form, .se-addons-menu {
   position: absolute;
   z-index: 40;
   background: var(--se-bg);
@@ -215,7 +233,7 @@
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
   font-size: 12px;
 }
-.se-fn-menu[hidden], .se-fn-form[hidden], .se-addons-menu[hidden] { display: none; }
+.se-pick-menu[hidden], .se-fn-form[hidden], .se-addons-menu[hidden] { display: none; }
 /* the Add-ons menu: a check box per add-on the document can switch */
 .se-addons-menu { min-width: 14rem; max-width: 28rem; padding: 0.3rem 0.4rem; display: flex; flex-direction: column; gap: 0.2rem; }
 .se-addon-row { display: flex; align-items: baseline; gap: 0.4rem; padding: 0.15rem 0.3rem; border-radius: 0.3rem; cursor: pointer; }
@@ -256,11 +274,11 @@
   .se-addons-install button, .se-addon-url { font-size: 14px; padding: 0.4rem 0.6rem; min-height: 2.2rem; }
   .se-addon-remove { font-size: 16px; padding: 0.3rem 0.6rem; }
 }
-.se-fn-menu { min-width: 18rem; max-width: 30rem; max-height: 16rem; overflow-y: auto; padding: 2px; }
-.se-fn-item { display: flex; gap: 0.6rem; padding: 0.25rem 0.5rem; cursor: pointer; border-radius: 0.3rem; align-items: baseline; }
-.se-fn-item.se-active { background: rgba(var(--se-accent), 0.14); }
-.se-fn-name { font-family: var(--se-mono); font-weight: 600; white-space: nowrap; }
-.se-fn-doc { color: var(--se-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.se-pick-menu { min-width: 18rem; max-width: 30rem; max-height: 16rem; overflow-y: auto; padding: 2px; }
+.se-pick-item { display: flex; gap: 0.6rem; padding: 0.25rem 0.5rem; cursor: pointer; border-radius: 0.3rem; align-items: baseline; }
+.se-pick-item.se-active { background: rgba(var(--se-accent), 0.14); }
+.se-pick-name { font-family: var(--se-mono); font-weight: 600; white-space: nowrap; }
+.se-pick-doc { color: var(--se-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .se-fn-form { min-width: 20rem; max-width: 28rem; padding: 0.5rem 0.6rem; display: flex; flex-direction: column; gap: 0.3rem; }
 .se-fn-title { font-family: var(--se-mono); font-weight: 600; }
 .se-fn-docline { color: var(--se-muted); }
@@ -313,38 +331,7 @@
 }
 @keyframes se-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .se-spinner { animation: none; } }
-/* the type menu: operations of the selection's type, made hard to miss */
-.se-typemenu {
-  font: inherit;
-  font-size: 12px;
-  line-height: 1.2;
-  padding: 0.2rem 0.5rem;
-  border: 1px solid rgba(var(--se-accent), 0.9);
-  border-radius: 0.3rem;
-  background: linear-gradient(180deg, rgba(var(--se-accent), 0.16) 0%, rgba(var(--se-accent), 0.08) 100%);
-  box-shadow: var(--se-btn-edge), var(--se-btn-shadow);
-  color: inherit;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 120ms ease, box-shadow 120ms ease;
-}
-.se-typemenu[hidden] { display: none; }
-.se-methods {
-  font: inherit;
-  font-size: 12px;
-  line-height: 1.2;
-  padding: 0.2rem 0.5rem;
-  border: 1px solid var(--se-border);
-  border-radius: 0.3rem;
-  background: var(--se-btn);
-  box-shadow: var(--se-btn-edge), var(--se-btn-shadow);
-  color: inherit;
-  cursor: pointer;
-  transition: background 120ms ease, box-shadow 120ms ease;
-}
-.se-methods[hidden] { display: none; }
-.se-typemenu:disabled { opacity: 0.4; cursor: default; }
-.se-toolbar button:disabled, .se-ops:disabled { opacity: 0.4; cursor: default; }
+.se-toolbar button:disabled { opacity: 0.4; cursor: default; }
 .se-sep { width: 1px; height: 1.1rem; background: var(--se-border); margin: 0 0.5rem; }
 .se-status {
   /* its own full line under the tool rows: it is always visible, and its
@@ -962,7 +949,7 @@
   /* every control the finger can hit, the menus and the function box
    * included: leaving one out left it visibly smaller than the rest (the
    * type and Methods menus beside Transform) and harder to tap */
-  .se-toolbar button, .se-ops, .se-typemenu, .se-methods, .se-fn,
+  .se-toolbar button, .se-pick,
   .se-sym select, .se-sym input, .se-sym button, .se-actions button, .se-opbar button {
     font-size: 14px;
     padding: 0.45rem 0.7rem;
@@ -976,31 +963,22 @@
   .sympy-editor { min-width: 0; width: 100%; }
 }
 
-/* narrow screens (phones): the tools wrap onto as many rows as they need
- * (every button stays visible), and the status gets its own line */
-@media (max-width: 640px) {
-  .se-fn { width: 11rem; }
-}
-
 /* hover feedback only where hovering exists: on a touch screen :hover
  * sticks to the last tapped button, which then looks "active" */
 @media (hover: hover) {
-  .se-toolbar button:hover:not(:disabled), .se-ops:hover:not(:disabled), .se-methods:hover:not(:disabled) {
+  .se-toolbar button:hover:not(:disabled) {
     background: var(--se-btn-hover);
     border-color: rgba(var(--se-accent), 0.55);
     box-shadow: var(--se-btn-edge), var(--se-btn-shadow-hover);
   }
-  .se-typemenu:hover:not(:disabled) {
-    background: linear-gradient(180deg, rgba(var(--se-accent), 0.24) 0%, rgba(var(--se-accent), 0.14) 100%);
-    box-shadow: var(--se-btn-edge), var(--se-btn-shadow-hover);
-  }
+  .se-pick:hover:not(:disabled) { border-color: rgba(var(--se-accent), 0.55); }
   .se-actions button:hover:not(:disabled), .se-opbar button:hover:not(:disabled) {
     background: rgba(var(--se-accent), 0.14);
     box-shadow: inset 0 0 0 1px rgba(var(--se-accent), 0.25);
   }
   .se-sym button:hover:not(:disabled), .se-session button:hover:not(:disabled), .se-step:hover:not(:disabled) { background: rgba(var(--se-accent), 0.12); }
   .se-session[role="button"]:hover { background: rgba(var(--se-accent), 0.08); }
-  .se-fn-item:hover { background: rgba(var(--se-accent), 0.14); }
+  .se-pick-item:hover { background: rgba(var(--se-accent), 0.14); }
   .se-scrollbtn:hover { opacity: 1; color: rgb(var(--se-accent)); }
   .se-source[contenteditable]:hover { background: rgba(var(--se-accent), 0.06); }
 }
