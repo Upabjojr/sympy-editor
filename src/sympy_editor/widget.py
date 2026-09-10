@@ -26,6 +26,17 @@ class SympyEditorWidget(anywidget.AnyWidget):
     >>> w = SympyEditorWidget(x**2 + y)   # doctest: +SKIP
     >>> w                                 # display it
     >>> w.expr                            # current (edited) expression
+
+    Add-ons come the way they do for a page - ``addons=`` switched on,
+    ``available=`` there to be switched on while editing - and each may be
+    named by module, by add-on name, or given as an object:
+
+    >>> SympyEditorWidget(sin(x), addons=["sympy_editor_plot"])      # doctest: +SKIP
+    >>> SympyEditorWidget(sin(x), available=installed_addons())      # doctest: +SKIP
+
+    Their Python runs in this kernel, beside the document: an add-on's own
+    methods answer over the same channel as an edit, so the plot's samples
+    are the kernel's SymPy at work, not a copy of it in the browser.
     """
 
     _esm = read_static("editor.js") + "\n" + read_static("widget.js")

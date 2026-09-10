@@ -49,6 +49,25 @@ that runs its own SymPy in the browser — useful for notebooks exported with
 picks the kernel widget when anywidget is installed and falls back to Pyodide
 with a warning otherwise.
 
+#### Add-ons in the notebook
+
+They work here as they do anywhere else, and their Python runs in **this**
+kernel — the plot's samples are the kernel's SymPy at work:
+
+```python
+from sympy_editor import edit, installed_addons
+
+edit(sin(x), addons=["sympy_editor_plot"])       # on from the start
+edit(sin(x), available=installed_addons())       # listed, to switch on while editing
+```
+
+`addons=` switches them on; `available=` leaves them for the reader to turn
+on and off from the top of the drawer the **≡** button opens (their front
+ends are sent when they are switched on, not before).  Each may be named by
+module, by add-on name, or given as an `Addon`.  An add-on whose Python is
+not installed in the kernel is listed with the reason rather than silently
+missing.  `examples/addons.ipynb` walks through it.
+
 `on_change` is also how the editor drives another widget.
 `examples/plot_alongside.ipynb` puts a graph beside the formula — every
 committed edit redraws it, and every free symbol but `x` grows a slider —

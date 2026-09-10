@@ -3,9 +3,13 @@
  * one ES module, so `SympyEditor` is in scope here.
  *
  * Messages go to the kernel with model.send(); the kernel answers each one by
- * updating the "snapshot" trait (JSON string), which we apply to the editor
- * and use to settle the promise of the message it answers.  "interrupt" gets
- * no answer of its own: the interrupted message answers with the error.
+ * updating the "snapshot" trait (JSON string).  An answer settles the promise
+ * of the message it answers, with the snapshot itself - the same contract as
+ * the HTTP and Pyodide backends, whose send() resolves to the answer and
+ * applies nothing: whoever sent the message applies what it needs of it.  A
+ * snapshot that answers nothing (the first, or one the kernel pushes on its
+ * own after `w.expr = ...` in a cell) is applied here.  "interrupt" gets no
+ * answer of its own: the interrupted message answers with the error.
  */
 function render({ model, el }) {
   // Each message carries a request id and its answer brings it back, so the
@@ -29,8 +33,19 @@ function render({ model, el }) {
     if (!raw) return;
     const snap = JSON.parse(raw);
     const done = pending[snap._req];
-    delete pending[snap._req];
-    editor.setState(snap).then(() => { if (done) done(null); return editor._restoreAddons(); });
+    if (done) {
+      // To the sender, which applies it: Editor.send and the preview call
+      // setState themselves, and the rest read their answer off it - an
+      // add-on's method its result, the function picker its list, a save its
+      // session.  This used to settle them with null after applying the
+      // snapshot here, so every caller that reads its answer got nothing: the
+      // plot said "No answer" and drew nothing, the LaTeX reader never
+      // parsed, and a session could not be saved from a notebook.
+      delete pending[snap._req];
+      done(snap);
+      return;
+    }
+    editor.setState(snap).then(() => editor._restoreAddons());
   };
   model.on("change:snapshot", apply);
   apply();

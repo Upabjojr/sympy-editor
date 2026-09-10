@@ -315,8 +315,9 @@ installed_addons = installed
 
 
 def load_addon(spec: Union[str, Addon]) -> Addon:
-    """An :class:`Addon` from an instance, an entry-point name (``"tree"``,
-    see :func:`installed`), a module name (``"sympy_editor_tree"``: its
+    """An :class:`Addon` from an instance, the name of an installed add-on
+    (``"tree"``, from an entry point or an add-on folder: see
+    :func:`installed`), a module name (``"sympy_editor_tree"``: its
     ``ADDON``) or ``"module:object"`` (``"my_pkg.addons:PLOT"``).  A class is
     instantiated with no arguments."""
     if isinstance(spec, Addon):
@@ -328,7 +329,14 @@ def load_addon(spec: Union[str, Addon]) -> Addon:
                 addon = ep.load()
                 break
         if addon is None:
-            mod_name, _, attr = spec.partition(":")
+            # A name from an add-on folder (see register_addons_folder and
+            # SYMPY_EDITOR_ADDONS): installed() knows what to load it by.
+            # Without this a name resolved for Document(addons=[...]), which
+            # goes through the catalogue, but not for available=[...] or for
+            # a bare load_addon() - and the error said the name was installed
+            # in the same breath as refusing it.
+            found = installed().get(spec)
+            mod_name, _, attr = (found or spec).partition(":")
             try:
                 mod = importlib.import_module(mod_name)
             except ImportError as exc:

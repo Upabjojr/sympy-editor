@@ -326,6 +326,33 @@ def test_addon_folders_are_found_by_their_manifest(tmp_path, monkeypatch):
         ADDON_FOLDERS.remove(str(tmp_path.resolve()))
 
 
+def test_a_folder_registered_addon_loads_by_its_name(tmp_path, monkeypatch):
+    """An add-on from a folder is named by its manifest, not by its module,
+    and the name is what a reader has: installed_addons() hands out names,
+    so ``available=list(installed_addons())`` passes names in.  Both have to
+    reach the same add-on - once the name only worked through the
+    catalogue, so addons=["plot"] opened and available=["plot"] came back
+    saying "plot" was not installed while listing it among the installed."""
+    from sympy_editor.addons import ADDON_FOLDERS, register_addons_folder
+    folder = tmp_path / "named-addon"
+    (folder / "named_addon_pkg").mkdir(parents=True)
+    (folder / "named_addon_pkg" / "__init__.py").write_text(
+        "from sympy_editor import Addon\nclass A(Addon):\n    name = 'byname'\n    label = 'By name'\nADDON = A()\n")
+    (folder / "addon.json").write_text(json.dumps(
+        {"name": "byname", "label": "By name", "module": "named_addon_pkg", "version": "0.1"}))
+    register_addons_folder(tmp_path)
+    try:
+        assert load_addon("byname").name == "byname"           # the name...
+        assert load_addon("named_addon_pkg").name == "byname"  # ...and the module
+        assert list(Document(x, addons=["byname"]).addons) == ["byname"]
+        listed = {a["name"]: a for a in Document(x, available=["byname"]).available_addons()}
+        assert "error" not in listed["byname"] and listed["byname"]["label"] == "By name"
+    finally:
+        ADDON_FOLDERS.remove(str(tmp_path.resolve()))
+    with pytest.raises(ValueError):        # gone with the folder, and it says so
+        load_addon("byname")
+
+
 def test_the_repositorys_addon_folders_carry_manifests():
     """Every add-on in addons/ is a folder of the format the apps bundle and
     a repository would be cloned as: manifest beside the package."""

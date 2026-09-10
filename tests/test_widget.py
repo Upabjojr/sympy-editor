@@ -143,3 +143,29 @@ def test_widget_interrupts_the_message_that_is_running():
     assert [s["_req"] for s in seen] == [1, 2]
     assert seen[0]["error"].startswith("Interrupted") and w.expr == x
     assert seen[1]["error"] is None and "export" in seen[1]
+
+
+def test_widget_offers_addons_and_sends_the_front_end_when_switched_on():
+    """What the notebook examples do: available= lists add-ons for the reader
+    without loading them, and switching one on at run time answers with its
+    front end, since the page had none to start with."""
+    from sympy_editor import Addon
+
+    class Demo(Addon):
+        name = "demo"
+        label = "Demo"
+        js = 'SympyEditor.registerAddon("demo", {mount: function () { return {}; }});'
+
+    demo = Demo()
+    w = SympyEditorWidget(sin(x), available=[demo])
+    assert w.options["addons"] == []                       # listed, not loaded
+    listed = {a["name"]: a for a in w.document.available_addons()}
+    assert listed["demo"]["label"] == "Demo" and not listed["demo"]["on"]
+
+    w._on_msg(w, {"action": "addons", "enable": ["demo"], "_req": 3}, [])
+    w.wait(5)
+    snap = json.loads(w.snapshot)
+    assert snap["_req"] == 3
+    assert [a["name"] for a in snap["addon_clients"]] == ["demo"]
+    assert snap["addon_clients"][0]["js"] == demo.js
+    assert list(w.document.addons) == ["demo"]
