@@ -34,6 +34,13 @@ def _online(url):
 pytestmark = pytest.mark.skipif(not (_online(default_urls()["katexJs"]) and _online(PLOTLY_JS)), reason="a CDN is not reachable")
 
 
+
+#: Where the picture sits below the plot bar, in pixels: a wobble changes it,
+#: page scrolling does not.
+LAYOUT = """(() => { const a = document.querySelector('.plot-area').getBoundingClientRect(),
+    b = document.querySelector('.se-addon-plot .plot-bar').getBoundingClientRect();
+    return Math.round(a.top - b.top); })()"""
+
 def test_fields_values_zoom_and_guide():
     doc = Document(a * sin(x), addons=[ADDON])
     srv = EditorServer(doc, port=0)
@@ -64,14 +71,13 @@ def test_fields_values_zoom_and_guide():
         page.wait_for_function("document.querySelector('.plot-sliders label') && document.querySelector('.plot-sliders label').getAttribute('data-sym') === 'a'")
         page.locator(".plot-sliders .plot-value").fill("2")
         page.wait_for_selector(".plot-area svg.main-svg, .plot-area svg.plot-svg", timeout=30000)
-        page.wait_for_function("document.querySelector('.plot-shown').textContent.includes('-6')")
+        assert page.locator(".se-addon-plot .plot-bar .plot-num").first.input_value() == "-6"
         assert page.locator(".plot-sliders label.plot-unset").count() == 0
-        # a zoom in the picture: the fields follow, the readout says what is shown
+        # a zoom in the picture: the fields follow
         page.wait_for_function("document.querySelector('.plot-area')._seRelayout === true")   # Plotly's event API is up
         page.evaluate("Plotly.relayout(document.querySelector('.plot-area'), {'xaxis.range': [0, 1]})")
         page.wait_for_function("document.querySelector('.se-addon-plot .plot-bar .plot-num').value === '0'")
         assert page.locator(".se-addon-plot .plot-bar .plot-num").nth(1).input_value() == "1"
-        page.wait_for_function("document.querySelector('.plot-shown').textContent === 'visible range: 0 … 1'")
         # the gestures a person uses: a drag moves the picture, the wheel zooms
         box = page.locator(".plot-area .nsewdrag").first.bounding_box()
         x0, ym = box["x"] + box["width"] * 0.5, box["y"] + box["height"] * 0.5
@@ -83,19 +89,22 @@ def test_fields_values_zoom_and_guide():
         want = by / span[0] * span[1]
         near = "(() => { const v = parseFloat(document.querySelector('.se-addon-plot .plot-bar .plot-num').value); return Math.abs(v - %s) < 0.06; })()"
         page.wait_for_function(near % round(want, 4))
-        assert page.locator(".plot-shown").inner_text().startswith("visible range:")
-        shown = page.locator(".plot-shown").inner_text()
+        fields = lambda: [page.locator(".se-addon-plot .plot-bar .plot-num").nth(i).input_value() for i in (0, 1)]
+        shown = fields()
+        lay = page.evaluate(LAYOUT)
         wide = page.evaluate("() => { const r = document.querySelector('.plot-area')._fullLayout.xaxis.range; return r[1] - r[0]; }")
         page.mouse.move(box["x"] + box["width"] * 0.5, ym)
         for _ in range(3):                                                     # three notches: zooms in around the pointer
             page.mouse.wheel(0, -120)
             page.wait_for_timeout(200)
         page.wait_for_function("(w) => { const r = document.querySelector('.plot-area')._fullLayout.xaxis.range; return (r[1] - r[0]) < w * 0.9; }", arg=wide)
-        assert page.locator(".plot-shown").inner_text() != shown
+        page.wait_for_function("(s) => document.querySelector('.se-addon-plot .plot-bar .plot-num').value !== s", arg=shown[0])
+        assert fields() != shown
+        assert page.evaluate(LAYOUT) == lay                                   # the zoom moved nothing on the page
         page.mouse.dblclick(x0, ym)                                            # back to the whole span
-        page.wait_for_function("document.querySelector('.plot-shown').textContent === 'visible range: -6 … 6'")
+        page.wait_for_function("(() => { const f = document.querySelectorAll('.se-addon-plot .plot-bar .plot-num'); return f[0].value === '-6' && f[1].value === '6'; })()")
         # a plot cleared for a missing value and drawn again still follows a zoom
-        # (Plotly's purge took the listener away once, and the label stayed at -6 … 6)
+        # (Plotly's purge took the listener away once, and the fields stayed at -6 … 6)
         page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.send({action: 'set', src: 'a*sin(x) + b'})")
         page.wait_for_selector(".se-addon-plot .plot-note.error", timeout=15000)
         page.locator('.plot-sliders [data-sym="b"] .plot-value').fill("1")
@@ -104,7 +113,7 @@ def test_fields_values_zoom_and_guide():
         box = page.locator(".plot-area .nsewdrag").first.bounding_box()
         x0, ym = box["x"] + box["width"] * 0.5, box["y"] + box["height"] * 0.5
         page.mouse.move(x0, ym); page.mouse.down(); page.mouse.move(x0 - box["width"] * 0.25, ym, steps=10); page.mouse.up()
-        page.wait_for_function("document.querySelector('.plot-shown').textContent !== 'visible range: -6 … 6'")
+        page.wait_for_function("document.querySelector('.se-addon-plot .plot-bar .plot-num').value !== '-6'")
         assert float(page.locator(".se-addon-plot .plot-bar .plot-num").first.input_value()) > -6
         # the guide
         page.locator(".se-addon-plot .se-addon-help").click()
@@ -167,6 +176,7 @@ def test_two_fingers_pinch_the_axis():
 
             height = lambda: page.evaluate("() => { const r = document.querySelector('.plot-area')._fullLayout.yaxis.range; return r[1] - r[0]; }")
             wide, held, tall = span(), at_hold(), height()
+            lay0 = page.evaluate(LAYOUT)
             pinch(30, 110)                               # apart, sideways: a closer look along the axis
             close = span()
             assert close < wide * 0.6, (wide, close)
@@ -174,10 +184,15 @@ def test_two_fingers_pinch_the_axis():
             # fingers that barely separate up the screen say nothing about the
             # height, so a sideways pinch leaves it alone
             assert abs(height() - tall) < tall * 0.2, (tall, height())
-            # the fields and the label follow the pinch, as they do a wheel zoom
+            # the fields follow the pinch, as they do a wheel zoom
             assert abs(float(page.locator(".se-addon-plot .plot-bar .plot-num").first.input_value())
                        - page.evaluate("() => document.querySelector('.plot-area')._fullLayout.xaxis.range[0]")) < 0.2
-            assert page.locator(".plot-shown").inner_text().startswith("visible range:")
+            # and nothing on the page moved: at a phone's width follow the
+            # selection used to wrap onto the next line and back as the bar
+            # changed width, and the picture jumped under the fingers
+            assert page.evaluate(LAYOUT) == lay0, (lay0, page.evaluate(LAYOUT))
+            assert page.locator(".se-addon-plot .plot-bar input[type=checkbox]").count() == 0
+            assert page.locator(".se-addon-plot .plot-follow input[type=checkbox]").count() == 1
 
             pinch(110, 30)                               # fingers together: back out
             assert span() > close * 1.8, (close, span())

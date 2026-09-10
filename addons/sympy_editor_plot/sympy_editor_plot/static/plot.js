@@ -21,15 +21,21 @@ SympyEditor.registerAddon("plot", {
     };
     var from = numField(opts.span ? opts.span[0] : -6, "Left end of the axis (a zoom in the picture changes it too)");
     var to = numField(opts.span ? opts.span[1] : 6, "Right end of the axis (a zoom in the picture changes it too)");
-    var shown = h("span", { class: "plot-shown", title: "The visible range of the axis: it follows a zoom or a pan in the picture" });
     var follow = h("input", { type: "checkbox", checked: "" });
     var sliders = h("div", { class: "plot-sliders" });
     var bar = h("div", { class: "plot-bar" }, [
       h("label", {}, ["variable ", varSel]),
-      h("label", {}, ["from ", from]), h("label", {}, ["to ", to]), shown,
+      h("label", {}, ["from ", from]), h("label", {}, ["to ", to])
+    ]);
+    // A line of its own.  Beside the fields it wrapped onto the next line and
+    // back whenever the bar's width changed - and the width changed on every
+    // zoom while a readout of the visible range sat in the bar - so the
+    // picture underneath jumped up and down under the fingers.  The readout
+    // is gone too: the from/to fields already follow a zoom or a pan.
+    var followRow = h("div", { class: "plot-follow" }, [
       h("label", { title: "Plot the selected piece of the formula; unticked, the whole expression" }, [follow, " follow the selection"])
     ]);
-    var element = h("div", { class: "plot-panel" }, [bar, sliders, area, note]);
+    var element = h("div", { class: "plot-panel" }, [bar, followRow, sliders, area, note]);
 
     var values = {};        // the values given to the other free symbols, by name (none until the user gives one)
     var seq = 0, timer = null, plotly = null, plotlyFailed = false;
@@ -59,7 +65,6 @@ SympyEditor.registerAddon("plot", {
     var FEWEST = 60;        // points: below this the curve is not worth drawing
 
     function fmt(v) { return Number(v).toPrecision(4).replace(/\.?0+$/, ""); }
-    function showRange(a, b) { shown.textContent = a === null ? "" : "visible range: " + fmt(a) + " \u2026 " + fmt(b); }
 
     function target() {
       if (!follow.checked) return { path: "/" };
@@ -202,7 +207,6 @@ SympyEditor.registerAddon("plot", {
       if (plotly && area.querySelector(".js-plotly-plot, .plot-container")) { try { plotly.purge(area); } catch (e) { /* ignore */ } }
       area._seRelayout = false;
       area.textContent = "";
-      showRange(null);
     }
 
     function draw(res) {
@@ -237,12 +241,10 @@ SympyEditor.registerAddon("plot", {
             : { zeroline: true, gridcolor: dark ? "#333" : "#eee" }
         }, { responsive: true, displayModeBar: false, scrollZoom: true }).then(listenZoom, function () { /* drawn or not, nothing to listen to */ });
         sampled = [xs[0], xs[xs.length - 1]];
-        showRange(sampled[0], sampled[1]);
         return;
       }
       drawSvg(res);
       sampled = [xs[0], xs[xs.length - 1]];
-      showRange(sampled[0], sampled[1]);
     }
 
 
@@ -508,20 +510,16 @@ SympyEditor.registerAddon("plot", {
       if (typeof a !== "number" || typeof b !== "number" || !(a < b)) return;
       if (sampled && Math.abs(a - sampled[0]) < 1e-12 && Math.abs(b - sampled[1]) < 1e-12) return;   // the range we drew
       from.value = fmt(a); to.value = fmt(b);
-      showRange(a, b);
       request();
     }
 
     /** After every draw (Plotly's event API is on the element only once it
-     *  has drawn, and a purge takes it off again): listen for zooms, once,
-     *  and read the visible range back from the axis itself. */
+     *  has drawn, and a purge takes it off again): listen for zooms, once. */
     function listenZoom() {
       if (typeof area.on !== "function") return;
       if (typeof area.removeListener === "function") area.removeListener("plotly_relayout", onRelayout);
       area.on("plotly_relayout", onRelayout);
       area._seRelayout = true;
-      var ax = area._fullLayout && area._fullLayout.xaxis;
-      if (ax && ax.range && ax.range.length === 2) showRange(ax.range[0], ax.range[1]);
     }
 
     /** The fallback: axes and a polyline per curve, the vertical range from
@@ -577,7 +575,7 @@ SympyEditor.registerAddon("plot", {
       "<section><h3>Controls</h3><ul>",
       "<li><b>variable</b>: the symbol on the horizontal axis (the first free symbol to begin with); <b>from</b>/<b>to</b>: the span.</li>",
       "<li>With more than one free symbol nothing is drawn until the others have a value: each gets a field and a slider, and the value is substituted on the way to the plot \u2014 the formula stays symbolic. No value is ever guessed.</li>",
-      "<li><b>Drag</b> in the picture to move it \u2014 with the mouse or a finger, in either direction \u2014 and <b>turn the wheel</b> over it to zoom; double-click to come back to the whole thing. The <b>from</b>/<b>to</b> fields take the visible range, <i>visible range</i> reads it out, and the curve is sampled again over it \u2014 zooming in brings detail.</li>",
+      "<li><b>Drag</b> in the picture to move it \u2014 with the mouse or a finger, in either direction \u2014 and <b>turn the wheel</b> over it to zoom; double-click to come back to the whole thing. The <b>from</b>/<b>to</b> fields take the visible range, and the curve is sampled again over it \u2014 zooming in brings detail.</li>",
       "<li>On a touch screen, <b>pinch with two fingers</b> to zoom: apart for a closer look, together to come back out. Each axis takes the share the fingers moved along it \u2014 sideways for the span, up and down for the height, both for a pinch across the corner \u2014 and what is under the middle of the pinch stays where it is.</li>",
       "<li><b>Drag with one finger</b> to move the picture, in either direction: the span sideways, the height up and down.</li>",
       "<li>On a laptop, a <b>pinch on the trackpad</b> zooms both axes about the pointer. Double-click to come back to the whole picture.</li>",
