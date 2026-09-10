@@ -1,8 +1,12 @@
 name: Web app
 
-# Builds the web app (webapp/build.py) and publishes it with GitHub Pages.
-# Enable Pages for the repository (Settings > Pages > Source: GitHub Actions)
-# once; then every push to the default branch deploys it.
+# Builds the web app (webapp/build.py), to know that it builds, and keeps
+# what it built as the run's artifact.  It publishes nothing: the site at
+# https://upabjojr.github.io/sympy-editor/ is the shelf (`python
+# webapp/build.py --shelf DIR`, see the README) and lives in the
+# Upabjojr.github.io repository.  Pages for this repository would be served
+# at that same address and hide it, so they are left off - which is why a
+# deploy step here only ever failed.
 
 on:
   workflow_dispatch:
@@ -12,12 +16,6 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: true
 
 jobs:
   build:
@@ -32,15 +30,5 @@ jobs:
       # with two of the four rather than all of them.
       - run: pip install -e . "lark>=1.1" "sympy-matching>=0.0.4"
       - run: python webapp/build.py --out webapp/dist
-      - uses: actions/upload-pages-artifact@v3
-        with: { path: webapp/dist }
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - uses: actions/upload-artifact@v4
+        with: { name: webapp, path: webapp/dist }

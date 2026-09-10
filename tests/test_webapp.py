@@ -268,11 +268,22 @@ def test_the_shelf_teaches_and_shows_the_notebook_only_when_it_can(tmp_path):
     assert "android-history.png" not in page
 
 
+def _every_addons_packages():
+    """Skip unless this Python has every bundled add-on's own packages.  The
+    site is built where it has them (webapp.yml installs lark and
+    sympy-matching), and opens with all four on; a Python without them
+    cannot switch those two on, so there is no claim to check.  CI still
+    tests 3.9, which sympy-matching (3.10 and up) does not install on."""
+    pytest.importorskip("lark")
+    pytest.importorskip("sympy_matching")
+
+
 def test_the_site_opens_with_every_add_on_switched_on(tmp_path):
     """The site is the shop window: everything the editor can do is on when it
     opens, rather than waiting behind a menu nobody has been told about.  An
     app builds the same bundle with them merely available, and remembers what
     its owner leaves on, so the flag is the web site's alone."""
+    _every_addons_packages()
     mod = _load()
     out = mod.build(tmp_path / "dist", cdn=True)
     index = (out / "index.html").read_text(encoding="utf-8")
@@ -308,6 +319,7 @@ def test_the_showcase_site_opens_with_the_add_ons_on(tmp_path):
     open with the add-ons switched on - the site is where somebody sees what
     the editor can do - and both must name the packages the browser installs
     for them."""
+    _every_addons_packages()
     mod = _load()
     out = mod.shelf_site(tmp_path / "shelf", cdn=True)
     for name in ("index.html", "editor.html"):
