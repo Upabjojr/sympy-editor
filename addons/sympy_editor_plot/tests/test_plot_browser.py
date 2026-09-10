@@ -61,6 +61,11 @@ def test_fields_values_zoom_and_guide():
         assert "2 free symbols" in note and "give a value to x" in note      # a is first alphabetically: on the axis
         assert page.locator(".plot-area *").count() == 0
         assert page.locator(".plot-sliders label.plot-unset").count() == 1
+        # and every number field - the range's, a slider's value - asks for the
+        # ordinary keyboard: the phones' decimal and numeric pads have no
+        # minus sign, and "from" is negative to begin with
+        modes = page.evaluate("Array.from(document.querySelectorAll('.se-addon-plot .plot-num')).map(e => e.getAttribute('inputmode'))")
+        assert len(modes) >= 3 and all(m in (None, "text") for m in modes), modes
         # the range fields are text: selectable like any text
         frm = page.locator(".se-addon-plot .plot-bar .plot-num").first
         frm.click()

@@ -15,9 +15,13 @@ SympyEditor.registerAddon("plot", {
     var varSel = h("select", { title: "The variable on the horizontal axis" });
     // Text fields, not number inputs: a number input offers no text selection
     // to speak of (no selectionStart, no double-click to select) in some
-    // browsers; a text field with a decimal keyboard does.
+    // browsers.  And the ordinary keyboard, not a numeric one: on iOS and
+    // Android the decimal and numeric pads have no minus sign, and the
+    // numbers typed here are often negative ("from" is, to begin with).
+    // Nothing asks a phone for digits and a minus alone; the ordinary
+    // keyboard has both one tap away (123 / ?123).
     var numField = function (value, title) {
-      return h("input", { type: "text", inputmode: "decimal", class: "plot-num", value: String(value), title: title, spellcheck: "false", autocomplete: "off" });
+      return h("input", { type: "text", autocapitalize: "off", autocorrect: "off", class: "plot-num", value: String(value), title: title, spellcheck: "false", autocomplete: "off" });
     };
     var from = numField(opts.span ? opts.span[0] : -6, "Left end of the axis (a zoom in the picture changes it too)");
     var to = numField(opts.span ? opts.span[1] : 6, "Right end of the axis (a zoom in the picture changes it too)");
@@ -183,7 +187,7 @@ SympyEditor.registerAddon("plot", {
         var row = sliders.querySelector('[data-sym="' + name + '"]');
         if (row) return;
         var has = name in values;
-        var num = h("input", { type: "text", inputmode: "decimal", class: "plot-num plot-value", placeholder: "value", title: "The value of " + name + " for the plot",
+        var num = h("input", { type: "text", autocapitalize: "off", autocorrect: "off", class: "plot-num plot-value", placeholder: "value", title: "The value of " + name + " for the plot",
                                value: has ? String(values[name]) : "", spellcheck: "false", autocomplete: "off" });
         var range = h("input", { type: "range", min: "-3", max: "3", step: "0.05", value: has ? String(values[name]) : "0", title: "Slide to change " + name });
         var set = function (v) {
