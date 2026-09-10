@@ -2001,10 +2001,15 @@ var SympyEditor = (function () {
           self._hideMatrixGhost();
           try { hd.releasePointerCapture(ev.pointerId); } catch (e) { /* not captured */ }
           if (!cancelled && (d.rows !== d.ctx.rows || d.cols !== d.ctx.cols)) self._matrixOp("reshape", d.rows, d.cols, d.ctx.path);
-          else self.view.focus({ preventScroll: true });
+          else { self.view.focus({ preventScroll: true }); self._placeMatrixHandle(); }
         };
         hd.addEventListener("pointerup", function (ev) { endMatDrag(ev, false); });
         hd.addEventListener("pointercancel", function (ev) { endMatDrag(ev, true); });
+        // The capture lost with the drag still on - the grip taken off the
+        // page by a new rendering: end the drag as cancelled rather than
+        // leave one that nothing will ever finish.  After an ordinary release
+        // the drag is over already, and this does nothing.
+        hd.addEventListener("lostpointercapture", function (ev) { endMatDrag(ev, true); });
         hd.addEventListener("click", function (ev) { ev.stopPropagation(); });
         hd.addEventListener("touchstart", function (ev) { ev.stopPropagation(); }, { passive: true });
       }
@@ -3180,8 +3185,13 @@ var SympyEditor = (function () {
      *  grip is appended again each time it is placed. */
     _placeMatrixHandle() {
       var hd = this.matHandle;
-      if (!hd) return;
-      var ctx = !this.closed && !this.input && !this._matDrag ? this._matrixContext() : null;
+      // Mid-drag the grip stays where it is.  It holds the drag's pointer
+      // capture, and taking it off the page - which this did whenever a
+      // state, a scroll or a resize placed it again during a drag - sent the
+      // moves and the release elsewhere: the drag never ended, and the new
+      // size was never sent.
+      if (!hd || this._matDrag) return;
+      var ctx = !this.closed && !this.input ? this._matrixContext() : null;
       var el = ctx ? this._els(ctx.path)[0] : null;
       if (!el || el.classList.contains("se-editing") || this.view.classList.contains("se-empty")) {
         if (hd.parentNode) hd.parentNode.removeChild(hd);

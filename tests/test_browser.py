@@ -4592,6 +4592,39 @@ def test_matrix_rows_columns_and_the_resize_grip(browser, serve_expr):
     assert page.errors == []
 
 
+
+def test_the_grip_survives_being_placed_again_mid_drag(browser, serve_expr):
+    """The grip is placed again on every state, scroll and resize.  A call in
+    the middle of a drag used to take it off the page: the drag lost its
+    pointer capture, the release went to the page, and the new size was never
+    sent - which is what made the resize-grip test time out now and then on a
+    loaded CI runner, where a slow answer moved such a call into the drag.
+    The grip now stays where it is until the drag is over."""
+    srv, doc = serve_expr(Matrix([[1], [2], [3]]))
+    page = _open(browser, srv.url)
+    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "2"))
+    ctx = page.evaluate("document.querySelector('.sympy-editor').__sympyEditor._matHandleCtx")
+    assert ctx and (ctx["rows"], ctx["cols"]) == (3, 1), ctx
+    cell_w, cell_h = ctx["rect"]["width"] / ctx["cols"], ctx["rect"]["height"] / ctx["rows"]
+    grip = page.locator(".se-mat-handle")
+    box = grip.bounding_box()
+    gx, gy = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+    seq = int(page.locator(".sympy-editor").first.get_attribute("data-seq") or 0)
+    page.mouse.move(gx, gy)
+    page.mouse.down()
+    page.mouse.move(gx + cell_w, gy - cell_h, steps=3)
+    # what a state, a scroll or a resize does to the grip
+    page.evaluate("document.querySelector('.sympy-editor').__sympyEditor._placeMatrixHandle()")
+    assert grip.count() == 1                                      # still on the page, still holding the drag
+    page.mouse.move(gx + 2 * cell_w, gy - 2 * cell_h, steps=3)    # wider and shorter: 1 x 3
+    page.mouse.up()
+    page.wait_for_function("s => +document.querySelector('.sympy-editor').getAttribute('data-seq') > s",
+                           arg=seq, timeout=10000)
+    assert doc.expr.shape == (1, 3)
+    assert page.evaluate("document.querySelector('.sympy-editor').__sympyEditor._matDrag") is None
+    assert page.errors == []
+
+
 def test_arrows_move_through_a_matrix_as_it_is_drawn(browser, serve_expr):
     """In a grid the four arrows are directional: the entries of a matrix are
     a flat list of siblings (paths /2/0.. in reading order), so ← → used to
