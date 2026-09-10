@@ -14,10 +14,12 @@ addons/
   sympy_editor_plot/        the graph of the selection, drawn by Plotly.js (numpy optional)
   sympy_editor_matching/    rewrite rules matched many-to-one              (sympy-matching)
   sympy_editor_latex/       LaTeX in: a first reading, every ambiguity a choice, constants as switches (lark)
-  demo.py                   a page with the four, to try them in a browser
+  sympy_editor_feynman/     path integrals of QED as Feynman diagrams, drawn and editable  (no dependency; not bundled: install it while editing)
+  demo.py                   a page with the drafts, to try them in a browser
+  pack.py                   zips an add-on folder for "From a file…" in the Add-ons section
 ```
 
-All four are **drafts**: they work end to end (each has tests, and the
+All of them are **drafts**: they work end to end (each has tests, and the
 editor's browser test drives a panel), but their interfaces are the first
 version of an idea, not a promise.  They live in this repository for
 convenience only: an add-on is an **external project** - any package, in
@@ -75,6 +77,52 @@ entry point, the way pytest learns of its plugins.
 
 There is no configuration file and no build: an add-on is on for the
 documents that have it on, and off elsewhere.
+
+## Installing while editing
+
+The **Add-ons** section of the **≡** drawer (its own button on the strip
+when the drawer is off) ends with *Install an add-on*: paste the URL of a
+GitHub repository (`https://github.com/user/repo`, a folder in it,
+`user/repo`) or of a `.zip`, or choose a `.zip` with *From a file…*.  The
+page lists the add-ons it finds - every `addon.json` with its package
+beside it, the format below - with a check box each; *Install* unpacks
+the ticked ones into the **user directory** and switches them on.  A row
+of the menu that came this way says where it came from and has a × to
+remove it.
+
+- **Where they go.**  The apps keep them in their own data (`HOME`: the
+  files directory on Android, `Library/Application Support` on iOS), the
+  web app in the browser's storage (IndexedDB: the page unpacks them again
+  into the Pyodide file system at every start), a desktop Python in
+  `~/.sympy-editor/addons` (`SYMPY_EDITOR_USER_ADDONS` overrides it,
+  `sympy_editor.addons.set_user_dir()` from Python).  From then on
+  `installed_addons()` lists them beside the entry points, every new
+  document offers them, and `pip` is never involved.
+- **How the page reads a repository.**  GitHub's archive download sends no
+  CORS header, so a page fetches the tree through GitHub's API
+  (`/repos/o/r/git/trees/<ref>?recursive=1`, 60 calls an hour without a
+  token) and the files through `raw.githubusercontent.com`; when the API
+  refuses, jsDelivr's mirror of public repositories serves both.  The
+  native apps do the same from their WebView.  A `.zip` URL is fetched as
+  it is: it must come from a host that allows a page to read it - a
+  GitHub release asset does not; download it and use *From a file…*.
+- **What travels.**  The add-on folder without its `tests/`, caches or
+  `.git`; 40 MB and 4000 files at most; paths that escape the folder are
+  refused.  A manifest's `requires` is `micropip`-installed in the web app
+  (the page's runtime does it before switching the add-on on); the native
+  apps carry no pip, so an add-on that needs a package they lack shows
+  its error in the menu and stays off.
+- **It is code.**  An installed add-on runs in the app's Python and in the
+  page with the editor's rights; the menu says so.  Install what you trust.
+- **From Python:** `sympy_editor.addons.install_addons({"zip": base64} |
+  {"files": {path: text}}, select=[names])`, `inspect_addons(payload)`,
+  `uninstall_addon(name)`, `user_installed()`; through a document,
+  `{"action": "addons", "inspect": ..., "install": ..., "select": [...],
+  "uninstall": [...], "enable": [...]}` answers with `addons_result`.
+
+`python addons/pack.py sympy_editor_feynman` writes `addons/dist/…zip`,
+the archive *From a file…* takes; the Feynman add-on is the one kept out
+of the apps to be installed this way (from the repository's URL too).
 
 ## Writing an add-on of your own
 

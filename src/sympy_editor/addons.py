@@ -30,11 +30,16 @@ and SymPy, since it is embedded in the Pyodide pages with ``document.py``.
 
 from __future__ import annotations
 
+import base64
 import importlib
+import importlib.util
+import io
 import json
 import os
 import re
+import shutil
 import sys
+import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
@@ -47,7 +52,9 @@ if TYPE_CHECKING:  # pragma: no cover
     from .document import Document
 
 __all__ = ["Addon", "load_addon", "load_addons", "installed", "scan_addons", "register_addons_folder",
-           "read_manifest", "ENTRY_POINT_GROUP", "API_VERSION", "MANIFEST", "ADDONS_ENV"]
+           "read_manifest", "ENTRY_POINT_GROUP", "API_VERSION", "MANIFEST", "ADDONS_ENV",
+           "user_dir", "set_user_dir", "user_installed", "inspect_addons", "install_addons", "uninstall_addon",
+           "unpack_addons", "find_addons", "USER_ADDONS_ENV"]
 
 #: Installed add-ons announce themselves under this entry-point group:
 #: ``[project.entry-points."sympy_editor.addons"] tree = "sympy_editor_tree:ADDON"``.
@@ -63,6 +70,21 @@ MANIFEST = "addon.json"
 ADDONS_ENV = "SYMPY_EDITOR_ADDONS"
 #: Directories registered from Python (:func:`register_addons_folder`).
 ADDON_FOLDERS: List[str] = []
+#: Where the add-ons a user installs while editing go (:func:`install_addons`):
+#: this variable, else ``SYMPY_EDITOR_USER_ADDONS``, else ``~/.sympy-editor/addons``
+#: (``/sympy_editor_user_addons`` in a Pyodide page, whose file system is its
+#: own).  The apps point it into their data directory (:func:`set_user_dir`).
+USER_ADDONS_DIR: Optional[str] = None
+USER_ADDONS_ENV = "SYMPY_EDITOR_USER_ADDONS"
+#: The index the user directory keeps beside its folders: name -> {folder,
+#: version, source, ...}, so that the menu can say where an add-on came from.
+USER_INDEX = "installed.json"
+#: What an install refuses: more than this many bytes or files in one go.
+INSTALL_MAX_BYTES = 40 * 1024 * 1024
+INSTALL_MAX_FILES = 4000
+#: What of an add-on folder is not installed (tests, caches, a checkout's git).
+INSTALL_SKIP_DIRS = ("tests", "test", "__pycache__", ".git", ".github", "build", "dist", "node_modules")
+INSTALL_SKIP_SUFFIXES = (".pyc", ".pyo", ".egg-info")
 
 #: The version of this contract.  An add-on may set :attr:`Addon.api_version`
 #: to the one it was written for; a later, incompatible contract refuses it
@@ -305,6 +327,9 @@ def installed() -> Dict[str, str]:
     ``SYMPY_EDITOR_ADDONS`` and of :func:`register_addons_folder`."""
     out = {ep.name: ep.value for ep in sorted(_entry_points(ENTRY_POINT_GROUP), key=lambda e: e.name)}
     dirs = [d for d in os.environ.get(ADDONS_ENV, "").split(os.pathsep) if d] + list(ADDON_FOLDERS)
+    user = user_dir()
+    if user.is_dir() and str(user) not in dirs:
+        dirs.append(str(user))                            # what the user installed while editing
     for directory in dirs:
         for name, manifest in scan_addons(directory).items():
             out.setdefault(name, manifest["module"])
@@ -312,6 +337,262 @@ def installed() -> Dict[str, str]:
 
 
 installed_addons = installed
+
+
+# -- installing while editing ---------------------------------------------------
+#
+# An add-on folder (the manifest beside the package, the layout of a checkout
+# of an add-on's repository) can be installed at run time - from a .zip, or
+# from the files of a repository the front end fetched - into the user
+# directory, which :func:`installed` counts among the installed add-ons and
+# every new Document lists in its menu.  The apps and a Pyodide page keep
+# nothing else: the folders are the installation, and a folder removed is an
+# add-on gone (at the next start, where its module was already imported).
+# An add-on is code: it runs with the editor's rights, in the app's Python
+# and in the page.  The front end says so before installing anything.
+
+
+def user_dir() -> Path:
+    """The directory the add-ons installed while editing live in (see
+    :data:`USER_ADDONS_DIR`); it may not exist yet."""
+    if USER_ADDONS_DIR:
+        return Path(USER_ADDONS_DIR)
+    env = os.environ.get(USER_ADDONS_ENV)
+    if env:
+        return Path(env)
+    if sys.platform == "emscripten":                      # a Pyodide page: a file system of its own
+        return Path("/sympy_editor_user_addons")
+    return Path.home() / ".sympy-editor" / "addons"
+
+
+def set_user_dir(path: Union[str, Path]) -> Path:
+    """Put the user directory at ``path`` (an app's data directory) and make
+    what is there count as installed."""
+    global USER_ADDONS_DIR
+    USER_ADDONS_DIR = str(Path(path))
+    if Path(path).is_dir():
+        register_addons_folder(path)
+    return Path(path)
+
+
+def _read_index(root: Path) -> Dict[str, Dict[str, Any]]:
+    try:
+        data = json.loads((root / USER_INDEX).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_index(root: Path, index: Dict[str, Dict[str, Any]]) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / USER_INDEX).write_text(json.dumps(index, indent=1, sort_keys=True), encoding="utf-8")
+
+
+def user_installed(into: Union[str, Path, None] = None) -> Dict[str, Dict[str, Any]]:
+    """The add-ons installed while editing, by name: their manifests (with
+    ``folder``) plus what the index knows - ``source`` (where they came
+    from) and ``installed`` (when).  Empty when the directory does not exist."""
+    root = Path(into) if into is not None else user_dir()
+    if not root.is_dir():
+        return {}
+    index = _read_index(root)
+    out = {}
+    for name, manifest in scan_addons(root).items():
+        entry = dict(manifest)
+        entry.update({k: v for k, v in index.get(name, {}).items() if k not in entry})
+        entry["user"] = True
+        out[name] = entry
+    return out
+
+
+def _safe_relpath(name: str) -> Optional[str]:
+    """A zip member / files-map path as a clean relative posix path, or None
+    for one that must not be written (absolute, ``..``, a drive, empty)."""
+    text = str(name).replace("\\", "/")
+    if not text or text.startswith("/") or ":" in text.split("/", 1)[0] and len(text.split("/", 1)[0]) == 2:
+        return None
+    parts = [p for p in text.split("/") if p not in ("", ".")]
+    if not parts or any(p == ".." for p in parts):
+        return None
+    return "/".join(parts)
+
+
+def unpack_addons(payload: Dict[str, Any]) -> Dict[str, bytes]:
+    """The files of an install payload, by clean relative path.  ``payload``
+    is ``{"zip": <base64 of a .zip>}`` or ``{"files": {path: text or
+    {"b64": base64}}}`` (what the front end makes of a repository); paths
+    that escape (``..``, absolute) are refused, sizes are capped."""
+    files: Dict[str, bytes] = {}
+    total = 0
+
+    def put(name: str, data: bytes) -> None:
+        nonlocal total
+        rel = _safe_relpath(name)
+        if rel is None:
+            raise ValueError(f"Refusing the path {name!r} in the add-on archive")
+        total += len(data)
+        if total > INSTALL_MAX_BYTES or len(files) >= INSTALL_MAX_FILES:
+            raise ValueError("The add-on archive is too large to install")
+        files[rel] = data
+
+    if payload.get("zip"):
+        raw = payload["zip"]
+        try:
+            blob = base64.b64decode(raw, validate=False) if isinstance(raw, str) else bytes(raw)
+            with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+                for info in zf.infolist():
+                    if info.is_dir():
+                        continue
+                    if info.file_size > INSTALL_MAX_BYTES:
+                        raise ValueError("The add-on archive is too large to install")
+                    put(info.filename, zf.read(info))
+        except zipfile.BadZipFile:
+            raise ValueError("Not a .zip file") from None
+    elif isinstance(payload.get("files"), dict):
+        for name, value in payload["files"].items():
+            if isinstance(value, dict) and "b64" in value:
+                data = base64.b64decode(value["b64"])
+            elif isinstance(value, str):
+                data = value.encode("utf-8")
+            else:
+                raise ValueError(f"The file {name!r} is neither text nor base64")
+            put(name, data)
+    else:
+        raise ValueError("Nothing to install: give a zip or a files map")
+    if not files:
+        raise ValueError("The archive is empty")
+    return files
+
+
+def find_addons(files: Dict[str, bytes]) -> List[Dict[str, Any]]:
+    """The add-on folders among ``files``: every ``addon.json`` whose package
+    (``<folder>/<module>/__init__.py``) is there too, as manifests with
+    ``prefix`` (the folder's path in the archive, "" for the top) and
+    ``files`` (how many go with it); in the order of their paths."""
+    out = []
+    for path in sorted(files):
+        if path.rsplit("/", 1)[-1] != MANIFEST:
+            continue
+        prefix = path[: -len(MANIFEST)].rstrip("/")
+        if any(part in INSTALL_SKIP_DIRS for part in prefix.split("/") if part):
+            continue
+        try:
+            data = json.loads(files[path].decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            continue
+        if not isinstance(data, dict) or not data.get("name") or not data.get("module"):
+            continue
+        if not NAME_RE.match(str(data["name"])) or not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", str(data["module"])):
+            continue
+        init = (prefix + "/" if prefix else "") + str(data["module"]) + "/__init__.py"
+        if init not in files:
+            continue
+        manifest = {"name": str(data["name"]), "label": str(data.get("label") or data["name"]), "module": str(data["module"]),
+                    "version": str(data.get("version") or ""), "description": str(data.get("description") or ""),
+                    "requires": [str(r) for r in (data.get("requires") or []) if isinstance(r, str)],
+                    "prefix": prefix, "files": sum(1 for f in files if _under(f, prefix) and not _skipped(f, prefix))}
+        out.append(manifest)
+    return out
+
+
+def _under(path: str, prefix: str) -> bool:
+    return not prefix or path == prefix or path.startswith(prefix + "/")
+
+
+def _skipped(path: str, prefix: str) -> bool:
+    """Whether a file of an add-on folder stays out of the installation."""
+    rel = path[len(prefix) + 1:] if prefix else path
+    parts = rel.split("/")
+    return any(p in INSTALL_SKIP_DIRS for p in parts[:-1]) or parts[-1].endswith(INSTALL_SKIP_SUFFIXES)
+
+
+def inspect_addons(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """What an install payload holds (see :func:`find_addons`), each entry
+    also saying whether an add-on of that name is installed already
+    (``"installed": version or None``)."""
+    found = find_addons(unpack_addons(payload))
+    have = user_installed()
+    for m in found:
+        m["installed"] = have[m["name"]].get("version") if m["name"] in have else None
+    if not found:
+        raise ValueError("No add-on found: an add-on is a folder with addon.json beside its package")
+    return found
+
+
+def install_addons(payload: Dict[str, Any], select: Optional[Iterable[str]] = None,
+                   into: Union[str, Path, None] = None, source: str = "") -> List[Dict[str, Any]]:
+    """Install the add-on folders of ``payload`` (see :func:`unpack_addons`)
+    - the ones ``select`` names, or all - into ``into`` (the user directory
+    by default), one folder each, replacing a folder of the same name.
+    Returns their manifests (with ``folder``).  A module already imported in
+    this process is forgotten (``sys.modules``), so the new files load."""
+    root = Path(into) if into is not None else user_dir()
+    files = unpack_addons(payload)
+    found = find_addons(files)
+    wanted = set(select) if select is not None else None
+    chosen = [m for m in found if wanted is None or m["name"] in wanted]
+    if not chosen:
+        raise ValueError("No add-on found: an add-on is a folder with addon.json beside its package"
+                         if not found else "None of the add-ons named is in the archive")
+    if len({m["module"] for m in chosen}) < len(chosen):
+        raise ValueError("Two add-ons in the archive share a module name")
+    root.mkdir(parents=True, exist_ok=True)
+    index = _read_index(root)
+    out = []
+    for m in chosen:
+        folder = root / (m["prefix"].rsplit("/", 1)[-1] if m["prefix"] else m["module"])
+        if folder.exists():
+            shutil.rmtree(folder)
+        for path, data in files.items():
+            if not _under(path, m["prefix"]) or _skipped(path, m["prefix"]):
+                continue
+            rel = path[len(m["prefix"]) + 1:] if m["prefix"] else path
+            target = folder / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+        for old, entry in list(index.items()):        # another folder of the same add-on: gone
+            if old == m["name"] and entry.get("folder") not in (None, str(folder)) and Path(entry["folder"]).is_dir():
+                shutil.rmtree(entry["folder"], ignore_errors=True)
+        index[m["name"]] = {"folder": str(folder), "module": m["module"], "version": m["version"], "source": source,
+                            "installed": _now()}
+        _forget_module(m["module"])
+        entry = dict(m)
+        entry["folder"] = str(folder)
+        out.append(entry)
+    _write_index(root, index)
+    importlib.invalidate_caches()
+    register_addons_folder(root)
+    return out
+
+
+def uninstall_addon(name: str, into: Union[str, Path, None] = None) -> bool:
+    """Remove an add-on installed while editing: its folder and its index
+    entry.  Returns whether there was one.  Its module, if imported, stays
+    in this process until the next start."""
+    root = Path(into) if into is not None else user_dir()
+    have = user_installed(root)
+    entry = have.get(name)
+    index = _read_index(root)
+    if entry is None and name not in index:
+        return False
+    folder = Path(entry["folder"]) if entry else Path(index[name].get("folder", ""))
+    if folder.is_dir() and folder.resolve().parent == root.resolve():
+        shutil.rmtree(folder)
+        if str(folder.resolve()) in sys.path:
+            sys.path.remove(str(folder.resolve()))
+    index.pop(name, None)
+    _write_index(root, index)
+    return True
+
+
+def _forget_module(module: str) -> None:
+    for key in [k for k in sys.modules if k == module or k.startswith(module + ".")]:
+        del sys.modules[key]
+
+
+def _now() -> str:
+    import datetime
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def load_addon(spec: Union[str, Addon]) -> Addon:
@@ -328,7 +609,11 @@ def load_addon(spec: Union[str, Addon]) -> Addon:
                 addon = ep.load()
                 break
         if addon is None:
-            mod_name, _, attr = spec.partition(":")
+            # the name of an add-on folder (bundled, or installed while
+            # editing): its manifest says the module
+            folders = installed() if ":" not in spec else {}
+            target = folders.get(spec, spec) if not _importable(spec) else spec
+            mod_name, _, attr = target.partition(":")
             try:
                 mod = importlib.import_module(mod_name)
             except ImportError as exc:
@@ -349,6 +634,14 @@ def load_addon(spec: Union[str, Addon]) -> Addon:
     if int(getattr(addon, "api_version", API_VERSION)) > API_VERSION:
         raise ValueError(f"Add-on {addon.name!r} needs add-on API version {addon.api_version}; this sympy-editor has {API_VERSION}")
     return addon
+
+
+def _importable(name: str) -> bool:
+    """Whether ``name`` names a module this Python can import (without importing it)."""
+    try:
+        return importlib.util.find_spec(name.partition(":")[0]) is not None
+    except (ImportError, ValueError, AttributeError):
+        return False
 
 
 def load_addons(specs: Iterable[Union[str, Addon]]) -> Dict[str, Addon]:

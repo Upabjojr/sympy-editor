@@ -14,6 +14,7 @@ import urllib.request
 from contextlib import closing
 
 import pytest
+import json
 import re
 import time
 
@@ -3968,9 +3969,9 @@ def test_the_add_ons_switches_sit_at_the_top_of_the_drawer(browser, serve_expr):
         assert "se-drawer-addons" in panes[1], panes      # right under the head, above the sessions
         # it is a fold, shut until it is wanted
         assert page.evaluate("(() => document.querySelector('.se-drawer-addons').open)()") is False
-        assert not page.locator(".se-drawer-addons input").is_visible()
+        assert not page.locator(".se-drawer-addons .se-addon-row input").is_visible()
         page.locator(".se-drawer-addons .se-drawer-subhead").click()
-        box = page.locator(".se-drawer-addons input")
+        box = page.locator(".se-drawer-addons .se-addon-row input")   # the switches; the installer below has fields of its own
         assert box.count() == 1 and box.is_visible() and not box.is_checked()
         box.check()                                       # and it still switches the add-on on
         page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)
@@ -4308,7 +4309,7 @@ def test_addons_can_be_switched_on_and_off_while_editing(browser):
             if not page.locator(".se-addons-menu").is_visible():
                 menu_btn.click()
         open_menu()
-        box = page.locator(".se-addons-menu input")
+        box = page.locator(".se-addons-menu .se-addon-row input")
         assert box.count() == 1 and not box.is_checked()
         assert "Demo panel" in page.locator(".se-addons-menu").inner_text()
         box.check()                                       # on: the panel and the tools appear
@@ -4320,14 +4321,14 @@ def test_addons_can_be_switched_on_and_off_while_editing(browser):
         page.wait_for_function("document.querySelector('.se-source').textContent.startsWith('Box(')")
         # off: everything of it goes, the expression stays
         open_menu()
-        page.locator(".se-addons-menu input").uncheck()
+        page.locator(".se-addons-menu .se-addon-row input").uncheck()
         page.wait_for_function("!document.querySelector('.se-addon-demo')", timeout=10000)
         assert page.locator('.se-toolbar [data-cmd="addon:demo:boxit"]').count() == 0
         assert doc.addons == {} and isinstance(doc.expr, Boxed)
         assert page.locator(".se-source").inner_text().startswith("Box(")
         # and on again
         open_menu()
-        page.locator(".se-addons-menu input").check()
+        page.locator(".se-addons-menu .se-addon-row input").check()
         page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)
         assert page.errors == []
     finally:
@@ -4346,7 +4347,7 @@ def test_remembered_addons_come_back_after_a_reload(browser):
         page = _open(browser, srv.url)
         assert page.locator(".se-addon-demo").count() == 0
         page.locator('.se-toolbar [data-cmd="addons"]').click()
-        page.locator(".se-addons-menu input").check()
+        page.locator(".se-addons-menu .se-addon-row input").check()
         page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)
         assert page.evaluate("JSON.parse(localStorage.getItem('sympy-editor:addons'))") == ["demo"]
         doc.disable("demo")                                     # the server forgets (an app restarted)
@@ -4354,13 +4355,198 @@ def test_remembered_addons_come_back_after_a_reload(browser):
         page.wait_for_selector(".se-addon-demo .demo-panel", timeout=15000)     # switched on again from the storage
         assert list(doc.addons) == ["demo"]
         page.locator('.se-toolbar [data-cmd="addons"]').click()
-        page.locator(".se-addons-menu input").uncheck()
+        page.locator(".se-addons-menu .se-addon-row input").uncheck()
         page.wait_for_function("!document.querySelector('.se-addon-demo')", timeout=10000)
         assert page.evaluate("JSON.parse(localStorage.getItem('sympy-editor:addons'))") == []
         assert page.errors == []
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def _addon_zip(tmp_path, name="zipped", label="From a zip", version="1.0.0", module="sympy_editor_zipped", nested=True):
+    """A .zip of an add-on folder, as a repository downloaded from GitHub
+    comes (one top folder, the add-on's folder inside it) or flat."""
+    import io
+    import zipfile
+
+    js = ('SympyEditor.registerAddon("%s", { mount: function (api) { var el = api.h("div", { class: "%s-panel" }, ["hello from %s"]);'
+          ' return { element: el, title: "%s" }; } });' % (name, name, name, label))
+    py = ("from pathlib import Path\nfrom sympy_editor import Addon\nfrom sympy_editor.ops import make_op\n"
+          "class A(Addon):\n    name = %r\n    label = %r\n    js = (Path(__file__).parent / 'static' / 'panel.js').read_text()\n"
+          "    ops = (make_op('double_it', lambda e: 2 * e, label='Double it'),)\n"
+          "    def handle(self, doc, method, payload):\n        return {'hi': %r}\nADDON = A()\n" % (name, label, name))
+    manifest = json.dumps({"name": name, "label": label, "module": module, "version": version,
+                           "description": "A test add-on that says hello.", "requires": []})
+    top = "repo-main/addons/" + module + "/" if nested else ""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(top + "addon.json", manifest)
+        zf.writestr(top + module + "/__init__.py", py)
+        zf.writestr(top + module + "/static/panel.js", js)
+        zf.writestr(top + "tests/test_it.py", "def test_nothing(): pass\n")       # never installed
+        if nested:
+            zf.writestr("repo-main/README.md", "not an add-on\n")
+    path = tmp_path / (name + ".zip")
+    path.write_bytes(buf.getvalue())
+    return path
+
+
+def test_addons_install_from_a_zip_file_and_remove(browser, tmp_path, monkeypatch):
+    """The Add-ons menu installs an add-on from a .zip (the folder format,
+    inside a downloaded repository or not): what the archive holds is
+    listed first, the ticked ones are installed into the user directory and
+    switched on, and a remove button takes an installed one away."""
+    import sys as _sys
+    from sympy_editor import addons as addons_mod
+    user = tmp_path / "user-addons"
+    monkeypatch.setenv("SYMPY_EDITOR_USER_ADDONS", str(user))
+    monkeypatch.setattr(addons_mod, "USER_ADDONS_DIR", None)
+    archive = _addon_zip(tmp_path)
+    # a document that knows an add-on: the Add-ons menu is on the toolbar,
+    # and the installer at the foot of it is what this test drives
+    doc = Document(x + y, available=[_demo_addon()[0]])
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        page = _open(browser, srv.url)
+        page.locator('.se-toolbar [data-cmd="addons"]').click()
+        menu = page.locator(".se-addons-menu")
+        assert menu.is_visible() and "Install an add-on" in menu.inner_text()
+        assert "runs in this app" in menu.locator(".se-addons-warning").inner_text()
+        assert menu.locator(".se-addon-remove").count() == 0                  # the add-on it knows is not one the user installed
+        # a file: what it holds is listed, with a check box
+        menu.locator(".se-addon-file-input").set_input_files(str(archive))
+        found = menu.locator(".se-addons-found .se-addon-found")
+        found.first.wait_for(timeout=15000)
+        assert found.count() == 1 and "From a zip" in found.first.inner_text() and "1.0.0" in found.first.inner_text()
+        assert "says hello" in found.first.inner_text()
+        assert found.first.locator("input").is_checked()
+        assert "One add-on found" in menu.locator(".se-addons-status").inner_text()
+        # installed and switched on: the panel, the op, the files in the user directory
+        menu.locator(".se-addons-do-install").click()
+        page.wait_for_selector(".se-addon-zipped .zipped-panel", timeout=15000)
+        assert "hello from zipped" in page.locator(".zipped-panel").inner_text()
+        page.wait_for_function("document.querySelector('.se-addons-status').textContent.includes('Installed and switched on: zipped')")
+        assert list(doc.addons) == ["zipped"] and not doc.can_undo
+        assert (user / "sympy_editor_zipped" / "addon.json").is_file()
+        assert (user / "sympy_editor_zipped" / "sympy_editor_zipped" / "static" / "panel.js").is_file()
+        assert not (user / "sympy_editor_zipped" / "tests").exists()
+        assert json.loads((user / "installed.json").read_text())["zipped"]["source"] == "zipped.zip"
+        assert "zipped" in addons_mod.installed()
+        row = menu.locator(".se-addon-row").filter(has_text="From a zip")
+        assert row.count() == 1 and row.locator("input").is_checked() and "v1.0.0 installed from zipped.zip" in row.inner_text()
+        assert menu.locator(".se-addons-found .se-addon-found").count() == 0     # the list is done with
+        assert "double_it" in [op["name"] for op in doc.snapshot()["ops"]]           # its op is in the menus
+        # the same archive again: it says what it replaces
+        menu.locator(".se-addon-file-input").set_input_files(str(archive))
+        found.first.wait_for(timeout=15000)
+        assert "replaces v1.0.0" in found.first.inner_text()
+        menu.locator(".se-addons-cancel").click()
+        assert menu.locator(".se-addons-found .se-addon-found").count() == 0
+        # removed: the panel goes, the folder goes, the row goes
+        row.locator(".se-addon-remove").click()
+        page.wait_for_function("!document.querySelector('.se-addon-zipped')", timeout=10000)
+        page.wait_for_function("document.querySelector('.se-addons-status').textContent.includes('Removed zipped')")
+        assert doc.addons == {} and not (user / "sympy_editor_zipped").exists()
+        assert menu.locator(".se-addon-row").filter(has_text="From a zip").count() == 0
+        assert "zipped" not in addons_mod.installed()
+        # not an archive: a message in the menu, not an error of the formula
+        bad = tmp_path / "bad.zip"
+        bad.write_bytes(b"not a zip at all")
+        menu.locator(".se-addon-file-input").set_input_files(str(bad))
+        page.wait_for_function("document.querySelector('.se-addons-status').textContent.includes('Not a .zip')")
+        assert page.errors == []
+    finally:
+        srv.shutdown()
+        srv.server_close()
+        _sys.modules.pop("sympy_editor_zipped", None)
+
+
+def test_addons_install_from_a_github_repository(browser, tmp_path, monkeypatch):
+    """A GitHub URL: the page lists the repository through the API (or
+    jsDelivr), reads every addon.json, and fetches the ticked folders' files
+    through raw.githubusercontent.com - here all three served by a stand-in
+    the page's requests are routed to, so no network is needed."""
+    import sys as _sys
+    from sympy_editor import addons as addons_mod
+    user = tmp_path / "user-addons"
+    monkeypatch.setenv("SYMPY_EDITOR_USER_ADDONS", str(user))
+    monkeypatch.setattr(addons_mod, "USER_ADDONS_DIR", None)
+    files = {
+        "README.md": "# repo\n",
+        "addons/sympy_editor_ghost/addon.json": json.dumps({"name": "ghost", "label": "From GitHub", "module": "sympy_editor_ghost", "version": "2.0"}),
+        "addons/sympy_editor_ghost/sympy_editor_ghost/__init__.py":
+            "from sympy_editor import Addon\nclass G(Addon):\n    name = 'ghost'\n    label = 'From GitHub'\n"
+            "    js = 'SympyEditor.registerAddon(\"ghost\", { mount: function (api) { return { element: api.h(\"div\", { class: \"ghost-panel\" }, [\"boo\"]) }; } });'\nADDON = G()\n",
+        "addons/sympy_editor_ghost/sympy_editor_ghost/static/icon.png": bytes(range(256)),
+        "addons/sympy_editor_ghost/tests/test_ghost.py": "def test(): pass\n",
+        "addons/template/addon.json": json.dumps({"name": "tmpl", "label": "Template", "module": "tmpl_pkg", "version": "0.1"}),
+        "addons/template/tmpl_pkg/__init__.py": "from sympy_editor import Addon\nclass T(Addon):\n    name = 'tmpl'\nADDON = T()\n",
+    }
+    calls = []
+
+    def stand_in(route, request):
+        url = request.url
+        calls.append(url)
+        if "api.github.com/repos/o/r/git/trees/main" in url:
+            body = json.dumps({"tree": [{"path": p, "type": "blob", "size": len(c)} for p, c in files.items()], "truncated": False})
+            return route.fulfill(status=200, content_type="application/json", headers={"Access-Control-Allow-Origin": "*"}, body=body)
+        if url.rstrip("/").endswith("api.github.com/repos/o/r"):
+            return route.fulfill(status=200, content_type="application/json", headers={"Access-Control-Allow-Origin": "*"}, body=json.dumps({"default_branch": "main"}))
+        m = re.match(r"https://raw\.githubusercontent\.com/o/r/main/(.*)$", url)
+        if m and m.group(1) in files:
+            content = files[m.group(1)]
+            return route.fulfill(status=200, headers={"Access-Control-Allow-Origin": "*"}, body=content if isinstance(content, bytes) else content.encode())
+        return route.fulfill(status=404, headers={"Access-Control-Allow-Origin": "*"}, body="no")
+
+    doc = Document(x + y, available=[_demo_addon()[0]])      # so the Add-ons menu, and its installer, are on the toolbar
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        page = _open(browser, srv.url)
+        page.route(re.compile(r"https://(api\.github\.com|raw\.githubusercontent\.com|cdn\.jsdelivr\.net|data\.jsdelivr\.com)/.*"), stand_in)
+        page.locator('.se-toolbar [data-cmd="addons"]').click()
+        menu = page.locator(".se-addons-menu")
+        menu.locator(".se-addon-url").fill("https://github.com/o/r")
+        menu.locator(".se-addon-fetch").click()
+        found = menu.locator(".se-addons-found .se-addon-found")
+        page.wait_for_function("document.querySelectorAll('.se-addons-found .se-addon-found').length === 2", timeout=15000)
+        assert "2 add-ons found" in menu.locator(".se-addons-status").inner_text()
+        texts = found.all_inner_texts()
+        assert any("From GitHub" in t and "2.0" in t for t in texts) and any("Template" in t for t in texts)
+        # only the ticked one is fetched and installed
+        found.filter(has_text="Template").locator("input").uncheck()
+        menu.locator(".se-addons-do-install").click()
+        page.wait_for_selector(".se-addon-ghost .ghost-panel", timeout=15000)
+        page.wait_for_function("document.querySelector('.se-addons-status').textContent.includes('Installed and switched on: ghost')")
+        assert list(doc.addons) == ["ghost"]
+        assert (user / "sympy_editor_ghost" / "sympy_editor_ghost" / "static" / "icon.png").read_bytes() == bytes(range(256))   # binary, intact
+        assert not (user / "sympy_editor_ghost" / "tests").exists() and not (user / "template").exists()
+        assert not any("tmpl_pkg" in c for c in calls if "raw.github" in c)          # nothing of the unticked one fetched
+        assert not any("tests/test_ghost" in c for c in calls)
+        index = json.loads((user / "installed.json").read_text())
+        assert index["ghost"]["source"] == "https://github.com/o/r" and index["ghost"]["version"] == "2.0"
+        row = menu.locator(".se-addon-row").filter(has_text="From GitHub")
+        assert "installed from github.com/o/r" in row.inner_text()
+        # a folder of the repository: only what is under it
+        menu.locator(".se-addon-url").fill("https://github.com/o/r/tree/main/addons/template")
+        menu.locator(".se-addon-url").press("Enter")
+        page.wait_for_function("document.querySelectorAll('.se-addons-found .se-addon-found').length === 1", timeout=15000)
+        assert "Template" in found.first.inner_text()
+        menu.locator(".se-addons-cancel").click()
+        # a repository with nothing in it
+        page.unroute(re.compile(r"https://(api\.github\.com|raw\.githubusercontent\.com|cdn\.jsdelivr\.net|data\.jsdelivr\.com)/.*"))
+        page.route(re.compile(r"https://(api\.github\.com|raw\.githubusercontent\.com|cdn\.jsdelivr\.net|data\.jsdelivr\.com)/.*"),
+                   lambda route, request: route.fulfill(status=403, headers={"Access-Control-Allow-Origin": "*"}, body="rate limited"))
+        menu.locator(".se-addon-url").fill("o/nothing")
+        menu.locator(".se-addon-fetch").click()
+        page.wait_for_function("document.querySelector('.se-addons-status').textContent.includes('could not be read')", timeout=15000)
+        assert page.errors == []
+    finally:
+        srv.shutdown()
+        srv.server_close()
+        _sys.modules.pop("sympy_editor_ghost", None)
 
 
 def _box_follows_selection(page):

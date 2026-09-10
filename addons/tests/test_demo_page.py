@@ -12,7 +12,7 @@ import pytest
 ADDONS = Path(__file__).resolve().parents[1]
 PAGE = ADDONS / "demo.html"
 sys.path.insert(0, str(ADDONS.parent / "src"))
-for pkg in ("sympy_editor_tree", "sympy_editor_plot", "sympy_editor_matching", "sympy_editor_latex"):
+for pkg in ("sympy_editor_tree", "sympy_editor_plot", "sympy_editor_matching", "sympy_editor_latex", "sympy_editor_feynman"):
     sys.path.insert(0, str(ADDONS / pkg))
 
 

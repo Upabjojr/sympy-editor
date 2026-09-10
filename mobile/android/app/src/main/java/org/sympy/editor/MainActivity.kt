@@ -5,16 +5,20 @@ import android.content.ContentValues
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Color
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
 import android.webkit.JavascriptInterface
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.widget.FrameLayout
 import androidx.activity.addCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
@@ -57,6 +61,16 @@ class MainActivity : AppCompatActivity() {
      *  be remembered and applied again - see [onWindowFocusChanged]. */
     private var wantsFullscreen = false
 
+    /** The page's `<input type="file">` (the Add-ons menu installing an
+     *  add-on from a .zip): a WebView shows no chooser of its own, so the
+     *  request is handed to the system's document picker and its answer
+     *  back to the page.  iOS's WKWebView does this by itself. */
+    private var fileChooser: ValueCallback<Array<Uri>>? = null
+    private val pickFile = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        fileChooser?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data))
+        fileChooser = null
+    }
+
     /** The app's Python module (sympy_editor_app.py), started on first use. */
     private val pythonApp: PyObject by lazy {
         if (!Python.isStarted()) Python.start(AndroidPlatform(applicationContext))
@@ -98,6 +112,19 @@ class MainActivity : AppCompatActivity() {
         // cannot download a blob, so they go to Downloads and the share sheet.
         web.addJavascriptInterface(ReportBridge(), "SympyEditorApp")
         web.addJavascriptInterface(PythonBridge(), "SympyEditorPy")
+        web.webChromeClient = object : WebChromeClient() {
+            override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean {
+                fileChooser?.onReceiveValue(null)       // a chooser still open: the page gets nothing for it
+                fileChooser = callback
+                return try {
+                    pickFile.launch(params.createIntent())
+                    true
+                } catch (e: android.content.ActivityNotFoundException) {
+                    fileChooser = null
+                    false
+                }
+            }
+        }
         // Start Python (unpacking its assets on the first launch) while the
         // page loads, so the first edit does not wait for it.
         pythonThread.execute { pythonApp }

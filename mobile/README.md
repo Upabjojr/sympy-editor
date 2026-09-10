@@ -20,6 +20,16 @@ mobile/
   ios/                     SwiftUI + WKWebView serving www/ (EditorView.swift + PythonRuntime.m)
 ```
 
+Both apps bundle the add-ons of `addons/` (one folder each, see
+`build.py`), and take more at run time: the page's **Add-ons** section
+installs an add-on from a GitHub repository (fetched by the WebView) or a
+`.zip` (the system's file picker: `onShowFileChooser` on Android, WKWebView's
+own on iOS) into the app's data - `HOME/sympy-editor/addons` on Android
+(Chaquopy's files directory), `Library/Application Support/sympy-editor/addons`
+on iOS - where `sympy_editor_app.py` finds it at every launch.  An add-on
+that needs a package the app does not carry shows its error in the menu:
+there is no pip on a phone.
+
 ## 1. The shared bundle
 
 ```bash

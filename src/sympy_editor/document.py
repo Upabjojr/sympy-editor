@@ -32,7 +32,7 @@ from sympy.parsing.sympy_parser import (
 
 from collections import OrderedDict
 
-from .addons import Addon, installed, load_addon
+from .addons import Addon, inspect_addons, install_addons, installed, load_addon, uninstall_addon, user_installed
 from .ops import KINDS, KIND_LABELS, Op, get_ops, node_kind, node_kinds, with_kind
 from .printer import (
     PLACEHOLDER_RE,
@@ -439,6 +439,9 @@ class Document:
                     self._loaded[spec.name] = spec
                 else:
                     self._catalog[str(spec)] = str(spec)
+            # What the user installed while editing (a page built elsewhere
+            # cannot have named it) is on offer like the rest.
+            self._adopt_user_addons()
         # Add-ons come first (their names read srepr strings back); what a
         # session kept for them is given back at the end, once there is an
         # expression to parse in the context of (restore_state may parse).
@@ -509,6 +512,8 @@ class Document:
             return got
         if isinstance(spec, str) and spec in self._catalog and not isinstance(self._catalog[spec], str):
             return self._catalog[spec]
+        if isinstance(spec, str) and spec not in self._catalog:
+            self._adopt_user_addons()                     # installed since this document was made?
         try:
             addon = load_addon(self._catalog.get(spec, spec) if isinstance(spec, str) else spec)
         except Exception as exc:
@@ -557,15 +562,22 @@ class Document:
 
     def available_addons(self) -> List[Dict[str, Any]]:
         """The add-ons this document can switch on or off: ``[{"name",
-        "label", "on", "requires"[, "error"]}]`` - the ones it started
-        with, plus what ``available`` named (every installed add-on by
-        default).  One that cannot be loaded is listed with its error."""
+        "label", "on", "requires"[, "error"][, "user": {version, source}]}]``
+        - the ones it started with, plus what ``available`` named (every
+        installed add-on by default), and what was installed while editing
+        (``user``: removable).  One that cannot be loaded is listed with
+        its error."""
         out = []
+        mine = self._adopt_user_addons()
         for key in list(self._catalog):
             try:
                 addon = self._load(key)
             except Exception as exc:
-                out.append({"name": key, "label": key, "on": False, "requires": [], "error": f"{type(exc).__name__}: {exc}"})
+                entry = {"name": key, "label": key, "on": False, "requires": [], "error": f"{type(exc).__name__}: {exc}"}
+                if key in mine:
+                    entry["label"] = mine[key].get("label") or key
+                    entry["user"] = {"version": mine[key].get("version", ""), "source": mine[key].get("source", "")}
+                out.append(entry)
                 continue
             if key != addon.name:
                 # a module name given as `available`: known by the add-on's name from now on
@@ -575,9 +587,52 @@ class Document:
                 self._loaded[addon.name] = addon
             if any(entry["name"] == addon.name for entry in out):
                 continue
-            out.append({"name": addon.name, "label": addon.label or addon.name, "on": addon.name in self.addons,
-                        "requires": list(addon.requires)})
+            entry = {"name": addon.name, "label": addon.label or addon.name, "on": addon.name in self.addons,
+                     "requires": list(addon.requires)}
+            if addon.name in mine:
+                entry["user"] = {"version": mine[addon.name].get("version", ""), "source": mine[addon.name].get("source", "")}
+            out.append(entry)
         return out
+
+    def _adopt_user_addons(self) -> Dict[str, Dict[str, Any]]:
+        """Put what was installed while editing - by this document or any
+        other, the page's runtime included - in the catalogue; returns it."""
+        mine = user_installed()
+        for name, manifest in mine.items():
+            if name not in self._catalog and manifest["module"] not in self._catalog:
+                self._catalog[name] = manifest["module"]
+        return mine
+
+    def install_addons(self, payload: Dict[str, Any], select=None, source: str = "") -> List[Dict[str, Any]]:
+        """Install add-on folders from ``payload`` (a zip, or files: see
+        :func:`~sympy_editor.addons.install_addons`) into the user directory
+        and put them in this document's catalogue (off; :meth:`enable`
+        switches one on).  Returns their manifests."""
+        done = install_addons(payload, select=select, source=source)
+        for m in done:
+            # One that is on runs its old version: off, so that the next
+            # enable (the menu asks for it) loads the new files; its state
+            # (addon_state) waits for it as for any switch.
+            self.disable(m["name"])
+            for key in [k for k, v in self._catalog.items() if v == m["module"] or k == m["name"]
+                        or (isinstance(v, Addon) and (v.name == m["name"] or v.module == m["module"]))]:
+                self._catalog.pop(key, None)
+                self._loaded.pop(key, None)
+            self._catalog[m["name"]] = m["module"]
+        return done
+
+    def uninstall_addons(self, names: Iterable[str]) -> List[str]:
+        """Switch off and remove add-ons installed while editing; returns
+        the names that were installed."""
+        gone = []
+        for name in names:
+            name = str(name)
+            self.disable(name)
+            if uninstall_addon(name):
+                gone.append(name)
+                self._catalog.pop(name, None)
+                self._loaded.pop(name, None)
+        return gone
 
     # -- state --------------------------------------------------------------
 
@@ -1705,15 +1760,27 @@ class Document:
             if action == "addon":
                 return self._handle_addon(message)
             if action == "addons":
-                # Switch add-ons on or off; not a step of the history.  The
-                # answer carries the front ends of the ones that are on, so
-                # the editor can mount what it has not seen yet.
+                # Switch add-ons on or off, install or remove them; not a
+                # step of the history.  The answer carries the front ends of
+                # the ones that are on, so the editor can mount what it has
+                # not seen yet, and under "addons_result" what an install
+                # found or did.
+                result: Dict[str, Any] = {}
+                if message.get("inspect"):
+                    result["found"] = inspect_addons(message["inspect"])
+                if message.get("install"):
+                    result["installed"] = self.install_addons(message["install"], select=message.get("select"),
+                                                              source=str(message.get("source") or ""))
+                if message.get("uninstall"):
+                    result["removed"] = self.uninstall_addons(message["uninstall"])
                 for name in message.get("disable") or []:
                     self.disable(str(name))
                 for name in message.get("enable") or []:
                     self.enable(str(name))
                 snap = self.snapshot()
                 snap["addon_clients"] = [addon.client() for addon in self.addons.values()]
+                if result:
+                    snap["addons_result"] = result
                 return snap
             if action == "export":
                 snap = self.snapshot()

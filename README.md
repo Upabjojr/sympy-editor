@@ -491,8 +491,15 @@ save_html(expr, "page.html", addons=["tree", "plot"])                  # a self-
 serve(expr, addons=["matching"])                                       # the local server
 ```
 
-The **Add-ons** section at the top of the **≡** drawer switches any installed add-on on or off
-while editing.  Not installed?  A module name (`addons=["sympy_editor_tree"]`)
+The **Add-ons** section at the top of the **≡** drawer switches any installed
+add-on on or off while editing, and installs new ones: paste the URL of a
+GitHub repository (or of a `.zip`), or choose a `.zip` with *From a file…*,
+tick what it holds, *Install* - on the desktop, in the web app (kept in the
+browser's storage) and in the Android and iOS apps (kept in the app's data)
+alike; a × on the row removes it again.  `addons/sympy_editor_feynman` - path
+integrals of QED expanded into Feynman diagrams, drawn and editable - is the
+add-on kept out of the apps to be installed that way
+(`python addons/pack.py sympy_editor_feynman` zips it).  Not installed?  A module name (`addons=["sympy_editor_tree"]`)
 or the object itself (`addons=[ADDON]`) work too; `python addons/demo.py`
 builds a page with the four drafts straight from the checkout.
 `addons/README.md` describes the architecture, and `addons/template/` is

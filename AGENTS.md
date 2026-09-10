@@ -62,7 +62,7 @@ src/sympy_editor/
                 and methods from a package outside this one; see addons/.
 tests/          pytest suite (printer round-trips, document ops, HTML, server).
 examples/       demo.py generates demo.html / runs the server.
-addons/         Add-on drafts, each a package of its own (tree, plot, matching, latex).
+addons/         Add-on drafts, each a package of its own (tree, plot, matching, latex, feynman).
 ```
 
 Data flow: Python `Document.snapshot()` → JSON (`latex`, `latex_plain`,
@@ -835,9 +835,41 @@ copies every folder of `addons/` (no tests) beside the app's Python,
 the page from a `Document(available=[their modules])` with
 `rememberAddons` on (`ADDONS_KEY` in localStorage, `_restoreAddons` at
 mount), and the manifests' `requires` go to Chaquopy's `pip` list (a test
-checks) and iOS's `app_packages`.  Adding an add-on from a repository later
-= cloning it into that directory; keep the folder format and the scan
-stable for that.
+checks) and iOS's `app_packages`.  **Installing while editing**: `addons.install_addons(payload, select,
+into, source)` unpacks add-on folders from `{"zip": base64}` or `{"files":
+{path: text | {"b64"}}}` (paths that escape are refused, tests/caches left
+out, 40 MB cap) into `user_dir()` - `USER_ADDONS_DIR` / `SYMPY_EDITOR_USER_ADDONS`
+/ `~/.sympy-editor/addons`, `/sympy_editor_user_addons` under Pyodide - with
+an `installed.json` index (source, version); `inspect_addons`,
+`uninstall_addon`, `user_installed` go with it, `installed()` counts the
+directory, `load_addon(name)` resolves a folder's name through it, and a
+`Document` adopts what is there (`_adopt_user_addons`, at creation and in
+`available_addons`/`_load`, so a document made before an install sees it).
+The message is the same `{"action": "addons"}` with `inspect`, `install` +
+`select` + `source`, `uninstall`, answered under `snap["addons_result"]`
+(`found`/`installed`/`removed`); `addons_available` rows carry `user:
+{version, source}`.  Front end: `_fillAddonsMenu` appends the install
+section (`.se-addons-install`: URL + *Look up*, *From a file…*, the found
+list with check boxes, *Install*; a × per user row) and the menu shows
+whenever installing is possible; `parseGithubUrl`/`githubListing`/
+`githubFindAddons`/`githubCollect` read a repository through the API and
+raw.githubusercontent.com with jsDelivr as the fallback (the archive
+download has no CORS header); a `.zip` goes to Python as base64.  The
+Pyodide runtime installs at its own level (`rt.installAddons`, worker
+messages `install`/`micropip`, `__sympy_editor_install` in the boot),
+keeps the payloads in IndexedDB (`addonStore`, one record per source) and
+replays them at every start - an interrupt restarts the worker - and
+`forgetAddons` drops them; the other backends install through the
+document (the apps' `sympy_editor_app.py` points `set_user_dir` into
+`HOME`, Android's `MainActivity` answers `onShowFileChooser` for the file
+input).  Tests: `tests/test_addons.py` (the installer),
+`test_browser.py::test_addons_install_from_a_zip_file_and_remove` and
+`..._from_a_github_repository` (GitHub stood in by `page.route`),
+`test_mobile.py::test_the_app_keeps_the_addons_the_user_installs`.
+`addons/pack.py` zips a folder; `addons/sympy_editor_feynman` is
+`"bundle": false`, the one to install that way.  Adding an add-on from a
+repository by hand = cloning it into that directory; keep the folder
+format and the scan stable for that.
 `Addon.contribute_step(doc, step, expr)` adds to each step of
 `history_labels()["steps"]` (on a copy: the render cache stays plain), and
 the front end hooks `historyStep` (an element for the drawer's rows,

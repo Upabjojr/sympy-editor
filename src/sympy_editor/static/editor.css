@@ -240,6 +240,40 @@
 .se-addon-row:hover { background: rgba(var(--se-accent), 0.1); }
 .se-addon-row small { color: var(--se-muted); }
 .se-addon-row .se-addon-error { color: var(--se-error); }
+.se-addon-row .se-addon-user { color: var(--se-muted); }
+.se-addons-menu { max-height: min(70vh, 32rem); overflow-y: auto; }
+.se-addon-remove {
+  margin-left: auto; font: inherit; line-height: 1; padding: 0 0.35rem; border: 1px solid transparent; border-radius: 0.3rem;
+  background: none; color: var(--se-muted); cursor: pointer;
+}
+.se-addon-remove:hover { color: var(--se-error); border-color: var(--se-border); }
+/* installing: a URL or a file, what was found, the switch */
+.se-addons-install { display: flex; flex-direction: column; gap: 0.3rem; margin-top: 0.3rem; padding-top: 0.4rem; border-top: 1px solid var(--se-border); }
+.se-addons-install-title { font-weight: 600; }
+.se-addons-install-row { display: flex; gap: 0.3rem; align-items: center; }
+.se-addon-url {
+  flex: 1 1 auto; min-width: 0; font: inherit; padding: 0.2rem 0.4rem; border: 1px solid var(--se-border); border-radius: 0.3rem;
+  background: var(--se-field); color: inherit;
+}
+.se-addon-url:focus { outline: 2px solid rgba(var(--se-accent), 0.6); outline-offset: -1px; }
+.se-addons-install button {
+  font: inherit; line-height: 1.2; padding: 0.2rem 0.55rem; border: 1px solid var(--se-border); border-radius: 0.3rem;
+  background: var(--se-btn); color: inherit; cursor: pointer; white-space: nowrap;
+}
+.se-addons-install button:disabled { opacity: 0.5; cursor: default; }
+.se-addons-do-install { border-color: rgba(var(--se-accent), 0.8) !important; background: rgba(var(--se-accent), 0.12) !important; }
+.se-addons-status { min-height: 1.1em; color: var(--se-muted); white-space: normal; }
+.se-addons-status.se-addon-error { color: var(--se-error); }
+.se-addons-found { display: flex; flex-direction: column; gap: 0.15rem; }
+.se-addons-found[hidden], .se-addons-found-actions[hidden] { display: none; }
+.se-addon-found { flex-wrap: wrap; }
+.se-addons-found-actions { display: flex; gap: 0.3rem; }
+.se-addons-warning { color: var(--se-muted); font-size: 11px; }
+.se-addons-busy .se-addons-status { font-style: italic; }
+@media (any-pointer: coarse) {
+  .se-addons-install button, .se-addon-url { font-size: 14px; padding: 0.4rem 0.6rem; min-height: 2.2rem; }
+  .se-addon-remove { font-size: 16px; padding: 0.3rem 0.6rem; }
+}
 /* In the drawer the same list is not a menu that drops but a section of the
  * panel: it sits in the flow, at full width, with none of the trimmings a
  * floating menu needs. */

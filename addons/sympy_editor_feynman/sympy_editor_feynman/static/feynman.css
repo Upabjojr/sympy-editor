@@ -1,0 +1,59 @@
+/* The Feynman panel: a strip of drawings, one per diagram of the expression. */
+.se-addon-feynman .fd-panel { display: flex; flex-direction: column; gap: 0.4rem; font-size: 12px; }
+.se-addon-feynman .fd-bar { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+.se-addon-feynman .fd-bar select, .se-addon-feynman .fd-bar button, .se-addon-feynman .fd-bar input {
+  font: inherit; font-size: 12px; padding: 0.2rem 0.5rem; border: 1px solid var(--se-border); border-radius: 0.3rem;
+  background: var(--se-btn); color: inherit;
+}
+.se-addon-feynman .fd-bar input { width: 3rem; background: var(--se-field); }
+.se-addon-feynman .fd-bar button { cursor: pointer; }
+.se-addon-feynman .fd-bar button:disabled { opacity: 0.4; cursor: default; }
+.se-addon-feynman .fd-hint { color: var(--se-muted); }
+.se-addon-feynman .fd-strip { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.se-addon-feynman .fd-card {
+  display: flex; flex-direction: column; align-items: center; gap: 0.2rem; padding: 0.3rem;
+  border: 1px solid var(--se-border); border-radius: 0.4rem; background: var(--se-field); cursor: pointer;
+}
+.se-addon-feynman .fd-card:hover { border-color: rgba(var(--se-accent), 0.7); }
+.se-addon-feynman .fd-card.fd-selected { outline: 2px solid rgba(var(--se-accent), 0.8); outline-offset: -1px; }
+.se-addon-feynman .fd-caption { color: var(--se-muted); font-size: 11px; }
+.se-addon-feynman .fd-svg { display: block; overflow: visible; }
+.se-addon-feynman .fd-fermion { fill: none; stroke: currentColor; stroke-width: 1.4; }
+.se-addon-feynman .fd-photon { fill: none; stroke: currentColor; stroke-width: 1.2; }
+.se-addon-feynman .fd-arrow { fill: currentColor; }
+.se-addon-feynman .fd-vertex { fill: currentColor; }
+.se-addon-feynman .fd-external { fill: var(--se-bg, #fff); stroke: currentColor; stroke-width: 1.2; }
+.se-addon-feynman .fd-label { font-size: 10px; fill: currentColor; font-style: italic; }
+.se-addon-feynman .fd-empty { color: var(--se-muted); }
+@media (any-pointer: coarse) {
+  .se-addon-feynman .fd-bar select, .se-addon-feynman .fd-bar button, .se-addon-feynman .fd-bar input { font-size: 14px; padding: 0.45rem 0.7rem; min-height: 2.2rem; }
+}
+/* editing */
+.se-addon-feynman .fd-card { position: relative; touch-action: none; }
+.se-addon-feynman .fd-card.fd-invalid { border-color: rgba(180, 35, 24, 0.5); }
+.se-addon-feynman .fd-hit { fill: none; stroke: transparent; stroke-width: 10; cursor: pointer; }
+.se-addon-feynman .fd-hit-node { fill: transparent; stroke: none; cursor: grab; }
+.se-addon-feynman [data-mode="fermion"] .fd-hit-node, .se-addon-feynman [data-mode="photon"] .fd-hit-node { cursor: crosshair; }
+.se-addon-feynman [data-mode="delete"] .fd-hit-node, .se-addon-feynman [data-mode="delete"] .fd-hit { cursor: not-allowed; }
+.se-addon-feynman [data-mode="vertex"] .fd-svg, .se-addon-feynman [data-mode="psi"] .fd-svg,
+.se-addon-feynman [data-mode="psibar"] .fd-svg, .se-addon-feynman [data-mode="A"] .fd-svg { cursor: copy; }
+.se-addon-feynman .fd-rubber { stroke-dasharray: 3 3; opacity: 0.7; pointer-events: none; }
+.se-addon-feynman .fd-edge:hover .fd-fermion, .se-addon-feynman .fd-edge:hover .fd-photon { stroke: rgb(var(--se-accent)); }
+.se-addon-feynman .fd-node:hover .fd-vertex, .se-addon-feynman .fd-node:hover .fd-external { stroke: rgb(var(--se-accent)); fill: rgb(var(--se-accent)); }
+.se-addon-feynman .fd-remove {
+  position: absolute; top: 0; right: 0; font: inherit; line-height: 1; padding: 0.1rem 0.35rem; border: none; background: none;
+  color: var(--se-muted); cursor: pointer;
+}
+.se-addon-feynman .fd-remove:hover { color: var(--se-error); }
+.se-addon-feynman .fd-factor { font: inherit; font-size: 11px; padding: 0 0.2rem; border: 1px solid transparent; border-radius: 0.25rem; background: none; color: inherit; cursor: pointer; }
+.se-addon-feynman .fd-factor:hover { border-color: var(--se-border); }
+.se-addon-feynman .fd-factor-field { font: inherit; font-size: 11px; width: 4rem; padding: 0 0.2rem; border: 1px solid var(--se-border); border-radius: 0.25rem; background: var(--se-field); color: inherit; }
+.se-addon-feynman .fd-warn { color: var(--se-error); cursor: help; }
+.se-addon-feynman .fd-menu {
+  position: absolute; z-index: 40; display: flex; flex-direction: column; gap: 0.1rem; padding: 0.25rem;
+  background: var(--se-bg); color: var(--se-fg); border: 1px solid var(--se-border); border-radius: 0.4rem; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+}
+.se-addon-feynman .fd-menu[hidden] { display: none; }
+.se-addon-feynman .fd-menu button { font: inherit; text-align: left; padding: 0.25rem 0.6rem; border: none; border-radius: 0.3rem; background: none; color: inherit; cursor: pointer; }
+.se-addon-feynman .fd-menu button:hover { background: rgba(var(--se-accent), 0.12); }
+.se-addon-feynman .fd-panel { position: relative; }
