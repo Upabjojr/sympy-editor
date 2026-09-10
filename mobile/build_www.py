@@ -141,6 +141,34 @@ def app_logo(debug: bool = False) -> str:
 DEBUG_SUFFIX = " (debug)"
 
 
+def bundled_addons(addons_dir: Path | None = None) -> list:
+    """The add-ons a bundle carries, by module name (never the template: that
+    one is an example to copy, not something to ship)."""
+    scanned = scan_addons(addons_dir if addons_dir is not None else ADDONS_DIR)
+    return [m["module"] for m in scanned.values() if m.get("bundle") is not False]
+
+
+def document_with_addons(expr, *, enable: bool = False, addons_dir: Path | None = None) -> Document:
+    """A document that knows the bundled add-ons, and (with ``enable``) opens
+    with them switched on rather than a click away.
+
+    One at a time, and a failure is that add-on's alone: switching one on
+    imports it here, and an add-on whose requirement this machine has not got
+    (the LaTeX reader wants lark) would otherwise take the whole build down
+    with it.  The page installs those requirements when it boots, so the
+    add-on is still listed and can be switched on there.
+    """
+    available = bundled_addons(addons_dir)
+    doc = Document(expr, available=available)
+    if enable:
+        for name in available:
+            try:
+                doc.enable(name)
+            except Exception as exc:
+                print(f"  {name} stays off: {type(exc).__name__}: {exc}")
+    return doc
+
+
 def build(out: Path, *, cdn: bool = False, cache: Path | None = None, expr=None, title: str = "SymPy Editor",
           head: str = "", native: bool = False, addons_dir: Path | None = None, debug: bool = False,
           enable_addons: bool = False) -> Path:
@@ -156,13 +184,21 @@ def build(out: Path, *, cdn: bool = False, cache: Path | None = None, expr=None,
     # The add-ons, off to start with and a click away in the Add-ons menu: the
     # document's catalogue names them by module; the app's Python imports them
     # from the folders it bundles, a Pyodide page from the packages it carries.
-    available = [m["module"] for m in scan_addons(addons_dir if addons_dir is not None else ADDONS_DIR).values()
-                 if m.get("bundle") is not False]      # not the template: an example to copy, never shipped
     # ``enable_addons`` starts them switched on rather than a click away: the
     # web site shows the editor with everything it has, where an app would
     # rather open quickly and let its owner choose (and remembers the choice).
-    doc = Document(expr if expr is not None else demo_expression(),
-                   addons=available if enable_addons else (), available=available)
+    #
+    # One at a time, and a failure is that add-on's alone: switching one on
+    # imports it here, and an add-on with a requirement this machine has not
+    # got (the LaTeX reader wants lark) would otherwise take the whole site
+    # build down with it.  The page itself installs those requirements when it
+    # boots, so the add-on is still listed and can be switched on there.
+    doc = document_with_addons(expr if expr is not None else demo_expression(),
+                               enable=enable_addons, addons_dir=addons_dir)
+    return _write(out, doc, urls, title, head, native, debug)
+
+
+def _write(out, doc, urls, title, head, native, debug):
     # A debug build is a second application on the phone: it says so over the
     # formula and wears the badged icon, as its launcher entry does.
     if debug and not title.endswith(DEBUG_SUFFIX):

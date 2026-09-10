@@ -725,17 +725,28 @@ def shelf_site(out: Path, *, cache: Path | None = None, cdn: bool = False) -> Pa
     icon = '<link rel="icon" href="icon.svg" type="image/svg+xml">\n<link rel="apple-touch-icon" href="icon-192.png">\n'
     # the mark beside the title, as the apps wear it: this page is the project's
     # own, and says so where a plain page would say nothing
-    editor = to_html(build_www.demo_expression(), title=NAME, head=icon,
+    # With the add-ons switched on: the plot, the tree, the rewrite rules and
+    # the LaTeX reader are what the editor can do, and the page that shows it
+    # off should show them rather than leave them behind a menu.  Their Python
+    # requirements are installed in the browser when the page boots.
+    # Sessions and the history behind the drawer's button, as the apps have
+    # them: several expressions, each with its own undo history, kept in the
+    # browser between visits.  It is also where the add-ons' switches live,
+    # so without it the page has no way to turn one off.
+    SHOWCASE = {"sessions": True, "rememberZoom": True, "rememberAddons": True}
+    editor = to_html(build_www.document_with_addons(build_www.demo_expression(), enable=True),
+                     title=NAME, head=icon, options=dict(SHOWCASE),
                      logo=build_www.app_logo())   # Pyodide from the CDN, ~0.5 MB
     (out / "editor.html").write_text(editor, encoding="utf-8")
     # ...and the same editor embedded at the top of the page itself, sharing
     # the copy of editor.js the viewers already carry.  Pyodide is not
     # vendored here (`pyodide=False` above), so it comes from the CDN either
     # way, and only once somebody edits something.
-    from sympy_editor import Document
     from sympy_editor.html import build_config
-    live = build_config(Document(build_www.demo_expression()), backend="pyodide",
-                        urls=urls, options={"preload": False})
+    # The same editor at the top of the front page, and the same drawer with
+    # it; Python still waits until somebody edits something (preload off).
+    live = build_config(build_www.document_with_addons(build_www.demo_expression(), enable=True),
+                        backend="pyodide", urls=urls, options=dict(SHOWCASE, preload=False))
     derivations_page(out, urls=urls, editor_href="editor.html", editor=live)
     return out
 

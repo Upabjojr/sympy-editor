@@ -26,7 +26,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: pip install -e .
+      # The add-ons' own requirements: the site starts with them switched
+      # on, and switching one on here imports it.  Without these the build
+      # still succeeds - it says which stayed off - but the site would open
+      # with two of the four rather than all of them.
+      - run: pip install -e . "lark>=1.1" "sympy-matching>=0.0.4"
       - run: python webapp/build.py --out webapp/dist
       - uses: actions/upload-pages-artifact@v3
         with: { path: webapp/dist }
