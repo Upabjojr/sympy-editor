@@ -157,10 +157,17 @@ def test_the_history_view_shows_a_tree_under_every_step(page_and_doc):
     added = frame.locator("section.step").nth(1).locator(".tree-node.tree-added text")
     assert "1" in [t.text_content() for t in added.all()]
     assert frame.locator("section.step").nth(0).locator(".tree-node.tree-added").count() == 0
-    # a click on a box's heading folds it and does not open the step (the view stays)
+    # every box starts shut: a history is a list of steps, and a tree opened
+    # beside each of them would bury it
+    assert frame.locator("section.step details.tree-history[open]").count() == 0
+    # a click on a box's heading opens that one, and does not open the step
+    # (the view stays where it is)
     frame.locator("section.step details.tree-history summary").first.click()
     page.wait_for_timeout(300)
     assert page.locator(".se-history-view").count() == 1
+    assert frame.locator("section.step details.tree-history").first.get_attribute("open") is not None
+    frame.locator("section.step details.tree-history summary").first.click()   # and shuts it again
+    page.wait_for_timeout(300)
     assert frame.locator("section.step details.tree-history").first.get_attribute("open") is None
     # the strip's buttons do all of them at once
     page.locator(".se-history-head .tree-expand-all").click()

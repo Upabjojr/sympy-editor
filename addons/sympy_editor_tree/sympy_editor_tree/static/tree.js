@@ -143,10 +143,15 @@ SympyEditor.registerAddon("tree", {
       return out;
     }
 
-    /** The history's step: a collapsible box with the step's tree. */
+    /** The history's step: a collapsible box with the step's tree.
+     *
+     *  Shut to start with.  A history is read as a list of steps, and a tree
+     *  opened beside every one of them buries that list - the trees are worth
+     *  looking at one at a time, or all at once from the tools above, and
+     *  either way it is the reader who asks. */
     function historyBox(step, prev) {
       if (!step || !step.tree) return null;
-      var d = h("details", { class: "tree-history", open: "" }, [h("summary", {}, ["Expression tree"]),
+      var d = h("details", { class: "tree-history" }, [h("summary", {}, ["Expression tree"]),
         h("div", { class: "tree-history-scroll" }, [treeSvg(step.tree, prev && prev.tree)])]);
       if (step.tree.too_big) d.querySelector(".tree-history-scroll").textContent = "(too many nodes to draw)";
       return d;
@@ -517,7 +522,7 @@ SympyEditor.registerAddon("tree", {
       "<li><kbd>Space</kbd> selects the focused node, <kbd>Tab</kbd> moves between nodes.</li>",
       "</ul></section>",
       "<section><h3>In the history</h3><ul>",
-      "<li>While this add-on is on, every step of the history \u2014 the drawer's list and the History view \u2014 carries the tree of its expression in a collapsible box, the nodes the previous step did not have in green: how the tree evolved, step by step. The saved web page keeps them.</li>",
+      "<li>While this add-on is on, every step of the history \u2014 the drawer's list and the History view \u2014 carries the tree of its expression in a collapsible box \u2014 shut until you open it, so the list of steps stays readable \u2014 with the nodes the previous step did not have in green: how the tree evolved, step by step. <b>Expand trees</b> and <b>Collapse trees</b> above the list do all of them at once, and the saved web page keeps them.</li>",
       "<li>A click on a box's heading folds or unfolds that tree (the step opens on a click elsewhere); <b>Expand trees</b> and <b>Collapse trees</b>, in the History view's strip and the drawer, do all of them at once.</li>",
       "</ul></section>",
       "<section><h3>Editing</h3><ul>",
