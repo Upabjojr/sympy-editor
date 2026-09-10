@@ -1860,6 +1860,15 @@ var SympyEditor = (function () {
       // has started a range selection keeps it, wherever it goes next.
       this.view.addEventListener("touchstart", function (ev) { if (ev.touches.length >= 2) ev.preventDefault(); }, { passive: false });
       this.view.addEventListener("touchmove", function (ev) { if (self._pinch || (self._drag && self._drag.held)) ev.preventDefault(); }, { passive: false });
+      // iOS zooms the page on gesture events of its own, whatever touch-action
+      // says, and a pinch meant for the formula now and then zoomed the whole
+      // app.  Cancelled for every gesture that starts in the editor - the
+      // formula, a panel under it, the drawer - where two fingers zoom what
+      // they are on.  The rest of a host page (a notebook, a site) keeps its
+      // own zoom; the editor-only page cancels them everywhere (html.py).
+      ["gesturestart", "gesturechange"].forEach(function (type) {
+        self.root.addEventListener(type, function (ev) { ev.preventDefault(); }, { passive: false });
+      });
       this.view.addEventListener("mouseleave", function () { self._setHover(null); });
       this.view.addEventListener("click", function (ev) { self._onClick(ev); });
       // Dragging with a mouse or a pen over the formula selects a range.  A

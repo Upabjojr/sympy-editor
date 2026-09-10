@@ -360,7 +360,10 @@
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
-  touch-action: pan-y pinch-zoom;   /* horizontal drags select; vertical pans and pinches scroll/zoom */
+  /* Horizontal drags select, vertical pans scroll the page, and two fingers
+   * zoom the formula (Editor.setZoom) - never the page, which pinch-zoom here
+   * allowed, and iOS took up. */
+  touch-action: pan-y;
 }
 /* The editing area sits on a stage so the full-screen button can be pinned to
  * its corner: inside the view a wide formula would scroll it out of sight. */

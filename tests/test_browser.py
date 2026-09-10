@@ -631,7 +631,9 @@ def test_touch_long_press_selects_a_range(browser, serve_expr):
     page.wait_for_timeout(600)
     assert page.locator(".se-status").inner_text() == "Symbol: c"
     _touch(page, "pointerup", kids[1])
-    assert page.evaluate("getComputedStyle(document.querySelector('.se-view')).touchAction").startswith("pan-y")
+    # exactly pan-y: two fingers zoom the formula, never the page (pinch-zoom
+    # here let iOS zoom the whole app)
+    assert page.evaluate("getComputedStyle(document.querySelector('.se-view')).touchAction") == "pan-y"
     assert page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.opts.longPress") == 450
     assert page.errors == []
 
@@ -4727,3 +4729,37 @@ def test_a_drag_past_the_edge_scrolls_and_keeps_selecting(browser, serve_expr):
     assert scroll_left() == stopped                                          # the finger up, the scrolling stops
     assert page.evaluate("document.querySelector('.sympy-editor').__sympyEditor._autoScroll") in (None, 0)
     assert errors == []
+
+
+def test_two_fingers_never_zoom_the_page(browser, tmp_path):
+    """iOS zooms the page on gesture events of its own, whatever touch-action
+    says, and Safari ignores user-scalable=no: now and then a pinch meant for
+    the formula zoomed the whole app, which then also panned sideways.  A
+    gesture that starts in the editor is cancelled there - in a notebook or on
+    a site as well - while the rest of a host page keeps its own zoom; the
+    editor-only page (the apps, the site's editor, a saved page) cancels them
+    everywhere, forbids zoom in its viewport, and never scrolls sideways."""
+    from sympy_editor.html import build_config, render_fragment
+    cancelled = ("(sel) => !document.querySelector(sel).dispatchEvent("
+                 "new Event('gesturestart', {bubbles: true, cancelable: true}))")
+    # the editor as a fragment of someone else's page: no page-wide cancel here
+    host = tmp_path / "host.html"
+    host.write_text("<!DOCTYPE html><html><head><meta charset='utf-8'></head><body><p id='outside'>host text</p>"
+                    + render_fragment(build_config(Document(x**2 + sin(x)), backend="readonly"))
+                    + "</body></html>", encoding="utf-8")
+    page = browser.new_page()
+    page.goto(host.as_uri())
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    assert page.evaluate(cancelled, ".se-view")            # on the formula
+    assert page.evaluate(cancelled, ".sympy-editor")       # anywhere in the editor
+    assert not page.evaluate(cancelled, "#outside")        # the host page keeps its zoom
+    # the editor alone
+    alone = tmp_path / "alone.html"
+    alone.write_text(to_html(Document(x**2), backend="readonly"), encoding="utf-8")
+    page = browser.new_page()
+    page.goto(alone.as_uri())
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    assert page.evaluate(cancelled, "body")                # nothing but the widgets zooms
+    viewport = page.evaluate("document.querySelector('meta[name=viewport]').content")
+    assert "user-scalable=no" in viewport and "maximum-scale=1" in viewport, viewport
+    assert page.evaluate("getComputedStyle(document.documentElement).overflowX") in ("hidden", "clip")

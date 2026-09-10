@@ -196,12 +196,16 @@ _PAGE = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>%(title)s</title>
 %(head)s<style>
   body { margin: 2rem; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
          background: #ffffff; color: #1f2328; }
   @media (prefers-color-scheme: dark) { body { background: #1e1e1e; color: #e6e6e6; } }
+  /* The page never moves sideways: whatever is wider than the screen - a
+     long formula, a magnified tree - scrolls in a box of its own. */
+  html, body { overflow-x: hidden; overscroll-behavior-x: none; }
+  @supports (overflow: clip) { html, body { overflow-x: clip; } }
   h1 { font-size: 1.2rem; font-weight: 600; margin: 0 0 1rem;
        display: flex; align-items: center; gap: 0.5rem; }
   /* the application's own icon, on the title's line and as tall as it:
@@ -219,7 +223,16 @@ _PAGE = """<!DOCTYPE html>
 </head>
 <body>
 <h1>%(heading)s</h1>
-%(fragment)s</body>
+%(fragment)s<script>
+/* A page that is the editor alone - the apps, the site's editor, a page saved
+ * to a file - zooms only what zooms: the formula, the plot, the tree.  The
+ * viewport above says so to a WebView; iOS Safari ignores user-scalable=no
+ * and takes its page zoom from gesture events, so those are cancelled too. */
+["gesturestart", "gesturechange"].forEach(function (type) {
+  document.addEventListener(type, function (ev) { ev.preventDefault(); }, { passive: false });
+});
+</script>
+</body>
 </html>
 """
 
