@@ -14,7 +14,8 @@ its own. They can be switched on and off while editing, from the top of the
 drawer the **≡** button opens, and the apps remember what was left on.
 
 * **Expression tree** — the tree beside the formula, clickable and editable,
-  with drag and drop, and a collapsible tree per step in the history.
+  with drag and drop, a collapsible tree per step in the history, and a big
+  tree got about with pinch, wheel and drag as the plot's picture is.
 * **Plot** — the graph of the selection, sampled by Python and drawn by
   Plotly, with pinch, drag and wheel on both axes.
 * **Rewrite rules** — pattern matching through `sympy-matching`, with named

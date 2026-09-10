@@ -30,6 +30,12 @@ w = edit(x + y*z, addons=["tree"])          # or addons=["sympy_editor_tree"]
   `sin(x)`, the base of a power) cannot be taken out, a leaf takes no
   argument, nothing goes into itself.  Python checks the same before
   changing anything.
+- A big tree is got about the way the plot's picture is: two fingers pinch to
+  magnify it and push it along, `ctrl` and the wheel - a pinch on a trackpad -
+  do the same with a mouse, and one finger, or a drag from empty space, scrolls
+  it.  A double-click on empty space puts it back to life size.  Magnified, the
+  tree pans inside the panel rather than growing it, and it keeps the
+  magnification across edits.
 - A transformation that is not allowed is refused: the error shows in the
   editor's line and the panel flickers red for half a second.
 - `Delete` removes the focused node; the panel's fields add an argument to the

@@ -243,3 +243,212 @@ def test_quick_actions_drag_verdicts_and_the_red_flicker():
         browser.close()
     srv.shutdown()
     srv.server_close()
+
+
+def _gesture_page(p, doc, **ctx_args):
+    """A touch browser on a page showing ``doc``'s tree, and the server behind
+    it.  The gesture tests each want their own viewport, so they do not share
+    the fixture above."""
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        browser = p.chromium.launch()
+    except Exception as exc:
+        srv.shutdown(); srv.server_close()
+        pytest.skip(f"chromium not available: {exc}")
+    ctx = browser.new_context(**ctx_args)
+    page = ctx.new_page()
+    page.errors = []
+    page.on("pageerror", lambda e: page.errors.append(str(e)))
+    page.goto(srv.url)
+    page.wait_for_selector(".se-addon-tree .tree-node", timeout=30000)
+    # The panel sits under the formula, off the bottom of a phone-sized
+    # window: fingers sent to a box that is not on the screen land nowhere.
+    page.locator(".se-addon-tree .tree-scroll").scroll_into_view_if_needed()
+    page.wait_for_timeout(100)
+    return page, ctx, browser, srv
+
+
+# Deep and wide enough that the drawing is bigger than the panel: something
+# to zoom into, and somewhere to scroll to.
+BUSHY = sin(x * y + z) ** 2 + Mul(x, y, z, evaluate=False) - sin(x) / (y + z)
+
+DRAWN = """() => { const s = document.querySelector('.se-addon-tree .tree-svg');
+    const b = s.getAttribute('viewBox').split(' ').map(Number);
+    return {w: +s.getAttribute('width'), h: +s.getAttribute('height'),
+            box: s.getAttribute('viewBox'), vw: b[2], vh: b[3]}; }"""
+SCROLL = """() => { const s = document.querySelector('.se-addon-tree .tree-scroll');
+    return {left: s.scrollLeft, top: s.scrollTop}; }"""
+
+
+def test_two_fingers_pinch_the_tree():
+    """Pinch to zoom, on a touch screen, as in the plot's picture - but a tree
+    is a drawing rather than a pair of axes, so it scales evenly and keeps its
+    own coordinates: the viewBox stays the layout's size and only the drawn
+    size changes.  What is under the middle of the fingers stays there."""
+    with playwright.sync_playwright() as p:
+        page, ctx, browser, srv = _gesture_page(
+            p, Document(BUSHY, addons=[ADDON]),
+            has_touch=True, is_mobile=True, viewport={"width": 420, "height": 820})
+        try:
+            # one finger is still the browser's, to scroll the box with; two
+            # come to the panel rather than magnifying the whole page
+            assert page.evaluate("() => getComputedStyle(document.querySelector('.tree-scroll')).touchAction") == "pan-x pan-y"
+
+            first = page.evaluate(DRAWN)
+            assert abs(first["w"] - first["vw"]) <= 1 and abs(first["h"] - first["vh"]) <= 1   # life size
+
+            cdp = ctx.new_cdp_session(page)
+            box = page.locator(".se-addon-tree .tree-scroll").bounding_box()
+            hold = (box["x"] + box["width"] * 0.5, box["y"] + min(box["height"], 260) / 2)
+            # what the drawing has under the middle of the fingers, in its own
+            # units: this is what a pinch has to keep where it is
+            under = """([cx, cy]) => { const s = document.querySelector('.tree-scroll');
+                const b = s.getBoundingClientRect(), z = +document.querySelector('.tree-svg').getAttribute('width');
+                const k = z / +document.querySelector('.tree-svg').getAttribute('viewBox').split(' ')[2];
+                return [(cx - b.left + s.scrollLeft) / k, (cy - b.top + s.scrollTop) / k]; }"""
+            held = page.evaluate(under, list(hold))
+
+            ids = [0]
+
+            def pinch(d0, d1):
+                ids[0] += 2                      # fresh ids: a reused one loses a finger
+                a, b = ids[0], ids[0] + 1
+                pt = lambda d, i: {"x": hold[0] + (-d if i == a else d), "y": hold[1], "id": i}
+                cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [pt(d0, a)]})
+                cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [pt(d0, a), pt(d0, b)]})
+                for i in range(1, 11):
+                    d = d0 + (d1 - d0) * i / 10.0
+                    cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [pt(d, a), pt(d, b)]})
+                    page.wait_for_timeout(40)
+                cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+                page.wait_for_timeout(120)
+
+            pinch(30, 120)                                   # apart: a closer look
+            big = page.evaluate(DRAWN)
+            assert big["w"] > first["w"] * 1.8, (first["w"], big["w"])
+            assert big["box"] == first["box"]                # the layout is untouched
+            assert abs(big["h"] / big["w"] - first["h"] / first["w"]) < 0.01   # evenly, not stretched
+            now = page.evaluate(under, list(hold))
+            assert abs(now[0] - held[0]) < 12 and abs(now[1] - held[1]) < 12, (held, now)
+
+            pinch(120, 30)                                   # together: back out
+            small = page.evaluate(DRAWN)
+            assert small["w"] < big["w"] * 0.6, (big["w"], small["w"])
+            assert small["box"] == first["box"]
+            assert page.errors == []
+        finally:
+            browser.close(); srv.shutdown(); srv.server_close()
+
+
+def test_two_fingers_drag_the_tree_along():
+    """The middle of a pinch carries the point it started on, so two fingers
+    moved together scroll the drawing without changing its size."""
+    with playwright.sync_playwright() as p:
+        page, ctx, browser, srv = _gesture_page(
+            p, Document(BUSHY, addons=[ADDON]),
+            has_touch=True, is_mobile=True, viewport={"width": 420, "height": 820})
+        try:
+            cdp = ctx.new_cdp_session(page)
+            box = page.locator(".se-addon-tree .tree-scroll").bounding_box()
+            cx, cy = box["x"] + box["width"] * 0.6, box["y"] + min(box["height"], 260) / 2
+            # room to scroll into: start from a magnified tree
+            page.evaluate("""() => { const s = document.querySelector('.tree-scroll');
+                s.scrollLeft = s.scrollWidth / 3; }""")
+            page.wait_for_timeout(60)
+            before = page.evaluate(SCROLL)
+            size = page.evaluate(DRAWN)
+
+            pt = lambda dx, i: {"x": cx + dx + (-25 if i == 1 else 25), "y": cy, "id": i}
+            cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [pt(0, 1)]})
+            cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [pt(0, 1), pt(0, 2)]})
+            for i in range(1, 11):
+                dx = 8 * i                                   # both fingers to the right, unchanged apart
+                cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [pt(dx, 1), pt(dx, 2)]})
+                page.wait_for_timeout(40)
+            cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+            page.wait_for_timeout(120)
+
+            after = page.evaluate(SCROLL)
+            assert after["left"] < before["left"] - 40, (before, after)   # the tree followed the fingers
+            assert page.evaluate(DRAWN)["w"] == size["w"]                 # and did not change size
+            assert page.errors == []
+        finally:
+            browser.close(); srv.shutdown(); srv.server_close()
+
+
+def test_a_trackpad_pinch_zooms_the_tree_and_a_plain_wheel_scrolls_it():
+    """A pinch on a laptop's trackpad reaches the page as a wheel event with
+    ctrlKey set - that is how the browser reports it, and how it would magnify
+    the whole page if nobody took it.  A plain wheel is left alone: over a tall
+    drawing a wheel should scroll."""
+    with playwright.sync_playwright() as p:
+        page, ctx, browser, srv = _gesture_page(p, Document(BUSHY, addons=[ADDON]))
+        try:
+            wheel = """([n, dy, ctrl]) => { const s = document.querySelector('.tree-scroll');
+                const b = s.getBoundingClientRect();
+                for (let i = 0; i < n; i++) s.dispatchEvent(new WheelEvent('wheel',
+                    {deltaY: dy, ctrlKey: ctrl, bubbles: true, cancelable: true,
+                     clientX: b.left + b.width / 2, clientY: b.top + b.height / 2}));
+                return null; }"""
+            first = page.evaluate(DRAWN)
+            page.evaluate(wheel, [6, -100, True])            # a pinch out on the trackpad
+            page.wait_for_timeout(120)
+            closer = page.evaluate(DRAWN)
+            assert closer["w"] > first["w"] * 1.4, (first["w"], closer["w"])
+            assert closer["box"] == first["box"]
+
+            page.evaluate(wheel, [6, 100, True])             # and back in
+            page.wait_for_timeout(120)
+            assert page.evaluate(DRAWN)["w"] < closer["w"] * 0.8
+
+            size = page.evaluate(DRAWN)
+            page.evaluate(wheel, [3, 100, False])            # a plain wheel is not a zoom
+            page.wait_for_timeout(120)
+            assert page.evaluate(DRAWN)["w"] == size["w"]
+            assert page.errors == []
+        finally:
+            browser.close(); srv.shutdown(); srv.server_close()
+
+
+def test_the_mouse_drags_the_tree_from_empty_space():
+    """With a mouse there is no pinch, and the scrollbars alone are a poor way
+    about a drawing wider than the panel.  Empty space is where it is pushed
+    along from; a press on a node still starts the drag that moves it, and a
+    double-click on empty space gives the tree back its life size."""
+    with playwright.sync_playwright() as p:
+        page, ctx, browser, srv = _gesture_page(p, Document(BUSHY, addons=[ADDON]))
+        try:
+            # magnified first: at life size a tree this wide fits a desktop
+            # window, and a drawing with nowhere to go cannot be pushed along
+            page.evaluate("""() => { const s = document.querySelector('.tree-scroll');
+                const b = s.getBoundingClientRect();
+                for (let i = 0; i < 8; i++) s.dispatchEvent(new WheelEvent('wheel',
+                    {deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true,
+                     clientX: b.left + b.width / 2, clientY: b.top + 40})); }""")
+            page.wait_for_timeout(150)
+            page.evaluate("""() => { const s = document.querySelector('.tree-scroll');
+                s.scrollLeft = s.scrollWidth / 3; }""")
+            page.wait_for_timeout(60)
+            before = page.evaluate(SCROLL)
+            assert before["left"] > 40, before
+            box = page.locator(".se-addon-tree .tree-scroll").bounding_box()
+            # the bottom strip of the box: below the deepest row, so empty
+            y = box["y"] + box["height"] - 4
+            page.mouse.move(box["x"] + box["width"] * 0.7, y)
+            page.mouse.down()
+            for i in range(1, 9):
+                page.mouse.move(box["x"] + box["width"] * 0.7 + 10 * i, y)
+            page.mouse.up()
+            after = page.evaluate(SCROLL)
+            assert after["left"] < before["left"] - 40, (before, after)
+
+            # a double-click on empty space is life size again
+            big = page.evaluate(DRAWN)
+            page.mouse.dblclick(box["x"] + box["width"] * 0.7, y)
+            page.wait_for_timeout(120)
+            back = page.evaluate(DRAWN)
+            assert back["w"] < big["w"] and abs(back["w"] - back["vw"]) <= 1
+            assert page.errors == []
+        finally:
+            browser.close(); srv.shutdown(); srv.server_close()
