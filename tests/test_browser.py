@@ -53,6 +53,30 @@ def browser():
         pytest.skip(f"playwright unavailable: {exc}")
 
 
+@pytest.fixture(autouse=True)
+def _close_what_the_test_opened(request):
+    """Close every page and context a test opened, when it ends.
+
+    The browser is shared by the whole module, which is what keeps it fast,
+    and most tests leave their page open.  They piled up: some eighty live
+    editors by the end of the file and twelve gigabytes of Chromium, on a
+    CI runner with sixteen - so the last tests ran starved of memory, and
+    now and then one waited out a thirty-second timeout (the caret, the
+    matrix grip).  None of them ever failed on its own."""
+    if "browser" not in request.fixturenames:
+        yield
+        return
+    browser = request.getfixturevalue("browser")
+    before = set(browser.contexts)
+    yield
+    for ctx in browser.contexts:
+        if ctx not in before:
+            try:
+                ctx.close()
+            except Exception:  # already gone with its page
+                pass
+
+
 @pytest.fixture
 def serve_expr():
     """Factory: serve_expr(expr) -> (server, document); servers stop at teardown."""
