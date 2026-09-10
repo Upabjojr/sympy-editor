@@ -27,7 +27,7 @@ sessions::
     save_history_html(steps, "steps.html")
 """
 
-from .addons import Addon, installed_addons, load_addon
+from .addons import Addon, installed_addons, load_addon, register_addons_folder
 from .document import Document
 from .history import History
 from .html import (display_history, display_html, save_history_html, save_html,
@@ -68,6 +68,7 @@ __all__ = [
     "get_at",
     "get_ops",
     "installed_addons",
+    "register_addons_folder",
     "load_addon",
     "make_op",
     "parse_path",
@@ -97,6 +98,24 @@ def edit(expr, backend="auto", **kwargs):
         the kernel.  The same page as :func:`to_html`.
     ``"auto"`` (default)
         ``"kernel"`` when anywidget is installed, ``"pyodide"`` otherwise.
+
+    Add-ons work here as they do anywhere else, and are given the same two
+    ways - by name, by module, or as an :class:`~sympy_editor.addons.Addon`:
+
+    ``addons=[...]``
+        switched on from the start, their panels under the formula.
+    ``available=[...]``
+        listed for the reader to switch on and off while editing, from the
+        top of the drawer the **≡** button opens.  Their front ends are sent
+        when they are switched on, not before.
+
+    >>> edit(sin(x), addons=["sympy_editor_plot"])            # doctest: +SKIP
+    >>> edit(sin(x), available=installed_addons())            # doctest: +SKIP
+
+    With neither, the editor is the editor alone.  An add-on runs in **this**
+    kernel, so its Python - `sympy-matching` for the rewrite rules, `lark` for
+    the LaTeX reader - is the kernel's to import; one that cannot be imported
+    is listed with the reason rather than silently missing.
     """
     if backend not in ("auto", "kernel", "pyodide"):
         raise ValueError("backend must be 'auto', 'kernel' or 'pyodide'")
