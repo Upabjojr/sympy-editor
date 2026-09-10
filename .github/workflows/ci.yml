@@ -10,16 +10,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.11", "3.13"]
+        python-version: ["3.10", "3.11", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
       # The bundled add-ons' own packages, so that the tests of a site that
-      # opens with all four on can see all four.  sympy-matching needs 3.10,
-      # so on 3.9 the rewrite rules stay off and those tests skip.
-      - run: pip install -e ".[jupyter,test]" "lark>=1.1" "sympy-matching>=0.0.4; python_version >= '3.10'"
+      # opens with all four on can see all four.
+      - run: pip install -e ".[jupyter,test]" "lark>=1.1" "sympy-matching>=0.0.4"
       - run: pytest -q --ignore=tests/test_browser.py
 
   # The oldest SymPy pyproject.toml admits (the matrix above always gets the
@@ -30,8 +29,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.9"
-      - run: pip install -e ".[jupyter,test]" "sympy==1.14.*" "lark>=1.1"   # no sympy-matching: it needs 3.10
+          python-version: "3.10"
+      - run: pip install -e ".[jupyter,test]" "sympy==1.14.*" "lark>=1.1" "sympy-matching>=0.0.4"
       - run: pytest -q --ignore=tests/test_browser.py
 
   browser:

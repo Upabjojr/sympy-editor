@@ -7,7 +7,7 @@ name = "sympy-editor-tree"
 version = "0.0.1"
 description = "sympy-editor add-on: the expression tree as an editable graph"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { text = "BSD-3-Clause" }
 dependencies = ["sympy-editor"]
 

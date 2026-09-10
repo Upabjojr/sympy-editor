@@ -7,7 +7,7 @@ name = "sympy-editor-latex"
 version = "0.0.1"
 description = "A sympy-editor add-on: LaTeX in, with its ambiguities and constants as choices"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { text = "BSD-3-Clause" }
 dependencies = ["sympy-editor", "lark>=1.1"]
 

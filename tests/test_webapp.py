@@ -271,9 +271,8 @@ def test_the_shelf_teaches_and_shows_the_notebook_only_when_it_can(tmp_path):
 def _every_addons_packages():
     """Skip unless this Python has every bundled add-on's own packages.  The
     site is built where it has them (webapp.yml installs lark and
-    sympy-matching), and opens with all four on; a Python without them
-    cannot switch those two on, so there is no claim to check.  CI still
-    tests 3.9, which sympy-matching (3.10 and up) does not install on."""
+    sympy-matching), and opens with all four on; a checkout tested without
+    them cannot switch those two on, so there is no claim to check."""
     pytest.importorskip("lark")
     pytest.importorskip("sympy_matching")
 

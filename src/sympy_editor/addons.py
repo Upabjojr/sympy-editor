@@ -237,16 +237,12 @@ class Addon:
 
 
 def _entry_points(group: str):
-    """``importlib.metadata.entry_points`` for one group, on every Python
-    this package supports (3.9 returns a dict, 3.10+ has ``select``)."""
+    """``importlib.metadata.entry_points`` for one group."""
     try:
         from importlib.metadata import entry_points
     except ImportError:  # pragma: no cover
         return []
-    eps = entry_points()
-    if hasattr(eps, "select"):
-        return list(eps.select(group=group))
-    return list(eps.get(group, []))  # type: ignore[union-attr]
+    return list(entry_points(group=group))
 
 
 def read_manifest(folder: Union[str, Path]) -> Optional[Dict[str, Any]]:

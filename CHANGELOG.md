@@ -61,6 +61,9 @@ The web site opens with all four switched on.
 
 ### Elsewhere
 
+* Python 3.10 or later: 3.9 is no longer supported (its security support
+  ended in October 2025, and the rewrite rules' `sympy-matching` never ran
+  on it).
 * The Android app is **SymPy Editor**, with a separate debug build
   (`org.sympy.editor.debug`) that can sit beside it.
 * `docs/cursor-and-selection.md` writes down what the cursor and the selection

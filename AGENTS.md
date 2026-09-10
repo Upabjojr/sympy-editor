@@ -980,7 +980,7 @@ builds a `--cdn` copy and checks the worker installs and caches in Chromium;
 
 ## Conventions
 
-- Python ≥ 3.9, SymPy ≥ 1.14 (`pyproject.toml`); no type-checking tooling
+- Python ≥ 3.10, SymPy ≥ 1.14 (`pyproject.toml`); no type-checking tooling
   enforced; keep type hints and docstrings.  In the browser, Pyodide's own
   sympy package lags behind (1.13.3 in Pyodide 0.28), so the pages load
   the `SYMPY_VERSION` wheel from PyPI (`SYMPY_WHEEL`, `urls["sympyWheel"]`;
