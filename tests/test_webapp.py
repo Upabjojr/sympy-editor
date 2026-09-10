@@ -300,3 +300,47 @@ def test_a_bundle_leaves_the_add_ons_off_unless_asked(tmp_path):
     on = re.search(r'"addons":\s*(\[[^\]]*\])', index)
     assert on and json.loads(on.group(1)) == [], on.group(1) if on else "no addons key"
     assert '"name": "plot"' in index          # ... but they are all there to be switched on
+
+
+def test_the_showcase_site_opens_with_the_add_ons_on(tmp_path):
+    """shelf_site builds what upabjojr.github.io/sympy-editor serves: the
+    front page with an editor to try, and editor.html beside it.  Both should
+    open with the add-ons switched on - the site is where somebody sees what
+    the editor can do - and both must name the packages the browser installs
+    for them."""
+    mod = _load()
+    out = mod.shelf_site(tmp_path / "shelf", cdn=True)
+    for name in ("index.html", "editor.html"):
+        page = (out / name).read_text(encoding="utf-8")
+        on = re.search(r'"addons":\s*(\[[^\]]*\])', page)
+        assert on, (name, "the page does not say which add-ons are on")
+        assert sorted(json.loads(on.group(1))) == ["latex", "matching", "plot", "tree"], (name, on.group(1))
+        # the two that need something from PyPI say so, or the browser cannot
+        # install them and they would come up switched on but broken
+        micropip = re.search(r'"micropip":\s*(\[[^\]]*\])', page)
+        assert micropip and "lark" in micropip.group(1), (name, micropip.group(1) if micropip else None)
+
+
+def test_a_missing_add_on_requirement_does_not_stop_the_build(tmp_path, monkeypatch):
+    """Switching an add-on on imports it.  A machine without lark (which is
+    what CI is) must still build the site - saying which add-on stayed off -
+    rather than failing outright, as it did once."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("build_www", ROOT / "mobile" / "build_www.py")
+    build_www = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(build_www)
+
+    from sympy import Symbol
+    real_enable = build_www.Document.enable
+
+    def refuse(self, spec_name, *a, **k):
+        if "latex" in str(spec_name):
+            raise ImportError("no lark here")
+        return real_enable(self, spec_name, *a, **k)
+
+    monkeypatch.setattr(build_www.Document, "enable", refuse)
+    doc = build_www.document_with_addons(Symbol("x"), enable=True)
+    on = list(doc.addons)
+    assert "latex" not in on, on                       # it stayed off
+    assert on, "the others should still be on"
+    assert any(a["name"] == "latex" for a in doc.available_addons())   # still there to switch on
