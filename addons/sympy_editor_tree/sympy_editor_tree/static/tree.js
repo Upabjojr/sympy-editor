@@ -32,7 +32,7 @@ SympyEditor.registerAddon("tree", {
     var wrapField = h("input", { type: "text", class: "tree-field", placeholder: "wrap in…",
       title: "Put the selected node inside this function (Enter)", spellcheck: "false", autocomplete: "off" });
     var nodeBtn = h("button", { type: "button", class: "tree-node-btn", title: "What can be done with the selected node: edit, delete, wrap, transform, its methods (also a right-click on a node)", disabled: "" }, ["Node \u25be"]);
-    var hint = h("span", { class: "tree-hint" }, ["click: select \u00b7 double-click: edit \u00b7 right-click: menu \u00b7 drag onto a node: move \u00b7 Del: remove"]);
+    var hint = h("span", { class: "tree-hint" }, ["click: select \u00b7 double-click: edit \u00b7 right-click: menu \u00b7 drag onto a node: move \u00b7 Del: remove \u00b7 pinch or ctrl+wheel: zoom"]);
     var bar = h("div", { class: "tree-bar" }, [nodeBtn, headSel, argField, wrapField, hint]);
     var menu = h("div", { class: "tree-menu", hidden: "", role: "menu" });
     // The quick actions: a small bar under the clicked node with the few
@@ -55,6 +55,8 @@ SympyEditor.registerAddon("tree", {
     var nodes = [];        // laid-out nodes: {data, x, y, w, el}
     var focused = null;    // the node the tree itself has focused (argument path as "0/1")
     var drag = null;
+    var zoom = 1;          // how much the drawing is magnified (see applyZoom)
+    var natural = null;    // its size at zoom 1, in the units it is laid out in
 
     function key(path) { return path.join("/"); }
     function byKey(k) { for (var i = 0; i < nodes.length; i++) if (key(nodes[i].data.path) === k) return nodes[i]; return null; }
@@ -182,6 +184,9 @@ SympyEditor.registerAddon("tree", {
       if (tree.too_big) {
         note.textContent = "The tree has " + tree.too_big + " nodes or more; the graph stops at " + tree.max + ".";
         note.hidden = false;
+        natural = null;
+        scroller.style.maxHeight = "";
+        svg.removeAttribute("viewBox");
         svg.setAttribute("width", "0"); svg.setAttribute("height", "0");
         return;
       }
@@ -211,8 +216,8 @@ SympyEditor.registerAddon("tree", {
         boxes.appendChild(g);
         nodes.push({ data: d, x: d._x, y: d._y, w: d._w, el: g });
       })(tree, 0);
-      svg.setAttribute("width", String(tree._span + 2 * PAD));
-      svg.setAttribute("height", String(PAD * 2 + (depth + 1) * NODE_H + depth * GAP_Y));
+      natural = { w: tree._span + 2 * PAD, h: PAD * 2 + (depth + 1) * NODE_H + depth * GAP_Y };
+      applyZoom();
       markSelection();
     }
 
@@ -449,6 +454,179 @@ SympyEditor.registerAddon("tree", {
         ev.preventDefault(); ev.stopPropagation();
         selectNode(n);
       }
+    });
+
+    /* ---- fingers, trackpad and mouse on the tree: pinch to zoom, drag to
+     *      scroll ----
+     *
+     * The same gestures as the plot's picture, and taken the same way; what
+     * differs is what they mean.  The plot has two axes of its own and scales
+     * each by its own share of a pinch, so that a sideways pinch stretches the
+     * span alone.  A tree is a drawing, not a pair of axes: stretching it
+     * along one side would only distort it, so a pinch scales it evenly, by
+     * how far the fingers move apart in any direction.
+     *
+     * Zooming is a viewBox and a size: the drawing keeps its own coordinates
+     * (everything laid out and every position read off the screen goes on
+     * working unchanged) and is drawn larger or smaller than them.  Scrolling
+     * is then the scroll box's own, so a zoomed-in tree pans with one finger
+     * as any overflowing box does - see touch-action in the CSS, which leaves
+     * one finger to the browser and brings two here.
+     *
+     * The magnification stays across redraws: an edit should not throw away
+     * the reader's place in a big tree.
+     */
+    var ZOOM_MIN = 0.25, ZOOM_MAX = 4;
+    var SEPARATION = 24;   // px: fingers closer than this say nothing about scale
+    var pinch = null;
+    var panning = null;
+    var frame = null;    // what the last move asked for, until the frame draws it
+    var queued = false;
+
+    /** Draw the tree at the current magnification.  The layout is untouched:
+     *  the viewBox is its natural size and the element is that size times the
+     *  zoom, so the browser does the scaling and every coordinate in this file
+     *  stays in the units the layout produced. */
+    function applyZoom() {
+      if (!natural) return;
+      svg.setAttribute("viewBox", "0 0 " + natural.w + " " + natural.h);
+      svg.setAttribute("width", String(Math.round(natural.w * zoom)));
+      svg.setAttribute("height", String(Math.round(natural.h * zoom)));
+      // Magnified, the drawing is kept within the room it had at life size:
+      // it then pans up and down inside the panel, rather than growing the
+      // panel until the formula above it is off the screen.  At life size
+      // the box is left alone, so an unzoomed tree shows as it always has.
+      scroller.style.maxHeight = zoom > 1 ? Math.round(natural.h) + "px" : "";
+    }
+
+    function clampZoom(want) {
+      if (!isFinite(want)) return zoom;
+      return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, want));
+    }
+
+    /** Magnify to `want`, and scroll so that the point of the drawing at
+     *  (`px`, `py`) - in the layout's own units - stays under (`clientX`,
+     *  `clientY`) on the screen.  Absolute rather than step by step: a gesture
+     *  works out where it started from and asks for that every time it moves,
+     *  so nothing drifts however many moves it takes.
+     *
+     *  At most once a frame.  A finger sends moves faster than the tree can be
+     *  laid out again, and only the last one before the frame is drawn. */
+    function showAt(want, px, py, clientX, clientY) {
+      frame = { zoom: clampZoom(want), px: px, py: py, x: clientX, y: clientY };
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(function () {
+        var at = frame;
+        frame = null;
+        queued = false;
+        if (!at || !natural) return;
+        zoom = at.zoom;
+        applyZoom();
+        var box = scroller.getBoundingClientRect();
+        scroller.scrollLeft = at.px * zoom - (at.x - box.left);
+        scroller.scrollTop = at.py * zoom - (at.y - box.top);
+      });
+    }
+
+    /** Where the point under (clientX, clientY) is in the drawing's own
+     *  units - what has to be held still while the magnification changes. */
+    function pointAt(clientX, clientY) {
+      var box = scroller.getBoundingClientRect();
+      return { x: (clientX - box.left + scroller.scrollLeft) / zoom,
+               y: (clientY - box.top + scroller.scrollTop) / zoom };
+    }
+
+    /** A node being dragged onto another, given up: a second finger, or a
+     *  redraw, means the drag is no longer what is happening.  Not endDrag -
+     *  that one lets go of the subtree where it is. */
+    function cancelDrag() {
+      if (!drag) return;
+      drag.from.el.classList.remove("tree-dragging");
+      if (drag.over) drag.over.el.classList.remove("tree-drop", "tree-drop-no");
+      drag = null;
+    }
+
+    scroller.addEventListener("touchstart", function (ev) {
+      if (ev.touches.length !== 2) { pinch = null; return; }
+      cancelDrag();                       // two fingers are a gesture, not a drag
+      hideQuick(); hideMenu();
+      var a = ev.touches[0], b = ev.touches[1];
+      var mid = pointAt((a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
+      pinch = { apart: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY),
+                zoom: zoom, px: mid.x, py: mid.y };
+      ev.preventDefault();
+    }, { passive: false });
+
+    scroller.addEventListener("touchmove", function (ev) {
+      if (!pinch || ev.touches.length !== 2) return;
+      ev.preventDefault();
+      var a = ev.touches[0], b = ev.touches[1];
+      var now = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      // Fingers barely apart tell us nothing about scale - the ratio of two
+      // small numbers is noise - so they only push the tree along.
+      var scale = (pinch.apart < SEPARATION || now < SEPARATION) ? 1 : now / pinch.apart;
+      // The middle of the fingers carries the point it started on: this is
+      // the pinch and the two-finger drag at once, in one sum.
+      showAt(pinch.zoom * scale, pinch.px, pinch.py,
+             (a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
+    }, { passive: false });
+
+    var endPinch = function (ev) {
+      if (!ev.touches || ev.touches.length < 2) pinch = null;
+    };
+    scroller.addEventListener("touchend", endPinch, true);
+    scroller.addEventListener("touchcancel", endPinch, true);
+
+    /* A pinch on a laptop's trackpad reaches the page as a wheel event with
+     * ctrlKey set - that is how the browser reports it, and how it would zoom
+     * the whole page if nobody took it.  A plain wheel is left alone: it
+     * scrolls the box, which is what a wheel over a tall drawing should do. */
+    scroller.addEventListener("wheel", function (ev) {
+      if (!natural || !(ev.ctrlKey || ev.metaKey)) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      var unit = ev.deltaMode === 1 ? 16 : ev.deltaMode === 2 ? 100 : 1;
+      var at = pointAt(ev.clientX, ev.clientY);
+      // From what the frame is already going to draw, not from what is on the
+      // screen: a trackpad sends several of these between two frames, and
+      // reading the drawn zoom each time would throw all but one of them away.
+      showAt((frame ? frame.zoom : zoom) * Math.exp(-ev.deltaY * unit * 0.002),
+             at.x, at.y, ev.clientX, ev.clientY);
+    }, { passive: false });
+
+    /* With a mouse there is no pinch and nothing to drag on empty space, so
+     * that is where the tree is pushed along from - the scrollbars alone are
+     * a poor way about a drawing wider than the panel.  A press on a node is
+     * left to the drag that moves it. */
+    scroller.addEventListener("pointerdown", function (ev) {
+      if (ev.pointerType === "touch") return;      // fingers: the gestures above
+      if (ev.button !== 0 || nodeOf(ev.target)) return;
+      panning = { x: ev.clientX, y: ev.clientY, id: ev.pointerId,
+                  left: scroller.scrollLeft, top: scroller.scrollTop };
+      try { scroller.setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ }
+      scroller.classList.add("tree-panning");
+    });
+    scroller.addEventListener("pointermove", function (ev) {
+      if (!panning || ev.pointerId !== panning.id) return;
+      scroller.scrollLeft = panning.left - (ev.clientX - panning.x);
+      scroller.scrollTop = panning.top - (ev.clientY - panning.y);
+    });
+    var endPan = function () {
+      if (!panning) return;
+      try { scroller.releasePointerCapture(panning.id); } catch (e) { /* ignore */ }
+      panning = null;
+      scroller.classList.remove("tree-panning");
+    };
+    scroller.addEventListener("pointerup", endPan);
+    scroller.addEventListener("pointercancel", endPan);
+
+    /* Nothing else gets back to life size, so a double-click on empty space
+     * does - the plot's double-click resets its span the same way. */
+    scroller.addEventListener("dblclick", function (ev) {
+      if (nodeOf(ev.target) || zoom === 1) return;   // on a node it opens the editor
+      var at = pointAt(ev.clientX, ev.clientY);
+      showAt(1, at.x, at.y, ev.clientX, ev.clientY);
     });
 
     // Drag a subtree onto another node: it becomes that node's last argument.
