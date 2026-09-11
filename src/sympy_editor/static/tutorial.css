@@ -36,13 +36,19 @@
 .se-tour-ring.pressing::after { animation: none; opacity: 0; }
 @keyframes se-tour-press { 0% { transform: scale(1.1); opacity: 1; } 55% { transform: scale(0.7); opacity: 1; } 100% { transform: scale(0.95); opacity: 0; } }
 /* the way out: the one thing on the layer that takes a pointer */
-.se-tour-stop { position: fixed; pointer-events: auto; cursor: pointer; font: inherit; font-size: 0.95rem; font-weight: 600;
-  padding: 0.45rem 0.95rem; border-radius: 999px; border: 1px solid rgba(79, 70, 229, 0.35);
-  background: #ffffff; color: #3730a3; box-shadow: 0 6px 18px rgba(30, 27, 75, 0.22); }
-.se-tour-stop:hover, .se-tour-stop:focus-visible { background: #eef2ff; outline: none; }
+.se-tour-stop { position: fixed; pointer-events: auto; cursor: pointer; font: inherit; font-size: 1.08rem; font-weight: 650;
+  padding: 0.62rem 1.25rem; border-radius: 999px; border: 1.5px solid hsl(243 60% 62%);
+  background: hsl(243 60% 95%); color: #312e81; box-shadow: 0 6px 20px rgba(30, 27, 75, 0.25);
+  animation: se-tour-stop-glow 1.6s ease-in-out infinite alternate; }
+/* noticed without shouting: its colour swells from soft to saturated and back */
+@keyframes se-tour-stop-glow {
+  from { background: hsl(243 45% 96%); border-color: hsl(243 35% 72%); }
+  to   { background: hsl(243 95% 87%); border-color: hsl(243 90% 60%); }
+}
+.se-tour-stop:hover, .se-tour-stop:focus-visible { animation: none; background: hsl(243 95% 88%); border-color: hsl(243 90% 58%); outline: none; }
 .se-tour-stop[hidden] { display: none; }
 @media (max-width: 640px) { .se-tour-caption { font-size: 1.1rem; } .se-tour-caption.large { font-size: 1.4rem; } }
 @media (prefers-reduced-motion: reduce) {
-  .se-tour-arrow, .se-tour-ring, .se-tour-ring::after, .se-tour-ring.pressing { animation: none; }
+  .se-tour-arrow, .se-tour-ring, .se-tour-ring::after, .se-tour-ring.pressing, .se-tour-stop { animation: none; }
   .se-tour-caption { transition: none; }
 }
