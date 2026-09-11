@@ -184,7 +184,9 @@ api.name, api.options        // the add-on's name, and Addon.client_options() fr
 api.state()                  // the last snapshot; api.node(path) one entry of its node table
 api.selected(), api.range()  // the selection (a view path) and the range, as the editor holds them
 api.select(path)             // select in the formula
-api.call(method, payload)    // → Promise: the query's result, or the new snapshot for a change
+api.call(method, payload[, {quiet: true}])   // → Promise: the query's result, or the new snapshot for a change;
+                             // quiet: no "Working…" overlay over the editor, the focus left alone - for a
+                             // question the panel shows its own progress for (the LaTeX box reads as one types)
 api.send(msg)                // any editor message ({action: "apply", ...})
 api.status(text), api.error(text)
 api.h(tag, attrs, children)  // the editor's element helper; api.katex(); api.loadScript(url)

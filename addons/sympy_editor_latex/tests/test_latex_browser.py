@@ -18,7 +18,7 @@ pytest.importorskip("lark")
 from sympy_editor import Document  # noqa: E402
 from sympy_editor.html import default_urls  # noqa: E402
 from sympy_editor.server import EditorServer  # noqa: E402
-from sympy_editor_latex import ADDON  # noqa: E402
+from sympy_editor_latex import ADDON, LatexAddon  # noqa: E402
 
 x, y = symbols("x y")
 
@@ -88,7 +88,7 @@ def test_the_panel_reads_offers_choices_and_inserts():
         page.wait_for_function("document.querySelector('.se-source').textContent.includes('Derivative(x**2, x)')")
         assert Symbol("pi") not in doc.expr.free_symbols
         # an error is a message in the panel, not the editor's
-        box.fill(r"\frac{x}")
+        box.fill(r"x^2 +* y")
         page.wait_for_function("document.querySelector('.ltx-note').classList.contains('error')")
         assert "could not be read" in page.locator(".ltx-note").inner_text()
         assert not page.locator(".se-error").is_visible()
@@ -98,6 +98,56 @@ def test_the_panel_reads_offers_choices_and_inserts():
         page.locator(".se-addon-latex .se-addon-help").click()
         assert "several ways" in page.locator(".se-help-view").inner_text().lower()
         page.keyboard.press("Escape")
+        assert errors == []
+        browser.close()
+    srv.shutdown()
+    srv.server_close()
+
+
+def test_typing_goes_on_through_a_slow_reading_and_unfinished_text_is_no_error():
+    """The first reading built the grammar - long enough for the editor's
+    overlay, which covered the box and took its focus mid-word; the
+    half-typed text then came back as an error.  Readings are quiet now (the
+    panel shows its own progress), and a text that stops too early is only
+    not finished: the last reading stays, dimmed, and cannot be inserted."""
+    import time
+
+    class Slow(LatexAddon):                 # every reading as slow as the first used to be on a phone
+        def read(self, doc, payload):
+            time.sleep(1.2)
+            return super().read(doc, payload)
+
+    doc = Document(x + y, addons=[Slow()])
+    srv = EditorServer(doc, port=0, options={"workingAfter": 100})
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    with playwright.sync_playwright() as p:
+        try:
+            browser = p.chromium.launch()
+        except Exception as exc:
+            pytest.skip(f"chromium not available: {exc}")
+        page = browser.new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(srv.url)
+        page.wait_for_selector(".se-addon-latex .ltx-input", timeout=30000)
+        page.locator(".ltx-input").click()
+        page.keyboard.type(r"\frac{x", delay=30)
+        page.wait_for_function("document.querySelector('.ltx-panel').classList.contains('ltx-busy')", timeout=5000)
+        page.wait_for_timeout(400)                                               # well past workingAfter
+        assert not page.locator(".se-loading").is_visible()                      # nothing over the box
+        assert page.evaluate("document.activeElement.className") == "ltx-input"  # still typing there
+        page.wait_for_function("document.querySelector('.ltx-note').textContent.startsWith('Not finished')", timeout=10000)
+        assert "error" not in page.locator(".ltx-note").get_attribute("class")
+        # typing on ends in a reading
+        page.keyboard.type("}{2}", delay=30)
+        page.wait_for_function("document.querySelector('.ltx-src').textContent === 'x/2'", timeout=15000)
+        assert page.locator(".ltx-note").inner_text() == "" and not page.locator(".ltx-insert-all").is_disabled()
+        # unfinished again: x/2 stays, dimmed, and is not inserted for this text
+        page.keyboard.type(" +", delay=30)
+        page.wait_for_function("document.querySelector('.ltx-panel').classList.contains('ltx-stale')", timeout=15000)
+        assert page.locator(".ltx-src").inner_text() == "x/2" and page.locator(".ltx-insert-all").is_disabled()
+        assert "error" not in page.locator(".ltx-note").get_attribute("class")
+        assert not page.locator(".se-loading").is_visible() and doc.expr == x + y
         assert errors == []
         browser.close()
     srv.shutdown()

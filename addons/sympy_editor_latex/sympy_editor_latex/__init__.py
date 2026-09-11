@@ -12,8 +12,10 @@ shows a first reading rendered, with
 
 What is read goes into the document over the selection or as the whole
 expression.  Methods: ``read`` (a query: ``{"latex", "choices", "constants"}``
-→ the reading, its ambiguities and constants) and ``insert`` (the same, plus
-``"path"``: committed).  Needs the ``lark`` package (pure Python).
+→ the reading, its ambiguities and constants), ``insert`` (the same, plus
+``"path"``: committed) and ``warm`` (builds the parsers, which the add-on
+otherwise starts building in the background as it is switched on: the first
+reading should not wait for them).  Needs the ``lark`` package (pure Python).
 """
 
 from __future__ import annotations
@@ -48,6 +50,9 @@ class LatexAddon(Addon):
         except ImportError:
             raise ImportError("The LaTeX add-on needs the lark package (pure Python): pip install lark") from None
         super().activate()
+        # Half a second on a laptop, seconds on a phone: the grammar is built
+        # now, off to one side, not when the user has begun to type.
+        self.reader.warm(background=True)
 
     def client_options(self) -> Dict[str, Any]:
         return {"constants": [{"name": name, "value": str(value), "default": default, "label": label}
@@ -85,6 +90,9 @@ class LatexAddon(Addon):
                                 constants=dict(constants) if isinstance(constants, dict) else {}, known=self._known(doc))
 
     def handle(self, doc, method: str, payload: Dict[str, Any]):
+        if method == "warm":
+            self.reader.warm()
+            return {"ready": True}
         if method == "read":
             result = self.read(doc, payload)
             result.pop("expr", None)

@@ -24,6 +24,8 @@ The grammar is the add-on's own copy of SymPy's (``static/grammar``), with
 
 from __future__ import annotations
 
+import re
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -54,6 +56,10 @@ BARE_FUNCTIONS = frozenset("""sin cos tan csc sec cot sin_power cos_power tan_po
 FUNCTIONS = BARE_FUNCTIONS | frozenset("function_applied abs floor ceil square_root conjugate min max".split())
 #: Letters that name a function when followed by parentheses, by convention.
 FUNCTION_LETTERS = frozenset("f g h F G H".split())
+
+#: What an unfinished text is told: it stops in the middle of an expression
+#: (``\frac{x``, ``x +``), or of a command (``\fr``) - being typed, not wrong.
+INCOMPLETE = "Not finished yet: the LaTeX stops in the middle of an expression"
 
 MAX_POINTS = 40
 MAX_ALTERNATIVES = 8
@@ -221,21 +227,47 @@ class LatexReader:
         self._forest_parser = None
         self._callbacks = None
         self._transformer = None
+        self._lock = threading.Lock()
 
     # -- the parsers ---------------------------------------------------------
 
     def _build(self) -> None:
         if self._forest_parser is not None:
             return
-        lark = _lark()
-        grammar = (self.grammar_dir / "latex.lark").read_text(encoding="utf-8")
-        common = dict(source_path=str(self.grammar_dir) + "/", parser="earley", start="latex_string", lexer="auto",
-                      propagate_positions=True, maybe_placeholders=False, keep_all_tokens=True)
-        self._forest_parser = lark.Lark(grammar, ambiguity="forest", **common)
-        # The forest carries no tree-building callbacks of its own: a twin
-        # parser (any ambiguity mode that builds trees) lends its table.
-        self._callbacks = lark.Lark(grammar, ambiguity="explicit", **common).parser.parser.callbacks
-        self._transformer = _Transformer()
+        with self._lock:                  # a warm-up thread may be building them this moment: wait for it
+            if self._forest_parser is not None:
+                return
+            lark = _lark()
+            grammar = (self.grammar_dir / "latex.lark").read_text(encoding="utf-8")
+            common = dict(source_path=str(self.grammar_dir) + "/", parser="earley", start="latex_string", lexer="auto",
+                          propagate_positions=True, maybe_placeholders=False, keep_all_tokens=True)
+            forest_parser = lark.Lark(grammar, ambiguity="forest", **common)
+            # The forest carries no tree-building callbacks of its own: a twin
+            # parser (any ambiguity mode that builds trees) lends its table.
+            self._callbacks = lark.Lark(grammar, ambiguity="explicit", **common).parser.parser.callbacks
+            self._transformer = _Transformer()
+            self._forest_parser = forest_parser          # last: it is what says the rest is ready
+
+    def warm(self, background: bool = False) -> None:
+        """Build the parsers now rather than at the first reading, which would
+        wait for them - half a second on a laptop, seconds on a phone, while
+        the user is typing.  ``background``: in a thread of its own, so that
+        nothing waits, where there are threads (Pyodide has none: there the
+        first call builds them)."""
+        if self._forest_parser is not None:
+            return
+        if not background:
+            self._build()
+            return
+        def build():
+            try:
+                self._build()
+            except Exception:  # noqa: BLE001 - the first reading builds them again, and says what is wrong
+                pass
+        try:
+            threading.Thread(target=build, name="latex-grammar", daemon=True).start()
+        except RuntimeError:
+            pass
 
     def _chooser(self, choices: Dict[str, int], known_functions=(), memo: Optional[Dict[str, int]] = None):
         lark = _lark()
@@ -307,7 +339,9 @@ class LatexReader:
         functions (a symbol of the same name is reused, with its assumptions).
 
         Returns ``{"ok": True, "expr", "src", "latex", "ambiguities": [...],
-        "constants": [...]}`` or ``{"ok": False, "error": ...}``.  Each
+        "constants": [...]}`` or ``{"ok": False, "error": ...}`` - with
+        ``"incomplete": True`` when the text only stops too early (it is
+        being typed: :data:`INCOMPLETE`).  Each
         ambiguity is ``{"key", "fragment", "choice", "options": [{"src",
         "latex"}]}`` - the whole expression under each alternative - and each
         constant ``{"name", "on", "value", "label"}``.
@@ -323,11 +357,17 @@ class LatexReader:
             n for n, v in known.items() if isinstance(v, sympy.core.function.FunctionClass)}
         try:
             forest = self._forest_parser.parse(latex)
+        except lark.exceptions.UnexpectedEOF:
+            return {"ok": False, "incomplete": True, "error": INCOMPLETE}
+        except lark.exceptions.UnexpectedCharacters as exc:
+            # a command being typed at the end (\fr on the way to \frac) is
+            # unfinished too, not wrong
+            tail = re.search(r"\\[A-Za-z]*$", latex)
+            if tail and getattr(exc, "pos_in_stream", -1) >= tail.start():
+                return {"ok": False, "incomplete": True, "error": INCOMPLETE}
+            return self._unreadable(latex, exc)
         except lark.exceptions.UnexpectedInput as exc:
-            col = getattr(exc, "column", None)
-            where = f" at position {col}" if isinstance(col, int) and col > 0 else ""
-            snippet = latex[max(0, (col or 1) - 1):(col or 1) + 11] if col else ""
-            return {"ok": False, "error": f"This LaTeX could not be read{where}" + (f": near {snippet!r}" if snippet else "")}
+            return self._unreadable(latex, exc)
         except lark.exceptions.LarkError as exc:
             return {"ok": False, "error": f"This LaTeX could not be read: {str(exc).splitlines()[0][:120]}"}
 
@@ -349,6 +389,13 @@ class LatexReader:
         # changes just what was picked (a decision made afresh could flip).
         return {"ok": True, "expr": expr, "src": str(expr), "latex": sympy.latex(expr),
                 "ambiguities": ambiguities, "constants": consts, "choices": dict(chosen)}
+
+    @staticmethod
+    def _unreadable(latex: str, exc) -> Dict[str, Any]:
+        col = getattr(exc, "column", None)
+        where = f" at position {col}" if isinstance(col, int) and col > 0 else ""
+        snippet = latex[max(0, (col or 1) - 1):(col or 1) + 11] if col else ""
+        return {"ok": False, "error": f"This LaTeX could not be read{where}" + (f": near {snippet!r}" if snippet else "")}
 
     def _to_expr(self, tree) -> Basic:
         import warnings

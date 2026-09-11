@@ -119,6 +119,42 @@ def test_errors_are_messages_not_exceptions(reader):
     assert read_latex(r"\sin x")["src"] == "sin(x)"
 
 
+def test_unfinished_text_is_not_an_error(reader):
+    """The panel reads as the user types: a text that stops in the middle of
+    an expression, or of a command, is being typed - not wrong."""
+    for unfinished in (r"\frac{x", r"\frac{x}{", r"x +", r"x^", r"\sqrt{", r"\fr", "\\", r"\frac{x}{2} + \sin"):
+        res = reader.read(unfinished)
+        assert res["ok"] is False and res.get("incomplete") is True and res["error"].startswith("Not finished"), unfinished
+    for wrong in (r"x )", r"\foo x", r"x^2 +* y", r"x $$ y"):
+        res = reader.read(wrong)
+        assert res["ok"] is False and not res.get("incomplete") and "could not be read" in res["error"], wrong
+
+
+def test_the_parsers_are_ready_before_the_first_reading():
+    """Building them takes half a second here and seconds on a phone, which
+    the first reading waited for while the user typed.  They are built in
+    the background (a reading meanwhile waits for that one build), or by
+    "warm"."""
+    fresh = LatexReader()
+    fresh.warm(background=True)
+    assert fresh.read(r"\sin x")["src"] == "sin(x)"
+    # switched on in a document, the add-on starts the build by itself
+    import time
+    from sympy_editor_latex import LatexAddon
+    switched = LatexAddon()
+    Document(x, addons=[switched])
+    for _ in range(200):
+        if switched.reader._forest_parser is not None:
+            break
+        time.sleep(0.05)
+    assert switched.reader._forest_parser is not None
+    other = LatexReader()
+    doc = Document(x, addons=[ADDON])
+    assert doc.handle({"action": "addon", "addon": "latex", "method": "warm"})["query"]["result"] == {"ready": True}
+    other.warm()
+    assert other._forest_parser is not None
+
+
 def test_the_document_s_names_are_reused_and_its_functions_apply():
     xp = Symbol("x", positive=True)
     doc = Document(xp ** 2 + f(y), addons=[ADDON])
@@ -141,7 +177,7 @@ def test_the_methods_read_and_insert():
     doc.handle({"action": "addon", "addon": "latex", "method": "insert", "latex": r"e^{i \pi}", "path": "/",
                 "constants": {"pi": False, "i": False}})
     assert doc.expr == E ** (Symbol("i") * Symbol("pi"))
-    bad = doc.handle({"action": "addon", "addon": "latex", "method": "insert", "latex": r"\frac{x}", "path": "/"})
+    bad = doc.handle({"action": "addon", "addon": "latex", "method": "insert", "latex": r"x^2 +* y", "path": "/"})
     assert "could not be read" in bad["query"]["error"] and doc.expr == E ** (Symbol("i") * Symbol("pi"))
     assert ADDON.client_options()["constants"][0]["name"] == "pi"
     assert "static/grammar/latex.lark" in ADDON.python_sources()                             # the grammar travels to Pyodide pages

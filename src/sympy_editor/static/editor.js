@@ -1759,7 +1759,7 @@ var SympyEditor = (function () {
         node: function (path) { return self.state && self.state.nodes ? self.state.nodes[path] || null : null; },
         select: function (path) { self.select(path); },
         send: function (msg) { return self.send(msg); },
-        call: function (method, payload) { return self._addonCall(entry.name, method, payload); },
+        call: function (method, payload, options) { return self._addonCall(entry.name, method, payload, options); },
         status: function (text) { self._setStatus(text); },
         error: function (text) { self._showError(text); },
         showHelp: function (html, title) { self.showHelp(html, title || entry.label); },
@@ -1772,14 +1772,16 @@ var SympyEditor = (function () {
      *  Calls queue up behind the request in flight (the editor answers one
      *  message at a time), in order - not the latest one only, as the
      *  user's own presses do: a panel asking as the user edits must not
-     *  lose its question. */
-    _addonCall(name, method, payload) {
+     *  lose its question.  `options.quiet` is for a question the panel
+     *  shows its own progress for - the LaTeX box reads as the user types:
+     *  no overlay over the editor then, and the focus left where it is. */
+    _addonCall(name, method, payload, options) {
       var self = this;
       var msg = Object.assign({}, payload || {}, { action: "addon", addon: name, method: method });
       var run = async function () {
         while (self.busy && !self.closed) await new Promise(function (r) { setTimeout(r, 25); });
         if (self.closed) throw new Error("The session is closed");
-        var snap = await self.send(msg);
+        var snap = await self.send(msg, options);
         if (!snap) throw new Error("No answer");
         if (snap.query && snap.query.error) throw new Error(snap.query.error);   // the method failed: the caller's to show
         if (snap.error) throw new Error(snap.error);
@@ -4786,8 +4788,13 @@ var SympyEditor = (function () {
      *  long computation are one undo), and one that points into the
      *  expression is dropped if the expression changed while it waited.  An
      *  add-on's calls wait in turn, all of them, and see to their own
-     *  staleness (see _addonCall). */
-    async send(msg) {
+     *  staleness (see _addonCall).
+     *
+     *  `options.quiet`: no spinner overlay and no dimming however long it
+     *  takes, and the focus is not taken - for a request whose progress is
+     *  shown where it was asked (an add-on's panel), which the overlay would
+     *  cover while the user is typing there. */
+    async send(msg, options) {
       if (this.closed || !this.backend) return;
       if (this.busy) {
         var before = this.state ? this.state.srepr : null;
@@ -4803,12 +4810,12 @@ var SympyEditor = (function () {
         }
       }
       this.busy = true;
-      var self = this;
+      var self = this, quiet = !!(options && options.quiet);
       // A request that takes a while dims the formula and gets the spinner
       // overlay, and after a few seconds the offer to interrupt it (where the
-      // backend can).  A quick one shows nothing at all.
-      var working = setTimeout(function () { self.root.classList.add("se-busy"); self._showLoading(self._workingText(msg)); }, this.opts.workingAfter);
-      var offer = setTimeout(function () {
+      // backend can).  A quick one shows nothing at all, nor a quiet one.
+      var working = quiet ? null : setTimeout(function () { self.root.classList.add("se-busy"); self._showLoading(self._workingText(msg)); }, this.opts.workingAfter);
+      var offer = quiet ? null : setTimeout(function () {
         if (self.backend.interrupt && (!self.backend.canInterrupt || self.backend.canInterrupt())) self.interruptBtn.hidden = false;
       }, this.opts.interruptAfter);
       var wasSrepr = this.state ? this.state.srepr : null;

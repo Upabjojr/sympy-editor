@@ -59,7 +59,9 @@ SympyEditor.registerAddon("latex", {
       if (!text) { clear(); return; }
       var my = ++seq;
       element.classList.add("ltx-busy");
-      api.call("read", { latex: text, choices: choices, constants: constants }).then(function (res) {
+      // quiet: the panel shows its own progress, and the editor's overlay
+      // would cover the box and take its focus while the user types
+      api.call("read", { latex: text, choices: choices, constants: constants }, { quiet: true }).then(function (res) {
         if (my !== seq) return;
         element.classList.remove("ltx-busy");
         last = res;
@@ -76,12 +78,24 @@ SympyEditor.registerAddon("latex", {
     }
 
     function clear() {
+      element.classList.remove("ltx-stale");
       preview.textContent = ""; src.textContent = ""; ambig.textContent = ""; consts.textContent = "";
       note.textContent = ""; note.className = "ltx-note";
       insertSel.disabled = insertAll.disabled = true;
     }
 
     function render(res) {
+      if (!res.ok && res.incomplete) {
+        // The text stops mid-expression: it is being typed, not wrong.  The
+        // last reading stays, dimmed - it is not this text's - and cannot be
+        // inserted.
+        note.textContent = res.error;
+        note.className = "ltx-note pending";
+        if (preview.textContent) element.classList.add("ltx-stale");
+        insertSel.disabled = insertAll.disabled = true;
+        return;
+      }
+      element.classList.remove("ltx-stale");
       if (!res.ok) {
         clear();
         note.textContent = res.error || "This LaTeX could not be read";
@@ -145,6 +159,10 @@ SympyEditor.registerAddon("latex", {
     }
 
     input.addEventListener("input", function () { choices = {}; schedule(); });   // new text: the old picks no longer apply
+    // The parsers, where the add-on could not build them in the background
+    // (no threads in Pyodide), are built when the box is first taken - before
+    // anything is typed, not at the first reading.
+    input.addEventListener("focus", function () { api.call("warm", {}, { quiet: true }).then(null, function () {}); }, { once: true });
     input.addEventListener("keydown", function (ev) {
       ev.stopPropagation();                        // the editor's keys are not for the box
       if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); insert(api.selected() && api.selected() !== "/" ? api.selected() : "/"); }

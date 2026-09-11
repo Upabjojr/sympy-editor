@@ -19,6 +19,10 @@
 .se-addon-latex .ltx-src { font-family: var(--se-mono); color: var(--se-muted); word-break: break-word; }
 .se-addon-latex .ltx-note { min-height: 1.2em; color: var(--se-muted); }
 .se-addon-latex .ltx-note.error { color: var(--se-error); }
+/* a text that stops mid-expression is being typed: a quiet note, and the last
+   reading dimmed (it is not this text's) */
+.se-addon-latex .ltx-note.pending { color: var(--se-muted); font-style: italic; }
+.se-addon-latex .ltx-stale .ltx-preview, .se-addon-latex .ltx-stale .ltx-src { opacity: 0.4; }
 .se-addon-latex .ltx-ambig, .se-addon-latex .ltx-consts { display: flex; flex-direction: column; gap: 0.25rem; }
 .se-addon-latex .ltx-point { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }
 .se-addon-latex .ltx-fragment { font-family: var(--se-mono); padding: 0 0.3rem; border-radius: 0.25rem; background: rgba(var(--se-accent), 0.1); }
