@@ -1770,8 +1770,9 @@ var SympyEditor = (function () {
     /** One of an add-on's Python methods: a query resolves with its result,
      *  a change with the new snapshot (already applied); an error rejects.
      *  Calls queue up behind the request in flight (the editor answers one
-     *  message at a time, and `send` drops a message while it is busy):
-     *  a panel asking as the user edits must not lose its question. */
+     *  message at a time), in order - not the latest one only, as the
+     *  user's own presses do: a panel asking as the user edits must not
+     *  lose its question. */
     _addonCall(name, method, payload) {
       var self = this;
       var msg = Object.assign({}, payload || {}, { action: "addon", addon: name, method: method });
@@ -4706,6 +4707,14 @@ var SympyEditor = (function () {
     /* ---- commands ---- */
 
     command(cmd) {
+      // These open a field or a panel, which they do not while a request
+      // runs; their buttons no longer grey out for one (see send), so a
+      // press meanwhile waits for it to end rather than doing nothing.
+      if (this.busy && (cmd === "edit" || cmd === "keyboard" || cmd === "history")) {
+        var self = this;
+        this._afterRequest().then(function (go) { if (go) self.command(cmd); });
+        return;
+      }
       switch (cmd) {
         case "undo": return this.send({ action: "undo" });
         case "redo": return this.send({ action: "redo" });
@@ -4767,16 +4776,38 @@ var SympyEditor = (function () {
       }
     }
 
-    /** Send a message to the backend and apply the returned snapshot. */
+    /** Send a message to the backend and apply the returned snapshot.
+     *
+     *  One request at a time - and while one runs, nothing on the toolbar
+     *  changes: a plot following the selection asks Python something at
+     *  every change, and buttons greyed out for each request blinked.  So
+     *  what is asked for meanwhile is not refused but waits for the request
+     *  to end, the latest such message only (three taps on Undo during a
+     *  long computation are one undo), and one that points into the
+     *  expression is dropped if the expression changed while it waited.  An
+     *  add-on's calls wait in turn, all of them, and see to their own
+     *  staleness (see _addonCall). */
     async send(msg) {
-      if (this.busy || this.closed || !this.backend) return;
+      if (this.closed || !this.backend) return;
+      if (this.busy) {
+        var before = this.state ? this.state.srepr : null;
+        if (msg.action === "addon") {
+          while (this.busy && !this.closed) await this._pause();
+        } else if (!(await this._afterRequest())) {
+          return;
+        }
+        if (this.closed || !this.backend) return;
+        if (msg.action !== "addon" && msg.path !== undefined && (this.state ? this.state.srepr : null) !== before) {
+          this._setStatus("Not done: the expression changed while it waited for the request before it");
+          return;
+        }
+      }
       this.busy = true;
-      this.root.classList.add("se-busy");
-      this._updateToolbar();
       var self = this;
-      // A request that takes a while gets the spinner overlay, and after a
-      // few seconds the offer to interrupt it (where the backend can).
-      var working = setTimeout(function () { self._showLoading(self._workingText(msg)); }, this.opts.workingAfter);
+      // A request that takes a while dims the formula and gets the spinner
+      // overlay, and after a few seconds the offer to interrupt it (where the
+      // backend can).  A quick one shows nothing at all.
+      var working = setTimeout(function () { self.root.classList.add("se-busy"); self._showLoading(self._workingText(msg)); }, this.opts.workingAfter);
       var offer = setTimeout(function () {
         if (self.backend.interrupt && (!self.backend.canInterrupt || self.backend.canInterrupt())) self.interruptBtn.hidden = false;
       }, this.opts.interruptAfter);
@@ -4801,6 +4832,20 @@ var SympyEditor = (function () {
         this.root.classList.remove("se-busy");
         this._updateToolbar();
       }
+    }
+
+    /** Wait for the request in flight to end.  False if something asked for
+     *  later has taken this one's turn, or the editor closed meanwhile. */
+    async _afterRequest() {
+      var turn = this._turn = {};
+      while (this.busy && !this.closed) await this._pause();
+      if (this.closed || this._turn !== turn) return false;
+      this._turn = null;
+      return true;
+    }
+
+    _pause() {
+      return new Promise(function (resolve) { setTimeout(resolve, 25); });
     }
 
     _workingText(msg) {
@@ -5782,7 +5827,9 @@ var SympyEditor = (function () {
       if (this._actionsStale && this.actions && this.state) this._setActionStates();
       var s = this.state || {};
       var b = this.buttons;
-      var dis = this.busy || this.closed || !this.state;
+      // Not this.busy: a request in flight greys nothing out (see send), and a
+      // press meanwhile waits for it.
+      var dis = this.closed || !this.state;
       var set = function (name, disabled) { if (b[name]) b[name].disabled = !!disabled; };
       var t = this.selected ? this.tree[this.selected] : null;
       var range = !!this.range;

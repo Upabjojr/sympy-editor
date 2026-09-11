@@ -1574,6 +1574,66 @@ def test_long_computation_shows_spinner_and_can_be_interrupted(browser):
         srv.server_close()
 
 
+def test_a_request_leaves_the_toolbar_alone_and_a_press_meanwhile_waits(browser):
+    """A plot following the selection asks Python something at every change,
+    and the toolbar greyed out for each request: it blinked.  Nothing on it
+    changes while a request runs now, and a quick one does not dim the
+    formula either.  A press meanwhile is not lost but waits for the request
+    - the last of several presses only - and one that points into the
+    expression is dropped if the expression changed while it waited."""
+    import time
+    from sympy_editor.ops import Op, get_ops
+
+    def slow(expr):
+        time.sleep(1.5)
+        return 2 * expr
+
+    ops = get_ops()
+    ops["slow"] = Op("slow", "Take a while", slow)
+    doc = Document(x + 1, ops=ops)
+    srv = EditorServer(doc, port=0, options={"workingAfter": 5000})
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    ed = "document.querySelector('.sympy-editor').__sympyEditor"
+    busy = lambda: page.evaluate(ed + ".busy")
+    try:
+        page = _open(browser, srv.url)
+        _next_state(page, lambda: page.evaluate(ed + ".send({action: 'set', src: 'x + 2'})"))
+        undo = page.locator('.se-toolbar [data-cmd="undo"]')
+        assert undo.is_enabled()
+        page.evaluate("""() => { window.__flips = 0;
+            new MutationObserver(list => {
+                const byTarget = new Map();
+                for (const m of list) { if (!byTarget.has(m.target)) byTarget.set(m.target, []); byTarget.get(m.target).push(m.oldValue !== null); }
+                for (const [el, olds] of byTarget) { const values = [...olds, el.hasAttribute('disabled')];
+                    for (let i = 1; i < values.length; i++) if (values[i] !== values[i - 1]) window.__flips++; }
+            }).observe(document.querySelector('.sympy-editor'), {attributes: true, subtree: true, attributeFilter: ['disabled'], attributeOldValue: true}); }""")
+        _pick(page, ".se-ops", "slow")
+        assert busy()
+        # two presses on Undo while it runs: the button is live, and nothing changes
+        undo.click()
+        undo.click()
+        assert busy() and doc.expr == x + 2
+        assert page.evaluate("window.__flips") == 0
+        assert "se-busy" not in page.locator(".sympy-editor").get_attribute("class")
+        assert page.evaluate("getComputedStyle(document.querySelector('.se-view')).opacity") == "1"
+        # the request ends (2*x + 4), then the last press runs: one undo, back to x + 2
+        assert _wait(lambda: doc.expr == x + 2 and not busy(), timeout=10)
+        page.wait_for_timeout(400)
+        assert doc.expr == x + 2                                      # not a second undo
+        # a delete aimed into the formula while it changes under it is dropped
+        _pick(page, ".se-ops", "slow")
+        assert busy()
+        page.evaluate(ed + ".send({action: 'delete', path: '/0'})")
+        assert _wait(lambda: not busy() and doc.expr == 2 * x + 4, timeout=10)
+        page.wait_for_timeout(300)
+        assert doc.expr == 2 * x + 4
+        assert page.locator(".se-status").inner_text().startswith("Not done: the expression changed")
+        assert page.errors == []
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 def test_delete_button_empties_the_whole_expression(browser, serve_expr):
     srv, doc = serve_expr(x**2 + sin(y))
     page = _open(browser, srv.url)

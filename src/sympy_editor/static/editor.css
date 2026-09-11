@@ -583,6 +583,7 @@
 }
 @media (prefers-reduced-motion: reduce) { .se-source-caret { animation: none; } }
 
+/* a request that has taken a while (Editor.send): a quick one dims nothing */
 .se-busy .se-view { opacity: 0.6; }
 .se-closed .se-view { opacity: 0.7; }
 
