@@ -143,6 +143,9 @@ def test_the_shelf_opens_with_an_editor_of_its_own(tmp_path):
     assert run in page and page.count("if (!window.SympyEditorTutorial) {") == 1
     tour = page.split(run, 1)[1].splitlines()[0]
     assert '"stopButton": true' in tour and '"part": "history"' not in tour and "se-history-close" not in tour
+    # it stops when the reader goes elsewhere, and the button in the text plays it again
+    assert '"stopOnLeave": true' in tour and '"playButton": "try-the-editor-play"' in tour
+    assert page.index('id="try-the-editor-play"') < page.index('<div id="try-the-editor"></div>')
     assert cfg["sources"] and cfg["srepr"]                       # it computes, and knows what to start from
     assert ">Open standalone editor</a>" in page                 # the button names the other one
     assert "Open the editor" not in page

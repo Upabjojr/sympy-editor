@@ -83,7 +83,10 @@ them following on as if they had not been there.
 
 **Stopping**: the page has a button to stop the tour (``stop_button=False``
 leaves it out, for a recording); stopped, the overlay goes and the editor
-is left usable, what was done kept.
+is left usable, what was done kept.  With ``stop_on_leave=True`` a link
+followed, or the page scrolled on past the editor, stops it too; and
+``play_button`` names a button of the page's own (class ``se-tour-play``)
+that plays it again, from the start, on a fresh editor.
 
 **Embedding**: ``to_tutorial_html(..., full_page=False)`` is a fragment for
 a page of one's own.  Every editor on a page runs on one Python (Pyodide)
@@ -213,21 +216,31 @@ def player_css() -> str:
     return f"<style>\n{read_static('tutorial.css')}\n</style>\n"
 
 
-def player_html(element_id: str, script, *, full_page: bool = False, stop_button: bool = True) -> str:
+def player_html(element_id: str, script, *, full_page: bool = False, stop_button: bool = True,
+                stop_on_leave: bool = False, play_button: Optional[str] = None) -> str:
     """The player, and the call that plays ``script`` on the editor mounted in
     ``element_id`` - for after that editor's mount.  The player's script is
-    guarded, so several on a page share one copy."""
+    guarded, so several on a page share one copy.  ``stop_on_leave``: a link
+    followed, or the page scrolled past the editor, stops the tour too.
+    ``play_button``: the id of a button on the page, before this, that plays
+    it again from the start on a fresh editor."""
+    opts = {"fullPage": full_page, "stopButton": stop_button}
+    if stop_on_leave:
+        opts["stopOnLeave"] = True
+    if play_button:
+        opts["playButton"] = play_button
     return ("<script>\nif (!window.SympyEditorTutorial) {\n" + read_static("tutorial.js") + "\n}\n</script>\n"
             "<script>\n"
             f'SympyEditorTutorial.run(document.getElementById("{element_id}"), {_script_json(script)}, '
-            f'{{"fullPage": {"true" if full_page else "false"}, "stopButton": {"true" if stop_button else "false"}}});\n'
+            f"{json.dumps(opts)});\n"
             "</script>\n")
 
 
 def to_tutorial_html(script, *, expr=None, title: Optional[str] = None, backend: str = "pyodide",
                      options: Optional[Dict[str, Any]] = None, urls: Optional[Dict[str, str]] = None,
                      full_page: bool = True, element_id: Optional[str] = None, logo: str = "",
-                     stop_button: bool = True, skip=(), **config_kwargs) -> str:
+                     stop_button: bool = True, stop_on_leave: bool = False,
+                     play_button: Optional[str] = None, skip=(), **config_kwargs) -> str:
     """A page - or, with ``full_page=False``, a fragment to embed - with the
     editor that plays ``script`` as soon as it is ready.
 
@@ -236,7 +249,9 @@ def to_tutorial_html(script, *, expr=None, title: Optional[str] = None, backend:
     It is the ordinary editor page (fragment) with the player added after it:
     the editor is the one every other page has.  Fragments on one page share
     one copy of the scripts and one Python runtime.  ``logo``: SVG markup
-    beside a full page's title.  ``stop_button``: a button to stop the tour.
+    beside a full page's title.  ``stop_button``: a button to stop the tour;
+    ``stop_on_leave``, ``play_button``: see :func:`player_html` (the button
+    is the page's, around the fragment).
     ``skip``: the parts (``"part"`` of the steps) to leave out.  ``backend``
     is ``"pyodide"`` (a standalone file) by default; ``config_kwargs`` go to
     ``build_config`` (``api_url``/``token`` for ``"http"``)."""
@@ -247,7 +262,8 @@ def to_tutorial_html(script, *, expr=None, title: Optional[str] = None, backend:
     opts.update(options or {})
     config = build_config(doc, backend=backend, options=opts, urls=urls, **config_kwargs)
     element_id = element_id or ELEMENT_PREFIX + uuid.uuid4().hex[:10]
-    player = player_html(element_id, script, full_page=full_page, stop_button=stop_button)
+    player = player_html(element_id, script, full_page=full_page, stop_button=stop_button,
+                         stop_on_leave=stop_on_leave, play_button=play_button)
     if not full_page:
         return player_css() + render_fragment(config, element_id) + player
     page = render_page(config, title or script.get("title") or "SymPy Editor tutorial", player_css(), element_id, logo)

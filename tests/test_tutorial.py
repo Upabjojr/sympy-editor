@@ -321,3 +321,70 @@ def test_the_stop_button_stops_the_tour_and_leaves_the_editor_usable():
     assert layers == 0 and errors == []
     assert doc.expr == x**2 / y - sin(x)                              # the step after the stop never ran
     assert selected == "/1/d"
+
+
+@pytest.mark.skipif(not _online(default_urls()["katexJs"]), reason="KaTeX CDN not reachable")
+def test_a_link_or_a_scroll_past_stops_the_tour_and_the_play_button_plays_it_again():
+    """A reader gone elsewhere - a link followed, the page scrolled on past
+    the editor - is not watching: the tour stops.  The page's Play button,
+    out of sight while a tour plays, plays it again from the start on a
+    fresh editor."""
+    doc = Document(x**2 / y - sin(x))
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    script = {"steps": [
+        {"at": 0, "caption": "A long wait, for somebody to go elsewhere", "position": "top"},
+        {"after": 30, "set": "cos(x)"},                               # never reached
+    ]}
+    page_html = to_tutorial_html(script, expr=doc, backend="http", api_url="/api", token=srv.token,
+                                 stop_on_leave=True, play_button="play")
+    # the page's own, before the player: its button, a link, and a long way down
+    player = "<script>\nif (!window.SympyEditorTutorial)"
+    assert '"stopOnLeave": true, "playButton": "play"' in page_html
+    page_html = page_html.replace(player, '<button type="button" class="se-tour-play" id="play">Play</button>'
+                                  '<a id="away" href="#below">below</a><div style="height: 4000px"></div>'
+                                  '<p id="below">the end</p>\n' + player, 1)
+    try:
+        with playwright.sync_playwright() as p:
+            try:
+                browser = p.chromium.launch()
+            except Exception as exc:
+                pytest.skip(f"chromium not available: {exc}")
+            page = browser.new_page(viewport={"width": 1000, "height": 800})
+            errors = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.add_init_script("window.__ends = []; window.__starts = 0;"
+                                 "addEventListener('sympy-editor-tutorial-end', e => window.__ends.push(e.detail));"
+                                 "addEventListener('sympy-editor-tutorial-step', e => { if (!e.detail.index) window.__starts++; });")
+            page.route(srv.url + "tour", lambda route: route.fulfill(body=page_html, content_type="text/html"))
+            page.goto(srv.url + "tour")
+            play = page.locator("#play")
+            page.wait_for_selector(".se-tour-caption.shown", timeout=30000)
+            playing = {"play": play.is_visible()}
+            page.locator("#away").click()                             # a link followed: stopped at once
+            page.wait_for_function("() => window.__ends.length === 1", timeout=5000)
+            linked = page.evaluate("({end: window.__ends[0], hash: location.hash,"
+                                   " layers: document.querySelectorAll('.se-tour-layer').length})")
+            linked["play"] = play.is_visible()
+            page.evaluate("window.__old = document.querySelector('.sympy-editor')")
+            play.click()                                              # played again, on a fresh editor
+            page.wait_for_function("() => window.__starts === 2", timeout=30000)
+            page.wait_for_selector(".se-tour-caption.shown", timeout=30000)
+            again = page.evaluate("({old: window.__old.isConnected, editors: document.querySelectorAll('.sympy-editor').length})")
+            again["play"] = play.is_visible()
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")   # scrolled on past the editor
+            page.wait_for_function("() => window.__ends.length === 2", timeout=5000)
+            scrolled = page.evaluate("({end: window.__ends[1], layers: document.querySelectorAll('.se-tour-layer').length,"
+                                     " y: scrollY})")
+            scrolled["play"] = play.is_visible()
+            browser.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+    assert errors == []
+    assert playing == {"play": False}                                 # no Play button while it plays
+    assert linked == {"end": {"errors": [], "stopped": True}, "hash": "#below", "layers": 0, "play": True}
+    assert again == {"old": False, "editors": 1, "play": False}
+    assert scrolled["end"] == {"errors": [], "stopped": True} and scrolled["layers"] == 0 and scrolled["play"]
+    assert scrolled["y"] > 3000                                       # and nothing pulled the page back up
+    assert doc.expr == x**2 / y - sin(x)                              # no step after a stop ran

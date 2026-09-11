@@ -47,6 +47,15 @@
 }
 .se-tour-stop:hover, .se-tour-stop:focus-visible { animation: none; background: hsl(243 95% 88%); border-color: hsl(243 90% 58%); outline: none; }
 .se-tour-stop[hidden] { display: none; }
+/* the way back in: a button of the page's own (opts.playButton) that plays
+ * the tour again, there while none plays - out of sight rather than out of
+ * the page, so that nothing moves as it comes and goes */
+.se-tour-play { visibility: hidden; cursor: pointer; font: inherit; font-size: 0.95em; font-weight: 600;
+  padding: 0.3rem 0.95rem; margin-left: 0.35rem; border-radius: 999px; border: 1.5px solid hsl(243 60% 62%);
+  background: hsl(243 60% 95%); color: #312e81; }
+.se-tour-play.ready { visibility: visible; }
+.se-tour-play:hover, .se-tour-play:focus-visible { background: hsl(243 95% 88%); border-color: hsl(243 90% 58%); outline: none; }
+.se-tour-running .se-tour-play { visibility: hidden; }
 @media (max-width: 640px) { .se-tour-caption { font-size: 1.1rem; } .se-tour-caption.large { font-size: 1.4rem; } }
 @media (prefers-reduced-motion: reduce) {
   .se-tour-arrow, .se-tour-ring, .se-tour-ring::after, .se-tour-ring.pressing, .se-tour-stop { animation: none; }

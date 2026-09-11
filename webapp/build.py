@@ -609,13 +609,15 @@ TRY = """<h2 class="shelf">Try it</h2>
 
 #: ...or a tour of it, playing where the editor will be (examples/tutorial):
 #: the editor at work, pressed and typed into for real, with a button to stop
-#: it; stopped or over, it is the editor, to use.
+#: it; stopped or over, it is the editor, to use - and the button at the end
+#: of the text plays it again.
 TOUR = """<h2 class="shelf">Try it</h2>
 <section class="try">
   <p>A short tour plays here: the editor at work, pressed and typed into for
   real. Stop it whenever you like, and the editor is yours \u2014 click any piece
   of the formula and change it in place. Python runs in your browser, and every
-  result is computed on your device.</p>
+  result is computed on your device.
+  <button type="button" class="se-tour-play" id="{element}-play">\u25b6 Play the tour</button></p>
   <div id="{element}"></div>
 </section>"""
 
@@ -672,10 +674,13 @@ def derivations_page(folder: Path, *, urls: dict | None = None,
         if tour is not None:
             # the tour plays on that editor: its player after the mounts, its
             # overlay's style with the section (and no invitation to pulse -
-            # the tour is the invitation)
+            # the tour is the invitation).  A reader who follows a link or
+            # scrolls on past it has stopped watching, and it stops; the
+            # button in the section's text plays it again.
             from sympy_editor.tutorial import player_css, player_html
             try_editor = player_css() + TOUR.format(element=element)
-            try_watch = player_html(element, tour, full_page=False, stop_button=True)
+            try_watch = player_html(element, tour, full_page=False, stop_button=True,
+                                    stop_on_leave=True, play_button=f"{element}-play")
         else:
             try_editor, try_watch = TRY.format(element=element), TRY_SCRIPT
         mounts.append(f'SympyEditor.mount(document.getElementById("{element}"), {_script_json(editor)});')

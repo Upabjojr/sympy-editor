@@ -76,7 +76,8 @@ The web site opens with all four switched on.
   `examples/tutorial/` is a tour of the editor built this way: editing in
   the formula itself, the History of the edits, and three add-ons.  The web
   site's front page plays it (without the History), with a button to stop it
-  and use the editor.
+  and use the editor; a link followed, or the page scrolled on past the
+  editor, stops it too, and a button beside it plays it again from the start.
 * Python 3.10 or later: 3.9 is no longer supported (its security support
   ended in October 2025, and the rewrite rules' `sympy-matching` never ran
   on it).

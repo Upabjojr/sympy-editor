@@ -296,17 +296,45 @@
     this.speed = +(this.opts.speed || this.script.speed || 1) || 1;
     this.errors = [];
     this.stopped = false;
+    this.over = false;        // play() has returned, stopped or to the end
     this.index = -1;
     this.overlay = new Overlay(editor);
+    this._listeners = [];
     var self = this;
     if (this.opts.stopButton) {
       this.overlay.stopBtn.hidden = false;
       this.overlay.stopBtn.addEventListener("click", function (ev) { ev.preventDefault(); ev.stopPropagation(); self.stop(); });
     }
+    if (this.opts.stopOnLeave) {
+      // A reader gone elsewhere is not watching: a link followed, or the
+      // page scrolled on past the editor, stops the tour - which would
+      // otherwise pull the page back up at its next press.  Only a
+      // person's click counts: the player's own presses are not trusted.
+      var onLink = function (ev) {
+        var t = ev.target;
+        if (ev.isTrusted && t && t.closest && t.closest("a[href]")) self.stop();
+      };
+      this._listen(document, "click", onLink, true);
+      this._listen(document, "auxclick", onLink, true);
+      this._listen(window, "scroll", function () { if (self.past()) self.stop(); }, { capture: true, passive: true });
+    }
     this.done = new Promise(function (resolve) { self._resolve = resolve; });
   }
 
   Player.prototype.seconds = function (s) { return (s || 0) * 1000 / this.speed; };
+
+  Player.prototype._listen = function (target, type, fn, how) {
+    target.addEventListener(type, fn, how);
+    this._listeners.push(function () { target.removeEventListener(type, fn, how); });
+  };
+  Player.prototype._unlisten = function () {
+    this._listeners.splice(0).forEach(function (off) { off(); });
+  };
+
+  /** Has the page been scrolled on past the editor - all of it above the window? */
+  Player.prototype.past = function () {
+    return this.editor.root.getBoundingClientRect().bottom <= 0;
+  };
 
   /** Until the editor has its first state, Python has started, and nothing
    *  is on its way: a step sent to a busy editor is dropped. */
@@ -499,8 +527,10 @@
     if (!ov.caption.hidden) {
       var left = ov.until ? ov.until - Date.now() : this.seconds(LAST);
       await sleep(left);
+      if (this.stopped) return;         // stopped in the last caption: stop() saw to the rest, and nothing scrolls back
       ov.say(null);
       await sleep(300);
+      if (this.stopped) return;
     }
     ov.remove();
     var ed = this.editor;
@@ -516,13 +546,15 @@
   Player.prototype.play = async function () {
     document.documentElement.classList.add("se-tour-running");
     await this.ready();
+    if (this.opts.stopOnLeave && !this.stopped && this.past()) this.stop();   // the page opened further down
     do {
       var start = performance.now(), last = start;
       for (var i = 0; i < this.steps.length && !this.stopped; i++) {
         var step = this.steps[i] || {};
         var due = step.at !== undefined ? start + this.seconds(step.at)
                 : last + this.seconds(step.after !== undefined ? step.after : (i ? GAP : 0));
-        await sleep(due - performance.now());
+        // a little at a time: stopped, the player is over at once, not at the next step's time
+        while (!this.stopped && performance.now() < due) await sleep(Math.min(100, due - performance.now()));
         await this.idle();
         if (this.stopped) break;
         this.index = i;
@@ -533,17 +565,23 @@
       if (this.script.loop && !this.stopped) await sleep(this.seconds(this.script.loopDelay !== undefined ? this.script.loopDelay : 3));
     } while (this.script.loop && !this.stopped);
     if (!this.stopped) await this.finish();
-    document.documentElement.classList.remove("se-tour-running");
-    window.dispatchEvent(new CustomEvent("sympy-editor-tutorial-end", { detail: { errors: this.errors.slice() } }));
+    this.over = true;
+    this._unlisten();
+    // Stopped, stop() took the class away already - and a tour played again
+    // since then has put it back, for itself.
+    if (!this.stopped) document.documentElement.classList.remove("se-tour-running");
+    window.dispatchEvent(new CustomEvent("sympy-editor-tutorial-end", { detail: { errors: this.errors.slice(), stopped: this.stopped } }));
     this._resolve({ errors: this.errors.slice(), stopped: this.stopped });
   };
 
-  /** Stop where it is (the Stop button, or a page's own call): the overlay
-   *  goes, and the editor is left usable - the History, the drawer and a
-   *  field half typed in the formula shut, what was done so far kept. */
+  /** Stop where it is (the Stop button, the reader gone elsewhere, or a
+   *  page's own call): the overlay goes, and the editor is left usable - the
+   *  History, the drawer and a field half typed in the formula shut, what
+   *  was done so far kept. */
   Player.prototype.stop = function () {
     if (this.stopped) return;
     this.stopped = true;
+    this._unlisten();
     this.overlay.remove();
     var ed = this.editor;
     if (ed.root.querySelector(".se-history-view") && typeof ed.closeHistory === "function") ed.closeHistory();
@@ -554,19 +592,47 @@
     document.documentElement.classList.remove("se-tour-running");
   };
 
+  /** A fresh editor in the place of `ed`, mounted as it was: a tour played
+   *  again starts from where the first did - its formula, its add-ons off,
+   *  what they kept gone.  The page's Python is started already, and the new
+   *  editor's document is one more in it.  `ed` itself where there is no
+   *  mounting it again (an Editor made by hand). */
+  function fresh(ed) {
+    var cfg = ed.mountConfig, host = ed.root.parentNode;
+    if (!cfg || !host || !window.SympyEditor) return ed;
+    ed.destroy();
+    return window.SympyEditor.mount(host, cfg);
+  }
+
   window.SympyEditorTutorial = {
-    version: 2,
+    version: 3,
     Player: Player,
     /** Play `script` on an editor (the Editor, its element, or the element
      *  it was mounted in; the page's first editor by default).  `opts`:
      *  fullPage (the page is the editor's: back to its top at the end),
-     *  stopButton (a button to stop it), speed. */
+     *  stopButton (a button to stop it), stopOnLeave (a link followed, or
+     *  the page scrolled past the editor, stops it too), playButton (a
+     *  button of the page's own, or its id, that plays it again from the
+     *  start on a fresh editor - the class "se-tour-play" keeps it out of
+     *  sight while a tour plays), speed. */
     run: function (target, script, opts) {
       var ed = editorOf(target);
       if (!ed) throw new Error("SympyEditorTutorial.run: no editor to play on");
       var player = new Player(ed, script, opts);
       window.SympyEditorTutorial.current = player;
       player.play();
+      var btn = opts && opts.playButton;
+      if (typeof btn === "string") btn = document.getElementById(btn);
+      if (btn && !btn.__sympyEditorTour) {
+        btn.__sympyEditorTour = true;
+        btn.classList.add("ready");
+        btn.addEventListener("click", function () {
+          var now = window.SympyEditorTutorial.current;
+          if (now && !now.stopped && !now.over) return;          // one tour at a time
+          btn.blur();                                            // out of sight while it plays
+          window.SympyEditorTutorial.run(fresh(now ? now.editor : ed), script, opts);
+        });
+      }
       return player;
     }
   };

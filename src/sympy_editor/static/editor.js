@@ -6475,6 +6475,7 @@ var SympyEditor = (function () {
     if (cfg.addons) options.addons = cfg.addons;           // their front ends (loaded by the Editor)
     var backend = make(cfg);
     var editor = new Editor(host, backend, options);
+    editor.mountConfig = cfg;      // what a fresh one is mounted from (a tour played again)
     editor.setState(cfg.snapshot).then(function () {
       var warm = Promise.resolve();
       if (backend.warmup && editor.opts.preload !== false) {
