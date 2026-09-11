@@ -176,9 +176,10 @@ SympyEditor.registerAddon("latex", {
       title: "LaTeX",
       help: "<section><h3>LaTeX in</h3><ul>"
         + "<li>Type or paste LaTeX in the box; the reading appears under it, rendered and as SymPy source.</li>"
-        + "<li>Where the text can be read in several ways — <code>f(x)</code> applied or multiplied, how far <code>\\sin x \\cos y</code> reaches — a menu shows every reading of that part; the first is the usual convention, pick another and the whole follows.</li>"
+        + "<li>Where the text can be read in several ways — <code>f(x)</code> applied or multiplied, how far <code>\\sin x \\cos y</code> reaches — a menu shows every reading of that part, the usual one chosen to begin with; pick another and the whole follows.</li>"
         + "<li>Names that usually mean a constant — <code>\\pi</code>, <code>e</code>, <code>i</code>, <code>\\gamma</code> — are switches: the constant, or a plain symbol of that name.</li>"
-        + "<li><b>Replace the selection</b> puts the reading over what is selected; <b>Replace the whole expression</b> (or Ctrl+Enter) makes it the formula.</li>"
+        + "<li>While you type, a text that stops in the middle of an expression (<code>\\frac{x</code>, <code>x +</code>) or of a command (<code>\\fr</code>) is only <i>not finished yet</i>, not an error: the last reading stays, dimmed, until the text reads again.</li>"
+        + "<li><b>Replace the selection</b> puts the reading over what is selected (a node or a range); <b>Replace the whole expression</b> makes it the formula. <kbd>Ctrl</kbd>+<kbd>Enter</kbd> in the box replaces the selected node when there is one, the whole expression otherwise.</li>"
         + "</ul></section>",
       onSelect: function () { updateInsert(); },
       destroy: function () { clearTimeout(timer); }

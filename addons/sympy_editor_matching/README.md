@@ -16,6 +16,16 @@ w = edit(sin(x)**2 + cos(x)**2, addons=["matching"])
   identity of its slot when absent - the conventions of sympy-matching.  In
   the formula a wildcard is underlined: a solid line for one that must be
   there, a dotted line for an optional one.
+- An optional wildcard is for a part that may be missing.  `x**m_ -> x**(m_ + 1)/(m_ + 1) if Ne(m_, -1)`
+  takes `x**3` to `x**4/4` but not `x`, which is not a power; `x**_m_` reads
+  `x` as `x**1` and gives `x**2/2`.  `_c_*x**_n_ -> _c_*x**(_n_ + 1)/(_n_ + 1) if Ne(_n_, -1)`
+  works on `5*x**3`, `3*x`, `x**4` and `x` alike (with `c_` and `n_`, on the
+  first only), and `_a_*x + _b_ -> -_b_/_a_` gives `-2/3` for `3*x + 2`, `0`
+  for `3*x` and `-2` for `x + 2`.  Keep a wildcard required where the rule
+  needs the piece: an optional one may always take its identity, so
+  `sin(_a_ + b_) -> sin(_a_)*cos(b_) + cos(_a_)*sin(b_)` reads `sin(x + y)` as
+  `sin(0 + (x + y))` and changes nothing, while `sin(a_ + b_)` expands it.
+  (Every example here is checked by the add-on's tests.)
 - The panel holds the rule set: type `sin(a_)**2 -> 1 - cos(a_)**2`, or
   `x**m_ -> x**(m_ + 1)/(m_ + 1) if Ne(m_, -1)` for a guarded rule.
 - Select a piece of the formula: the panel lists the rules that match it,

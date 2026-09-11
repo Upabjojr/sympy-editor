@@ -93,6 +93,31 @@ def test_the_guard_is_honoured_and_the_transform_menu_rewrites_inside():
     assert n > 3
 
 
+def test_the_guide_s_wildcard_examples_hold():
+    """The examples of required and optional wildcards in the panel's guide
+    and the README, as they are written there."""
+    def at_root(rule, expr):
+        doc = Document(expr, addons=[MatchingAddon()])
+        _q(doc, "add_rule", src=rule)
+        hits = _q(doc, "matches", path="/")["matches"]
+        return hits[0]["result"] if hits else None
+
+    assert at_root("sin(a_)**2 + cos(a_)**2 -> 1", sin(x + 1) ** 2 + cos(x + 1) ** 2) == "1"
+    assert at_root("sin(a_)**2 + cos(a_)**2 -> 1", sin(x) ** 2 + cos(y) ** 2) is None
+    required, optional = "x**m_ -> x**(m_ + 1)/(m_ + 1) if Ne(m_, -1)", "x**_m_ -> x**(_m_ + 1)/(_m_ + 1) if Ne(_m_, -1)"
+    assert [at_root(required, e) for e in (x**3, x, 1 / x)] == ["x**4/4", None, None]
+    assert [at_root(optional, e) for e in (x**3, x, 1 / x)] == ["x**4/4", "x**2/2", None]
+    power = "_c_*x**_n_ -> _c_*x**(_n_ + 1)/(_n_ + 1) if Ne(_n_, -1)"
+    assert [at_root(power, e) for e in (5 * x**3, 3 * x, x**4, x, 1 / x)] == ["5*x**4/4", "3*x**2/2", "x**5/5", "x**2/2", None]
+    assert [at_root("c_*x**n_ -> c_*x**(n_ + 1)/(n_ + 1) if Ne(n_, -1)", e) for e in (5 * x**3, 3 * x, x**4, x)] == ["5*x**4/4", None, None, None]
+    assert [at_root("_a_*x + _b_ -> -_b_/_a_", e) for e in (3 * x + 2, 3 * x, x + 2)] == ["-2/3", "0", "-2"]
+    assert [at_root("a_*x + b_ -> -b_/a_", e) for e in (3 * x + 2, 3 * x, x + 2)] == ["-2/3", None, None]
+    # an optional wildcard may always take its identity: this rule changes nothing
+    assert at_root("sin(_a_ + b_) -> sin(_a_)*cos(b_) + cos(_a_)*sin(b_)", sin(x + y)) == "sin(x + y)"
+    assert at_root("sin(a_ + b_) -> sin(a_)*cos(b_) + cos(a_)*sin(b_)", sin(x + y)) == "sin(x)*cos(y) + sin(y)*cos(x)"
+    assert at_root("sin(a_ + b_) -> sin(a_)*cos(b_) + cos(a_)*sin(b_)", sin(x)) is None
+
+
 def test_use_the_selected_rule_and_remove_it():
     doc = Document("Rule(sin(a_)**2, 1 - cos(a_)**2)", addons=[ADDON])
     res = _q(doc, "use_selection", path="/")
