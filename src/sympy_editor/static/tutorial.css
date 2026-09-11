@@ -3,13 +3,17 @@
  * overlay's own classes, and the overlay never takes a pointer. */
 .se-tour-layer { position: fixed; inset: 0; pointer-events: none; z-index: 2147483000;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-.se-tour-caption { position: fixed; left: 50%; bottom: 1.5rem; transform: translate(-50%, 0.4rem);
-  box-sizing: border-box; max-width: min(38rem, calc(100vw - 2rem)); padding: 0.8rem 1.1rem;
-  border-radius: 0.7rem; background: rgba(18, 22, 30, 0.9); color: #fff; font-size: 1.05rem; line-height: 1.45;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3); opacity: 0; transition: opacity 0.25s ease, transform 0.25s ease; }
-.se-tour-caption.shown { opacity: 1; transform: translate(-50%, 0); }
-.se-tour-caption.top { top: 1.5rem; bottom: auto; }
-.se-tour-caption.center { top: 50%; bottom: auto; transform: translate(-50%, -50%); }
+/* the caption: set beside what it is about (tutorial.js places it) */
+.se-tour-caption { position: fixed; left: 0; top: 0; box-sizing: border-box;
+  max-width: min(34rem, calc(100vw - 24px)); padding: 0.95rem 1.25rem;
+  border-radius: 14px; border: 1px solid rgba(255, 255, 255, 0.22);
+  background: linear-gradient(135deg, #1e40af 0%, #4f46e5 55%, #7c3aed 100%);
+  color: #ffffff; font-size: 1.3rem; font-weight: 500; line-height: 1.45; letter-spacing: 0.005em;
+  text-shadow: 0 1px 1px rgba(15, 23, 42, 0.35);
+  box-shadow: 0 16px 40px rgba(30, 27, 75, 0.38), 0 2px 6px rgba(30, 27, 75, 0.25);
+  opacity: 0; translate: 0 8px; transition: opacity 0.28s ease, translate 0.28s ease; }
+.se-tour-caption.shown { opacity: 1; translate: 0 0; }
+.se-tour-caption.large { font-size: 1.75rem; font-weight: 600; padding: 1.3rem 1.7rem; max-width: min(38rem, calc(100vw - 24px)); text-align: center; }
 .se-tour-caption[hidden], .se-tour-arrow[hidden], .se-tour-ring[hidden] { display: none; }
 /* the arrow: above what is about to be pressed, bobbing towards it */
 .se-tour-arrow { position: fixed; width: 56px; height: 56px; color: #ff7a1a;
@@ -28,6 +32,7 @@
 .se-tour-ring.pressing { animation: se-tour-press 0.4s ease-in forwards; background: rgba(255, 122, 26, 0.28); }
 .se-tour-ring.pressing::after { animation: none; opacity: 0; }
 @keyframes se-tour-press { 0% { transform: scale(1.1); opacity: 1; } 55% { transform: scale(0.7); opacity: 1; } 100% { transform: scale(0.95); opacity: 0; } }
+@media (max-width: 640px) { .se-tour-caption { font-size: 1.1rem; } .se-tour-caption.large { font-size: 1.4rem; } }
 @media (prefers-reduced-motion: reduce) {
   .se-tour-arrow, .se-tour-ring, .se-tour-ring::after, .se-tour-ring.pressing { animation: none; }
   .se-tour-caption { transition: none; }

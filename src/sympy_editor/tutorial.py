@@ -32,15 +32,17 @@ slow computation delays what follows rather than losing it.
 **What** it does - exactly one of:
 
 ``"caption": "text"``
-    a text box describing what is going on; ``"position"``: ``"bottom"``
-    (default), ``"top"`` or ``"center"``; ``"duration"``: seconds before it
-    goes (default: until the next caption); ``null`` takes it away.
+    a text box describing what is going on (``"size": "large"`` for a title);
+    ``"duration"``: seconds before it goes (default: until the next
+    caption); ``null`` takes it away.
 ``"point": target``
     the arrow and the ring on something, nothing pressed; ``"hold"`` seconds.
 ``"click": target``
     the arrow and the ring, then the press: a button, a checkbox, a row of a
     menu - or, with ``{"path": ...}``, a piece of the formula, selected.
     ``"lead"``: seconds of arrow and ring first (default 1.2).
+``"choose": {"target": ..., "value": "x"}``
+    an option of a drop-down list (a ``<select>``), by value or by text.
 ``"type": {"target": ..., "text": "...", "enter": true}``
     text typed into a field one character at a time (``"perChar"`` seconds),
     replacing what it held (``"replace": false`` appends); ``"enter"`` applies
@@ -61,7 +63,22 @@ slow computation delays what follows rather than losing it.
 A **target** is ``{"path": "/1/d"}`` (a piece of the formula), ``{"selector":
 "css", "text": "..."}`` (the first visible element matching it, holding that
 text) or a CSS selector string.  Any step may also ``"say"`` something - a
-caption shown as it starts (``"position"``, ``"sayFor"`` seconds).
+caption shown as it starts (``"sayFor"`` seconds).
+
+**Where** a caption goes, ``"position"``: ``"near"`` - beside what the step
+is about, above it (and above the arrow) or below when there is no room; the
+default for a step with a target - ``"above"``, ``"below"``, or ``"top"``,
+``"center"`` (the default otherwise), ``"bottom"`` of the editor on the
+screen.  ``"near": target`` puts a caption step beside something too.
+
+**The end**: once the last caption has had its time, everything of the
+player goes - overlay, arrow, captions - the drawer and the menus shut, and
+the page is the editor as a reader finds it.
+
+**Embedding**: ``to_tutorial_html(..., full_page=False)`` is a fragment for
+a page of one's own.  Every editor on a page runs on one Python (Pyodide)
+runtime; a tutorial's add-ons are installed into it whichever editor
+started it.
 """
 
 from __future__ import annotations
@@ -70,20 +87,22 @@ import argparse
 import copy
 import json
 import sys
+import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
-from .html import _as_document, _script_json, build_config, read_static, render_page
+from .html import _as_document, _script_json, build_config, read_static, render_fragment, render_page
 
 __all__ = ["ACTIONS", "load_tutorial", "to_tutorial_html", "save_tutorial_html"]
 
 #: What a step can do; each step does exactly one of these.
-ACTIONS = ("caption", "point", "click", "type", "key", "set", "apply", "undo", "redo", "zoom", "addons", "wait")
+ACTIONS = ("caption", "point", "click", "choose", "type", "key", "set", "apply", "undo", "redo", "zoom", "addons", "wait")
 _TIMING = ("at", "after")
-_EXTRA = ("say", "sayFor", "position", "duration", "hold", "lead")
+_EXTRA = ("say", "sayFor", "position", "size", "near", "duration", "hold", "lead")
+POSITIONS = ("near", "above", "below", "top", "center", "bottom")
 _SCRIPT_KEYS = ("title", "expression", "addons", "options", "speed", "loop", "loopDelay", "steps", "description")
-#: The editor's element on a tutorial page (fixed: the player finds it by id).
-ELEMENT_ID = "sympy-editor-tutorial"
+#: The start of the id of a tutorial's editor element (each gets its own).
+ELEMENT_PREFIX = "sympy-editor-tutorial-"
 
 
 def _target_ok(target) -> bool:
@@ -108,10 +127,19 @@ def _check_step(i: int, step: Any) -> None:
     for k in _TIMING + ("sayFor", "duration", "hold", "lead"):
         if k in step and (isinstance(step[k], bool) or not isinstance(step[k], (int, float)) or step[k] < 0):
             raise ValueError(f"{where}: {k!r} is a number of seconds, not {step[k]!r}")
+    if "position" in step and step["position"] not in POSITIONS:
+        raise ValueError(f"{where}: position is one of {', '.join(POSITIONS)}, not {step['position']!r}")
+    if "size" in step and step["size"] != "large":
+        raise ValueError(f"{where}: size is \"large\" or left out")
+    if "near" in step and not _target_ok(step["near"]):
+        raise ValueError(f"{where}: near needs a target")
     action = doing[0]
     value = step[action]
     if action in ("point", "click") and not _target_ok(value):
         raise ValueError(f"{where}: {action} needs a target - a CSS selector, {{'selector': ...}} or {{'path': ...}}")
+    if action == "choose":
+        if not isinstance(value, dict) or not isinstance(value.get("value"), str) or not _target_ok(value.get("target", value.get("selector"))):
+            raise ValueError(f"{where}: choose needs {{'target': ..., 'value': '...'}}")
     if action == "type":
         if not isinstance(value, dict) or not isinstance(value.get("text"), str):
             raise ValueError(f"{where}: type needs {{'target': ..., 'text': '...'}}")
@@ -158,14 +186,18 @@ def load_tutorial(script: Union[str, Path, Dict[str, Any]]) -> Dict[str, Any]:
 
 def to_tutorial_html(script, *, expr=None, title: Optional[str] = None, backend: str = "pyodide",
                      options: Optional[Dict[str, Any]] = None, urls: Optional[Dict[str, str]] = None,
+                     full_page: bool = True, element_id: Optional[str] = None, logo: str = "",
                      **config_kwargs) -> str:
-    """A page with the editor that plays ``script`` as soon as it is ready.
+    """A page - or, with ``full_page=False``, a fragment to embed - with the
+    editor that plays ``script`` as soon as it is ready.
 
     ``expr`` (an expression, source, or :class:`Document`) overrides the
     script's ``"expression"``; ``options`` are merged over its ``"options"``.
-    The page is the ordinary editor page with the player added after it: the
-    editor is the one every other page has.  ``backend`` is ``"pyodide"`` (a
-    standalone file) by default; ``config_kwargs`` go to ``build_config``
+    It is the ordinary editor page (fragment) with the player added after it:
+    the editor is the one every other page has.  Fragments on one page share
+    one copy of the scripts and one Python runtime.  ``logo``: SVG markup
+    beside a full page's title.  ``backend`` is ``"pyodide"`` (a standalone
+    file) by default; ``config_kwargs`` go to ``build_config``
     (``api_url``/``token`` for ``"http"``)."""
     script = load_tutorial(script)
     source = expr if expr is not None else script.get("expression", "x")
@@ -173,12 +205,16 @@ def to_tutorial_html(script, *, expr=None, title: Optional[str] = None, backend:
     opts = dict(script.get("options") or {})
     opts.update(options or {})
     config = build_config(doc, backend=backend, options=opts, urls=urls, **config_kwargs)
-    head = f"<style>\n{read_static('tutorial.css')}\n</style>\n"
-    page = render_page(config, title or script.get("title") or "SymPy Editor tutorial", head, ELEMENT_ID, "")
-    player = ("<script>\n" + read_static("tutorial.js") + "\n</script>\n"
+    element_id = element_id or ELEMENT_PREFIX + uuid.uuid4().hex[:10]
+    css = f"<style>\n{read_static('tutorial.css')}\n</style>\n"
+    player = ("<script>\nif (!window.SympyEditorTutorial) {\n" + read_static("tutorial.js") + "\n}\n</script>\n"
               "<script>\n"
-              f'SympyEditorTutorial.run(document.getElementById("{ELEMENT_ID}"), {_script_json(script)});\n'
+              f'SympyEditorTutorial.run(document.getElementById("{element_id}"), {_script_json(script)}, '
+              f'{{"fullPage": {"true" if full_page else "false"}}});\n'
               "</script>\n")
+    if not full_page:
+        return css + render_fragment(config, element_id) + player
+    page = render_page(config, title or script.get("title") or "SymPy Editor tutorial", css, element_id, logo)
     body, end = page.rsplit("</body>", 1)
     return body + player + "</body>" + end
 

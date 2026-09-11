@@ -8,15 +8,16 @@
  *
  *     SympyEditorTutorial.run(editorOrItsElement, script)      // -> a Player
  *
- * sympy_editor.tutorial builds such pages from a JSON script, and documents
- * every kind of step.  In short: {"steps": [{"at": 0, "caption": "..."},
- * {"after": 2, "click": {"path": "/1"}, "say": "..."}, ...]}.
+ * sympy_editor.tutorial builds such pages (and fragments to embed) from a
+ * JSON script, and documents every kind of step.  In short: {"steps": [{"at":
+ * 0, "caption": "..."}, {"after": 2, "click": {"path": "/1"}, "say": "..."}]}.
  *
  * The player drives the editor the way a person would - it presses the real
  * buttons and types into the real fields - so what the video shows is what a
  * reader will find.  The clock starts once the formula is drawn and Python
  * is ready, and a step never starts before its time, nor while Python is
- * still working on the one before: the editor would drop it.
+ * still working on the one before: the editor would drop it.  When the script
+ * is over, everything of the player goes and the editor is left as it is.
  */
 (function () {
   "use strict";
@@ -25,7 +26,9 @@
   var LEAD = 1.2;      // seconds of arrow and ring before a press
   var GAP = 1.0;       // seconds after the previous step, when a step says neither "at" nor "after"
   var PER_CHAR = 0.07; // seconds per character typed
-  var FIND = 5;        // seconds to wait for a target to appear (a menu opening, a panel drawn)
+  var FIND = 6;        // seconds to wait for a target to appear (a menu opening, a panel drawn)
+  var LAST = 2.5;      // seconds the last caption stays, when it does not say how long
+  var MARGIN = 12;     // px kept between a caption and the edges, the target, the arrow
 
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, Math.max(0, ms)); }); }
   function make(tag, cls, parent) {
@@ -41,6 +44,11 @@
     var root = thing && thing.querySelector && thing.querySelector(".sympy-editor");
     return root ? root.__sympyEditor : null;
   }
+  function visible(node) {
+    if (!node || !node.getBoundingClientRect) return false;
+    var r = node.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && getComputedStyle(node).visibility !== "hidden";
+  }
   /** Where to aim at `node`: the element - or its content, when that is much
    *  narrower (a row of a menu, a checkbox and its label), so that the ring
    *  goes round what is read rather than the empty end of a wide row. */
@@ -55,15 +63,36 @@
     } catch (e) { /* no ranges over this kind of node */ }
     return box;
   }
-  function visible(node) {
-    if (!node || !node.getBoundingClientRect) return false;
-    var r = node.getBoundingClientRect();
-    return r.width > 0 && r.height > 0 && getComputedStyle(node).visibility !== "hidden";
+
+  /** `rectOf`, holding on to the last box it gave with anything in it.  An
+   *  element the editor replaces - the rows of the add-ons' list are made
+   *  again when one is switched on - answers an empty box at 0, 0 once it
+   *  is off the page, and what was placed by it jumped to the corner. */
+  function steady(rectOf) {
+    var last = null;
+    return function () {
+      var r = rectOf();
+      if (r && (r.width || r.height)) last = r;
+      return last || r;
+    };
+  }
+
+  /** The subject with the room its ring (round it) and its arrow (over it,
+   *  or under it near the top) take - what a caption keeps clear of.  The
+   *  same sums as Overlay.layout draws them with. */
+  function keepOut(s) {
+    var size = Math.max(34, Math.min(160, Math.max(s.width, s.height) + 22));
+    var cx = s.left + s.width / 2, cy = s.top + s.height / 2;
+    var k = { left: Math.min(s.left, cx - size / 2), right: Math.max(s.right, cx + size / 2),
+              top: Math.min(s.top, cy - size / 2), bottom: Math.max(s.bottom, cy + size / 2) };
+    if (s.top < 76) k.bottom = Math.max(k.bottom, s.bottom + 62); else k.top = Math.min(k.top, s.top - 62);
+    return k;
   }
 
   /* ---- the overlay: a layer over the page that never takes a pointer ---- */
 
-  function Overlay() {
+  function Overlay(editor) {
+    this.editor = editor;
     this.layer = make("div", "se-tour-layer", document.body);
     this.caption = make("div", "se-tour-caption", this.layer);
     this.caption.setAttribute("role", "status");
@@ -74,61 +103,118 @@
     this.arrow.hidden = true;
     this.ring = make("div", "se-tour-ring", this.layer);
     this.ring.hidden = true;
-    this.target = null;
+    this.target = null;       // {node, rect()} the arrow and the ring are on
+    this.subject = null;      // what the caption is about, when it is placed beside something
+    this.place = "near";
+    this.until = 0;           // when the caption on show goes (0: when the next one comes)
     this.captionTimer = null;
-    this.frame = null;
+    var self = this;
+    this.frame = requestAnimationFrame(function loop() { self.layout(); self.frame = requestAnimationFrame(loop); });
   }
 
-  /** A caption in its box; null or "" takes it away.  `seconds` hides it
-   *  again after that long; without, it stays until the next one. */
-  Overlay.prototype.say = function (text, position, seconds) {
+  /** The part of the editor on the screen: where captions go when they are
+   *  not beside something - the editor's, not the window's, so that one
+   *  embedded in a longer page keeps its captions to itself. */
+  Overlay.prototype.stage = function () {
+    var r = this.editor.root.getBoundingClientRect();
+    var top = Math.max(r.top, 0), bottom = Math.min(r.bottom, innerHeight);
+    if (bottom - top < 120) { top = 0; bottom = innerHeight; }                  // hardly on the screen: the window
+    var left = Math.max(r.left, 0), right = Math.min(r.right, innerWidth);
+    return { left: left, right: right, top: top, bottom: bottom, width: right - left, height: bottom - top };
+  };
+
+  Overlay.prototype.layout = function () {
+    var t = this.target;
+    if (t) {
+      var r = t.rect();
+      var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      var size = Math.max(34, Math.min(160, Math.max(r.width, r.height) + 22));
+      this.ring.style.width = this.ring.style.height = size + "px";
+      this.ring.style.left = (cx - size / 2) + "px";
+      this.ring.style.top = (cy - size / 2) + "px";
+      // Above the target, pointing down - below it, pointing up, when there
+      // is no room above.
+      var below = r.top < 76;
+      this.arrow.classList.toggle("below", below);
+      this.arrow.style.left = (cx - 28) + "px";
+      this.arrow.style.top = (below ? r.bottom + 6 : r.top - 62) + "px";
+    }
+    var box = this.caption;
+    if (box.hidden) return;
+    var w = box.offsetWidth, h = box.offsetHeight, x, y;
+    var s = this.subject ? this.subject() : null;
+    var place = this.place;
+    if (s && place !== "top" && place !== "center" && place !== "bottom") {
+      // Beside what it is about: above it, or below when there is no room;
+      // never over it - nor over the ring and the arrow it gets.  Their room
+      // is kept from the start, worked out from the subject as `layout`
+      // draws them: a caption placed round the subject alone was overlapped
+      // by the ring of a wide, short box, and jumped when the ring came.
+      var k = keepOut(s);
+      var above = k.top - MARGIN - h, underneath = k.bottom + MARGIN;
+      var cx = s.left + s.width / 2, cy = s.top + s.height / 2;
+      var onLeft = k.left - MARGIN - w, onRight = k.right + MARGIN;
+      if (place === "above" || (place !== "below" && above >= MARGIN)) {
+        y = above; x = cx - w / 2;
+      } else if (place === "near" && cx > innerWidth / 2 && onLeft >= MARGIN) {
+        // No room above a target on the right (a row of the drawer at the top
+        // of the screen): beside it, on the left - below, it would cover the
+        // rows that come next.
+        x = onLeft; y = cy - h / 2;
+      } else if (place === "near" && cx <= innerWidth / 2 && onRight + w <= innerWidth - MARGIN) {
+        x = onRight; y = cy - h / 2;
+      } else {
+        y = underneath; x = cx - w / 2;
+      }
+    } else {
+      var st = this.stage();
+      x = st.left + st.width / 2 - w / 2;
+      y = place === "top" ? st.top + 18 : place === "bottom" ? st.bottom - h - 18 : st.top + st.height / 2 - h / 2;
+    }
+    x = Math.max(MARGIN, Math.min(innerWidth - w - MARGIN, x));
+    y = Math.max(MARGIN, Math.min(innerHeight - h - MARGIN, y));
+    box.style.left = Math.round(x) + "px";
+    box.style.top = Math.round(y) + "px";
+  };
+
+  /** A caption; null or "" takes it away.  `opts`: place ("near" - beside
+   *  `subject` -, "above", "below", "top", "center", "bottom"), size
+   *  ("large"), seconds (gone after that long; else until the next). */
+  Overlay.prototype.say = function (text, opts, subject) {
     var box = this.caption, self = this;
+    opts = opts || {};
     clearTimeout(this.captionTimer);
     if (!text) {
       box.classList.remove("shown");
+      this.until = 0;
       this.captionTimer = setTimeout(function () { box.hidden = true; }, 250);
       return;
     }
+    this.subject = subject || null;
+    this.place = opts.place || (subject ? "near" : "center");
     box.textContent = String(text);
-    box.className = "se-tour-caption " + (position === "top" || position === "center" ? position : "bottom");
+    box.className = "se-tour-caption" + (opts.size === "large" ? " large" : "");
     box.hidden = false;
+    this.layout();
     void box.offsetWidth;                          // start the fade from where it is
     box.classList.add("shown");
-    if (seconds) this.captionTimer = setTimeout(function () { self.say(null); }, seconds * 1000);
+    this.until = opts.seconds ? Date.now() + opts.seconds * 1000 : 0;
+    if (opts.seconds) this.captionTimer = setTimeout(function () { self.say(null); }, opts.seconds * 1000);
   };
 
   /** Arrow and ring on `node`, following it while it moves, until `clear`. */
   Overlay.prototype.point = function (node, rectOf) {
-    var self = this;
-    this.target = { node: node, rect: rectOf || function () { return aim(node); } };
+    this.target = { node: node, rect: steady(rectOf || function () { return aim(node); }) };
     this.arrow.hidden = false;
     this.ring.hidden = false;
     this.ring.classList.remove("pressing");
-    var place = function () {
-      if (!self.target) return;
-      var r = self.target.rect();
-      var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-      var size = Math.max(34, Math.min(160, Math.max(r.width, r.height) + 22));
-      self.ring.style.width = self.ring.style.height = size + "px";
-      self.ring.style.left = (cx - size / 2) + "px";
-      self.ring.style.top = (cy - size / 2) + "px";
-      // Above the target, pointing down - below it, pointing up, when there
-      // is no room above.
-      var below = r.top < 76;
-      self.arrow.classList.toggle("below", below);
-      self.arrow.style.left = (cx - 28) + "px";
-      self.arrow.style.top = (below ? r.bottom + 6 : r.top - 62) + "px";
-      self.frame = requestAnimationFrame(place);
-    };
-    cancelAnimationFrame(this.frame);
-    place();
+    this.layout();
   };
 
   /** The press: the ring closes on the target. */
   Overlay.prototype.pressing = function () { this.ring.classList.add("pressing"); };
 
   Overlay.prototype.clear = function () {
-    cancelAnimationFrame(this.frame);
     this.target = null;
     this.arrow.hidden = true;
     this.ring.hidden = true;
@@ -137,6 +223,7 @@
 
   Overlay.prototype.remove = function () {
     this.clear();
+    cancelAnimationFrame(this.frame);
     clearTimeout(this.captionTimer);
     if (this.layer.parentNode) this.layer.parentNode.removeChild(this.layer);
   };
@@ -169,6 +256,11 @@
     node.dispatchEvent(new KeyboardEvent("keyup", init));
   }
 
+  function changed(node) {
+    node.dispatchEvent(new Event("input", { bubbles: true }));
+    node.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
   /* ---- the player ---- */
 
   function Player(editor, script, opts) {
@@ -180,7 +272,7 @@
     this.errors = [];
     this.stopped = false;
     this.index = -1;
-    this.overlay = new Overlay();
+    this.overlay = new Overlay(editor);
     var self = this;
     this.done = new Promise(function (resolve) { self._resolve = resolve; });
   }
@@ -214,7 +306,7 @@
   };
 
   Player.prototype.find = async function (target) {
-    if (target === "focused") return document.activeElement;
+    if (target === "focused") return document.activeElement ? { node: document.activeElement } : null;
     var t = typeof target === "string" ? { selector: target } : (target || {});
     var ed = this.editor, end = Date.now() + (t.timeout || FIND) * 1000;
     while (!this.stopped) {
@@ -234,7 +326,7 @@
         if (t.text) all = all.filter(function (n) { return n.textContent.indexOf(t.text) >= 0; });
         found = all[0] || null;
       }
-      if (found) return { node: found, rect: rect, path: t.path };
+      if (found) return { node: found, rect: steady(rect || function () { return aim(found); }), path: t.path };
       if (Date.now() > end) return null;
       await sleep(80);
     }
@@ -253,11 +345,26 @@
     if (window.console) console.warn("sympy-editor tutorial: step " + i + ": " + what);
   };
 
+  /** What a step's caption is about: its own target, when it has one. */
+  Player.prototype.subjectOf = async function (step) {
+    var target = step.click || step.point || step.choose || (step.type && (step.type.target || step.type.selector));
+    if (step.choose && typeof step.choose === "object" && !step.choose.path && !step.choose.selector) target = step.choose.target;
+    if (step.near) target = step.near;
+    if (!target || target === "focused") return null;
+    var hit = await this.find(target);
+    return hit ? hit.rect : null;
+  };
+
   Player.prototype.perform = async function (i, step) {
-    var ed = this.editor, self = this, hit;
-    if (step.say !== undefined) this.overlay.say(step.say, step.position, step.sayFor);
+    var ed = this.editor, hit;
+    var sayOpts = { place: step.position, size: step.size };
+    if (step.say !== undefined) {
+      sayOpts.seconds = step.sayFor;
+      this.overlay.say(step.say, sayOpts, await this.subjectOf(step));
+    }
     if ("caption" in step) {
-      this.overlay.say(step.caption, step.position, step.duration);
+      sayOpts.seconds = step.duration;
+      this.overlay.say(step.caption, sayOpts, step.near ? await this.subjectOf(step) : null);
     } else if (step.point) {
       if (!(hit = await this.find(step.point))) return this.miss(i, "nothing to point at: " + JSON.stringify(step.point));
       await this.show(hit, step.hold !== undefined ? step.hold : LEAD);
@@ -271,11 +378,25 @@
       else press(hit.node);
       await sleep(this.seconds(0.25));
       this.overlay.clear();
+    } else if (step.choose) {
+      var c = step.choose;
+      if (!(hit = await this.find(c.target || c.selector))) return this.miss(i, "nothing to choose in: " + JSON.stringify(c));
+      var sel = hit.node, want = String(c.value);
+      var opt = Array.prototype.slice.call(sel.options || []).filter(function (o) { return o.value === want || o.textContent.trim() === want; })[0];
+      if (!opt) return this.miss(i, "no option " + JSON.stringify(want) + " in " + JSON.stringify(c.target || c.selector));
+      await this.show(hit, step.lead !== undefined ? step.lead : 0.8);
+      this.overlay.pressing();
+      await sleep(this.seconds(0.18));
+      sel.focus({ preventScroll: true });
+      sel.value = opt.value;
+      changed(sel);
+      await sleep(this.seconds(0.25));
+      this.overlay.clear();
     } else if (step.type) {
       var t = step.type;
       if (!(hit = await this.find(t.target || t.selector || "focused"))) return this.miss(i, "nowhere to type: " + JSON.stringify(t));
       var node = hit.node, editable = node.isContentEditable;
-      if (t.target !== "focused") {
+      if ((t.target || t.selector || "focused") !== "focused") {
         await this.show(hit, t.lead !== undefined ? t.lead : 0.6);
         this.overlay.clear();
         press(node);
@@ -283,11 +404,13 @@
       node.focus({ preventScroll: true });
       if (t.replace !== false) { if (editable) node.textContent = ""; else node.value = ""; }
       var text = String(t.text || "");
-      for (var c = 0; c < text.length && !this.stopped; c++) {
-        if (editable) node.textContent += text[c]; else node.value += text[c];
-        node.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text[c] }));
+      for (var ch = 0; ch < text.length && !this.stopped; ch++) {
+        if (editable) node.textContent += text[ch]; else node.value += text[ch];
+        node.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text[ch] }));
         await sleep(this.seconds(t.perChar !== undefined ? t.perChar : PER_CHAR));
       }
+      // what leaving the field, or Enter, would tell its listeners
+      if (!editable) node.dispatchEvent(new Event("change", { bubbles: true }));
       if (t.enter) { await sleep(this.seconds(0.3)); key(node, "Enter"); }
     } else if (step.key) {
       var active = document.activeElement;
@@ -312,11 +435,31 @@
     }
     // "wait": nothing to do - the timing was the point
     await this.idle();
-    void self;
+  };
+
+  /** The script is over: the last caption has its time, then everything of
+   *  the player goes, and what is left is the editor, as a reader finds it -
+   *  no overlay, the drawer and the menus shut, the page at its top. */
+  Player.prototype.finish = async function () {
+    var ov = this.overlay;
+    ov.clear();
+    if (!ov.caption.hidden) {
+      var left = ov.until ? ov.until - Date.now() : this.seconds(LAST);
+      await sleep(left);
+      ov.say(null);
+      await sleep(300);
+    }
+    ov.remove();
+    var ed = this.editor;
+    if (typeof ed.closeDrawer === "function") ed.closeDrawer();
+    if (document.activeElement && document.activeElement !== document.body && ed.root.contains(document.activeElement)) document.activeElement.blur();
+    try {
+      if (this.opts.fullPage) window.scrollTo({ top: 0, behavior: "smooth" });
+      else ed.root.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    } catch (e) { /* old browsers */ }
   };
 
   Player.prototype.play = async function () {
-    var ed = this.editor;
     document.documentElement.classList.add("se-tour-running");
     await this.ready();
     do {
@@ -335,11 +478,10 @@
       }
       if (this.script.loop && !this.stopped) await sleep(this.seconds(this.script.loopDelay !== undefined ? this.script.loopDelay : 3));
     } while (this.script.loop && !this.stopped);
-    this.overlay.clear();
+    if (!this.stopped) await this.finish();
     document.documentElement.classList.remove("se-tour-running");
     window.dispatchEvent(new CustomEvent("sympy-editor-tutorial-end", { detail: { errors: this.errors.slice() } }));
     this._resolve({ errors: this.errors.slice(), stopped: this.stopped });
-    void ed;
   };
 
   Player.prototype.stop = function () {
@@ -349,10 +491,12 @@
   };
 
   window.SympyEditorTutorial = {
-    version: 1,
+    version: 2,
     Player: Player,
     /** Play `script` on an editor (the Editor, its element, or the element
-     *  it was mounted in; the page's first editor by default). */
+     *  it was mounted in; the page's first editor by default).  `opts`:
+     *  fullPage (the page is the editor's: back to its top at the end),
+     *  speed. */
     run: function (target, script, opts) {
       var ed = editorOf(target);
       if (!ed) throw new Error("SympyEditorTutorial.run: no editor to play on");

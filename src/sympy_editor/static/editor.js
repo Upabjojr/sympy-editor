@@ -1144,9 +1144,12 @@ var SympyEditor = (function () {
     _build() {
       var self = this;
       var o = this.opts;
-      // Settled before the strip is built: the add-ons' switches go on it only
-      // when there is no drawer to hold them (see where addonsMenu is made).
-      this._drawerWanted = !!(o.sessions && !o.readOnly);
+      // Settled before the strip is built.  Every editor that edits has the
+      // drawer: the sessions and their history when o.sessions is on, the
+      // add-ons' switches always (its button shows once there are add-ons to
+      // switch, see _fillAddonsMenu); they go on the strip only for a
+      // read-only editor, which has no drawer (see where addonsMenu is made).
+      this._drawerWanted = !o.readOnly;
       var root = h("div", { class: "sympy-editor" });
       this.root = root;
       this.buttons = {};
@@ -1207,12 +1210,24 @@ var SympyEditor = (function () {
       zoomBtn("zoomin", "+", "Zoom in (Ctrl+plus, Ctrl+wheel, pinch)");
       // 3. the sessions drawer, alone at the right end of its row: it slides
       //    in from the right, so the tap and what it opens are on one side
-      if (o.sessions && !o.readOnly) {
-        block("sessions");
-        btn("drawer", "\u2261", "Sessions and history");
+      if (!o.readOnly) {
+        this.drawerBlock = block("sessions");
+        btn("drawer", "\u2261", o.sessions ? "Sessions and history" : "Add-ons: panels and tools from other packages");
         // On a narrow screen the blocks pack into lines: this ends the first
         // one, so nothing can slip to the right of the drawer's button.
-        this.tools.appendChild(h("span", { class: "se-linebreak" }));
+        this.drawerBreak = h("span", { class: "se-linebreak" });
+        this.tools.appendChild(this.drawerBreak);
+        // Without sessions it holds the add-ons alone, and is not on the
+        // strip until there are some (_fillAddonsMenu): a marker keeps its
+        // place, so that an editor without either has the strip it always
+        // had.  Hidden would not do: the strip's columns are counted with
+        // :nth-of-type, and a hidden block still counts, moving every block
+        // after it.
+        if (!o.sessions) {
+          this.drawerSpot = document.createComment(" the drawer's button, once there are add-ons ");
+          this.tools.replaceChild(this.drawerSpot, this.drawerBlock);
+          this.tools.removeChild(this.drawerBreak);
+        }
       }
       if (!o.readOnly) {
         // 4. moving the selection
@@ -1411,9 +1426,12 @@ var SympyEditor = (function () {
       // app's own Python).
       this.sessions = null;
       this.drawer = null;
-      if (o.sessions && !o.readOnly) {
+      this.sessionsBody = null;
+      if (!o.readOnly) {
         var close = h("button", { type: "button", class: "se-drawer-close", title: "Close" }, ["\u00d7"]);
         close.addEventListener("click", function () { self.closeDrawer(); });
+      }
+      if (o.sessions && !o.readOnly) {
         this.sessionsBody = h("div", { class: "se-sessions" });
         this.historyBody = h("div", { class: "se-history" });
         // The history belongs to a session: it is a sub-tab inside the card
@@ -1426,10 +1444,17 @@ var SympyEditor = (function () {
           if (tab) self.showDrawerTab(tab.classList.contains("se-subtab-current") ? "sessions" : tab.getAttribute("data-tab"));
         });
         this.historyPane = h("div", { class: "se-drawer-pane", "data-pane": "history", hidden: "" }, [this.historyBody]);
+      }
+      if (!o.readOnly) {
         // The add-ons' switches ride at the top of the drawer (see the note
         // where addonsMenu is made): open in place, not a menu that drops.
         this.addonsPane = null;
-        if (this.addonsMenu && !this.addonsBtn) {
+        if (this.addonsMenu && !this.addonsBtn && !o.sessions) {
+          // No sessions: the switches are all the drawer holds, in the open.
+          this.addonsMenu.hidden = false;
+          this.addonsMenu.classList.add("se-addons-inline");
+          this.addonsPane = h("div", { class: "se-drawer-addons se-drawer-addons-only", hidden: "" }, [this.addonsMenu]);
+        } else if (this.addonsMenu && !this.addonsBtn) {
           this.addonsMenu.hidden = false;
           this.addonsMenu.classList.add("se-addons-inline");
           // A fold, shut to start with: the switches are set once in a while,
@@ -1439,12 +1464,13 @@ var SympyEditor = (function () {
             this.addonsMenu
           ]);
         }
-        this.drawer = h("aside", { class: "se-drawer", hidden: "", role: "dialog", "aria-label": "Sessions" }, [
-          h("div", { class: "se-drawer-head" }, [h("strong", {}, ["Sessions"]), close])
-        ].concat(this.addonsPane ? [this.addonsPane] : []).concat([this.sessionsBody]));
+        var heading = o.sessions ? "Sessions" : "Add-ons";
+        this.drawer = h("aside", { class: "se-drawer", hidden: "", role: "dialog", "aria-label": heading }, [
+          h("div", { class: "se-drawer-head" }, [h("strong", {}, [heading]), close])
+        ].concat(this.addonsPane ? [this.addonsPane] : []).concat(this.sessionsBody ? [this.sessionsBody] : []));
         this.backdrop = h("div", { class: "se-backdrop", hidden: "" });
         this.backdrop.addEventListener("click", function () { self.closeDrawer(); });
-        this.sessions = this.drawer;
+        this.sessions = o.sessions ? this.drawer : null;
         root.appendChild(this.backdrop);
         root.appendChild(this.drawer);
       }
@@ -1710,6 +1736,19 @@ var SympyEditor = (function () {
     _fillAddonsMenu(available) {
       var host = this.addonsBlock || this.addonsPane;
       if (host) host.hidden = !available.length;
+      // Without sessions the drawer holds these switches alone: no add-ons,
+      // no drawer button - the strip as it was.
+      if (this.drawerSpot) {
+        var on = !!available.length, there = !!this.drawerBlock.parentNode;
+        if (on && !there) {
+          this.drawerSpot.parentNode.insertBefore(this.drawerBlock, this.drawerSpot);
+          this.drawerSpot.parentNode.insertBefore(this.drawerBreak, this.drawerSpot);
+        } else if (!on && there) {
+          this.closeDrawer();
+          this.drawerBlock.parentNode.removeChild(this.drawerBlock);
+          this.drawerBreak.parentNode.removeChild(this.drawerBreak);
+        }
+      }
       if (!this.addonsMenu) return;
       var self = this;
       this.addonsMenu.textContent = "";
@@ -5954,14 +5993,14 @@ var SympyEditor = (function () {
   // thread, so a long computation leaves the page responsive and can be
   // stopped by terminating the worker (see pyodideRuntime).
   var PYODIDE_WORKER = [
-    "var newDoc = null, handle = null;",
+    "var newDoc = null, handle = null, py = null;",
     "self.onmessage = async function (e) {",
     "  var m = e.data;",
     "  try {",
     "    if (m.type === 'init') {",
     "      self.postMessage({ type: 'progress', text: 'Loading Python runtime (Pyodide)…' });",
     "      importScripts(m.pyodideJs);",
-    "      var py = await self.loadPyodide({ indexURL: m.indexURL });",
+    "      py = await self.loadPyodide({ indexURL: m.indexURL });",
     "      self.postMessage({ type: 'progress', text: 'Loading SymPy…' });",
     "      if (m.sympyWheel) { await py.loadPackage('mpmath'); await py.loadPackage(m.sympyWheel); }",
     "      else await py.loadPackage('sympy');",
@@ -5980,6 +6019,18 @@ var SympyEditor = (function () {
     "      py.runPython(m.boot);",
     "      newDoc = py.globals.get('__sympy_editor_new');",
     "      handle = py.globals.get('__sympy_editor_handle');",
+    "      self.postMessage({ type: 'done', req: m.req });",
+    "    } else if (m.type === 'packages') {",
+    "      for (var pk in (m.packages || {})) for (var pf in m.packages[pk]) {",
+    "        var pp = m.root + '/' + pk + '/' + pf; py.FS.mkdirTree(pp.slice(0, pp.lastIndexOf('/'))); py.FS.writeFile(pp, m.packages[pk][pf]);",
+    "      }",
+    "      if (m.micropip && m.micropip.length) {",
+    "        try {",
+    "          await py.loadPackage('micropip');",
+    "          await py.runPythonAsync('import micropip\\nawait micropip.install(' + JSON.stringify(m.micropip) + ')');",
+    "        } catch (err) { console.warn('sympy-editor: an add-on\\'s packages could not be installed:', err); }",
+    "      }",
+    "      py.runPython('import importlib\\nimportlib.invalidate_caches()');",
     "      self.postMessage({ type: 'done', req: m.req });",
     "    } else if (m.type === 'newDoc') {",
     "      newDoc(m.id, m.srepr, m.settings);",
@@ -6030,7 +6081,26 @@ var SympyEditor = (function () {
       }
     }
     py.runPython(PYODIDE_BOOT);
-    return { newDoc: py.globals.get("__sympy_editor_new"), handle: py.globals.get("__sympy_editor_handle") };
+    return { py: py, newDoc: py.globals.get("__sympy_editor_new"), handle: py.globals.get("__sympy_editor_handle") };
+  }
+
+  /** Add-on packages written into a runtime that is running already (and
+   *  their PyPI requirements installed): see rt.addPackages. */
+  async function installPackages(py, packages, micropip) {
+    for (var pkg in packages) for (var f in packages[pkg]) {
+      var fp = PYODIDE_ROOT + "/" + pkg + "/" + f;
+      py.FS.mkdirTree(fp.slice(0, fp.lastIndexOf("/")));
+      py.FS.writeFile(fp, packages[pkg][f]);
+    }
+    if (micropip.length) {
+      try {
+        await py.loadPackage("micropip");
+        await py.runPythonAsync("import micropip\nawait micropip.install(" + JSON.stringify(micropip) + ")");
+      } catch (err) {
+        console.warn("sympy-editor: an add-on's packages could not be installed:", err);
+      }
+    }
+    py.runPython("import importlib\nimportlib.invalidate_caches()");
   }
 
   /** One Python runtime (a worker, or the page) holding the Documents of
@@ -6038,7 +6108,10 @@ var SympyEditor = (function () {
    *  next request starts a new one and re-creates the Documents from their
    *  last committed state (`docs`), so only the undo history is lost. */
   function makeRuntime(cfg) {
-    var rt = { docs: {}, worker: null, ready: null, inPage: null, pending: {}, req: 0, report: function () {} };
+    var rt = { docs: {}, worker: null, ready: null, inPage: null, pending: {}, req: 0, report: function () {},
+               extra: { packages: {}, micropip: [] } };    // brought by editors that joined it (rt.addPackages)
+    function packagesOf() { return Object.assign({}, cfg.packages || {}, rt.extra.packages); }
+    function micropipOf() { return (cfg.micropip || []).concat(rt.extra.micropip); }
 
     function post(msg) {
       return new Promise(function (resolve, reject) {
@@ -6099,7 +6172,7 @@ var SympyEditor = (function () {
               indexURL: new URL(cfg.pyodideIndex, document.baseURI).href,
               sympyWheel: cfg.sympyWheel ? new URL(cfg.sympyWheel, document.baseURI).href : "",
               dir: PYODIDE_DIR, root: PYODIDE_ROOT, sources: cfg.sources,
-              packages: cfg.packages || {}, micropip: cfg.micropip || [], boot: PYODIDE_BOOT });
+              packages: packagesOf(), micropip: micropipOf(), boot: PYODIDE_BOOT });
             return;
           } catch (e) {
             if (window.console) console.warn("sympy-editor: Python could not start in a worker, using the page instead.", e);
@@ -6107,12 +6180,31 @@ var SympyEditor = (function () {
             rt.worker = null;
           }
         }
-        rt.inPage = await pyodideInPage(cfg, rt.report);
+        rt.inPage = await pyodideInPage(Object.assign({}, cfg, { packages: packagesOf(), micropip: micropipOf() }), rt.report);
       })().catch(function (e) { rt.ready = null; throw e; });
       return rt.ready;
     };
 
     rt.canInterrupt = function () { return !!rt.worker; };
+
+    /** An editor joining this runtime - one another editor of the page
+     *  started, with its own add-ons - brings the packages of its add-ons:
+     *  those the runtime lacks are written in (their PyPI requirements
+     *  installed) before its document is made, and kept, so that a restart
+     *  after an interruption has them too.  Without this the second editor
+     *  of a page had none of the add-ons the first did not. */
+    rt.addPackages = async function (other) {
+      var had = packagesOf(), hadPip = micropipOf();
+      var pk = {}, any = false;
+      for (var name in (other.packages || {})) if (!(name in had)) { pk[name] = other.packages[name]; any = true; }
+      var pip = (other.micropip || []).filter(function (r) { return hadPip.indexOf(r) < 0; });
+      if (!any && !pip.length) return;
+      Object.assign(rt.extra.packages, pk);
+      rt.extra.micropip = rt.extra.micropip.concat(pip);
+      await rt.start();
+      if (rt.inPage) await installPackages(rt.inPage.py, pk, pip);
+      else await post({ type: "packages", root: PYODIDE_ROOT, packages: pk, micropip: pip });
+    };
 
     rt.interrupt = function () {
       if (!rt.worker) return false;
@@ -6171,6 +6263,7 @@ var SympyEditor = (function () {
       if (!ready) {
         ready = (async function () {
           rt = await pyodideRuntime(cfg, report);
+          await rt.addPackages(cfg);          // a runtime another editor started may lack this one's add-ons
           id = "doc" + (++window.__sympyEditorPyodide.docs);
           await rt.newDoc(id, cfg.srepr, cfg.document || {});
           report("");

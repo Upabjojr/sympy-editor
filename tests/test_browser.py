@@ -4443,6 +4443,8 @@ def test_addon_panel_tools_and_calls(browser):
 
 
 def test_addons_can_be_switched_on_and_off_while_editing(browser):
+    """No sessions, and still the drawer: the add-ons' switches are all it
+    holds, in the open."""
     addon, Boxed = _demo_addon()
     doc = Document(x + y, available=[addon])        # known to the document, off
     srv = EditorServer(doc, port=0)
@@ -4451,38 +4453,69 @@ def test_addons_can_be_switched_on_and_off_while_editing(browser):
         page = _open(browser, srv.url)
         assert page.locator(".se-addon-demo").count() == 0
         assert page.locator('.se-toolbar [data-cmd="addon:demo:boxit"]').count() == 0
-        menu_btn = page.locator('.se-toolbar [data-cmd="addons"]')
-        assert menu_btn.is_visible()
+        assert page.locator('.se-toolbar [data-cmd="addons"]').count() == 0      # no menu on the strip any more
+        drawer_btn = page.locator('.se-toolbar [data-cmd="drawer"]')
+        assert drawer_btn.is_visible()
 
-        def open_menu():                                  # the button toggles: open it only when it is closed
-            if not page.locator(".se-addons-menu").is_visible():
-                menu_btn.click()
-        open_menu()
-        box = page.locator(".se-addons-menu input")
+        def open_drawer():
+            if not page.locator(".se-drawer").is_visible():
+                drawer_btn.click()
+            page.wait_for_selector(".se-drawer-addons input", state="visible", timeout=5000)
+
+        def close_drawer():
+            page.locator(".se-drawer-close").click()
+            assert _wait(lambda: page.locator(".se-drawer").is_hidden())
+        open_drawer()
+        assert page.locator(".se-drawer-head").inner_text().startswith("Add-ons")
+        assert page.locator(".se-sessions").count() == 0                         # no sessions in it
+        box = page.locator(".se-drawer-addons input")
         assert box.count() == 1 and not box.is_checked()
-        assert "Demo panel" in page.locator(".se-addons-menu").inner_text()
+        assert "Demo panel" in page.locator(".se-drawer-addons").inner_text()
         box.check()                                       # on: the panel and the tools appear
         page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)
         assert page.locator('.se-toolbar [data-cmd="addon:demo:boxit"]').count() == 1
         assert list(doc.addons) == ["demo"] and not doc.can_undo
         page.wait_for_function("document.querySelector('.demo-panel').getAttribute('data-src') === 'x + y'")
+        close_drawer()
         page.locator('.se-toolbar [data-cmd="addon:demo:boxit"]').click()
         page.wait_for_function("document.querySelector('.se-source').textContent.startsWith('Box(')")
         # off: everything of it goes, the expression stays
-        open_menu()
-        page.locator(".se-addons-menu input").uncheck()
+        open_drawer()
+        page.locator(".se-drawer-addons input").uncheck()
         page.wait_for_function("!document.querySelector('.se-addon-demo')", timeout=10000)
         assert page.locator('.se-toolbar [data-cmd="addon:demo:boxit"]').count() == 0
         assert doc.addons == {} and isinstance(doc.expr, Boxed)
         assert page.locator(".se-source").inner_text().startswith("Box(")
         # and on again
-        open_menu()
-        page.locator(".se-addons-menu input").check()
+        page.locator(".se-drawer-addons input").check()
         page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)
         assert page.errors == []
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_the_drawer_button_shows_only_with_something_to_hold(browser, tmp_path):
+    """Without sessions the drawer holds the add-ons alone: with none to
+    switch there is no button - the strip as it always was - and a read-only
+    editor has no drawer at all."""
+    doc_none = Document(x + y, available=[])
+    srv2 = EditorServer(doc_none, port=0)
+    threading.Thread(target=srv2.serve_forever, daemon=True).start()
+    try:
+        page = _open(browser, srv2.url)
+        assert page.locator('.se-toolbar [data-cmd="drawer"]').count() == 0      # not even hidden: the columns count blocks
+        assert page.locator('.se-toolbar [data-cmd="addons"]').count() == 0
+        assert page.errors == []
+    finally:
+        srv2.shutdown()
+        srv2.server_close()
+    ro = browser.new_page()
+    path = tmp_path / "ro.html"
+    path.write_text(to_html(x + y, backend="readonly"), encoding="utf-8")
+    ro.goto(path.as_uri())
+    ro.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    assert ro.locator('[data-cmd="drawer"]').count() == 0 and ro.locator(".se-drawer").count() == 0
 
 
 def test_remembered_addons_come_back_after_a_reload(browser):
@@ -4495,16 +4528,16 @@ def test_remembered_addons_come_back_after_a_reload(browser):
     try:
         page = _open(browser, srv.url)
         assert page.locator(".se-addon-demo").count() == 0
-        page.locator('.se-toolbar [data-cmd="addons"]').click()
-        page.locator(".se-addons-menu input").check()
+        page.locator('.se-toolbar [data-cmd="drawer"]').click()
+        page.locator(".se-drawer-addons input").check()
         page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)
         assert page.evaluate("JSON.parse(localStorage.getItem('sympy-editor:addons'))") == ["demo"]
         doc.disable("demo")                                     # the server forgets (an app restarted)
         page.goto(srv.url)
         page.wait_for_selector(".se-addon-demo .demo-panel", timeout=15000)     # switched on again from the storage
         assert list(doc.addons) == ["demo"]
-        page.locator('.se-toolbar [data-cmd="addons"]').click()
-        page.locator(".se-addons-menu input").uncheck()
+        page.locator('.se-toolbar [data-cmd="drawer"]').click()
+        page.locator(".se-drawer-addons input").uncheck()
         page.wait_for_function("!document.querySelector('.se-addon-demo')", timeout=10000)
         assert page.evaluate("JSON.parse(localStorage.getItem('sympy-editor:addons'))") == []
         assert page.errors == []

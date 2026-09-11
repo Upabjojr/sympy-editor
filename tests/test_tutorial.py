@@ -14,7 +14,7 @@ from sympy import sin, symbols, sympify
 from sympy_editor import Document, to_html
 from sympy_editor.html import default_urls, read_static
 from sympy_editor.server import EditorServer
-from sympy_editor.tutorial import ELEMENT_ID, load_tutorial, main, save_tutorial_html, to_tutorial_html
+from sympy_editor.tutorial import ELEMENT_PREFIX, load_tutorial, main, save_tutorial_html, to_tutorial_html
 
 x, y = symbols("x y")
 PLAYER = "SympyEditorTutorial"
@@ -49,6 +49,10 @@ def test_a_script_loads_from_a_dict_json_text_or_a_file(tmp_path):
     ({"steps": [{"wait": True, "sayy": "typo"}]}, "step 0: unknown key(s) sayy"),
     ({"steps": [{"wait": True}], "stepz": []}, "unknown key(s) stepz"),
     ({"steps": [{"wait": True}], "speed": 0}, "'speed' is a positive number"),
+    ({"steps": [{"wait": True, "position": "left"}]}, "step 0: position is one of"),
+    ({"steps": [{"wait": True, "size": "huge"}]}, "step 0: size is"),
+    ({"steps": [{"caption": "a", "near": 3}]}, "step 0: near needs a target"),
+    ({"steps": [{"choose": {"target": "select"}}]}, "step 0: choose needs"),
 ])
 def test_a_script_at_fault_is_refused_naming_the_step(script, says):
     with pytest.raises(ValueError) as err:
@@ -61,12 +65,27 @@ def test_a_script_at_fault_is_refused_naming_the_step(script, says):
 def test_the_page_is_the_ordinary_editor_page_with_the_player_after_it():
     script = {"title": "A tour", "expression": "x**2 + 1", "steps": [{"at": 0, "caption": "hi </script> there"}]}
     page = to_tutorial_html(script)
-    assert page.count(f'SympyEditor.mount(document.getElementById("{ELEMENT_ID}")') == 1
+    assert page.count(f'SympyEditor.mount(document.getElementById("{ELEMENT_PREFIX}') == 1
+    assert '"fullPage": true' in page
     assert read_static("editor.js").strip() in page and read_static("tutorial.js").strip() in page
     assert read_static("tutorial.css").strip() in page and "<title>A tour</title>" in page
     assert page.index("SympyEditor.mount(") < page.index(f"{PLAYER}.run(")          # the editor first
     assert "hi </script> there" not in page                                        # the script is escaped
     assert '"x**2 + 1"' in page or "x**2 + 1" in page
+
+
+def test_a_fragment_embeds_beside_other_editors_sharing_their_scripts():
+    """Embedded in a page of one's own: no page of its own around it, its own
+    element, and every script guarded - one copy of the editor, one of the
+    player, whatever else is on the page (and so one Python runtime)."""
+    script = {"expression": "x**2", "steps": [{"at": 0, "caption": "hi"}]}
+    one = to_tutorial_html(script, full_page=False)
+    two = to_tutorial_html(script, full_page=False)
+    assert one.startswith("<style>") and not one.lstrip().startswith("<!DOCTYPE")
+    assert "if (!window.SympyEditor) {" in one and "if (!window.SympyEditorTutorial) {" in one
+    assert '"fullPage": false' in one
+    ids = [f.split(f'id="{ELEMENT_PREFIX}')[1].split('"')[0] for f in (one, two)]
+    assert ids[0] != ids[1]                                       # two on a page do not collide
 
 
 def test_nothing_else_carries_the_player():
@@ -115,20 +134,42 @@ def _online(url):
 
 
 WATCH = """
-window.__tour = {steps: [], rings: 0, end: null};
+window.__tour = {steps: [], rings: 0, end: null, placed: {}, picked: []};
+addEventListener('DOMContentLoaded', () => {
+  const s = document.createElement('select');
+  s.id = 'pick'; s.innerHTML = '<option value="a">a</option><option value="b">b</option>';
+  s.addEventListener('change', () => window.__tour.picked.push(s.value));
+  document.body.appendChild(s);
+});
+const box = r => r && {left: r.left, top: r.top, right: r.right, bottom: r.bottom};
 addEventListener('sympy-editor-tutorial-step', e => {
+  const i = e.detail.index;
   const cap = document.querySelector('.se-tour-caption');
   const sel = document.querySelector('.se-view .se-selected[data-path]');
-  window.__tour.steps.push({i: e.detail.index,
+  window.__tour.steps.push({i: i,
     caption: cap && !cap.hidden ? cap.textContent : null,
     source: (document.querySelector('.se-source') || {}).textContent,
     selected: sel ? sel.getAttribute('data-path') : null});
+  setTimeout(() => {           // the arrow and the ring are up by now: where did the caption go?
+    const c = document.querySelector('.se-tour-caption'), r = document.querySelector('.se-tour-ring');
+    window.__tour.placed[i] = {caption: c && !c.hidden ? box(c.getBoundingClientRect()) : null,
+                               ring: r && !r.hidden ? box(r.getBoundingClientRect()) : null,
+                               width: innerWidth, height: innerHeight};
+  }, 220);
 });
-addEventListener('sympy-editor-tutorial-end', e => { window.__tour.end = e.detail; });
+addEventListener('sympy-editor-tutorial-end', e => {
+  window.__tour.end = e.detail;
+  window.__tour.after = {layers: document.querySelectorAll('.se-tour-layer').length,
+                         running: document.documentElement.classList.contains('se-tour-running')};
+});
 new MutationObserver(recs => recs.forEach(r => {
   if (r.target.classList && r.target.classList.contains('se-tour-ring') && !r.target.hidden) window.__tour.rings++;
 })).observe(document, {subtree: true, attributes: true, attributeFilter: ['hidden']});
 """
+
+
+def _apart(a, b):
+    return a["right"] <= b["left"] or b["right"] <= a["left"] or a["bottom"] <= b["top"] or b["bottom"] <= a["top"]
 
 
 @pytest.mark.skipif(not _online(default_urls()["katexJs"]), reason="KaTeX CDN not reachable")
@@ -145,6 +186,7 @@ def test_the_player_plays_a_script_on_a_real_editor():
         {"after": 0.4, "undo": True},
         {"after": 0.4, "point": ".se-ops", "say": "Every transformation is in this menu"},
         {"after": 0.4, "zoom": 1.5},
+        {"after": 0.4, "choose": {"target": "#pick", "value": "b"}, "say": "A choice from a list"},
         {"after": 0.4, "caption": None},
     ]}
     # the page from the server's own address, so that the player's presses
@@ -164,8 +206,7 @@ def test_the_player_plays_a_script_on_a_real_editor():
             page.goto(srv.url + "tour")
             page.wait_for_function("() => window.__tour && window.__tour.end", timeout=60000)
             tour = page.evaluate("window.__tour")
-            zoom = page.evaluate(f"document.getElementById('{ELEMENT_ID}').querySelector('.sympy-editor').__sympyEditor.zoom")
-            caption_left = page.evaluate("(() => { const c = document.querySelector('.se-tour-caption'); return !!c && !c.hidden && c.classList.contains('shown'); })()")
+            zoom = page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.zoom")
             browser.close()
     finally:
         srv.shutdown()
@@ -179,7 +220,15 @@ def test_the_player_plays_a_script_on_a_real_editor():
     assert at[5]["source"] == "x**2 + 2*x + 1"                                     # typed, applied, expanded
     assert doc.expr == sympify("(x + 1)**2")                                       # and undone
     assert tour["rings"] >= 4                                                      # arrow and ring: 2 clicks, typing, a point
-    assert zoom == 1.5 and not caption_left
+    assert zoom == 1.5 and tour["picked"] == ["b"]                                 # chose from the list
+    # every caption said beside a target stays clear of its ring, on the screen
+    for i in (1, 2, 3, 6, 8):
+        placed = tour["placed"][str(i)]
+        cap, ring = placed["caption"], placed["ring"]
+        assert cap and ring and _apart(cap, ring), (i, placed)
+        assert cap["left"] >= 0 and cap["top"] >= 0 and cap["right"] <= placed["width"] and cap["bottom"] <= placed["height"]
+    # and at the end, nothing of the tutorial is left: the editor as a reader finds it
+    assert tour["after"] == {"layers": 0, "running": False}
 
 
 def test_the_example_tour_is_a_script_that_builds(tmp_path):
@@ -189,7 +238,7 @@ def test_the_example_tour_is_a_script_that_builds(tmp_path):
     from pathlib import Path
     here = Path(__file__).resolve().parent.parent / "examples" / "tutorial"
     script = load_tutorial(here / "tour.json")
-    assert len(script["steps"]) > 10 and set(script["addons"]) == {"plot", "tree"}
+    assert len(script["steps"]) > 10 and set(script["addons"]) == {"plot", "tree", "matching", "latex"}
     spec = importlib.util.spec_from_file_location("tour_build", here / "build.py")
     build = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(build)
@@ -197,3 +246,5 @@ def test_the_example_tour_is_a_script_that_builds(tmp_path):
     assert build.main(["--out", str(out)]) == 0
     page = out.read_text(encoding="utf-8")
     assert PLAYER in page and "sympy_editor_plot" in page and "sympy_editor_tree" in page
+    assert "sympy_editor_matching" in page and "sympy_editor_latex" in page
+    assert "sympy-matching" in page and "lark" in page       # what the browser installs for those two

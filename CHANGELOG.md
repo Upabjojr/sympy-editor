@@ -40,11 +40,18 @@ The web site opens with all four switched on.
   scrolls and keeps selecting, and the selection no longer blinks out or
   shifts under the finger.
 * The full-screen button keeps its corner.
+* The ≡ drawer is there in every editor that edits: the sessions and their
+  history when they are on, the add-ons' switches always - in a notebook, a
+  served page, a saved page too.  Without sessions and without add-ons the
+  strip is as it was.  The Add-ons menu on the strip is gone.
 * The apply row is four menus in two groups, and `options={"actions": ...}`
   chooses what the action menus offer.
 
 ### Fixed
 
+* Editors on one page share one Python runtime, and it installed only the
+  add-ons of the editor that started it: a second editor with other add-ons
+  could not start them.  An editor that joins now brings its own.
 * `srepr` does not round-trip a `MatAdd` — SymPy prints an `Add`'s terms in
   display order rather than the order it holds them, so a page or an app
   rebuilding an expression got the terms in another order and edits landed on
@@ -61,11 +68,13 @@ The web site opens with all four switched on.
 
 ### Elsewhere
 
-* Tutorials: `sympy_editor.tutorial` builds a page that plays a JSON script of
-  timed steps on the editor - captions, an arrow and a pulsing ring on what is
-  about to be pressed, then the press - to be watched or recorded as a video.
-  Only a page built for it plays one; the editor itself is unchanged.
-  `examples/tutorial/` is a tour of the editor built this way.
+* Tutorials: `sympy_editor.tutorial` builds a page (or a fragment to embed)
+  that plays a JSON script of timed steps on the editor - captions beside what
+  they describe, an arrow and a pulsing ring on what is about to be pressed,
+  then the press - to be watched or recorded as a video; when it is over, the
+  page is the editor.  Only a page built for it plays one.
+  `examples/tutorial/` is a tour of the editor built this way, all four
+  add-ons included.
 * Python 3.10 or later: 3.9 is no longer supported (its security support
   ended in October 2025, and the rewrite rules' `sympy-matching` never ran
   on it).

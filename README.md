@@ -117,8 +117,13 @@ save_tutorial_html({
 or `python -m sympy_editor.tutorial script.json -o tutorial.html`. A step
 happens `"at"` a time or `"after"` the previous one, and never while Python is
 still busy with the one before. It does one thing: `caption`, `point`, `click`,
-`type`, `key`, `set`, `apply`, `undo`/`redo`, `zoom`, `addons` or `wait`.
-`sympy_editor/tutorial.py` documents every kind of step.
+`choose`, `type`, `key`, `set`, `apply`, `undo`/`redo`, `zoom`, `addons` or
+`wait`. A caption goes beside what the step is about, or at the top, centre or
+bottom of the editor. When the script is over, everything of the tutorial goes
+and the page is the editor as a reader finds it. `full_page=False` gives a
+fragment to embed in a page of one's own; it shares the page's one Python
+runtime with any other editor there. `sympy_editor/tutorial.py` documents every
+kind of step.
 `examples/tutorial/` has a tour of the editor built this way
 (`python examples/tutorial/build.py`). On a page that includes
 `static/tutorial.js`, `SympyEditorTutorial.run(editor, script)` plays one from
