@@ -73,8 +73,8 @@ The web site opens with all four switched on.
   they describe, an arrow and a pulsing ring on what is about to be pressed,
   then the press - to be watched or recorded as a video; when it is over, the
   page is the editor.  Only a page built for it plays one.
-  `examples/tutorial/` is a tour of the editor built this way, all four
-  add-ons included.
+  `examples/tutorial/` is a tour of the editor built this way: editing in
+  the formula itself, the History of the edits, and three add-ons.
 * Python 3.10 or later: 3.9 is no longer supported (its security support
   ended in October 2025, and the rewrite rules' `sympy-matching` never ran
   on it).

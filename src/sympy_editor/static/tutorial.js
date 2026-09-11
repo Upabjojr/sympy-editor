@@ -116,7 +116,10 @@
    *  not beside something - the editor's, not the window's, so that one
    *  embedded in a longer page keeps its captions to itself. */
   Overlay.prototype.stage = function () {
-    var r = this.editor.root.getBoundingClientRect();
+    // The History (or the guide) covers the window while it is open: then it
+    // is what the captions go at the top, middle or bottom of.
+    var open = this.editor.root.querySelector(".se-history-view");
+    var r = (open || this.editor.root).getBoundingClientRect();
     var top = Math.max(r.top, 0), bottom = Math.min(r.bottom, innerHeight);
     if (bottom - top < 120) { top = 0; bottom = innerHeight; }                  // hardly on the screen: the window
     var left = Math.max(r.left, 0), right = Math.min(r.right, innerWidth);
@@ -350,7 +353,14 @@
     var target = step.click || step.point || step.choose || (step.type && (step.type.target || step.type.selector));
     if (step.choose && typeof step.choose === "object" && !step.choose.path && !step.choose.selector) target = step.choose.target;
     if (step.near) target = step.near;
-    if (!target || target === "focused") return null;
+    if (target === "focused") {
+      // Typing where the focus is - the field Edit opened in the formula:
+      // the caption goes beside that field, not over the middle of the
+      // editor, which is where the field is.
+      var f = document.activeElement;
+      return f && f !== document.body && this.editor.root.contains(f) ? steady(function () { return aim(f); }) : null;
+    }
+    if (!target) return null;
     var hit = await this.find(target);
     return hit ? hit.rect : null;
   };
@@ -411,7 +421,16 @@
       }
       // what leaving the field, or Enter, would tell its listeners
       if (!editable) node.dispatchEvent(new Event("change", { bubbles: true }));
-      if (t.enter) { await sleep(this.seconds(0.3)); key(node, "Enter"); }
+      if (t.enter) {
+        await sleep(this.seconds(0.3));
+        key(node, "Enter");
+        // The editor's in-place field (Edit, or a double-click, on a piece
+        // of the formula) takes a person's Enter, not one sent from a script;
+        // leaving the field applies it just the same, and that is what is
+        // done when the Enter did not.
+        await sleep(this.seconds(0.15));
+        if (node === ed.input && document.activeElement === node) node.blur();
+      }
     } else if (step.key) {
       var active = document.activeElement;
       var into = active && ed.root.contains(active) ? active : ed.view;
@@ -439,7 +458,8 @@
 
   /** The script is over: the last caption has its time, then everything of
    *  the player goes, and what is left is the editor, as a reader finds it -
-   *  no overlay, the drawer and the menus shut, the page at its top. */
+   *  no overlay, the History, the drawer and the menus shut, the page at its
+   *  top. */
   Player.prototype.finish = async function () {
     var ov = this.overlay;
     ov.clear();
@@ -451,6 +471,7 @@
     }
     ov.remove();
     var ed = this.editor;
+    if (ed.root.querySelector(".se-history-view") && typeof ed.closeHistory === "function") ed.closeHistory();
     if (typeof ed.closeDrawer === "function") ed.closeDrawer();
     if (document.activeElement && document.activeElement !== document.body && ed.root.contains(document.activeElement)) document.activeElement.blur();
     try {

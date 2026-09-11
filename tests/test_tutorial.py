@@ -149,6 +149,7 @@ addEventListener('sympy-editor-tutorial-step', e => {
   window.__tour.steps.push({i: i,
     caption: cap && !cap.hidden ? cap.textContent : null,
     source: (document.querySelector('.se-source') || {}).textContent,
+    count: (document.querySelector('.se-history-head .se-play-count') || {}).textContent || null,
     selected: sel ? sel.getAttribute('data-path') : null});
   setTimeout(() => {           // the arrow and the ring are up by now: where did the caption go?
     const c = document.querySelector('.se-tour-caption'), r = document.querySelector('.se-tour-ring');
@@ -160,7 +161,8 @@ addEventListener('sympy-editor-tutorial-step', e => {
 addEventListener('sympy-editor-tutorial-end', e => {
   window.__tour.end = e.detail;
   window.__tour.after = {layers: document.querySelectorAll('.se-tour-layer').length,
-                         running: document.documentElement.classList.contains('se-tour-running')};
+                         running: document.documentElement.classList.contains('se-tour-running'),
+                         history: !!document.querySelector('.se-history-view')};
 });
 new MutationObserver(recs => recs.forEach(r => {
   if (r.target.classList && r.target.classList.contains('se-tour-ring') && !r.target.hidden) window.__tour.rings++;
@@ -181,12 +183,16 @@ def test_the_player_plays_a_script_on_a_real_editor():
         {"at": 0, "caption": "A formula you can click"},
         {"after": 0.4, "click": {"path": "/1/d"}, "say": "Click a piece to select it"},
         {"after": 0.4, "click": '.se-toolbar [data-cmd="parent"]', "say": "Up to what holds it"},
-        {"after": 0.4, "type": {"target": ".se-source", "text": "(x + 1)**2", "enter": True}, "say": "Or type it"},
+        {"after": 0.4, "click": {"path": "/"}, "say": "The whole formula"},
+        {"after": 0.4, "click": '.se-actions [data-cmd="edit"]', "say": "Edit it where it is"},
+        {"after": 0.4, "type": {"target": "focused", "text": "(x + 1)**2", "enter": True}},
         {"after": 0.4, "apply": "expand", "say": "Transform it"},
         {"after": 0.4, "undo": True},
         {"after": 0.4, "point": ".se-ops", "say": "Every transformation is in this menu"},
         {"after": 0.4, "zoom": 1.5},
         {"after": 0.4, "choose": {"target": "#pick", "value": "b"}, "say": "A choice from a list"},
+        {"after": 0.4, "click": '.se-toolbar [data-cmd="history"]', "say": "Every edit, kept"},
+        {"after": 0.6, "click": '.se-history-head .se-play-step[title^="The next"]'},
         {"after": 0.4, "caption": None},
     ]}
     # the page from the server's own address, so that the player's presses
@@ -217,18 +223,21 @@ def test_the_player_plays_a_script_on_a_real_editor():
     assert at[1]["caption"] == "A formula you can click"                           # a caption stays until the next
     assert at[2]["caption"] == "Click a piece to select it" and at[2]["selected"] == "/1/d"
     assert at[3]["selected"] == "/1"                                               # the parent button, pressed
-    assert at[5]["source"] == "x**2 + 2*x + 1"                                     # typed, applied, expanded
+    assert at[6]["source"] == "(x + 1)**2"                                         # typed over it, in the formula itself
+    assert at[7]["source"] == "x**2 + 2*x + 1"                                     # and expanded
     assert doc.expr == sympify("(x + 1)**2")                                       # and undone
-    assert tour["rings"] >= 4                                                      # arrow and ring: 2 clicks, typing, a point
+    assert tour["rings"] >= 6                                                      # arrow and ring on every press and point
     assert zoom == 1.5 and tour["picked"] == ["b"]                                 # chose from the list
     # every caption said beside a target stays clear of its ring, on the screen
-    for i in (1, 2, 3, 6, 8):
+    for i in (1, 2, 4, 8, 10):                                                     # the steps with a caption and a ring
         placed = tour["placed"][str(i)]
         cap, ring = placed["caption"], placed["ring"]
         assert cap and ring and _apart(cap, ring), (i, placed)
         assert cap["left"] >= 0 and cap["top"] >= 0 and cap["right"] <= placed["width"] and cap["bottom"] <= placed["height"]
-    # and at the end, nothing of the tutorial is left: the editor as a reader finds it
-    assert tour["after"] == {"layers": 0, "running": False}
+    assert at[13]["count"] and at[13]["count"].startswith("2 /")                   # the History, one step on
+    # and at the end, nothing of the tutorial is left - the History it left
+    # open shut too: the editor as a reader finds it
+    assert tour["after"] == {"layers": 0, "running": False, "history": False}
 
 
 def test_the_example_tour_is_a_script_that_builds(tmp_path):
@@ -238,13 +247,13 @@ def test_the_example_tour_is_a_script_that_builds(tmp_path):
     from pathlib import Path
     here = Path(__file__).resolve().parent.parent / "examples" / "tutorial"
     script = load_tutorial(here / "tour.json")
-    assert len(script["steps"]) > 10 and set(script["addons"]) == {"plot", "tree", "matching", "latex"}
+    assert len(script["steps"]) > 10 and set(script["addons"]) == {"plot", "matching", "latex"}
     spec = importlib.util.spec_from_file_location("tour_build", here / "build.py")
     build = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(build)
     out = tmp_path / "tour.html"
     assert build.main(["--out", str(out)]) == 0
     page = out.read_text(encoding="utf-8")
-    assert PLAYER in page and "sympy_editor_plot" in page and "sympy_editor_tree" in page
+    assert PLAYER in page and "sympy_editor_plot" in page
     assert "sympy_editor_matching" in page and "sympy_editor_latex" in page
     assert "sympy-matching" in page and "lark" in page       # what the browser installs for those two
