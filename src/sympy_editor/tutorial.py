@@ -32,7 +32,9 @@ slow computation delays what follows rather than losing it.
 **What** it does - exactly one of:
 
 ``"caption": "text"``
-    a text box describing what is going on (``"size": "large"`` for a title);
+    a text box describing what is going on (``"size": "large"`` for a title):
+    plain text, where a line break starts a new line and what is between
+    backticks is code, kept on one line (```pip install sympy-editor```);
     ``"duration"``: seconds before it goes (default: until the next
     caption); ``null`` takes it away.
 ``"point": target``

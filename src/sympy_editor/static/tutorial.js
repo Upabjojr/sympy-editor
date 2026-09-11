@@ -195,7 +195,15 @@
     }
     this.subject = subject || null;
     this.place = opts.place || (subject ? "near" : "center");
-    box.textContent = String(text);
+    // Text, never markup: a line break starts a new line, and what is
+    // between backticks is a piece of code, kept on one line - a command
+    // broken after "pip install" reads as two.
+    box.textContent = "";
+    String(text).split("`").forEach(function (part, i) {
+      if (!part) return;
+      if (i % 2) make("code", "", box).textContent = part;
+      else box.appendChild(document.createTextNode(part));
+    });
     box.className = "se-tour-caption" + (opts.size === "large" ? " large" : "");
     box.hidden = false;
     this.layout();

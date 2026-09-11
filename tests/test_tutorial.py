@@ -150,6 +150,7 @@ addEventListener('sympy-editor-tutorial-step', e => {
     caption: cap && !cap.hidden ? cap.textContent : null,
     source: (document.querySelector('.se-source') || {}).textContent,
     count: (document.querySelector('.se-history-head .se-play-count') || {}).textContent || null,
+    code: cap && !cap.hidden ? [...cap.querySelectorAll('code')].map(c => c.textContent) : [],
     selected: sel ? sel.getAttribute('data-path') : null});
   setTimeout(() => {           // the arrow and the ring are up by now: where did the caption go?
     const c = document.querySelector('.se-tour-caption'), r = document.querySelector('.se-tour-ring');
@@ -191,7 +192,7 @@ def test_the_player_plays_a_script_on_a_real_editor():
         {"after": 0.4, "point": ".se-ops", "say": "Every transformation is in this menu"},
         {"after": 0.4, "zoom": 1.5},
         {"after": 0.4, "choose": {"target": "#pick", "value": "b"}, "say": "A choice from a list"},
-        {"after": 0.4, "click": '.se-toolbar [data-cmd="history"]', "say": "Every edit, kept"},
+        {"after": 0.4, "click": '.se-toolbar [data-cmd="history"]', "say": "Every edit, `kept`"},
         {"after": 0.6, "click": '.se-history-head .se-play-step[title^="The next"]'},
         {"after": 0.4, "caption": None},
     ]}
@@ -235,6 +236,7 @@ def test_the_player_plays_a_script_on_a_real_editor():
         assert cap and ring and _apart(cap, ring), (i, placed)
         assert cap["left"] >= 0 and cap["top"] >= 0 and cap["right"] <= placed["width"] and cap["bottom"] <= placed["height"]
     assert at[13]["count"] and at[13]["count"].startswith("2 /")                   # the History, one step on
+    assert at[12]["caption"] == "Every edit, kept" and at[12]["code"] == ["kept"]  # backticks: code, as text
     # and at the end, nothing of the tutorial is left - the History it left
     # open shut too: the editor as a reader finds it
     assert tour["after"] == {"layers": 0, "running": False, "history": False}
@@ -247,13 +249,15 @@ def test_the_example_tour_is_a_script_that_builds(tmp_path):
     from pathlib import Path
     here = Path(__file__).resolve().parent.parent / "examples" / "tutorial"
     script = load_tutorial(here / "tour.json")
-    assert len(script["steps"]) > 10 and set(script["addons"]) == {"plot", "matching", "latex"}
+    assert len(script["steps"]) > 10 and set(script["addons"]) == {"plot", "tree", "matching", "latex"}
+    # every add-on is listed in the menu; the tour leaves the tree alone
+    assert not any("Expression tree" in json.dumps(s) for s in script["steps"])
     spec = importlib.util.spec_from_file_location("tour_build", here / "build.py")
     build = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(build)
     out = tmp_path / "tour.html"
     assert build.main(["--out", str(out)]) == 0
     page = out.read_text(encoding="utf-8")
-    assert PLAYER in page and "sympy_editor_plot" in page
+    assert PLAYER in page and "sympy_editor_plot" in page and "sympy_editor_tree" in page
     assert "sympy_editor_matching" in page and "sympy_editor_latex" in page
     assert "sympy-matching" in page and "lark" in page       # what the browser installs for those two
