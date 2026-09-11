@@ -2960,6 +2960,40 @@ def test_edit_at_a_caret_opens_the_field_where_the_caret_is(browser, serve_expr)
     assert page.errors == []
 
 
+
+def test_the_working_overlay_stays_in_the_middle_of_the_screen(browser, serve_expr):
+    """On a phone "Computing..." and its Interrupt button sat in the middle of
+    the whole editor - below the screen when the editor with its panels is
+    taller than it - and went with the page when it scrolled.  They stay in
+    the middle of the screen, scrolled or not; an editor the screen holds
+    whole has them in its own middle, as before."""
+    srv, doc = serve_expr(x + y)
+    page = browser.new_page(viewport={"width": 400, "height": 700})
+    page.goto(srv.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    ed = "document.querySelector('.sympy-editor').__sympyEditor"
+    tall = page.add_style_tag(content=".sympy-editor .se-view { min-height: 2400px; }")
+    page.evaluate(ed + "._showLoading('Computing Factor…'); " + ed + ".interruptBtn.hidden = false")
+    # [box top, box bottom, the middle of the part of the overlay on screen]
+    where = ("() => { const b = document.querySelector('.se-loading-box').getBoundingClientRect(),"
+             " o = document.querySelector('.se-loading').getBoundingClientRect();"
+             " return [b.top, b.bottom, (Math.max(o.top, 0) + Math.min(o.bottom, innerHeight)) / 2]; }")
+    over = page.evaluate("() => { const r = document.querySelector('.se-loading').getBoundingClientRect(); return [r.top + scrollY, r.bottom + scrollY]; }")
+    assert over[1] - over[0] > 2400
+    # the top of the page, the editor filling the screen, its last 700px, its last 300px
+    for scroll in (0, over[0] + 400, over[1] - 700, over[1] - 300):
+        page.evaluate("y => window.scrollTo(0, y)", scroll)
+        top, bottom, middle = _settled(lambda: page.evaluate(where))
+        assert 0 <= top and bottom <= 700 and abs((top + bottom) / 2 - middle) <= 2, (scroll, top, bottom, middle)
+    # an editor the screen holds whole: the middle of the editor
+    tall.evaluate("s => s.remove()")
+    page.evaluate("window.scrollTo(0, 0)")
+    top, bottom, middle = _settled(lambda: page.evaluate(where))
+    r = page.evaluate("() => { const r = document.querySelector('.se-loading').getBoundingClientRect(); return [r.top, r.bottom]; }")
+    assert r[1] - r[0] < 700 and abs((top + bottom) / 2 - (r[0] + r[1]) / 2) <= 2, (top, bottom, r)
+    page.evaluate(ed + "._hideLoading()")
+
+
 def test_full_screen_button_gives_the_formula_the_window(browser, serve_expr):
     """A quasi-transparent button in the corner of the editing area makes the
     formula fill the window; Esc (or the button) comes back."""

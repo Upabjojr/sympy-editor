@@ -1584,7 +1584,8 @@ var SympyEditor = (function () {
         title: "Stop the computation (the expression stays as it was)" }, ["Interrupt"]);
       this.interruptBtn.addEventListener("click", function () { self.interrupt(); });
       this.overlay = h("div", { class: "se-loading", hidden: "", role: "status", "aria-live": "polite" }, [
-        h("div", { class: "se-spinner" }), h("div", { class: "se-loading-text" }, ["Loading…"]), this.interruptBtn
+        h("div", { class: "se-loading-box" }, [
+          h("div", { class: "se-spinner" }), h("div", { class: "se-loading-text" }, ["Loading…"]), this.interruptBtn])
       ]);
       this.committed = null;   // the last snapshot that is not a preview (see _previewSource)
       if (this.fnForm) root.appendChild(this.fnForm);
@@ -2241,6 +2242,7 @@ var SympyEditor = (function () {
       else if (snap.preview) this._setStatus("Previewing the edited source – Enter applies it, Esc reverts");
       if (snap.closed) {
         this.closed = true;
+        this._followLoading(false);
         this.root.classList.add("se-closed");
         this._setStatus("Session closed – the expression was returned to Python.");
       }
@@ -3389,15 +3391,74 @@ var SympyEditor = (function () {
       this.loading = true;
       this.overlay.querySelector(".se-loading-text").textContent = text || "Loading…";
       this.overlay.hidden = false;
+      this._followLoading(true);
       if (this.root.contains(document.activeElement) && document.activeElement !== document.body) document.activeElement.blur();
       this._setStatus(text || "");
     }
 
     _hideLoading() {
+      this._followLoading(false);
       if (!this.loading) return;
       this.loading = false;
       this.overlay.hidden = true;
       this._applySelection();
+    }
+
+    /** The overlay's box - spinner, text, Interrupt - in the middle of the
+     *  part of the editor that is on screen, not of the whole editor: on a
+     *  phone the editor with its add-on panels is taller than the screen, and
+     *  its middle was far below it.  The part on screen is the overlay within
+     *  the window and within every box around the editor that clips it (a
+     *  notebook's scrolling panel). */
+    _placeLoading() {
+      var box = this.overlay.firstChild;
+      if (!box || this.overlay.hidden) return;
+      var r = this.overlay.getBoundingClientRect();
+      var top = Math.max(r.top, 0), bottom = Math.min(r.bottom, window.innerHeight || document.documentElement.clientHeight);
+      var clips = this._loadingClips || [];
+      for (var i = 0; i < clips.length; i++) {
+        var c = clips[i].getBoundingClientRect();
+        top = Math.max(top, c.top);
+        bottom = Math.min(bottom, c.bottom);
+      }
+      var mid = bottom > top ? (top + bottom) / 2 : (r.top + r.bottom) / 2;   // nothing of it on screen: its own middle
+      var y = Math.max(0, Math.min(mid - r.top - box.offsetHeight / 2, r.height - box.offsetHeight));
+      box.style.top = Math.round(y) + "px";
+      box.style.transform = "none";
+    }
+
+    /** Keep the box placed while the overlay is up: the page or any box
+     *  around the editor scrolling, the window resizing, the editor or the
+     *  box changing size (the Interrupt button coming up). */
+    _followLoading(on) {
+      if (on && !this._loadingFollow) {
+        var self = this, queued = false;
+        this._loadingClips = [];
+        for (var el = this.root.parentElement; el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
+          if (getComputedStyle(el).overflowY !== "visible") this._loadingClips.push(el);
+        }
+        this._loadingFollow = function () {
+          if (queued) return;
+          queued = true;
+          requestAnimationFrame(function () { queued = false; self._placeLoading(); });
+        };
+        document.addEventListener("scroll", this._loadingFollow, true);      // capturing: any box's scroll, not only the page's
+        window.addEventListener("resize", this._loadingFollow);
+        if (window.ResizeObserver) {
+          this._loadingSizes = new ResizeObserver(this._loadingFollow);
+          this._loadingSizes.observe(this.overlay.firstChild);
+          this._loadingSizes.observe(this.root);
+        }
+        this._placeLoading();
+      } else if (!on && this._loadingFollow) {
+        document.removeEventListener("scroll", this._loadingFollow, true);
+        window.removeEventListener("resize", this._loadingFollow);
+        if (this._loadingSizes) { this._loadingSizes.disconnect(); this._loadingSizes = null; }
+        this._loadingFollow = null;
+        this._loadingClips = null;
+      } else if (on) {
+        this._placeLoading();          // shown again with another text: placed again
+      }
     }
 
     /** Paste `text` where the selection is: spliced at a caret like typing,

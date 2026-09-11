@@ -295,7 +295,6 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.6rem;
   background: rgba(127, 127, 127, 0.25);
   backdrop-filter: blur(1.5px);
   border-radius: 0.5rem;
@@ -304,6 +303,20 @@
   color: var(--se-fg);
 }
 .se-loading[hidden] { display: none; }
+/* The spinner, the text and the Interrupt button: placed by the editor in the
+ * middle of the part of it that is on screen (_placeLoading), which scrolling
+ * does not move; until then, in the middle of the whole. */
+.se-loading-box {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+}
 .se-loading-text { background: var(--se-bg); padding: 0.2rem 0.6rem; border-radius: 0.3rem; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2); }
 .se-interrupt {
   font: inherit;
