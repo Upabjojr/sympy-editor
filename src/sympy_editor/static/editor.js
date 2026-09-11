@@ -36,6 +36,7 @@ var SympyEditor = (function () {
     actions: null,       // {expr: [op names], matrix: [...], integral: [...]...}: what the two action menus offer, in
                          // that order (a name may be {name, label}); a key left out means every registered op
     longPress: 450,      // ms a finger must rest on the formula before it starts a range selection (touch screens)
+    toolbarSettle: 250,  // ms a range being drawn must stop growing before the buttons follow it
     previewDelay: 250,   // ms after the last keystroke in the source line before it is previewed
     workingAfter: 400,   // ms a request may take before the spinner overlay appears
     interruptAfter: 2000, // ms after which the overlay offers to interrupt the computation
@@ -1959,6 +1960,7 @@ var SympyEditor = (function () {
         if (self._drag && (self._drag.moved || self._drag.held) && !cancelled) self._suppressClick = true;
         self._drag = null;
         if (self._opsStale) self._fillOps();      // the strip catches up with what was selected
+        if (self._toolbarTimer) self._updateToolbar();   // ... and so do the buttons
       };
       this.view.addEventListener("pointerup", function (ev) { endPointer(ev, false); });
       this.view.addEventListener("pointercancel", function (ev) { endPointer(ev, true); });
@@ -3240,6 +3242,19 @@ var SympyEditor = (function () {
       // line, and the browser drops the selection being made.
       if (document.activeElement === this.source) rect = null;
       if (!rect || this.input || this.closed) { this.actions.hidden = true; this.view.style.paddingBottom = ""; return; }
+      // Mid-drag the bar follows the selection, but its buttons keep their
+      // state until the selection settles, as the toolbar's do: Unwrap is
+      // live on x**2 and not on a range, and went on and off as the finger
+      // crossed from one to the other (_updateToolbar catches up).
+      if (this._drawing()) { this._actionsStale = true; this._updateToolbar(); }
+      else this._setActionStates();
+      this.actions.hidden = false;
+      this._positionBar(this.actions, rect);
+    }
+
+    /** Which of the bar's buttons apply to the selection. */
+    _setActionStates() {
+      this._actionsStale = false;
       var t = this.selected ? this.tree[this.selected] : null;
       var selNode = this.selected && !this.range ? this.state.nodes[this.selected] : null;
       var unwrapOk = !!(selNode && (selNode.nargs || selNode.parts));
@@ -3260,8 +3275,6 @@ var SympyEditor = (function () {
                             : cmd === "matdelcol" ? !(mctx && mctx.cols > 1)
                             : false;
       }
-      this.actions.hidden = false;
-      this._positionBar(this.actions, rect);
     }
 
     /** Place a floating bar under `rect` (a selection) - under the formula's
@@ -5740,7 +5753,33 @@ var SympyEditor = (function () {
       }
     }
 
+    /** A range is being drawn: by a finger after a long press, or a mouse. */
+    _drawing() {
+      return !!(this._drag && (this._drag.moved || this._drag.held)) && !this.closed;
+    }
+
+    /** Bring the buttons up to date with the selection - but not while a
+     *  range is being drawn.  The range changes at every node the finger (or
+     *  the mouse) crosses, and the buttons that follow it - the arrows,
+     *  Unwrap, and all of them for each request a plot following the
+     *  selection sends - went off and on as fast: the toolbar flickered
+     *  under the drag.  Mid-drag they wait until the selection has stopped
+     *  growing for opts.toolbarSettle ms; lifting the finger brings them up
+     *  to date at once (endPointer). */
     _updateToolbar() {
+      if (this._drawing()) {
+        var self = this;
+        clearTimeout(this._toolbarTimer);
+        this._toolbarTimer = setTimeout(function () { self._applyToolbar(); }, this.opts.toolbarSettle);
+        return;
+      }
+      this._applyToolbar();
+    }
+
+    _applyToolbar() {
+      clearTimeout(this._toolbarTimer);
+      this._toolbarTimer = null;
+      if (this._actionsStale && this.actions && this.state) this._setActionStates();
       var s = this.state || {};
       var b = this.buttons;
       var dis = this.busy || this.closed || !this.state;
@@ -5805,6 +5844,7 @@ var SympyEditor = (function () {
         this._fsListener = null;
       }
       this._cancelHold();
+      clearTimeout(this._toolbarTimer);
       if (this._resizeObserver) { this._resizeObserver.disconnect(); this._resizeObserver = null; }
       if (this._contentObserver) { this._contentObserver.disconnect(); this._contentObserver = null; }
       if (this._relayout) window.removeEventListener("resize", this._relayout);

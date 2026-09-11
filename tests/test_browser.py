@@ -631,10 +631,74 @@ def test_touch_long_press_selects_a_range(browser, serve_expr):
     page.wait_for_timeout(600)
     assert page.locator(".se-status").inner_text() == "Symbol: c"
     _touch(page, "pointerup", kids[1])
-    # exactly pan-y: two fingers zoom the formula, never the page (pinch-zoom
+    # one finger pans natively both ways (iOS fought a pan done in script);
+    # no pinch-zoom: two fingers zoom the formula, never the page (pinch-zoom
     # here let iOS zoom the whole app)
-    assert page.evaluate("getComputedStyle(document.querySelector('.se-view')).touchAction") == "pan-y"
+    assert page.evaluate("getComputedStyle(document.querySelector('.se-view')).touchAction") == "pan-x pan-y"
     assert page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.opts.longPress") == 450
+    assert page.errors == []
+
+
+def test_touch_range_drag_leaves_the_toolbar_alone_until_it_settles(browser, serve_expr):
+    """A range drawn by a finger changes the selection at every node it
+    crosses, and the buttons that follow the selection went off and on as
+    fast - the toolbar flickered under the drag.  They wait until the
+    selection has stopped growing for opts.toolbarSettle ms, and catch up at
+    once when the finger lifts."""
+    a, b, c, d = symbols("a b c d")
+    srv, doc = serve_expr(a + b + c + d)
+    page = _open(browser, srv.url)
+    kids = _display_children(page, "/")
+    ed = "document.querySelector('.sympy-editor').__sympyEditor"
+    assert page.evaluate(ed + ".opts.toolbarSettle") == 250
+    # a long press on a selects it: nothing on its left, so ← is off
+    _touch(page, "pointerdown", kids[0])
+    assert _wait(lambda: page.locator(".se-status").inner_text() == "Symbol: a", timeout=2)
+    assert page.evaluate(ed + ".buttons.left.disabled") is True
+    # count real changes: writing a button's disabled state again, unchanged,
+    # is a mutation too, but nothing a finger can see
+    page.evaluate("""() => { window.__flips = 0;
+        new MutationObserver(list => {
+            const byTarget = new Map();
+            for (const m of list) { if (!byTarget.has(m.target)) byTarget.set(m.target, []); byTarget.get(m.target).push(m.oldValue !== null); }
+            for (const [el, olds] of byTarget) { const values = [...olds, el.hasAttribute('disabled')];
+                for (let i = 1; i < values.length; i++) if (values[i] !== values[i - 1]) window.__flips++; }
+        }).observe(document.querySelector('.sympy-editor'), {attributes: true, subtree: true, attributeFilter: ['disabled'], attributeOldValue: true}); }""")
+    # the finger wavers between a and b: a range, a node, a range, ... - ←
+    # would have gone on and off with each; the buttons hold still
+    for kid in (kids[1], kids[0], kids[1], kids[0], kids[1]):
+        _touch(page, "pointermove", kid)
+    assert page.locator(".se-status").inner_text() == "Add range: a + b"
+    assert page.evaluate("window.__flips") == 0
+    # the selection rests: the buttons follow it, in one change
+    assert _wait(lambda: page.evaluate(ed + ".buttons.left.disabled") is False, timeout=2)
+    assert page.evaluate("window.__flips") == 1
+    _touch(page, "pointerup", kids[1])
+    # lifting the finger mid-settle brings the buttons up to date at once
+    _touch(page, "pointerdown", kids[3])
+    assert _wait(lambda: page.locator(".se-status").inner_text() == "Symbol: d", timeout=2)
+    assert page.evaluate(ed + ".buttons.right.disabled") is True
+    _touch(page, "pointermove", kids[2])
+    assert page.evaluate(ed + ".buttons.right.disabled") is True           # still waiting
+    _touch(page, "pointerup", kids[2])
+    assert page.evaluate(ed + ".buttons.right.disabled") is False          # the range c + d: → is on
+    # the bar under the selection holds still as well: Unwrap is live on x**2
+    # and not on x alone or on the range x**2 + y
+    page.evaluate(ed + ".send({action: 'set', src: 'x**2 + y + z'})")
+    page.wait_for_function("document.querySelector('.se-source').textContent === 'x**2 + y + z'")
+    terms = _display_children(page, "/")
+    x, two = _display_children(page, terms[0])
+    unwrap = ed + ".actions.querySelector('button[data-cmd=\"unwrap\"]').disabled"
+    _touch(page, "pointerdown", x)
+    assert _wait(lambda: page.locator(".se-status").inner_text() == "Symbol: x", timeout=2)
+    assert page.evaluate(unwrap) is True
+    page.evaluate("window.__flips = 0")
+    for path in (two, terms[1], two, terms[1], two):
+        _touch(page, "pointermove", path)
+    assert page.locator(".se-status").inner_text() == "Pow: x**2"
+    assert page.evaluate("window.__flips") == 0
+    assert _wait(lambda: page.evaluate(unwrap) is False, timeout=2)         # settled on x**2: Unwrap is on
+    _touch(page, "pointerup", two)
     assert page.errors == []
 
 
