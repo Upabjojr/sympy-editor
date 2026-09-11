@@ -4021,6 +4021,7 @@ var SympyEditor = (function () {
       }
       var vr = this.view.getBoundingClientRect();
       var cx = Math.max(gap.a, Math.min(x === undefined ? gap.b : x, gap.b));
+      this._caretX = cx;           // the end of the gap it is drawn at: an Edit field opens there (beginInsert)
       this.caretEl.style.left = Math.round(cx - vr.left + this.view.scrollLeft - 1) + "px";
       this.caretEl.style.top = Math.round(gap.top - vr.top + this.view.scrollTop) + "px";
       this.caretEl.style.height = Math.round(Math.max(12, gap.height)) + "px";
@@ -4618,8 +4619,14 @@ var SympyEditor = (function () {
         placeholder: "term", "aria-label": "New term (SymPy syntax)" });
       input.value = initial || "";
       var host = this._els(gap.path)[0];
-      if (gap.rightEl && gap.rightEl.parentNode) gap.rightEl.parentNode.insertBefore(input, gap.rightEl);
-      else if (gap.leftEl && gap.leftEl.parentNode) gap.leftEl.parentNode.insertBefore(input, gap.leftEl.nextSibling);
+      // Where the caret was drawn.  An operator drawn between two arguments
+      // makes the ends of their gap two places, either side of the "+" (the
+      // "-", the "<"...): the caret after the left argument opens the field
+      // there, before the glyph - not after it, where the other caret is.
+      var left = gap.leftEl && gap.leftEl.parentNode, right = gap.rightEl && gap.rightEl.parentNode;
+      var cx = this._caretX;
+      if (left && (!right || (cx !== undefined && cx - gap.a < gap.b - cx))) left.insertBefore(input, gap.leftEl.nextSibling);
+      else if (right) right.insertBefore(input, gap.rightEl);
       else if (host) host.appendChild(input);
       else return;
       this._hideCaret();
@@ -5396,7 +5403,8 @@ var SympyEditor = (function () {
       var head = h("div", { class: "se-history-head" }, [
         h("span", { class: "se-history-title" }, [heading]), close]);
       var body = h("div", { class: "se-help-body" });
-      body.innerHTML = html || HELP_HTML;
+      // an add-on's guide in the columns of the editor's own, not across the whole width
+      body.innerHTML = html ? (html.indexOf("se-help-cols") >= 0 ? html : '<div class="se-help-cols">' + html + "</div>") : HELP_HTML;
       var view = h("div", { class: "se-history-view se-help-view", role: "dialog", "aria-label": heading }, [head, body]);
       close.addEventListener("click", function () { self.closeHelp(); });
       this._helpKey = function (ev) { if (ev.key === "Escape") { ev.preventDefault(); self.closeHelp(); } };
@@ -6357,6 +6365,13 @@ var SympyEditor = (function () {
       send: async function (msg, report) {
         await start(report || function () {});
         return call("handle", [docId, JSON.stringify(msg)]);
+      },
+      /** Stop the message being processed.  The app's Python runs on a
+       *  thread of its own, and the host asks it to stop from another
+       *  (sympy_editor_app.interrupt); a host without the method cannot. */
+      canInterrupt: function () { return !!window.SympyEditorPy && typeof window.SympyEditorPy.interrupt === "function"; },
+      interrupt: function () {
+        return call("interrupt", []).then(function (ok) { return ok === true; }, function () { return false; });
       },
       /** Switch to a document built from `state` (a session), as Pyodide does. */
       openDocument: async function (state, report) {

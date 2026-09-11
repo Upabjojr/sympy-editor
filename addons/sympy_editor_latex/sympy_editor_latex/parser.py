@@ -248,17 +248,23 @@ class LatexReader:
             self._transformer = _Transformer()
             self._forest_parser = forest_parser          # last: it is what says the rest is ready
 
-    def warm(self, background: bool = False) -> None:
+    @property
+    def ready(self) -> bool:
+        """Whether the parsers are built."""
+        return self._forest_parser is not None
+
+    def warm(self, background: bool = False) -> bool:
         """Build the parsers now rather than at the first reading, which would
         wait for them - half a second on a laptop, seconds on a phone, while
         the user is typing.  ``background``: in a thread of its own, so that
-        nothing waits, where there are threads (Pyodide has none: there the
-        first call builds them)."""
+        nothing waits, where there are threads.  Pyodide has none: there
+        nothing is built, and the answer is False (True otherwise: built, or
+        being built)."""
         if self._forest_parser is not None:
-            return
+            return True
         if not background:
             self._build()
-            return
+            return True
         def build():
             try:
                 self._build()
@@ -267,7 +273,8 @@ class LatexReader:
         try:
             threading.Thread(target=build, name="latex-grammar", daemon=True).start()
         except RuntimeError:
-            pass
+            return False
+        return True
 
     def _chooser(self, choices: Dict[str, int], known_functions=(), memo: Optional[Dict[str, int]] = None):
         lark = _lark()

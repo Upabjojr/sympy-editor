@@ -53,6 +53,9 @@ def test_the_panel_reads_offers_choices_and_inserts():
         usual, other = str(sin(x) * cos(y) + pi), str(sin(x * cos(y)) + pi)
         page.wait_for_function("s => document.querySelector('.ltx-src').textContent === s", arg=usual, timeout=15000)
         assert page.locator(".ltx-preview .katex").count() == 1                          # rendered
+        # the reading shows once, typeset and as source - not a second time
+        # beside the menu of each ambiguity (issue #27)
+        assert page.locator(".ltx-panel .katex").count() == 1 and page.locator(".ltx-ambig .katex").count() == 0
         # the ambiguities: a menu per point with the whole under each reading, the conventional one chosen
         rows = page.locator(".ltx-point")
         assert rows.count() == 2
@@ -95,6 +98,13 @@ def test_the_panel_reads_offers_choices_and_inserts():
         # the toolbar tool focuses the box; the guide opens
         page.locator('.se-toolbar [data-cmd="addon:latex:focus"]').click()
         assert page.evaluate("document.activeElement.className") == "ltx-input"
+        # its "?" is the toolbar's "?", not one of the panel's own buttons (issue #27)
+        page.mouse.move(0, 0)
+        look = ("b => { const s = getComputedStyle(b), r = b.getBoundingClientRect(); return [s.fontSize, s.fontWeight,"
+                " s.padding, s.border, s.borderRadius, s.backgroundImage, s.boxShadow, s.color, Math.round(r.width),"
+                " Math.round(r.height)]; }")
+        assert (page.locator(".se-addon-latex .se-addon-help").evaluate(look)
+                == page.locator('.se-toolbar [data-cmd="help"]').evaluate(look))
         page.locator(".se-addon-latex .se-addon-help").click()
         assert "several ways" in page.locator(".se-help-view").inner_text().lower()
         page.keyboard.press("Escape")

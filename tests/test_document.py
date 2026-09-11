@@ -405,6 +405,34 @@ def test_ranges_replace_delete_apply():
     assert "Invalid argument range" in doc.handle({"action": "delete", "path": "/", "children": []})["error"]
 
 
+
+def test_an_operation_on_a_range_changes_only_the_selected_terms():
+    """Issue #27: factor - or any operation, from the menus or the function
+    box - with some of the terms of a sum selected works on those terms
+    alone, the others left as they are; the same with some of the factors of
+    a product."""
+    from sympy import symbols
+    x, y = symbols("x y")
+
+    def on(expr, picked, action, **kw):
+        doc = Document(expr)
+        children = [i for i, arg in enumerate(doc.expr.args) if arg in picked]
+        assert len(children) == len(picked), (doc.expr.args, picked)
+        snap = doc.handle(dict(action=action, path="/", children=children, **kw))
+        assert not snap.get("error"), snap["error"]
+        return doc.expr
+
+    # a sum: each of these, on the whole, would change the other terms too
+    assert on(x**2 + 2*x + 1 + y, [x**2, 2*x, 1], "apply", op="factor") == (x + 1)**2 + y
+    assert on((x + 1)**2 + (x - 1)**2 + (y + 1)**2, [(x + 1)**2, (x - 1)**2], "apply", op="expand") == 2*x**2 + 2 + (y + 1)**2
+    assert on(1/(x + 1) + 1/(x - 1) + y, [1/(x + 1), 1/(x - 1)], "apply", op="together") == 2*x/((x - 1)*(x + 1)) + y
+    assert on(x**2 + 2*x + 1 + y**2, [x**2, 2*x, 1], "call", func="factor") == (x + 1)**2 + y**2
+    # a product
+    assert on(2*x*(x + 1)*(x - 1), [x + 1, x - 1], "apply", op="expand") == 2*x*(x**2 - 1)
+    assert on(3*(x + 1)**2*(y + 2), [3, (x + 1)**2], "apply", op="expand") == (3*x**2 + 6*x + 3)*(y + 2)
+    assert on(2*x*(x + 1)*(x - 1), [x + 1, x - 1], "call", func="expand") == 2*x*(x**2 - 1)
+
+
 def test_insert_honours_a_leading_operator():
     from sympy import MatrixSymbol, symbols
     x, y, z = symbols("x y z")

@@ -42,13 +42,16 @@ SympyEditor.registerAddon("latex", {
 
     api.katex().then(function (k) { katex = k; if (last && last.ok) render(last); }, function () {});
 
-    function typeset(el, tex, fallback) {
+    // The reading typeset - or nothing, until KaTeX is here: the source
+    // under it says the same, and as text in its place it was the same
+    // line twice.  HTML only, as the editor's own formula: the MathML
+    // copy KaTeX adds by default shows beside it wherever its stylesheet
+    // is not (yet) in the page.
+    function typeset(el, tex) {
       el.textContent = "";
-      if (katex && tex) {
-        try { el.innerHTML = katex.renderToString(tex, { throwOnError: false, displayMode: false }); return; }
-        catch (e) { /* fall through to the text */ }
-      }
-      el.textContent = fallback || tex || "";
+      if (!katex || !tex) return;
+      try { el.innerHTML = katex.renderToString(tex, { throwOnError: false, displayMode: false, output: "html" }); }
+      catch (e) { /* the source under it stands for it */ }
     }
 
     function schedule() { clearTimeout(timer); timer = setTimeout(read, 450); }
@@ -91,7 +94,7 @@ SympyEditor.registerAddon("latex", {
         // inserted.
         note.textContent = res.error;
         note.className = "ltx-note pending";
-        if (preview.textContent) element.classList.add("ltx-stale");
+        if (src.textContent) element.classList.add("ltx-stale");
         insertSel.disabled = insertAll.disabled = true;
         return;
       }
@@ -106,7 +109,7 @@ SympyEditor.registerAddon("latex", {
       note.textContent = res.ambiguities.length
         ? (res.ambiguities.length === 1 ? "One part of this can be read two ways: pick below." : res.ambiguities.length + " parts of this can be read several ways: pick below.")
         : "";
-      typeset(preview, res.latex, res.src);
+      typeset(preview, res.latex);
       src.textContent = res.src;
       // the ambiguities: a menu per point, the whole expression under each alternative
       ambig.textContent = "";
@@ -119,10 +122,10 @@ SympyEditor.registerAddon("latex", {
           sel.appendChild(opt);
         });
         sel.addEventListener("change", function () { choices[a.key] = parseInt(sel.value, 10); read(); });
-        var shown = h("span", { class: "ltx-shown" });
-        var current = a.options[a.choice];
-        typeset(shown, current && current.latex, current && current.src);
-        ambig.appendChild(h("label", { class: "ltx-point" }, [h("code", { class: "ltx-fragment" }, [a.fragment]), " → ", sel, shown]));
+        // (what the pick makes of the whole is the reading above, typeset
+        // and as source: typeset again here, beside the menu, it was the
+        // expression twice)
+        ambig.appendChild(h("label", { class: "ltx-point" }, [h("code", { class: "ltx-fragment" }, [a.fragment]), " → ", sel]));
       });
       // the constants: a switch per name that occurs
       consts.textContent = "";
@@ -159,10 +162,12 @@ SympyEditor.registerAddon("latex", {
     }
 
     input.addEventListener("input", function () { choices = {}; schedule(); });   // new text: the old picks no longer apply
-    // The parsers, where the add-on could not build them in the background
-    // (no threads in Pyodide), are built when the box is first taken - before
-    // anything is typed, not at the first reading.
-    input.addEventListener("focus", function () { api.call("warm", {}, { quiet: true }).then(null, function () {}); }, { once: true });
+    // The parsers are built as soon as the panel is shown, not at the first
+    // reading: in a thread of their own where Python has threads (the one
+    // the add-on started when it was switched on - this answers at once),
+    // and where it has none (Pyodide) by this request, which waits for
+    // whatever the editor is doing and goes before what comes next.
+    api.call("warm", { background: true }, { quiet: true }).then(null, function () {});
     input.addEventListener("keydown", function (ev) {
       ev.stopPropagation();                        // the editor's keys are not for the box
       if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); insert(api.selected() && api.selected() !== "/" ? api.selected() : "/"); }

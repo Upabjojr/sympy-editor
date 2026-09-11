@@ -232,15 +232,49 @@ def test_both_bridges_offer_what_the_page_calls():
     about box - hence a subset, not an equality.)"""
     src = (ROOT / "src" / "sympy_editor" / "static" / "editor.js").read_text(encoding="utf-8")
     called = set(re.findall(r'call\("(\w+)"', src))
-    assert called == {"newDoc", "handle"}, called
+    assert called == {"newDoc", "handle", "interrupt"}, called
     for bridge in ("mobile/ios/SymPyEditor/EditorView.swift",
                    "mobile/android/app/src/main/java/org/sympy/editor/MainActivity.kt"):
         text = (ROOT / bridge).read_text(encoding="utf-8")
         for method in called:
             assert method in text, (bridge, method)
     mod = _load_app_module()
-    for function in ("new_doc", "handle", "version", "close"):
+    for function in ("new_doc", "handle", "version", "close", "interrupt"):
         assert callable(getattr(mod, function))
+
+
+
+def test_the_app_interrupts_a_long_message_from_another_thread():
+    """Issue #27: the apps had no Interrupt button.  Their Python runs on one
+    thread of its own; the button reaches it from another (the bridge's),
+    through interrupt(), and the message answers with the document as it
+    was and the reason."""
+    import json
+    import threading
+
+    from sympy import Symbol, srepr
+
+    mod = _load_app_module()
+    assert json.loads(mod.interrupt()) is False                     # nothing running: nothing to stop
+    mod.new_doc("slow", srepr(Symbol("x")), "{}")
+    started = threading.Event()
+
+    def forever(message):                                           # a computation that does not end by itself
+        started.set()
+        while True:
+            pass
+
+    mod._documents["slow"].handle = forever
+    out = {}
+    worker = threading.Thread(target=lambda: out.update(snap=json.loads(mod.handle("slow", '{"action": "snapshot"}'))))
+    worker.start()
+    assert started.wait(10)
+    assert json.loads(mod.interrupt()) is True
+    worker.join(10)
+    assert not worker.is_alive()
+    assert out["snap"]["error"] == "Interrupted" and out["snap"]["src"] == "x"
+    assert json.loads(mod.interrupt()) is False
+    mod.close("slow")
 
 
 def test_the_history_is_written_into_its_frame_not_handed_to_it():

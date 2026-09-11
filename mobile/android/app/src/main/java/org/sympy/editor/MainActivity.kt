@@ -166,18 +166,25 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun version(req: String) = answer(req) { pythonApp.callAttr("version").toString() }
 
-        private fun answer(req: String, work: () -> String) {
-            pythonThread.execute {
-                var ok = true
-                val payload = try {
-                    work()
-                } catch (e: Throwable) {
-                    ok = false
-                    e.message ?: e.toString()
-                }
-                val js = "window.__sympyEditorNative(${JSONObject.quote(req)}, $ok, ${JSONObject.quote(payload)});"
-                runOnUiThread { web.evaluateJavascript(js, null) }
+        /** Stop the message being processed, if any.  Answered here, on the
+         *  bridge's own thread: on the Python thread it would wait behind the
+         *  very computation it is to stop.  Chaquopy takes the GIL for it,
+         *  which that computation lets go of every few milliseconds. */
+        @JavascriptInterface
+        fun interrupt(req: String) = reply(req) { pythonApp.callAttr("interrupt").toString() }
+
+        private fun answer(req: String, work: () -> String) = pythonThread.execute { reply(req, work) }
+
+        private fun reply(req: String, work: () -> String) {
+            var ok = true
+            val payload = try {
+                work()
+            } catch (e: Throwable) {
+                ok = false
+                e.message ?: e.toString()
             }
+            val js = "window.__sympyEditorNative(${JSONObject.quote(req)}, $ok, ${JSONObject.quote(payload)});"
+            runOnUiThread { web.evaluateJavascript(js, null) }
         }
     }
 

@@ -150,7 +150,7 @@
 }
 .se-icon { display: block; width: 1.2em; height: 1.2em; }
 .se-zoom { display: inline-flex; align-items: center; gap: 0.25rem; white-space: nowrap; }   /* one block: wraps as a unit */
-.se-toolbar button {
+.se-toolbar button, .se-addon > summary .se-addon-help {
   font: inherit;
   font-size: 12px;
   line-height: 1.2;
@@ -165,13 +165,13 @@
 }
 /* Pressed: the surface sinks - the gradient flips and the shadow moves
  * inside, and the label follows it down by half a pixel. */
-.se-toolbar button:active:not(:disabled), .se-actions button:active:not(:disabled),
+.se-toolbar button:active:not(:disabled), .se-addon > summary .se-addon-help:active, .se-actions button:active:not(:disabled),
 .se-opbar button:active:not(:disabled), .se-keep button:active:not(:disabled) {
   background: var(--se-btn-down);
   box-shadow: var(--se-btn-shadow-down);
   transform: translateY(0.5px);
 }
-.se-toolbar button:focus-visible,
+.se-toolbar button:focus-visible, .se-addon > summary .se-addon-help:focus-visible,
 .se-actions button:focus-visible, .se-opbar button:focus-visible {
   outline: 2px solid rgba(var(--se-accent), 0.55);
   outline-offset: 1px;
@@ -181,7 +181,7 @@
   box-shadow: none;
 }
 @media (prefers-reduced-motion: reduce) {
-  .se-toolbar button, .se-pick, .se-actions button, .se-opbar button { transition: none; }
+  .se-toolbar button, .se-addon > summary .se-addon-help, .se-pick, .se-actions button, .se-opbar button { transition: none; }
 }
 /* The apply row: two groups boxed apart - the actions (Transform and the
  * type's own menu, both lists chosen by options.actions) and the library
@@ -602,7 +602,11 @@
 .se-addon[open] > summary::before { content: "\25BE"; }
 .se-addon > summary { list-style: none; }
 .se-addon > summary::-webkit-details-marker { display: none; }
-.se-addon-help { margin-left: auto; font-size: 11px; line-height: 1.2; padding: 1px 7px; }
+/* An add-on's "?" is the toolbar's: the same button, sharing every rule of
+ * .se-toolbar button above and below - with a selector that also wins over
+ * whatever a panel does to its own buttons (the LaTeX panel's are bolder
+ * and wider) - and none of the heading it sits in, bold and grey. */
+.se-addon > summary .se-addon-help { margin-left: auto; font-weight: 400; color: var(--se-fg); }
 /* what an add-on draws under a step of the drawer's history list: a block
  * of its own under the row (the row is a button; this has clicks of its own) */
 .se-step-extra { display: block; margin: 0 0 0.3rem 2rem; font-size: 11px; }
@@ -966,7 +970,7 @@
   /* every control the finger can hit, the menus and the function box
    * included: leaving one out left it visibly smaller than the rest (the
    * type and Methods menus beside Transform) and harder to tap */
-  .se-toolbar button, .se-pick,
+  .se-toolbar button, .se-addon > summary .se-addon-help, .se-pick,
   .se-sym select, .se-sym input, .se-sym button, .se-actions button, .se-opbar button {
     font-size: 14px;
     padding: 0.45rem 0.7rem;
@@ -983,7 +987,7 @@
 /* hover feedback only where hovering exists: on a touch screen :hover
  * sticks to the last tapped button, which then looks "active" */
 @media (hover: hover) {
-  .se-toolbar button:hover:not(:disabled) {
+  .se-toolbar button:hover:not(:disabled), .se-addon > summary .se-addon-help:hover {
     background: var(--se-btn-hover);
     border-color: rgba(var(--se-accent), 0.55);
     box-shadow: var(--se-btn-edge), var(--se-btn-shadow-hover);

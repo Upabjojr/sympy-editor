@@ -2862,6 +2862,104 @@ def test_native_backend_talks_to_the_host_application(browser, serve_expr):
     assert page.errors == []
 
 
+
+def test_native_backend_interrupts_through_the_host(browser, serve_expr):
+    """Issue #27: the apps offered no Interrupt button - their bridge had no
+    way to stop Python.  A host with `interrupt` gets one: a slow request
+    offers it after `interruptAfter`, the button reaches the host, and the
+    host's answer to the request it stopped is the document with the reason."""
+    from sympy_editor.html import build_config
+    srv, doc = serve_expr(x + y)
+    cfg = build_config(doc, backend="native",
+                       options={"katexJs": default_urls()["katexJs"], "katexCss": default_urls()["katexCss"],
+                                "interruptAfter": 300})
+    page = _open(browser, srv.url)
+    page.evaluate("""([api, token]) => {
+        const host = document.createElement('div');
+        host.id = 'native-host';
+        document.body.appendChild(host);
+        const post = (body) => fetch(api, {method: 'POST', body: JSON.stringify(body),
+                                           headers: {'Content-Type': 'application/json', 'X-SymPy-Editor-Token': token}
+                                          }).then(r => r.text());
+        window.__interrupts = 0;
+        window.__held = null;
+        window.SympyEditorPy = {
+            newDoc(req) { post({action: 'snapshot'}).then(t => window.__sympyEditorNative(req, true, t)); },
+            handle(req, id, message) {
+                const m = JSON.parse(message);
+                if (m.action === 'apply') { window.__held = req; return; }        // computing, until stopped
+                post(m).then(t => window.__sympyEditorNative(req, true, t));
+            },
+            interrupt(req) {
+                window.__interrupts++;
+                const held = window.__held;
+                window.__held = null;
+                window.__sympyEditorNative(req, true, held ? 'true' : 'false');
+                if (held) post({action: 'snapshot'}).then(t => {
+                    const s = JSON.parse(t);
+                    s.error = 'Interrupted';
+                    s.seq = (s.seq || 0) + 1;
+                    window.__sympyEditorNative(held, true, JSON.stringify(s));
+                });
+            }
+        };
+    }""", [srv.url.rstrip("/") + "/api", srv.token])
+    page.evaluate("(cfg) => { window.__nativeEditor = SympyEditor.mount(document.getElementById('native-host'), cfg); }", cfg)
+    page.wait_for_selector("#native-host .se-view .katex [data-path]", timeout=30000)
+    ed = "window.__nativeEditor"
+    assert page.evaluate(ed + ".backend.canInterrupt()") is True
+    page.evaluate(ed + ".send({action: 'apply', path: '/', op: 'factor'}); 0")      # not awaited: it ends when stopped
+    button = page.locator("#native-host .se-interrupt")
+    button.wait_for(state="visible", timeout=10000)
+    button.click()
+    assert _wait(lambda: page.evaluate("window.__interrupts") == 1)
+    assert _wait(lambda: "Interrupted" in page.locator("#native-host .se-error").inner_text())
+    assert _wait(lambda: page.evaluate(ed + ".busy") is False)
+    assert button.is_hidden()
+    # a host without the method (an app built before it) offers no button
+    assert page.evaluate("delete window.SympyEditorPy.interrupt, %s.backend.canInterrupt()" % ed) is False
+    assert page.errors == []
+
+
+def test_edit_at_a_caret_opens_the_field_where_the_caret_is(browser, serve_expr):
+    """Issue #27: with the caret on the left of a "+", Edit opened the field
+    on its right - at the other caret of that gap.  At every caret position of
+    these formulas the field opens against the side the caret was drawn on:
+    touching the argument before it, or the one after it."""
+    srv, doc = serve_expr(x + y)
+    page = _open(browser, srv.url)
+    ed = "document.querySelector('.sympy-editor').__sympyEditor"
+    sides = set()
+    for src in ["x + y", "x - y", "x*y + 1", "x**2 + 3*x - 5", "sin(x) + cos(y)", "(x + 1)*(y - 2)",
+                "2*x*y", "Eq(x, y)", "x/y + z", "x - sin(y)", "x < y"]:
+        seq = page.evaluate(ed + ".state.seq")
+        page.evaluate("s => %s.send({action: 'set', src: s})" % ed, src)
+        page.wait_for_function("s => %s.state.seq > s && !%s.busy" % (ed, ed), arg=seq)
+        found = page.evaluate("""() => {
+            const e = %s, out = [];
+            const count = e._caretPositions().length;
+            for (let i = 0; i < count; i++) {
+                const pos = e._caretPositions()[i];              // afresh: the last field was taken out
+                e._showCaret(pos.gap, pos.x);
+                const g = e.caret, cx = e._caretX;
+                const side = g.leftEl && (!g.rightEl || cx - g.a < g.b - cx) ? "left" : "right";
+                e.command("edit");
+                const f = e.input.getBoundingClientRect();
+                const gapPx = side === "left" ? f.left - e._visualRect(g.leftEl).right
+                                              : e._visualRect(g.rightEl).left - f.right;
+                out.push([i, side, !!g.extend, Math.round(gapPx)]);
+                e.cancelEdit();
+            }
+            return out;
+        }""" % ed)
+        assert found, src
+        for i, side, extend, gap_px in found:
+            sides.add((side, extend))
+            assert abs(gap_px) <= 3, (src, i, side, extend, gap_px)
+    assert ("left", False) in sides and ("right", False) in sides     # both ends of an operator's gap were tried
+    assert page.errors == []
+
+
 def test_full_screen_button_gives_the_formula_the_window(browser, serve_expr):
     """A quasi-transparent button in the corner of the editing area makes the
     formula fill the window; Esc (or the button) comes back."""
@@ -4417,10 +4515,18 @@ def test_addon_panel_tools_and_calls(browser):
         page.keyboard.press("Control+z")
         page.wait_for_function("document.querySelector('.se-source').textContent === 'x + y'")
         # the panel's "?" opens the add-on's guide in the editor's help overlay, Esc closes it
+        # ... a "?" just like the toolbar's (issue #27)
+        page.mouse.move(0, 0)
+        look = ("b => { const s = getComputedStyle(b), r = b.getBoundingClientRect(); return [s.fontSize, s.fontWeight,"
+                " s.padding, s.border, s.borderRadius, s.backgroundImage, s.boxShadow, s.color, Math.round(r.width),"
+                " Math.round(r.height)]; }")
+        assert (page.locator(".se-addon-demo .se-addon-help").evaluate(look)
+                == page.locator('.se-toolbar [data-cmd="help"]').evaluate(look))
         page.locator(".se-addon-demo .se-addon-help").click()
         guide = page.locator(".se-help-view")
         assert guide.is_visible() and "counts arguments" in guide.inner_text()
         assert page.locator(".se-help-view .se-history-title").inner_text() == "Demo panel"
+        assert page.locator(".se-help-view .se-help-cols").count() == 1       # laid out as the editor's guide (issue #27)
         assert page.locator(".se-addon-demo").get_attribute("open") is not None   # the box did not fold
         page.keyboard.press("Escape")
         assert page.locator(".se-help-view").count() == 0

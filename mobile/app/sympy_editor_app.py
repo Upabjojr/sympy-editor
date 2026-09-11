@@ -14,11 +14,12 @@ side where each platform's build expects them.
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from sympy_editor.addons import register_addons_folder
-from sympy_editor.document import Document
+from sympy_editor.document import Document, Interrupted, interrupt_thread
 
 #: The add-ons the app bundles: one folder each under ``addons/`` beside this
 #: module (a copy of the add-on's repository: its manifest and its package),
@@ -32,6 +33,9 @@ BUNDLED_ADDONS = register_addons_folder(ADDONS_DIR) if ADDONS_DIR.is_dir() else 
 
 #: One Document per editor/session, by the id the page chose.
 _documents: Dict[str, Document] = {}
+
+#: The thread running a message, while one does: what :func:`interrupt` stops.
+_running: Optional[int] = None
 
 
 def new_doc(doc_id: str, srepr: str, settings_json: str) -> str:
@@ -53,10 +57,28 @@ def new_doc(doc_id: str, srepr: str, settings_json: str) -> str:
 def handle(doc_id: str, message_json: str) -> str:
     """Process one front-end message for ``doc_id``; the answer is a snapshot
     (errors of the edit itself travel inside it, in ``error``)."""
+    global _running
     doc = _documents.get(doc_id)
     if doc is None:
         raise KeyError(f"Unknown document {doc_id!r}: the page must call new_doc first")
-    return json.dumps(doc.handle(json.loads(message_json)))
+    _running = threading.get_ident()
+    try:
+        return json.dumps(doc.handle(json.loads(message_json)))
+    except Interrupted:
+        # stopped where Document.handle does not report it itself: the
+        # document as it stands, with the reason
+        return json.dumps(doc.snapshot(error="Interrupted"))
+    finally:
+        _running = None
+
+
+def interrupt() -> str:
+    """Stop the message being processed, if any; JSON ``true`` when there was
+    one.  The bridges call this from a thread of their own, not the Python
+    thread: that one is busy with the computation, and lets this in between
+    two of its steps (:func:`sympy_editor.document.interrupt_thread`)."""
+    ident = _running
+    return json.dumps(ident is not None and interrupt_thread(ident))
 
 
 def close(doc_id: str) -> None:

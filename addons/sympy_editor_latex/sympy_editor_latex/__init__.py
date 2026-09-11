@@ -91,8 +91,13 @@ class LatexAddon(Addon):
 
     def handle(self, doc, method: str, payload: Dict[str, Any]):
         if method == "warm":
-            self.reader.warm()
-            return {"ready": True}
+            # The panel asks as soon as it is shown ("background"): where
+            # there are threads the parsers are being built in one (activate()
+            # started it) and this answers at once; where there are none
+            # (Pyodide) they are built now, before anything is typed.
+            if not (payload.get("background") and self.reader.warm(background=True)):
+                self.reader.warm()
+            return {"ready": self.reader.ready}
         if method == "read":
             result = self.read(doc, payload)
             result.pop("expr", None)

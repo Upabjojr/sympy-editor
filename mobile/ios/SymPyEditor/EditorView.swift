@@ -67,13 +67,15 @@ final class PythonBridge: NSObject, WKScriptMessageHandler {
             };
           }
           window.SympyEditorPy = {
-            newDoc: forward("newDoc"), handle: forward("handle"), version: forward("version")
+            newDoc: forward("newDoc"), handle: forward("handle"), version: forward("version"),
+            interrupt: forward("interrupt")
           };
         })();
         """
 
     /// What each method of the page's object is called in sympy_editor_app.py.
-    private static let functions = ["newDoc": "new_doc", "handle": "handle", "version": "version"]
+    private static let functions = ["newDoc": "new_doc", "handle": "handle", "version": "version",
+                                    "interrupt": "interrupt"]
 
     weak var webView: WKWebView?
 
@@ -107,6 +109,20 @@ final class PythonBridge: NSObject, WKScriptMessageHandler {
               let request = arguments.first
         else { return }
         let rest = Array(arguments.dropFirst())
+        if function == "interrupt" {
+            // Not queued behind the computation it is to stop, on the Python
+            // thread: from a thread of its own.  -call:arguments:error: takes
+            // the GIL, which that computation lets go of every few
+            // milliseconds; before Python has started there is nothing to stop.
+            DispatchQueue.global(qos: .userInitiated).async { [self] in
+                guard case .success? = started else { answer(request, ok: true, payload: "false"); return }
+                switch Result(catching: { try runtime.call(function, arguments: rest) }) {
+                case .success(let payload): answer(request, ok: true, payload: payload)
+                case .failure(let error): answer(request, ok: false, payload: error.localizedDescription)
+                }
+            }
+            return
+        }
         queue.async { [self] in
             switch start().flatMap({ _ in Result { try runtime.call(function, arguments: rest) } }) {
             case .success(let payload): answer(request, ok: true, payload: payload)

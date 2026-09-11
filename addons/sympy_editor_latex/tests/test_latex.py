@@ -155,6 +155,28 @@ def test_the_parsers_are_ready_before_the_first_reading():
     assert other._forest_parser is not None
 
 
+
+def test_the_panel_s_warm_builds_them_where_there_are_no_threads(monkeypatch):
+    """Issue #27: the panel asks for the parsers as soon as it is shown
+    ("background").  Where there are threads they are built in one and the
+    request answers at once; where there are none - Pyodide, where starting
+    a thread raises - the request builds them itself."""
+    import threading
+    from sympy_editor_latex import LatexAddon
+
+    def no_threads(self):
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(threading.Thread, "start", no_threads)
+    fresh = LatexReader()
+    assert fresh.warm(background=True) is False and not fresh.ready
+    addon = LatexAddon()
+    doc = Document(x, addons=[addon])                   # switched on: no thread to build them in
+    assert not addon.reader.ready
+    res = doc.handle({"action": "addon", "addon": "latex", "method": "warm", "background": True})["query"]["result"]
+    assert res == {"ready": True} and addon.reader.ready
+
+
 def test_the_document_s_names_are_reused_and_its_functions_apply():
     xp = Symbol("x", positive=True)
     doc = Document(xp ** 2 + f(y), addons=[ADDON])
