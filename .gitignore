@@ -7,6 +7,7 @@ dist/
 .ipynb_checkpoints/
 examples/*.html
 examples/derivations/*.html
+examples/tutorial/*.html
 
 # Images are built, never committed: mobile/make_icons.py draws the app's
 # icons from mobile/icon/*.svg, and the builds regenerate them.

@@ -91,6 +91,39 @@ until they are ready (`options={"preload": False}` defers that to the first
 edit).  Use `editable=False` for a view-only page (still
 selectable).
 
+### Tutorials: a page that plays itself
+
+A tutorial is the editor page playing a script of timed steps: captions
+describing what is going on, an arrow and a pulsing ring on whatever is about
+to be pressed, then the press itself. It is meant to be watched, or recorded
+as a video. Nothing in the editor's interface starts one, and no ordinary page,
+server, widget or app carries any of it; only a page built for it plays.
+
+```python
+from sympy_editor import save_tutorial_html
+
+save_tutorial_html({
+    "expression": "x**2/y - sin(x)",
+    "steps": [
+        {"at": 0, "caption": "Click any piece of the formula to select it"},
+        {"after": 2, "click": {"path": "/1/d"}},
+        {"after": 1.5, "click": ".se-toolbar [data-cmd=\"parent\"]", "say": "Up: what holds it"},
+        {"after": 1.5, "type": {"target": ".se-source", "text": "(x + 1)**2", "enter": True}},
+        {"after": 1.5, "apply": "expand"},
+    ],
+}, "tutorial.html")
+```
+
+or `python -m sympy_editor.tutorial script.json -o tutorial.html`. A step
+happens `"at"` a time or `"after"` the previous one, and never while Python is
+still busy with the one before. It does one thing: `caption`, `point`, `click`,
+`type`, `key`, `set`, `apply`, `undo`/`redo`, `zoom`, `addons` or `wait`.
+`sympy_editor/tutorial.py` documents every kind of step.
+`examples/tutorial/` has a tour of the editor built this way
+(`python examples/tutorial/build.py`). On a page that includes
+`static/tutorial.js`, `SympyEditorTutorial.run(editor, script)` plays one from
+JavaScript.
+
 ### Local server (scripts, plain Python sessions)
 
 ```python

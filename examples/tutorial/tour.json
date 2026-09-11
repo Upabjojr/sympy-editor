@@ -1,0 +1,40 @@
+{
+  "title": "A tour of sympy-editor",
+  "description": "What the editor does, in a minute and a half: selecting, walking up, transforming, undoing, typing SymPy, zooming, and two add-ons.",
+  "expression": "(x**2 - 1)/(x + 1) + sin(x)**2 + cos(x)**2",
+  "addons": ["plot", "tree"],
+  "steps": [
+    {"at": 0, "caption": "sympy-editor: a SymPy expression you edit by pointing at it.", "position": "center", "duration": 3.5},
+
+    {"after": 3.8, "click": {"path": "/2/n"}, "say": "Click any piece of the formula to select it - here, the numerator."},
+    {"after": 1.8, "click": ".se-toolbar [data-cmd=\"parent\"]", "say": "The up arrow selects what holds it: the whole fraction."},
+    {"after": 1.8, "click": ".se-ops", "say": "Transform lists what can be done with the selection."},
+    {"after": 0.8, "click": ".se-pick-menu[data-for=\"se-ops\"] .se-pick-item[data-name=\"cancel\"]", "say": "cancel: (x² − 1)/(x + 1) is x − 1."},
+
+    {"after": 2.4, "click": {"path": "/"}, "say": "Now the whole expression..."},
+    {"after": 1.2, "click": ".se-ops"},
+    {"after": 0.8, "click": ".se-pick-menu[data-for=\"se-ops\"] .se-pick-item[data-name=\"trigsimp\"]", "say": "...and trigsimp: sin² x + cos² x is 1, so all that is left is x."},
+
+    {"after": 2.6, "click": ".se-toolbar [data-cmd=\"undo\"]", "say": "Undo and redo: every step is kept."},
+    {"after": 1.4, "click": ".se-toolbar [data-cmd=\"redo\"]"},
+
+    {"after": 2.0, "type": {"target": ".se-source", "text": "Integral(x*exp(-x), (x, 0, oo))", "enter": true}, "say": "The source line takes SymPy input as well."},
+    {"after": 2.0, "click": ".se-ops", "say": "doit evaluates what is written but not done..."},
+    {"after": 0.8, "click": ".se-pick-menu[data-for=\"se-ops\"] .se-pick-item[data-name=\"doit\"]", "say": "...the integral is 1."},
+    {"after": 2.2, "click": ".se-toolbar [data-cmd=\"undo\"]"},
+
+    {"after": 1.5, "click": ".se-toolbar [data-cmd=\"zoomin\"]", "say": "The formula zooms: these buttons, Ctrl and the wheel, or two fingers on a screen."},
+    {"after": 0.7, "click": ".se-toolbar [data-cmd=\"zoomin\"]", "lead": 0.4},
+    {"after": 1.4, "click": ".se-toolbar [data-cmd=\"zoomreset\"]"},
+
+    {"after": 1.6, "type": {"target": ".se-source", "text": "sin(x)/x", "enter": true}, "say": "Add-ons bring more..."},
+    {"after": 1.4, "click": ".se-toolbar [data-cmd=\"addons\"]", "say": "...switched on from the Add-ons menu."},
+    {"after": 0.8, "click": {"selector": "label.se-addon-row", "text": "Plot"}},
+    {"after": 0.8, "click": {"selector": "label.se-addon-row", "text": "Expression tree"}, "lead": 0.8},
+    {"after": 1.0, "click": ".se-toolbar [data-cmd=\"addons\"]", "lead": 0.5},
+    {"after": 1.5, "point": ".se-addon-plot .plot-area", "hold": 2.5, "say": "A plot of the selection, sampled by SymPy: it follows every edit, and zooms with two fingers."},
+    {"after": 1.0, "point": ".se-addon-tree .tree-svg", "hold": 2.5, "say": "The expression's tree: click, drag and edit its nodes."},
+
+    {"after": 2.5, "caption": "That is sympy-editor.  pip install sympy-editor", "position": "center", "duration": 5}
+  ]
+}

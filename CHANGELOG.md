@@ -61,6 +61,11 @@ The web site opens with all four switched on.
 
 ### Elsewhere
 
+* Tutorials: `sympy_editor.tutorial` builds a page that plays a JSON script of
+  timed steps on the editor - captions, an arrow and a pulsing ring on what is
+  about to be pressed, then the press - to be watched or recorded as a video.
+  Only a page built for it plays one; the editor itself is unchanged.
+  `examples/tutorial/` is a tour of the editor built this way.
 * Python 3.10 or later: 3.9 is no longer supported (its security support
   ended in October 2025, and the rewrite rules' `sympy-matching` never ran
   on it).

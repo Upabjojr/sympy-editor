@@ -47,6 +47,7 @@ from .printer import (
     strip_annotations,
 )
 from .server import EditorServer, serve
+from .tutorial import save_tutorial_html, to_tutorial_html
 
 __version__ = "0.1.1"
 
@@ -80,6 +81,8 @@ __all__ = [
     "strip_annotations",
     "to_history_html",
     "to_html",
+    "to_tutorial_html",
+    "save_tutorial_html",
 ]
 
 

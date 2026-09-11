@@ -1,0 +1,34 @@
+/* sympy-editor tutorial player (tutorial.js): the overlay over a page that
+ * plays a script.  Nothing here touches the editor: every rule is under the
+ * overlay's own classes, and the overlay never takes a pointer. */
+.se-tour-layer { position: fixed; inset: 0; pointer-events: none; z-index: 2147483000;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.se-tour-caption { position: fixed; left: 50%; bottom: 1.5rem; transform: translate(-50%, 0.4rem);
+  box-sizing: border-box; max-width: min(38rem, calc(100vw - 2rem)); padding: 0.8rem 1.1rem;
+  border-radius: 0.7rem; background: rgba(18, 22, 30, 0.9); color: #fff; font-size: 1.05rem; line-height: 1.45;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3); opacity: 0; transition: opacity 0.25s ease, transform 0.25s ease; }
+.se-tour-caption.shown { opacity: 1; transform: translate(-50%, 0); }
+.se-tour-caption.top { top: 1.5rem; bottom: auto; }
+.se-tour-caption.center { top: 50%; bottom: auto; transform: translate(-50%, -50%); }
+.se-tour-caption[hidden], .se-tour-arrow[hidden], .se-tour-ring[hidden] { display: none; }
+/* the arrow: above what is about to be pressed, bobbing towards it */
+.se-tour-arrow { position: fixed; width: 56px; height: 56px; color: #ff7a1a;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.35)); animation: se-tour-bob 0.9s ease-in-out infinite; }
+.se-tour-arrow.below { transform: rotate(180deg); }
+.se-tour-arrow svg { display: block; width: 100%; height: 100%; fill: none; stroke: currentColor;
+  stroke-width: 7; stroke-linecap: round; stroke-linejoin: round; }
+@keyframes se-tour-bob { 0%, 100% { translate: 0 -6px; } 50% { translate: 0 4px; } }
+/* the ring: pulsing round it, then closing on it as it is pressed */
+.se-tour-ring { position: fixed; box-sizing: border-box; border-radius: 50%;
+  border: 3px solid rgba(255, 122, 26, 0.95); animation: se-tour-pulse 1.1s ease-out infinite; }
+.se-tour-ring::after { content: ""; position: absolute; inset: -3px; border-radius: 50%;
+  border: 3px solid rgba(255, 122, 26, 0.55); animation: se-tour-wave 1.1s ease-out 0.35s infinite; }
+@keyframes se-tour-pulse { 0% { transform: scale(0.75); opacity: 1; } 100% { transform: scale(1.2); opacity: 0.35; } }
+@keyframes se-tour-wave { 0% { transform: scale(1); opacity: 0.8; } 100% { transform: scale(1.9); opacity: 0; } }
+.se-tour-ring.pressing { animation: se-tour-press 0.4s ease-in forwards; background: rgba(255, 122, 26, 0.28); }
+.se-tour-ring.pressing::after { animation: none; opacity: 0; }
+@keyframes se-tour-press { 0% { transform: scale(1.1); opacity: 1; } 55% { transform: scale(0.7); opacity: 1; } 100% { transform: scale(0.95); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .se-tour-arrow, .se-tour-ring, .se-tour-ring::after, .se-tour-ring.pressing { animation: none; }
+  .se-tour-caption { transition: none; }
+}

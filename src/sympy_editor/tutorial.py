@@ -1,0 +1,213 @@
+"""Tutorials: an editor page that plays a script of timed steps - captions,
+an arrow and a pulsing ring on what is about to be pressed, the press itself -
+to be watched, or recorded, as a video.
+
+Nothing in the editor's interface starts one, and no ordinary page carries
+any of it (``to_html``, ``save_html``, the server, the widget, the apps).  A
+page plays a script only when it is built for it::
+
+    from sympy_editor.tutorial import save_tutorial_html
+    save_tutorial_html("tour.json", "tour.html")
+
+or from the command line, ``python -m sympy_editor.tutorial tour.json -o
+tour.html``; or, on a page that includes ``static/tutorial.js``, from
+JavaScript: ``SympyEditorTutorial.run(editor, script)``.
+
+The script
+----------
+A JSON object::
+
+    {"title": "A tour", "expression": "x**2/y - sin(x)",
+     "addons": ["plot", "tree"],        # there to be switched on by a step
+     "options": {...},                  # front-end options, see editor.js DEFAULTS
+     "speed": 1, "loop": false, "loopDelay": 3,
+     "steps": [...]}
+
+**When** a step happens: ``"at"`` - seconds from the start (the start is when
+Python is ready) - or ``"after"`` - seconds after the previous step ended; with
+neither, one second after it.  A step never starts before its time, nor while
+Python is still working on the previous one (the editor would drop it), so a
+slow computation delays what follows rather than losing it.
+
+**What** it does - exactly one of:
+
+``"caption": "text"``
+    a text box describing what is going on; ``"position"``: ``"bottom"``
+    (default), ``"top"`` or ``"center"``; ``"duration"``: seconds before it
+    goes (default: until the next caption); ``null`` takes it away.
+``"point": target``
+    the arrow and the ring on something, nothing pressed; ``"hold"`` seconds.
+``"click": target``
+    the arrow and the ring, then the press: a button, a checkbox, a row of a
+    menu - or, with ``{"path": ...}``, a piece of the formula, selected.
+    ``"lead"``: seconds of arrow and ring first (default 1.2).
+``"type": {"target": ..., "text": "...", "enter": true}``
+    text typed into a field one character at a time (``"perChar"`` seconds),
+    replacing what it held (``"replace": false`` appends); ``"enter"`` applies
+    it.  ``"target": "focused"`` types where the focus is.
+``"key": "ArrowUp"``
+    a key pressed in the editor - or ``{"key": "z", "ctrl": true}``, or a list.
+``"set": "source"``
+    the expression, from SymPy source.
+``"apply": "expand"`` or ``{"op": "expand", "path": "/1"}``
+    one of the editor's operations, on the selection by default.
+``"undo": true`` / ``"redo": true``
+``"zoom": 1.5``
+    the formula's zoom (1 is the normal size).
+``"addons": {"enable": [...], "disable": [...]}``
+``"wait": true``
+    nothing: the timing is the point.
+
+A **target** is ``{"path": "/1/d"}`` (a piece of the formula), ``{"selector":
+"css", "text": "..."}`` (the first visible element matching it, holding that
+text) or a CSS selector string.  Any step may also ``"say"`` something - a
+caption shown as it starts (``"position"``, ``"sayFor"`` seconds).
+"""
+
+from __future__ import annotations
+
+import argparse
+import copy
+import json
+import sys
+from pathlib import Path
+from typing import Any, Dict, Optional, Union
+
+from .html import _as_document, _script_json, build_config, read_static, render_page
+
+__all__ = ["ACTIONS", "load_tutorial", "to_tutorial_html", "save_tutorial_html"]
+
+#: What a step can do; each step does exactly one of these.
+ACTIONS = ("caption", "point", "click", "type", "key", "set", "apply", "undo", "redo", "zoom", "addons", "wait")
+_TIMING = ("at", "after")
+_EXTRA = ("say", "sayFor", "position", "duration", "hold", "lead")
+_SCRIPT_KEYS = ("title", "expression", "addons", "options", "speed", "loop", "loopDelay", "steps", "description")
+#: The editor's element on a tutorial page (fixed: the player finds it by id).
+ELEMENT_ID = "sympy-editor-tutorial"
+
+
+def _target_ok(target) -> bool:
+    if isinstance(target, str):
+        return bool(target.strip())
+    return isinstance(target, dict) and (isinstance(target.get("path"), str) or isinstance(target.get("selector"), str))
+
+
+def _check_step(i: int, step: Any) -> None:
+    where = f"step {i}"
+    if not isinstance(step, dict):
+        raise ValueError(f"{where}: a step is an object, not {type(step).__name__}")
+    doing = [a for a in ACTIONS if a in step]
+    if len(doing) != 1:
+        raise ValueError(f"{where}: says what it does with exactly one of {', '.join(ACTIONS)} "
+                         f"(it has {', '.join(doing) or 'none'})")
+    unknown = sorted(set(step) - set(ACTIONS) - set(_TIMING) - set(_EXTRA))
+    if unknown:
+        raise ValueError(f"{where}: unknown key(s) {', '.join(unknown)}")
+    if "at" in step and "after" in step:
+        raise ValueError(f"{where}: says when with 'at' or 'after', not both")
+    for k in _TIMING + ("sayFor", "duration", "hold", "lead"):
+        if k in step and (isinstance(step[k], bool) or not isinstance(step[k], (int, float)) or step[k] < 0):
+            raise ValueError(f"{where}: {k!r} is a number of seconds, not {step[k]!r}")
+    action = doing[0]
+    value = step[action]
+    if action in ("point", "click") and not _target_ok(value):
+        raise ValueError(f"{where}: {action} needs a target - a CSS selector, {{'selector': ...}} or {{'path': ...}}")
+    if action == "type":
+        if not isinstance(value, dict) or not isinstance(value.get("text"), str):
+            raise ValueError(f"{where}: type needs {{'target': ..., 'text': '...'}}")
+        target = value.get("target", value.get("selector", "focused"))
+        if target != "focused" and not _target_ok(target):
+            raise ValueError(f"{where}: type has no target it could find")
+    if action == "caption" and value is not None and not isinstance(value, str):
+        raise ValueError(f"{where}: a caption is text (or null to take it away)")
+    if action == "key" and not (isinstance(value, (str, dict)) or
+                                (isinstance(value, list) and value and all(isinstance(k, (str, dict)) for k in value))):
+        raise ValueError(f"{where}: key is a key name, {{'key': ...}} or a list of them")
+    if action == "set" and not isinstance(value, str):
+        raise ValueError(f"{where}: set takes SymPy source, a string")
+    if action == "apply" and not (isinstance(value, str) or (isinstance(value, dict) and isinstance(value.get("op"), str))):
+        raise ValueError(f"{where}: apply takes an operation's name, or {{'op': ..., 'path': ...}}")
+    if action == "zoom" and (isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0):
+        raise ValueError(f"{where}: zoom is a positive number")
+    if action == "addons" and not (isinstance(value, dict) and set(value) <= {"enable", "disable"}):
+        raise ValueError(f"{where}: addons takes {{'enable': [...], 'disable': [...]}}")
+
+
+def load_tutorial(script: Union[str, Path, Dict[str, Any]]) -> Dict[str, Any]:
+    """The script - a dict, JSON text, or the path of a JSON file - checked
+    (a ``ValueError`` names the step at fault) and copied."""
+    if isinstance(script, Path) or (isinstance(script, str) and not script.lstrip().startswith("{")):
+        script = json.loads(Path(script).read_text(encoding="utf-8"))
+    elif isinstance(script, str):
+        script = json.loads(script)
+    if not isinstance(script, dict):
+        raise ValueError("a tutorial script is a JSON object")
+    unknown = sorted(set(script) - set(_SCRIPT_KEYS))
+    if unknown:
+        raise ValueError(f"the script has unknown key(s) {', '.join(unknown)}")
+    steps = script.get("steps")
+    if not isinstance(steps, list) or not steps:
+        raise ValueError("the script needs 'steps': a list of at least one")
+    for i, step in enumerate(steps):
+        _check_step(i, step)
+    for k in ("speed", "loopDelay"):
+        if k in script and (isinstance(script[k], bool) or not isinstance(script[k], (int, float)) or script[k] <= 0):
+            raise ValueError(f"{k!r} is a positive number")
+    return copy.deepcopy(script)
+
+
+def to_tutorial_html(script, *, expr=None, title: Optional[str] = None, backend: str = "pyodide",
+                     options: Optional[Dict[str, Any]] = None, urls: Optional[Dict[str, str]] = None,
+                     **config_kwargs) -> str:
+    """A page with the editor that plays ``script`` as soon as it is ready.
+
+    ``expr`` (an expression, source, or :class:`Document`) overrides the
+    script's ``"expression"``; ``options`` are merged over its ``"options"``.
+    The page is the ordinary editor page with the player added after it: the
+    editor is the one every other page has.  ``backend`` is ``"pyodide"`` (a
+    standalone file) by default; ``config_kwargs`` go to ``build_config``
+    (``api_url``/``token`` for ``"http"``)."""
+    script = load_tutorial(script)
+    source = expr if expr is not None else script.get("expression", "x")
+    doc = _as_document(source, available=list(script.get("addons") or [])) if not hasattr(source, "handle") else source
+    opts = dict(script.get("options") or {})
+    opts.update(options or {})
+    config = build_config(doc, backend=backend, options=opts, urls=urls, **config_kwargs)
+    head = f"<style>\n{read_static('tutorial.css')}\n</style>\n"
+    page = render_page(config, title or script.get("title") or "SymPy Editor tutorial", head, ELEMENT_ID, "")
+    player = ("<script>\n" + read_static("tutorial.js") + "\n</script>\n"
+              "<script>\n"
+              f'SympyEditorTutorial.run(document.getElementById("{ELEMENT_ID}"), {_script_json(script)});\n'
+              "</script>\n")
+    body, end = page.rsplit("</body>", 1)
+    return body + player + "</body>" + end
+
+
+def save_tutorial_html(script, path, **kwargs) -> Path:
+    """Write :func:`to_tutorial_html` output to ``path`` and return it."""
+    path = Path(path)
+    path.write_text(to_tutorial_html(script, **kwargs), encoding="utf-8")
+    return path
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description="Build a page that plays a tutorial script on the editor.")
+    ap.add_argument("script", help="the tutorial script (JSON)")
+    ap.add_argument("-o", "--out", help="the page to write (default: the script's name, .html)")
+    ap.add_argument("--addons", help="a folder of add-on folders to register first (e.g. addons/)")
+    args = ap.parse_args(argv)
+    if args.addons:
+        from .addons import register_addons_folder
+        register_addons_folder(args.addons)
+    out = Path(args.out) if args.out else Path(args.script).with_suffix(".html")
+    try:
+        save_tutorial_html(Path(args.script), out)
+    except ValueError as exc:
+        print(f"{args.script}: {exc}", file=sys.stderr)
+        return 1
+    print(f"Wrote {out}")
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    sys.exit(main())
