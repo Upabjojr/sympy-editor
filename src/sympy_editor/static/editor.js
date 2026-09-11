@@ -1950,6 +1950,7 @@ var SympyEditor = (function () {
         if (touch && leaf) {
           self._cancelHold();
           self._hold = { id: ev.pointerId, x: ev.clientX, y: ev.clientY, leaf: leaf,
+                         path: leaf.getAttribute("data-path"), srepr: self.state ? self.state.srepr : null,
                          timer: setTimeout(function () { self._beginHold(); }, self.opts.longPress) };
         }
       });
@@ -2187,10 +2188,16 @@ var SympyEditor = (function () {
       }
       var same = snap === this.state;   // re-render of the current state (keeps the range)
       var previous = this.state && !this.state.preview ? this.state : this.committed;
+      // A new snapshot of the same expression - the add-ons switched on, a
+      // session reopened, any answer that changed nothing - has the same
+      // paths: the range stays.  Dropping it lost a range selected while an
+      // app was still starting, and the operation picked next went to the
+      // whole expression.
+      var unchanged = same || (!!previous && !snap.preview && !!snap.srepr && previous.srepr === snap.srepr);
       this.state = snap;
       this._hideKeep();
       this.tree = buildTree(snap.nodes || {});
-      if (!same) { this.range = null; this._cameFrom = {}; }
+      if (!unchanged) { this.range = null; this._cameFrom = {}; }
       // An open field is dropped without cancelEdit(): that would re-render
       // on its own (a second, re-entrant setState) - the render below is enough.
       if (this.editing !== null || this.inserting) this._endEdit();
@@ -5826,9 +5833,13 @@ var SympyEditor = (function () {
       this._hold = null;
       if (!hold || this.closed || this.loading) return;
       this._endPan();
-      var leaf = hold.leaf;
-      if (!leaf || !leaf.isConnected || !this.view.contains(leaf)) return;
-      var path = leaf.getAttribute("data-path");
+      var leaf = hold.leaf, path = hold.path;
+      if (!leaf || !leaf.isConnected || !this.view.contains(leaf)) {
+        // The rendering was replaced under the finger - a snapshot arriving,
+        // one after another while an app starts - and the press was lost.
+        // The node is the one at the same path, if the expression is too.
+        if (!path || !this.state || this.state.srepr !== hold.srepr || !(path in this.tree) || !this._els(path).length) return;
+      }
       this._gapCache = null;
       this.select(path);
       this.lastLeaf = path;

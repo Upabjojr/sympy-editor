@@ -2994,6 +2994,56 @@ def test_the_working_overlay_stays_in_the_middle_of_the_screen(browser, serve_ex
     page.evaluate(ed + "._hideLoading()")
 
 
+
+def test_a_range_survives_a_snapshot_of_the_same_expression(browser, serve_expr):
+    """Right after an app starts, snapshots keep arriving that change nothing
+    - the add-ons switching on, the session reopened - and each one dropped
+    the range: selected meanwhile, 2*x**2 + x in x**3 + 2*x**2 + x was gone
+    when factor was picked, which went to the whole expression.  A snapshot
+    of the same expression keeps the range; a change still drops it."""
+    srv, doc = serve_expr(x**3 + 2*x**2 + x)
+    page = _open(browser, srv.url)
+    ed = "document.querySelector('.sympy-editor').__sympyEditor"
+    kids = _display_children(page, "/")
+    srcs = [page.evaluate("p => %s.state.nodes[p].src" % ed, k) for k in kids]
+    i = srcs.index("2*x**2")
+    page.evaluate("i => %s._setRange('/', i, i + 1)" % ed, i)
+    page.evaluate("async () => { const e = %s; await e.setState(JSON.parse(JSON.stringify(e.state))); }" % ed)
+    assert page.evaluate(ed + ".range") == {"parent": "/", "anchor": i, "focus": i + 1}
+    assert page.locator(".se-status").inner_text() == "Add range: 2*x**2 + x"
+    seq = page.evaluate(ed + ".state.seq")
+    page.evaluate(ed + "._applyOp('factor')")
+    page.wait_for_function("s => %s.state.seq > s && !%s.busy" % (ed, ed), arg=seq)
+    assert doc.expr == x**3 + x*(2*x + 1)
+    # a change of the expression drops it
+    page.evaluate("i => %s._setRange('/', 0, 1)" % ed, 0)
+    seq = page.evaluate(ed + ".state.seq")
+    page.evaluate(ed + ".send({action: 'set', src: 'x + y + z'})")
+    page.wait_for_function("s => %s.state.seq > s && !%s.busy" % (ed, ed), arg=seq)
+    assert page.evaluate(ed + ".range") is None
+    assert page.errors == []
+
+
+
+def test_a_long_press_survives_a_rerender_under_the_finger(browser, serve_expr):
+    """The long press kept the element the finger went down on; a snapshot
+    arriving meanwhile - while an app starts, one after another - rendered
+    the formula again, the element was gone, and the press selected nothing.
+    The node at the same path is selected, the expression being the same."""
+    a, b, c = symbols("a b c")
+    srv, doc = serve_expr(a + b + c)
+    page = _open(browser, srv.url)
+    ed = "document.querySelector('.sympy-editor').__sympyEditor"
+    kids = _display_children(page, "/")
+    _touch(page, "pointerdown", kids[1])
+    page.evaluate("async () => { const e = %s; await e.setState(JSON.parse(JSON.stringify(e.state))); }" % ed)
+    assert _wait(lambda: page.evaluate(ed + ".selected") == kids[1], timeout=3)
+    _touch(page, "pointermove", kids[2])
+    assert page.locator(".se-selected").count() == 2               # and the drag goes on into a range
+    _touch(page, "pointerup", kids[2])
+    assert page.errors == []
+
+
 def test_full_screen_button_gives_the_formula_the_window(browser, serve_expr):
     """A quasi-transparent button in the corner of the editing area makes the
     formula fill the window; Esc (or the button) comes back."""
