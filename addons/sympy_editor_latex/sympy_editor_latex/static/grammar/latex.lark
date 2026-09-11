@@ -5,7 +5,11 @@
 //   - a/bc offers the product as the divisor, \sqrt x needs no braces;
 //   - \text{...}, \operatorname{...} name multi-letter symbols like \mathit;
 //   - \vec{v}, \hat{x}, \bar{x}, \mathbf{x}... are decorated symbols;
-//   - a power or a decorated symbol may be followed by more factors (x^2 y).
+//   - a power or a decorated symbol may be followed by more factors (x^2 y);
+//   - \coth, \sech, \csch and the inverse hyperbolic functions (\arsinh or
+//     \arcsinh...) are functions;
+//   - a command never matches the start of a longer command of the grammar
+//     (\sin in \sinh): parser.guard_commands, applied when the grammar is built.
 // Ambiguities are the reader's business (parser.py), not resolved here.
 
 %ignore /[ \t\n\r]+/
@@ -77,9 +81,15 @@ FUNC_ARCCOT: "\\arccot"
 FUNC_SINH: "\\sinh"
 FUNC_COSH: "\\cosh"
 FUNC_TANH: "\\tanh"
-FUNC_ARSINH: "\\arsinh"
-FUNC_ARCOSH: "\\arcosh"
-FUNC_ARTANH: "\\artanh"
+FUNC_COTH: "\\coth"
+FUNC_SECH: "\\sech"
+FUNC_CSCH: "\\csch"
+FUNC_ARSINH: "\\arsinh" | "\\arcsinh"
+FUNC_ARCOSH: "\\arcosh" | "\\arccosh"
+FUNC_ARTANH: "\\artanh" | "\\arctanh"
+FUNC_ARCOTH: "\\arcoth" | "\\arccoth"
+FUNC_ARSECH: "\\arsech" | "\\arcsech"
+FUNC_ARCSCH: "\\arcsch" | "\\arccsch"
 
 FUNC_SQRT: "\\sqrt"
 
@@ -393,11 +403,14 @@ csc_power: FUNC_CSC CARET _expression_core _expression
 sec_power: FUNC_SEC CARET _expression_core _expression
 cot_power: FUNC_COT CARET _expression_core _expression
 
-_hyperbolic_trigonometric_function: sinh | cosh | tanh
+_hyperbolic_trigonometric_function: sinh | cosh | tanh | coth | sech | csch
 
 sinh: FUNC_SINH _expression
 cosh: FUNC_COSH _expression
 tanh: FUNC_TANH _expression
+coth: FUNC_COTH _expression
+sech: FUNC_SECH _expression
+csch: FUNC_CSCH _expression
 
 _inverse_trigonometric_function: arcsin | arccos | arctan | arccsc | arcsec | arccot
 
@@ -408,11 +421,14 @@ arccsc: FUNC_ARCCSC _expression
 arcsec: FUNC_ARCSEC _expression
 arccot: FUNC_ARCCOT _expression
 
-_inverse_hyperbolic_trigonometric_function: asinh | acosh | atanh
+_inverse_hyperbolic_trigonometric_function: asinh | acosh | atanh | acoth | asech | acsch
 
 asinh: FUNC_ARSINH _expression
 acosh: FUNC_ARCOSH _expression
 atanh: FUNC_ARTANH _expression
+acoth: FUNC_ARCOTH _expression
+asech: FUNC_ARSECH _expression
+acsch: FUNC_ARCSCH _expression
 
 abs: BAR _expression BAR
 floor: L_FLOOR _expression R_FLOOR

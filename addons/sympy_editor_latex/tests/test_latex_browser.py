@@ -90,6 +90,10 @@ def test_the_panel_reads_offers_choices_and_inserts():
         page.locator(".ltx-insert").click()
         page.wait_for_function("document.querySelector('.se-source').textContent.includes('Derivative(x**2, x)')")
         assert Symbol("pi") not in doc.expr.free_symbols
+        # \sinh is one command: one reading, one menu over it (issue #27)
+        box.fill(r"\sinh xy")
+        page.wait_for_function("document.querySelector('.ltx-src').textContent === 'sinh(x*y)'")
+        assert page.locator(".ltx-point").count() == 1 and page.locator(".ltx-panel .katex").count() == 1
         # an error is a message in the panel, not the editor's
         box.fill(r"x^2 +* y")
         page.wait_for_function("document.querySelector('.ltx-note').classList.contains('error')")

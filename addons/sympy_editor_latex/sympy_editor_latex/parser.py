@@ -50,7 +50,7 @@ CONSTANTS: Dict[str, Tuple[Basic, bool, str]] = {
 #: Function rules whose argument is *not* delimited by the rule itself (``\sin x``):
 #: how far the argument reaches is the ambiguity these conventions settle.
 BARE_FUNCTIONS = frozenset("""sin cos tan csc sec cot sin_power cos_power tan_power csc_power sec_power cot_power
-    arcsin arccos arctan arccsc arcsec arccot sinh cosh tanh asinh acosh atanh exponential log
+    arcsin arccos arctan arccsc arcsec arccot sinh cosh tanh coth sech csch asinh acosh atanh acoth asech acsch exponential log
     determinant trace adjugate""".split())
 #: Every rule that applies a function (the delimited ones included).
 FUNCTIONS = BARE_FUNCTIONS | frozenset("function_applied abs floor ceil square_root conjugate min max".split())
@@ -161,6 +161,31 @@ def tree_cost(tree, known_functions=()) -> int:
     return total
 
 
+_COMMAND = re.compile(r'"\\\\([A-Za-z]+)"')
+
+
+def guard_commands(grammar: str, others: str = "") -> str:
+    r"""The grammar with every command that begins a longer command of it
+    kept from matching there: ``"\\sin"`` becomes ``/\\sin(?!h)/`` beside
+    ``"\\sinh"``.
+
+    TeX reads all the letters after a backslash as one name, but the reader
+    lets a command run into the letters that follow it - ``\sinx`` is
+    sin(x), ``\pix`` is pi*x, as people type - and so it also read
+    ``\sinh x`` as sin(h*x), even preferring that to sinh(x).  Now a command
+    gives way to a longer one the grammar knows, and any other letters after
+    it read as before.  ``others``: grammar text (the imported Greek letters)
+    whose commands count as longer ones too; it is not rewritten itself."""
+    names = set(_COMMAND.findall(grammar)) | set(_COMMAND.findall(others))
+
+    def guarded(m):
+        name = m.group(1)
+        tails = sorted(other[len(name):] for other in names if other != name and other.startswith(name))
+        return "/\\\\%s(?!%s)/" % (name, "|".join(tails)) if tails else m.group(0)
+
+    return _COMMAND.sub(guarded, grammar)
+
+
 class _Transformer:
     """Built lazily: SymPy's transformer, with the rules the grammar adds."""
 
@@ -181,6 +206,25 @@ class _Transformer:
                 head = tokens[0]
                 name = head.name if isinstance(head, Symbol) else str(head)
                 return sympy.Function(str(name))(*tokens[2])
+
+            # the hyperbolic functions SymPy's grammar and transformer lack
+            def coth(self, tokens):
+                return sympy.coth(tokens[1])
+
+            def sech(self, tokens):
+                return sympy.sech(tokens[1])
+
+            def csch(self, tokens):
+                return sympy.csch(tokens[1])
+
+            def acoth(self, tokens):
+                return sympy.acoth(tokens[1])
+
+            def asech(self, tokens):
+                return sympy.asech(tokens[1])
+
+            def acsch(self, tokens):
+                return sympy.acsch(tokens[1])
 
             def PARTIAL(self, token):
                 return Symbol("d")                       # \partial behaves as the letter d does
@@ -238,7 +282,8 @@ class LatexReader:
             if self._forest_parser is not None:
                 return
             lark = _lark()
-            grammar = (self.grammar_dir / "latex.lark").read_text(encoding="utf-8")
+            grammar = guard_commands((self.grammar_dir / "latex.lark").read_text(encoding="utf-8"),
+                                     (self.grammar_dir / "greek_symbols.lark").read_text(encoding="utf-8"))
             common = dict(source_path=str(self.grammar_dir) + "/", parser="earley", start="latex_string", lexer="auto",
                           propagate_positions=True, maybe_placeholders=False, keep_all_tokens=True)
             forest_parser = lark.Lark(grammar, ambiguity="forest", **common)

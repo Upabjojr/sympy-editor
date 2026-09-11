@@ -177,6 +177,44 @@ def test_the_panel_s_warm_builds_them_where_there_are_no_threads(monkeypatch):
     assert res == {"ready": True} and addon.reader.ready
 
 
+
+def test_a_command_is_not_read_inside_a_longer_one():
+    r"""\sinh x was read as sin(h*x) - \sin running into the letter h - and
+    that reading came first; the panel showed two menus over the same
+    "\sinh xy", each with the whole expression.  A command gives way to a
+    longer one the grammar knows; letters glued on that make no command of it
+    still read as they did (\sinx, \pix)."""
+    from sympy import (Ge, Le, Ne, acosh, acoth, acsch, asech, asinh, atanh, cosh, coth, csch, pi, sech, sin,
+                       sinh, tanh)
+    reader = LatexReader()
+    for tex, want in [(r"\sinh x", sinh(x)), (r"\cosh x", cosh(x)), (r"\tanh x", tanh(x)), (r"\coth x", coth(x)),
+                      (r"\sech x", sech(x)), (r"\csch x", csch(x)), (r"\arsinh x", asinh(x)), (r"\arcsinh x", asinh(x)),
+                      (r"\arccosh x", acosh(x)), (r"\arctanh x", atanh(x)), (r"\arccoth x", acoth(x)),
+                      (r"\arcsech x", asech(x)), (r"\arccsch x", acsch(x)), (r"\sinhx", sinh(x)),
+                      (r"x \geq y", Ge(x, y)), (r"x \leq y", Le(x, y)), (r"x \neq y", Ne(x, y)),
+                      (r"\left( x \right)", x), (r"\sinx", sin(x)), (r"\pix", pi * x)]:
+        res = reader.read(tex)
+        assert res["ok"] and res["expr"] == want, (tex, res.get("src"), res.get("error"))
+        assert all("(h" not in o["src"] for a in res["ambiguities"] for o in a["options"]), (tex, res["ambiguities"])
+    res = reader.read(r"\sinh xy")
+    assert res["src"] == "sinh(x*y)"
+    assert [[o["src"] for o in a["options"]] for a in res["ambiguities"]] == [["sinh(x*y)", "y*sinh(x)"]]
+
+
+def test_guard_commands_rewrites_only_the_commands_that_begin_longer_ones():
+    import re
+    from sympy_editor_latex.parser import GRAMMAR_DIR, guard_commands
+    lines = [r'A: "\\sin"', r'B: "\\sinh"', r'C: "\\ge" | "\\geq"', r'D: "\\,"']        # as in a .lark file
+    assert guard_commands("\n".join(lines)).split("\n") == [
+        r'A: /\\sin(?!h)/', r'B: "\\sinh"', r'C: /\\ge(?!q)/ | "\\geq"', r'D: "\\,"']
+    assert guard_commands(r'A: "\\pi"', others=r'P: "\\pix"') == r'A: /\\pi(?!x)/'
+    # the Greek letters are imported as they are, unguarded: none may begin another command
+    command = re.compile(r'"\\\\([A-Za-z]+)"')
+    greek = set(command.findall((GRAMMAR_DIR / "greek_symbols.lark").read_text(encoding="utf-8")))
+    every = greek | set(command.findall((GRAMMAR_DIR / "latex.lark").read_text(encoding="utf-8")))
+    assert not [(a, b) for a in greek for b in every if a != b and b.startswith(a)]
+
+
 def test_the_document_s_names_are_reused_and_its_functions_apply():
     xp = Symbol("x", positive=True)
     doc = Document(xp ** 2 + f(y), addons=[ADDON])
