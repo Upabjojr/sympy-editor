@@ -108,7 +108,12 @@ class LatexAddon(Addon):
                 raise ValueError(result.get("error") or "This LaTeX could not be read")
             expr: Basic = result["expr"]
             path = str(payload.get("path") or "/")
-            if path == "/":
+            children = payload.get("children")
+            if children:
+                # a range (some terms of a sum, factors of a product): those
+                # alone - the whole expression was replaced, the range ignored
+                doc.replace(path, expr, children=[int(i) for i in children])
+            elif path == "/":
                 doc.set(expr)
             else:
                 doc.replace(path, expr)

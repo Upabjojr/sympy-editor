@@ -178,6 +178,16 @@ def test_the_panel_s_warm_builds_them_where_there_are_no_threads(monkeypatch):
 
 
 
+
+def test_insert_over_a_range_replaces_only_the_range():
+    """"Replace the selected range" with 2*x**2 + x selected in x**3 + 2*x**2 + x
+    made the whole expression the reading: the range was sent and ignored."""
+    doc = Document(x**3 + 2*x**2 + x, addons=[ADDON])
+    children = [i for i, arg in enumerate(doc.expr.args) if arg in (2*x**2, x)]
+    snap = doc.handle({"action": "addon", "addon": "latex", "method": "insert", "latex": "y", "path": "/", "children": children})
+    assert not snap.get("error") and doc.expr == x**3 + y
+
+
 def test_a_command_is_not_read_inside_a_longer_one():
     r"""\sinh x was read as sin(h*x) - \sin running into the letter h - and
     that reading came first; the panel showed two menus over the same
