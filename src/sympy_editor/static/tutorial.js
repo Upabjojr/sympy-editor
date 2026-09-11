@@ -103,6 +103,13 @@
     this.arrow.hidden = true;
     this.ring = make("div", "se-tour-ring", this.layer);
     this.ring.hidden = true;
+    // The one thing on the layer that takes a pointer: a way out, for a
+    // reader who would rather use the editor than watch it.
+    this.stopBtn = make("button", "se-tour-stop", this.layer);
+    this.stopBtn.type = "button";
+    this.stopBtn.textContent = "\u25a0 Stop the tour";
+    this.stopBtn.title = "Stop the tour and use the editor";
+    this.stopBtn.hidden = true;
     this.target = null;       // {node, rect()} the arrow and the ring are on
     this.subject = null;      // what the caption is about, when it is placed beside something
     this.place = "near";
@@ -141,6 +148,13 @@
       this.arrow.classList.toggle("below", below);
       this.arrow.style.left = (cx - 28) + "px";
       this.arrow.style.top = (below ? r.bottom + 6 : r.top - 62) + "px";
+    }
+    if (!this.stopBtn.hidden) {
+      // the bottom right corner of the editor on the screen, clear of its
+      // toolbar (the drawer's button is at the top right)
+      var sb = this.stage();
+      this.stopBtn.style.left = Math.round(Math.min(innerWidth - MARGIN, sb.right - MARGIN) - this.stopBtn.offsetWidth) + "px";
+      this.stopBtn.style.top = Math.round(Math.min(innerHeight - MARGIN, sb.bottom - MARGIN) - this.stopBtn.offsetHeight) + "px";
     }
     var box = this.caption;
     if (box.hidden) return;
@@ -285,6 +299,10 @@
     this.index = -1;
     this.overlay = new Overlay(editor);
     var self = this;
+    if (this.opts.stopButton) {
+      this.overlay.stopBtn.hidden = false;
+      this.overlay.stopBtn.addEventListener("click", function (ev) { ev.preventDefault(); ev.stopPropagation(); self.stop(); });
+    }
     this.done = new Promise(function (resolve) { self._resolve = resolve; });
   }
 
@@ -347,6 +365,7 @@
   Player.prototype.show = async function (hit, seconds) {
     try { hit.node.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" }); } catch (e) { /* old browsers */ }
     await sleep(this.seconds(0.35));
+    if (this.stopped) return;
     this.overlay.point(hit.node, hit.rect);
     await sleep(this.seconds(seconds));
   };
@@ -390,8 +409,10 @@
     } else if (step.click) {
       if (!(hit = await this.find(step.click))) return this.miss(i, "nothing to click: " + JSON.stringify(step.click));
       await this.show(hit, step.lead !== undefined ? step.lead : LEAD);
+      if (this.stopped) return;                               // stopped while the arrow was up: nothing is pressed
       this.overlay.pressing();
       await sleep(this.seconds(0.18));
+      if (this.stopped) return;
       if (hit.path !== undefined) ed.select(hit.path);        // a piece of the formula: selected as a click would
       else press(hit.node);
       await sleep(this.seconds(0.25));
@@ -403,8 +424,10 @@
       var opt = Array.prototype.slice.call(sel.options || []).filter(function (o) { return o.value === want || o.textContent.trim() === want; })[0];
       if (!opt) return this.miss(i, "no option " + JSON.stringify(want) + " in " + JSON.stringify(c.target || c.selector));
       await this.show(hit, step.lead !== undefined ? step.lead : 0.8);
+      if (this.stopped) return;
       this.overlay.pressing();
       await sleep(this.seconds(0.18));
+      if (this.stopped) return;
       sel.focus({ preventScroll: true });
       sel.value = opt.value;
       changed(sel);
@@ -416,6 +439,7 @@
       var node = hit.node, editable = node.isContentEditable;
       if ((t.target || t.selector || "focused") !== "focused") {
         await this.show(hit, t.lead !== undefined ? t.lead : 0.6);
+        if (this.stopped) return;
         this.overlay.clear();
         press(node);
       }
@@ -429,8 +453,9 @@
       }
       // what leaving the field, or Enter, would tell its listeners
       if (!editable) node.dispatchEvent(new Event("change", { bubbles: true }));
-      if (t.enter) {
+      if (t.enter && !this.stopped) {
         await sleep(this.seconds(0.3));
+        if (this.stopped) return;
         key(node, "Enter");
         // The editor's in-place field (Edit, or a double-click, on a piece
         // of the formula) takes a person's Enter, not one sent from a script;
@@ -513,9 +538,19 @@
     this._resolve({ errors: this.errors.slice(), stopped: this.stopped });
   };
 
+  /** Stop where it is (the Stop button, or a page's own call): the overlay
+   *  goes, and the editor is left usable - the History, the drawer and a
+   *  field half typed in the formula shut, what was done so far kept. */
   Player.prototype.stop = function () {
+    if (this.stopped) return;
     this.stopped = true;
     this.overlay.remove();
+    var ed = this.editor;
+    if (ed.root.querySelector(".se-history-view") && typeof ed.closeHistory === "function") ed.closeHistory();
+    if (typeof ed.closeDrawer === "function") ed.closeDrawer();
+    if (ed.input && typeof ed.cancelEdit === "function") ed.cancelEdit(true);
+    var a = document.activeElement;
+    if (a && a !== document.body && ed.root.contains(a)) a.blur();
     document.documentElement.classList.remove("se-tour-running");
   };
 
@@ -525,7 +560,7 @@
     /** Play `script` on an editor (the Editor, its element, or the element
      *  it was mounted in; the page's first editor by default).  `opts`:
      *  fullPage (the page is the editor's: back to its top at the end),
-     *  speed. */
+     *  stopButton (a button to stop it), speed. */
     run: function (target, script, opts) {
       var ed = editorOf(target);
       if (!ed) throw new Error("SympyEditorTutorial.run: no editor to play on");

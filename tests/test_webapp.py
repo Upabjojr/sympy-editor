@@ -125,8 +125,9 @@ def test_the_shelf_opens_with_an_editor_of_its_own(tmp_path):
     """The page is about an editor, so it starts with one: a live editor above
     everything else, sharing the copy of editor.js the viewers already carry,
     and the button beside the title now says which editor it opens instead.
-    Python is not loaded until somebody edits something (`preload` false), so
-    a visitor who only reads pays nothing for it."""
+    It plays the tour of examples/tutorial - without its History part, with
+    a button to stop it - and so starts Python at once; it keeps no sessions
+    and no add-ons in the browser, which editor.html on the same site does."""
     build = _load()
     out = build.shelf_site(tmp_path / "shelf", cdn=True)
     page = (out / "index.html").read_text(encoding="utf-8")
@@ -136,7 +137,12 @@ def test_the_shelf_opens_with_an_editor_of_its_own(tmp_path):
     assert mount in page
     line = page.split(mount, 1)[1].splitlines()[0]              # the config is one line of JSON
     cfg = json.loads(line.removesuffix(");").replace("\\u003c", "<"))
-    assert cfg["backend"] == "pyodide" and cfg["options"]["preload"] is False
+    assert cfg["backend"] == "pyodide" and cfg["options"].get("preload") is not False
+    assert not cfg["options"].get("sessions") and not cfg["options"].get("rememberAddons")
+    run = 'SympyEditorTutorial.run(document.getElementById("try-the-editor"), '
+    assert run in page and page.count("if (!window.SympyEditorTutorial) {") == 1
+    tour = page.split(run, 1)[1].splitlines()[0]
+    assert '"stopButton": true' in tour and '"part": "history"' not in tour and "se-history-close" not in tour
     assert cfg["sources"] and cfg["srepr"]                       # it computes, and knows what to start from
     assert ">Open standalone editor</a>" in page                 # the button names the other one
     assert "Open the editor" not in page
@@ -153,9 +159,15 @@ def test_the_shelf_s_editor_asks_to_be_touched_once(tmp_path):
     lands, and then never again (a reload asks once more).  The pulse is on a
     ring laid over the box - scaling the formula would soften the type - and
     it lets the clicks through."""
+    from sympy import Symbol
+    from sympy_editor import Document
+    from sympy_editor.html import build_config
     build = _load()
-    out = build.shelf_site(tmp_path / "shelf", cdn=True)
-    page = (out / "index.html").read_text(encoding="utf-8")
+    # a front page with an editor and no tour (the site's plays a tour, which
+    # is its invitation)
+    cfg = build_config(Document(Symbol("x")), backend="pyodide", options={"preload": False})
+    page = build.derivations_page(tmp_path / "try", urls=None, editor_href="editor.html",
+                                  editor=cfg).read_text(encoding="utf-8")
     assert "@keyframes se-view-notice" in page
     ring = page.split("section.try .se-stage::after {", 1)[1].split("}", 1)[0]
     for said in ("position: absolute", "inset: 0", "pointer-events: none",   # over the box, not in its way
@@ -180,6 +192,9 @@ def test_the_shelf_s_editor_asks_to_be_touched_once(tmp_path):
     bare = build.derivations_page(tmp_path / "bare", urls=None, editor_href="../index.html").read_text(encoding="utf-8")
     assert "The editor's box asks to be used" not in bare
     assert 'classList.add("se-edited")' not in bare
+    # ...nor on the site's front page, whose editor plays the tour instead
+    site = (build.shelf_site(tmp_path / "shelf", cdn=True) / "index.html").read_text(encoding="utf-8")
+    assert "The editor's box asks to be used" not in site and "SympyEditorTutorial.run(" in site
 
 
 def test_the_shelf_s_play_buttons_ask_to_be_pressed(tmp_path):
@@ -314,18 +329,22 @@ def test_a_bundle_leaves_the_add_ons_off_unless_asked(tmp_path):
 
 def test_the_showcase_site_opens_with_the_add_ons_on(tmp_path):
     """shelf_site builds what upabjojr.github.io/sympy-editor serves: the
-    front page with an editor to try, and editor.html beside it.  Both should
-    open with the add-ons switched on - the site is where somebody sees what
-    the editor can do - and both must name the packages the browser installs
-    for them."""
+    front page with the tour playing on an editor, and editor.html beside it.
+    editor.html opens with the add-ons switched on - the site is where
+    somebody sees what the editor can do; the front page's editor lists them
+    all and the tour switches on the ones it shows.  Both must name the
+    packages the browser installs for them."""
     _every_addons_packages()
     mod = _load()
     out = mod.shelf_site(tmp_path / "shelf", cdn=True)
     for name in ("index.html", "editor.html"):
         page = (out / name).read_text(encoding="utf-8")
-        on = re.search(r'"addons":\s*(\[[^\]]*\])', page)
-        assert on, (name, "the page does not say which add-ons are on")
-        assert sorted(json.loads(on.group(1))) == ["latex", "matching", "plot", "tree"], (name, on.group(1))
+        for addon in ("plot", "tree", "matching", "latex"):
+            assert f'"name": "{addon}"' in page, (name, addon)                  # listed, to be switched on
+        if name == "editor.html":
+            on = re.search(r'"addons":\s*(\[[^\]]*\])', page)
+            assert on, (name, "the page does not say which add-ons are on")
+            assert sorted(json.loads(on.group(1))) == ["latex", "matching", "plot", "tree"], (name, on.group(1))
         # the two that need something from PyPI say so, or the browser cannot
         # install them and they would come up switched on but broken
         micropip = re.search(r'"micropip":\s*(\[[^\]]*\])', page)

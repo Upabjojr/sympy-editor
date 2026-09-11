@@ -66,7 +66,7 @@ def test_the_page_is_the_ordinary_editor_page_with_the_player_after_it():
     script = {"title": "A tour", "expression": "x**2 + 1", "steps": [{"at": 0, "caption": "hi </script> there"}]}
     page = to_tutorial_html(script)
     assert page.count(f'SympyEditor.mount(document.getElementById("{ELEMENT_PREFIX}') == 1
-    assert '"fullPage": true' in page
+    assert '"fullPage": true' in page and '"stopButton": true' in page      # a way out, by default
     assert read_static("editor.js").strip() in page and read_static("tutorial.js").strip() in page
     assert read_static("tutorial.css").strip() in page and "<title>A tour</title>" in page
     assert page.index("SympyEditor.mount(") < page.index(f"{PLAYER}.run(")          # the editor first
@@ -261,3 +261,63 @@ def test_the_example_tour_is_a_script_that_builds(tmp_path):
     assert PLAYER in page and "sympy_editor_plot" in page and "sympy_editor_tree" in page
     assert "sympy_editor_matching" in page and "sympy_editor_latex" in page
     assert "sympy-matching" in page and "lark" in page       # what the browser installs for those two
+
+
+def test_a_part_of_the_script_can_be_left_out_and_the_stop_button_turned_off():
+    """A page may leave a named part out (the site leaves out the History),
+    and a recording may do without the Stop button."""
+    script = {"steps": [{"at": 0, "caption": "one"},
+                        {"after": 1, "caption": "two", "part": "history"},
+                        {"after": 1, "caption": "three", "part": "history"},
+                        {"after": 1, "caption": "four"}]}
+    page = to_tutorial_html(script, expr="x", backend="readonly", skip=["history"])
+    assert '"two"' not in page and '"three"' not in page and '"one"' in page and '"four"' in page
+    assert '"stopButton": true' in page
+    assert '"stopButton": false' in to_tutorial_html(script, expr="x", backend="readonly", stop_button=False)
+    with pytest.raises(ValueError, match="leaves no step"):
+        to_tutorial_html({"steps": [{"wait": True, "part": "p"}]}, expr="x", backend="readonly", skip=["p"])
+    with pytest.raises(ValueError, match="part is the name"):
+        load_tutorial({"steps": [{"wait": True, "part": ""}]})
+
+
+@pytest.mark.skipif(not _online(default_urls()["katexJs"]), reason="KaTeX CDN not reachable")
+def test_the_stop_button_stops_the_tour_and_leaves_the_editor_usable():
+    """Stopped mid-way: the overlay goes, nothing after it is pressed or
+    changed, and the editor is there to use."""
+    doc = Document(x**2 / y - sin(x))
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    script = {"steps": [
+        {"at": 0, "caption": "A long wait, for somebody to stop it", "position": "top"},
+        {"after": 30, "set": "cos(x)"},                               # never reached: stopped before
+    ]}
+    page_html = to_tutorial_html(script, expr=doc, backend="http", api_url="/api", token=srv.token)
+    try:
+        with playwright.sync_playwright() as p:
+            try:
+                browser = p.chromium.launch()
+            except Exception as exc:
+                pytest.skip(f"chromium not available: {exc}")
+            page = browser.new_page(viewport={"width": 1000, "height": 800})
+            errors = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.add_init_script("addEventListener('sympy-editor-tutorial-end', e => { window.__end = e.detail; });")
+            page.route(srv.url + "tour", lambda route: route.fulfill(body=page_html, content_type="text/html"))
+            page.goto(srv.url + "tour")
+            stop = page.locator(".se-tour-stop")
+            stop.wait_for(state="visible", timeout=30000)
+            page.wait_for_selector(".se-tour-caption.shown", timeout=30000)
+            stop.click()                                              # a real click: the button takes the pointer
+            page.wait_for_function("() => !!window.__end", timeout=35000)
+            end = page.evaluate("window.__end")
+            layers = page.evaluate("document.querySelectorAll('.se-tour-layer').length")
+            # the editor is usable: a click on the formula selects, as ever
+            page.locator('.se-view [data-path="/1/d"]').first.click(force=True)
+            selected = page.evaluate("(document.querySelector('.se-view .se-selected[data-path]') || {}).getAttribute && document.querySelector('.se-view .se-selected[data-path]').getAttribute('data-path')")
+            browser.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+    assert layers == 0 and errors == []
+    assert doc.expr == x**2 / y - sin(x)                              # the step after the stop never ran
+    assert selected == "/1/d"

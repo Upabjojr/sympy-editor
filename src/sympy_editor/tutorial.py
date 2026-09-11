@@ -77,6 +77,14 @@ screen.  ``"near": target`` puts a caption step beside something too.
 player goes - overlay, arrow, captions - the drawer and the menus shut, and
 the page is the editor as a reader finds it.
 
+**Parts**: ``"part": "history"`` on some steps names them as a group a page
+may leave out - ``to_tutorial_html(..., skip=["history"])`` - the steps after
+them following on as if they had not been there.
+
+**Stopping**: the page has a button to stop the tour (``stop_button=False``
+leaves it out, for a recording); stopped, the overlay goes and the editor
+is left usable, what was done kept.
+
 **Embedding**: ``to_tutorial_html(..., full_page=False)`` is a fragment for
 a page of one's own.  Every editor on a page runs on one Python (Pyodide)
 runtime; a tutorial's add-ons are installed into it whichever editor
@@ -95,12 +103,13 @@ from typing import Any, Dict, Optional, Union
 
 from .html import _as_document, _script_json, build_config, read_static, render_fragment, render_page
 
-__all__ = ["ACTIONS", "load_tutorial", "to_tutorial_html", "save_tutorial_html"]
+__all__ = ["ACTIONS", "load_tutorial", "to_tutorial_html", "save_tutorial_html", "without_parts",
+           "player_css", "player_html"]
 
 #: What a step can do; each step does exactly one of these.
 ACTIONS = ("caption", "point", "click", "choose", "type", "key", "set", "apply", "undo", "redo", "zoom", "addons", "wait")
 _TIMING = ("at", "after")
-_EXTRA = ("say", "sayFor", "position", "size", "near", "duration", "hold", "lead")
+_EXTRA = ("say", "sayFor", "position", "size", "near", "duration", "hold", "lead", "part")
 POSITIONS = ("near", "above", "below", "top", "center", "bottom")
 _SCRIPT_KEYS = ("title", "expression", "addons", "options", "speed", "loop", "loopDelay", "steps", "description")
 #: The start of the id of a tutorial's editor element (each gets its own).
@@ -133,6 +142,8 @@ def _check_step(i: int, step: Any) -> None:
         raise ValueError(f"{where}: position is one of {', '.join(POSITIONS)}, not {step['position']!r}")
     if "size" in step and step["size"] != "large":
         raise ValueError(f"{where}: size is \"large\" or left out")
+    if "part" in step and (not isinstance(step["part"], str) or not step["part"].strip()):
+        raise ValueError(f"{where}: part is the name of a group of steps")
     if "near" in step and not _target_ok(step["near"]):
         raise ValueError(f"{where}: near needs a target")
     action = doing[0]
@@ -186,10 +197,37 @@ def load_tutorial(script: Union[str, Path, Dict[str, Any]]) -> Dict[str, Any]:
     return copy.deepcopy(script)
 
 
+def without_parts(script, skip) -> Dict[str, Any]:
+    """``script`` without the steps of the parts in ``skip`` (a copy)."""
+    script = copy.deepcopy(script)
+    if skip:
+        leave = set(skip)
+        script["steps"] = [s for s in script["steps"] if s.get("part") not in leave]
+        if not script["steps"]:
+            raise ValueError(f"leaving out {', '.join(sorted(leave))} leaves no step")
+    return script
+
+
+def player_css() -> str:
+    """The overlay's style, as a ``<style>`` element."""
+    return f"<style>\n{read_static('tutorial.css')}\n</style>\n"
+
+
+def player_html(element_id: str, script, *, full_page: bool = False, stop_button: bool = True) -> str:
+    """The player, and the call that plays ``script`` on the editor mounted in
+    ``element_id`` - for after that editor's mount.  The player's script is
+    guarded, so several on a page share one copy."""
+    return ("<script>\nif (!window.SympyEditorTutorial) {\n" + read_static("tutorial.js") + "\n}\n</script>\n"
+            "<script>\n"
+            f'SympyEditorTutorial.run(document.getElementById("{element_id}"), {_script_json(script)}, '
+            f'{{"fullPage": {"true" if full_page else "false"}, "stopButton": {"true" if stop_button else "false"}}});\n'
+            "</script>\n")
+
+
 def to_tutorial_html(script, *, expr=None, title: Optional[str] = None, backend: str = "pyodide",
                      options: Optional[Dict[str, Any]] = None, urls: Optional[Dict[str, str]] = None,
                      full_page: bool = True, element_id: Optional[str] = None, logo: str = "",
-                     **config_kwargs) -> str:
+                     stop_button: bool = True, skip=(), **config_kwargs) -> str:
     """A page - or, with ``full_page=False``, a fragment to embed - with the
     editor that plays ``script`` as soon as it is ready.
 
@@ -198,25 +236,21 @@ def to_tutorial_html(script, *, expr=None, title: Optional[str] = None, backend:
     It is the ordinary editor page (fragment) with the player added after it:
     the editor is the one every other page has.  Fragments on one page share
     one copy of the scripts and one Python runtime.  ``logo``: SVG markup
-    beside a full page's title.  ``backend`` is ``"pyodide"`` (a standalone
-    file) by default; ``config_kwargs`` go to ``build_config``
-    (``api_url``/``token`` for ``"http"``)."""
-    script = load_tutorial(script)
+    beside a full page's title.  ``stop_button``: a button to stop the tour.
+    ``skip``: the parts (``"part"`` of the steps) to leave out.  ``backend``
+    is ``"pyodide"`` (a standalone file) by default; ``config_kwargs`` go to
+    ``build_config`` (``api_url``/``token`` for ``"http"``)."""
+    script = without_parts(load_tutorial(script), skip)
     source = expr if expr is not None else script.get("expression", "x")
     doc = _as_document(source, available=list(script.get("addons") or [])) if not hasattr(source, "handle") else source
     opts = dict(script.get("options") or {})
     opts.update(options or {})
     config = build_config(doc, backend=backend, options=opts, urls=urls, **config_kwargs)
     element_id = element_id or ELEMENT_PREFIX + uuid.uuid4().hex[:10]
-    css = f"<style>\n{read_static('tutorial.css')}\n</style>\n"
-    player = ("<script>\nif (!window.SympyEditorTutorial) {\n" + read_static("tutorial.js") + "\n}\n</script>\n"
-              "<script>\n"
-              f'SympyEditorTutorial.run(document.getElementById("{element_id}"), {_script_json(script)}, '
-              f'{{"fullPage": {"true" if full_page else "false"}}});\n'
-              "</script>\n")
+    player = player_html(element_id, script, full_page=full_page, stop_button=stop_button)
     if not full_page:
-        return css + render_fragment(config, element_id) + player
-    page = render_page(config, title or script.get("title") or "SymPy Editor tutorial", css, element_id, logo)
+        return player_css() + render_fragment(config, element_id) + player
+    page = render_page(config, title or script.get("title") or "SymPy Editor tutorial", player_css(), element_id, logo)
     body, end = page.rsplit("</body>", 1)
     return body + player + "</body>" + end
 
@@ -233,13 +267,15 @@ def main(argv=None) -> int:
     ap.add_argument("script", help="the tutorial script (JSON)")
     ap.add_argument("-o", "--out", help="the page to write (default: the script's name, .html)")
     ap.add_argument("--addons", help="a folder of add-on folders to register first (e.g. addons/)")
+    ap.add_argument("--skip", action="append", default=[], help="a part of the script to leave out (repeatable)")
+    ap.add_argument("--no-stop-button", action="store_true", help="no button to stop it (for a recording)")
     args = ap.parse_args(argv)
     if args.addons:
         from .addons import register_addons_folder
         register_addons_folder(args.addons)
     out = Path(args.out) if args.out else Path(args.script).with_suffix(".html")
     try:
-        save_tutorial_html(Path(args.script), out)
+        save_tutorial_html(Path(args.script), out, skip=args.skip, stop_button=not args.no_stop_button)
     except ValueError as exc:
         print(f"{args.script}: {exc}", file=sys.stderr)
         return 1

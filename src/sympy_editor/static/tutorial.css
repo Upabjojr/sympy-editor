@@ -35,6 +35,12 @@
 .se-tour-ring.pressing { animation: se-tour-press 0.4s ease-in forwards; background: rgba(255, 122, 26, 0.28); }
 .se-tour-ring.pressing::after { animation: none; opacity: 0; }
 @keyframes se-tour-press { 0% { transform: scale(1.1); opacity: 1; } 55% { transform: scale(0.7); opacity: 1; } 100% { transform: scale(0.95); opacity: 0; } }
+/* the way out: the one thing on the layer that takes a pointer */
+.se-tour-stop { position: fixed; pointer-events: auto; cursor: pointer; font: inherit; font-size: 0.95rem; font-weight: 600;
+  padding: 0.45rem 0.95rem; border-radius: 999px; border: 1px solid rgba(79, 70, 229, 0.35);
+  background: #ffffff; color: #3730a3; box-shadow: 0 6px 18px rgba(30, 27, 75, 0.22); }
+.se-tour-stop:hover, .se-tour-stop:focus-visible { background: #eef2ff; outline: none; }
+.se-tour-stop[hidden] { display: none; }
 @media (max-width: 640px) { .se-tour-caption { font-size: 1.1rem; } .se-tour-caption.large { font-size: 1.4rem; } }
 @media (prefers-reduced-motion: reduce) {
   .se-tour-arrow, .se-tour-ring, .se-tour-ring::after, .se-tour-ring.pressing { animation: none; }

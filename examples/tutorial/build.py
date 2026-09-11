@@ -29,10 +29,13 @@ def main(argv=None) -> int:
     ap.add_argument("--script", default=str(HERE / "tour.json"), help="the tutorial script (default: tour.json)")
     ap.add_argument("--out", default=str(HERE / "tour.html"), help="the page to write (default: tour.html)")
     ap.add_argument("--open", action="store_true", help="open it in the browser")
+    ap.add_argument("--no-stop-button", action="store_true", help="leave out the Stop button (for a recording)")
+    ap.add_argument("--skip", action="append", default=[], help="a part of the tour to leave out, e.g. history")
     args = ap.parse_args(argv)
     register_addons_folder(ROOT / "addons")        # the tour switches on all four add-ons
     # The app's title and logo: when the tour is over, the page is the app.
-    out = save_tutorial_html(Path(args.script), Path(args.out), logo=build_www.app_logo())
+    out = save_tutorial_html(Path(args.script), Path(args.out), logo=build_www.app_logo(),
+                             stop_button=not args.no_stop_button, skip=args.skip)
     print(f"Wrote {out} ({out.stat().st_size // 1024} KB)")
     if args.open:
         webbrowser.open(out.resolve().as_uri())

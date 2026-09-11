@@ -607,6 +607,19 @@ TRY = """<h2 class="shelf">Try it</h2>
 </section>"""
 
 
+#: ...or a tour of it, playing where the editor will be (examples/tutorial):
+#: the editor at work, pressed and typed into for real, with a button to stop
+#: it; stopped or over, it is the editor, to use.
+TOUR = """<h2 class="shelf">Try it</h2>
+<section class="try">
+  <p>A short tour plays here: the editor at work, pressed and typed into for
+  real. Stop it whenever you like, and the editor is yours \u2014 click any piece
+  of the formula and change it in place. Python runs in your browser, and every
+  result is computed on your device.</p>
+  <div id="{element}"></div>
+</section>"""
+
+
 CARD = """<section class="card" id="{slug}">
   <span class="steps">{steps} steps</span>
   <h3>{title}</h3>
@@ -630,7 +643,7 @@ def manifest() -> dict:
 
 def derivations_page(folder: Path, *, urls: dict | None = None,
                      editor_href: str = "../index.html",
-                     editor: dict | None = None) -> Path | None:
+                     editor: dict | None = None, tour: dict | None = None) -> Path | None:
     """The project introduced, then the whole shelf of worked derivations,
     each with its own player, as `folder/index.html`.
 
@@ -656,7 +669,15 @@ def derivations_page(folder: Path, *, urls: dict | None = None,
     try_editor = try_watch = ""
     if editor is not None:
         element = "try-the-editor"
-        try_editor, try_watch = TRY.format(element=element), TRY_SCRIPT
+        if tour is not None:
+            # the tour plays on that editor: its player after the mounts, its
+            # overlay's style with the section (and no invitation to pulse -
+            # the tour is the invitation)
+            from sympy_editor.tutorial import player_css, player_html
+            try_editor = player_css() + TOUR.format(element=element)
+            try_watch = player_html(element, tour, full_page=False, stop_button=True)
+        else:
+            try_editor, try_watch = TRY.format(element=element), TRY_SCRIPT
         mounts.append(f'SympyEditor.mount(document.getElementById("{element}"), {_script_json(editor)});')
     for i, (slug, make) in enumerate(shelf.DERIVATIONS):
         history = make()
@@ -738,16 +759,21 @@ def shelf_site(out: Path, *, cache: Path | None = None, cdn: bool = False) -> Pa
                      title=NAME, head=icon, options=dict(SHOWCASE),
                      logo=build_www.app_logo())   # Pyodide from the CDN, ~0.5 MB
     (out / "editor.html").write_text(editor, encoding="utf-8")
-    # ...and the same editor embedded at the top of the page itself, sharing
-    # the copy of editor.js the viewers already carry.  Pyodide is not
-    # vendored here (`pyodide=False` above), so it comes from the CDN either
-    # way, and only once somebody edits something.
+    # ...and at the top of the front page, the tour of examples/tutorial
+    # playing on an editor of its own, sharing the copy of editor.js the
+    # viewers already carry (Pyodide comes from the CDN: `pyodide=False`
+    # above).  Without the tour's History part, which opens a view over the
+    # whole editor; with a button to stop it.  Its add-ons are all there to
+    # switch on and the tour switches on the ones it shows.  No sessions and
+    # no remembered add-ons: editor.html, on the same site, keeps the
+    # reader's own in the browser, and the tour is not to add to them.
+    from sympy import sympify
     from sympy_editor.html import build_config
-    # The same editor at the top of the front page, and the same drawer with
-    # it; Python still waits until somebody edits something (preload off).
-    live = build_config(build_www.document_with_addons(build_www.demo_expression(), enable=True),
-                        backend="pyodide", urls=urls, options=dict(SHOWCASE, preload=False))
-    derivations_page(out, urls=urls, editor_href="editor.html", editor=live)
+    from sympy_editor.tutorial import load_tutorial, without_parts
+    tour = without_parts(load_tutorial(ROOT / "examples" / "tutorial" / "tour.json"), ["history"])
+    live = build_config(build_www.document_with_addons(sympify(tour["expression"])),
+                        backend="pyodide", urls=urls, options={})
+    derivations_page(out, urls=urls, editor_href="editor.html", editor=live, tour=tour)
     return out
 
 
