@@ -379,6 +379,38 @@ def test_the_webview_shows_the_bundle_and_nothing_else():
     assert "standardizedFileURL" in swift and 'hasPrefix(root.path + "/")' in swift
 
 
+def test_the_mac_app_is_the_same_shell_in_a_window():
+    """desktop/macos: the Mac app builds the very sources of the iOS one (a
+    WKWebView is a WKWebView), with the page, the app's Python and SymPy as
+    mobile/build.py stages them.  Its interpreter is the macOS build of the
+    same release, which carries the standard library inside the framework -
+    so there is no install step, and nothing of the iOS one's."""
+    yaml = pytest.importorskip("yaml")
+    spec = yaml.safe_load((ROOT / "desktop" / "macos" / "project.yml").read_text(encoding="utf-8"))
+    target = spec["targets"]["SymPyEditor"]
+    assert target["platform"] == "macOS"
+    assert any(d.get("framework") == "Python.xcframework" and d.get("embed") for d in target["dependencies"])
+    paths = {s["path"] for s in target["sources"] if isinstance(s, dict)}
+    # the shell, shared with iOS, and the three folders the phone build stages
+    assert "../../mobile/ios/SymPyEditor/EditorView.swift" in paths
+    assert {"../../mobile/www", "../../mobile/ios/app", "../../mobile/ios/app_packages"} <= paths
+    assert "postBuildScripts" not in target                      # nothing to install: the framework has it all
+    assert target["settings"]["base"]["CODE_SIGN_ENTITLEMENTS"]
+    assert "disable-library-validation" in (ROOT / "desktop/macos/SymPyEditor/SymPyEditor.entitlements").read_text(encoding="utf-8")
+
+    # the shared sources carry their Mac branches, and the iOS ones with them
+    view = (ROOT / "mobile/ios/SymPyEditor/EditorView.swift").read_text(encoding="utf-8")
+    assert "NSViewRepresentable" in view and "UIViewRepresentable" in view
+    assert "NSWorkspace.shared.open(url)" in view
+    objc = (ROOT / "mobile/ios/SymPyEditor/PythonRuntime.m").read_text(encoding="utf-8")
+    assert "TARGET_OS_OSX" in objc and "Python.framework/Versions/Current" in objc
+
+    build = (ROOT / "desktop" / "build.py").read_text(encoding="utf-8")
+    assert "import build as mobile" in build                     # one staging, both apps
+    assert "macOS-support" in build                              # the macOS flavour of the pinned release
+    assert "mobile.build_www(cdn, native=True)" in build         # the page edits in the app's own Python
+
+
 def test_no_image_is_committed():
     """Images are drawn, not kept: `mobile/make_icons.py` makes every one of
     them from the SVGs, and a build calls it."""

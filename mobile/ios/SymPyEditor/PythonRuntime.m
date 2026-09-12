@@ -104,9 +104,18 @@ static NSString *drainError(void) {
     config.write_bytecode = 0;
     config.install_signal_handlers = 0;   // the app owns its signals, not Python
 
-    // PYTHONHOME: `python/lib/python3.x` in the bundle, put there by the
-    // "Process Python libraries" build phase (Python.xcframework/build/utils.sh).
-    wchar_t *home = Py_DecodeLocale([[resources stringByAppendingPathComponent:@"python"] UTF8String], NULL);
+    // PYTHONHOME: on iOS `python/lib/python3.x` in the bundle, put there by
+    // the "Process Python libraries" build phase (Python.xcframework/build/
+    // utils.sh).  The Mac app embeds a whole Python.framework instead, the
+    // standard library inside it, so home is the framework's current version
+    // and nothing is unpacked beside the app.
+#if TARGET_OS_OSX
+    NSString *homePath = [[NSBundle mainBundle].privateFrameworksPath
+                          stringByAppendingPathComponent:@"Python.framework/Versions/Current"];
+#else
+    NSString *homePath = [resources stringByAppendingPathComponent:@"python"];
+#endif
+    wchar_t *home = Py_DecodeLocale(homePath.UTF8String, NULL);
     status = PyConfig_SetString(&config, &config.home, home);
     PyMem_RawFree(home);
     if (!PyStatus_Exception(status)) status = PyConfig_Read(&config);

@@ -1,5 +1,10 @@
 import SwiftUI
 import WebKit
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 /// The whole app: a WKWebView showing the shared bundle (the `www` folder of
 /// the app bundle, built by mobile/build_www.py), and the Python the page
@@ -11,17 +16,30 @@ import WebKit
 /// ``PythonBridge`` below, exactly as the Android app talks to its
 /// MainActivity.PythonBridge.  Files are served through a custom URL scheme
 /// because fetch() is not available to file:// pages.
+/// The same view serves the Mac app (desktop/macos), which is this shell in a
+/// window: a WKWebView is a WKWebView, and only the wrapper differs.
+#if os(macOS)
+struct EditorView: NSViewRepresentable {
+    func makeCoordinator() -> PythonBridge { PythonBridge() }
+    func makeNSView(context: Context) -> WKWebView { Self.webView(for: context.coordinator) }
+    func updateNSView(_ view: WKWebView, context: Context) {}
+}
+#else
 struct EditorView: UIViewRepresentable {
+    func makeCoordinator() -> PythonBridge { PythonBridge() }
+    func makeUIView(context: Context) -> WKWebView { Self.webView(for: context.coordinator) }
+    func updateUIView(_ uiView: WKWebView, context: Context) {}
+}
+#endif
+
+extension EditorView {
     /// The bundle's own origin - the only one this WebView ever navigates to
     /// - and the page it opens, which is the same bundle Android loads.
     static let scheme = "app"
     static let host = "www"
     static let start = URL(string: "app://www/index.html")!
 
-    func makeCoordinator() -> PythonBridge { PythonBridge() }
-
-    func makeUIView(context: Context) -> WKWebView {
-        let bridge = context.coordinator
+    static func webView(for bridge: PythonBridge) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.setURLSchemeHandler(BundleSchemeHandler(), forURLScheme: Self.scheme)
         config.userContentController.addUserScript(
@@ -33,8 +51,9 @@ struct EditorView: UIViewRepresentable {
         web.navigationDelegate = bridge.navigation
         #if DEBUG
         // Safari's Web Inspector can attach to a debug build (Develop >
-        // Simulator): without it a page that fails is a white rectangle.
-        if #available(iOS 16.4, *) { web.isInspectable = true }
+        // Simulator, or the Mac itself): without it a page that fails is a
+        // white rectangle.
+        if #available(iOS 16.4, macOS 13.3, *) { web.isInspectable = true }
         #endif
         bridge.webView = web
         // Start the interpreter while the page loads, so the first edit does
@@ -43,8 +62,6 @@ struct EditorView: UIViewRepresentable {
         web.load(URLRequest(url: Self.start))
         return web
     }
-
-    func updateUIView(_ uiView: WKWebView, context: Context) {}
 }
 
 /// `window.SympyEditorPy` in the page: the native backend of editor.js hands
@@ -155,7 +172,11 @@ final class BundleNavigation: NSObject, WKNavigationDelegate {
             return
         }
         decisionHandler(.cancel)
+        #if os(macOS)
+        NSWorkspace.shared.open(url)
+        #else
         if UIApplication.shared.canOpenURL(url) { UIApplication.shared.open(url) }
+        #endif
     }
 }
 

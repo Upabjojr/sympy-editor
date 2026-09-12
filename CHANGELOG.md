@@ -83,6 +83,14 @@ The web site opens with all four switched on.
   on it).
 * The Android app is **SymPy Editor**, with a separate debug build
   (`org.sympy.editor.debug`) that can sit beside it.
+* A **Mac app**: `python desktop/build.py --run` builds the editor as a macOS
+  application and opens it - the same page in a window, editing in the app's
+  own CPython, with nothing to install and nothing downloaded at run time.  It
+  is the iOS app's shell in a window (the same Swift and Objective-C, a few
+  `#if os(macOS)` branches), and its interpreter is the macOS build of the
+  release the iOS app pins, which carries the standard library inside
+  `Python.framework` - so the app embeds the framework and installs nothing.
+  macOS 11 and later, Apple silicon and Intel.  See `desktop/README.md`.
 * `docs/cursor-and-selection.md` writes down what the cursor and the selection
   do, in the page, the server, the Jupyter widget and the apps alike.
 

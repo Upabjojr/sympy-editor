@@ -323,6 +323,21 @@ step - what each step changed in red and green.  Both computed on the device,
 offline.*  They are also on the live page, in context:
 **[screenshots of the apps](https://upabjojr.github.io/sympy-editor/#on-a-phone)**.
 
+### Mac app
+
+`python desktop/build.py --run` builds the editor as a Mac application and
+opens it: the same page in a window, editing in the app's own CPython.
+Nothing is installed and nothing is downloaded at run time - the interpreter,
+SymPy and the add-ons are inside the `.app` (about 180 MB), which runs on
+macOS 11 and later, on Apple silicon and Intel alike.
+
+It is the iOS app's shell in a window - the same Swift and Objective-C, with a
+few `#if os(macOS)` branches - so a fix to one is a fix to both.  The
+interpreter is the macOS build of the release the iOS app pins, which carries
+the standard library inside `Python.framework`, so the app embeds the
+framework and installs nothing.  To hand the app to someone else, sign it with
+a Developer ID certificate and notarize it; see `desktop/README.md`.
+
 ### Web app
 
 `python webapp/build.py` builds the same page as an installable, offline-capable

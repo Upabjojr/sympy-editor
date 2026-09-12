@@ -32,6 +32,12 @@ mobile/ios/app/
 mobile/ios/app_packages/
 mobile/android/gradle/wrapper/gradle-wrapper.jar
 
+# the Mac app: the Xcode project, the interpreter and the plist are generated
+# the same way (desktop/build.py); build/ is covered above
+desktop/macos/*.xcodeproj/
+desktop/macos/Python.xcframework
+desktop/macos/SymPyEditor/Info.plist
+
 # web app build
 webapp/dist/
 mobile/android/.kotlin/

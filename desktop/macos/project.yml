@@ -1,0 +1,59 @@
+# XcodeGen spec for the Mac app (brew install xcodegen) - see desktop/README.md
+#
+# The app is the iOS shell in a window: the Swift and the Objective-C are the
+# very files mobile/ios builds, with the few #if os(macOS) branches they carry,
+# and the page, the app's Python and SymPy are the folders mobile/build.py
+# stages for iOS - staged once, used by both.  Python.xcframework here is the
+# macOS build of CPython (desktop/build.py downloads it), which ships the
+# standard library inside the framework: no install step, unlike iOS.
+name: SymPyEditor
+options:
+  bundleIdPrefix: org.sympy
+  deploymentTarget:
+    macOS: "11.0"
+  createIntermediateGroups: true
+targets:
+  SymPyEditor:
+    type: application
+    platform: macOS
+    sources:
+      - path: SymPyEditor                                   # Info.plist, entitlements, Assets.xcassets
+      - path: ../../mobile/ios/SymPyEditor/EditorView.swift
+      - path: ../../mobile/ios/SymPyEditor/SymPyEditorApp.swift
+      - path: ../../mobile/ios/SymPyEditor/PythonRuntime.h
+      - path: ../../mobile/ios/SymPyEditor/PythonRuntime.m
+      - path: ../../mobile/www                              # the shared bundle, as a folder
+        type: folder
+        buildPhase: resources
+      - path: ../../mobile/ios/app                          # sympy_editor_app.py and the sympy_editor package
+        type: folder
+        buildPhase: resources
+      - path: ../../mobile/ios/app_packages                 # SymPy and mpmath
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - framework: Python.xcframework
+        embed: true
+        codeSign: true
+    info:
+      path: SymPyEditor/Info.plist
+      properties:
+        CFBundleDisplayName: SymPy Editor
+        CFBundleShortVersionString: "0.1.1"
+        CFBundleVersion: ${MACOS_BUILD_NUMBER}
+        LSApplicationCategoryType: public.app-category.education
+        NSHighResolutionCapable: true
+        NSHumanReadableCopyright: BSD-3-Clause
+    settings:
+      base:
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        PRODUCT_BUNDLE_IDENTIFIER: org.sympy.editor
+        SWIFT_OBJC_BRIDGING_HEADER: ../../mobile/ios/SymPyEditor/SymPyEditor-Bridging-Header.h
+        # The interpreter loads the standard library's extension modules out of
+        # the framework it brings, which library validation would refuse.
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_ENTITLEMENTS: SymPyEditor/SymPyEditor.entitlements
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: ${MACOS_SIGN_IDENTITY}
+        DEVELOPMENT_TEAM: ${MACOS_TEAM_ID}
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
