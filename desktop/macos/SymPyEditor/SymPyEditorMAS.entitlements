@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- What the Mac App Store asks of an app: the sandbox.  The editor reads
+       and writes nothing outside its own container - the page, the
+       interpreter and SymPy are in the bundle. -->
+  <key>com.apple.security.app-sandbox</key>
+  <true/>
+  <!-- WebKit's own processes want this even for a page served from the
+       bundle: without it the view stays blank. -->
+  <key>com.apple.security.network.client</key>
+  <true/>
+</dict>
+</plist>
