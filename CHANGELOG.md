@@ -65,6 +65,30 @@ The web site opens with all four switched on.
   to be served.
 * The plot cannot eat the machine: one sampling at a time, a redraw a frame,
   fewer points while it is slow, and it stops following rather than locking up.
+* A selection made while an app is starting is kept.  The snapshots that
+  arrive then - the session reopened, the add-ons switched on - dropped the
+  range, and the operation picked next went to the whole expression instead
+  of the terms selected; a long press whose formula was drawn again under
+  the finger selected nothing at all.
+* Edit at a caret (and typing there) opens the field on the side the caret is
+  on: left of a `+` it opened after the sign, where the other caret is.
+* "Computing..." and its Interrupt button stay in the middle of what is on
+  screen rather than of the whole editor - on a phone, whose editor with its
+  panels is taller than the screen, they sat below the fold - and stay there
+  while the page scrolls.
+* The apps can interrupt a long computation: the button the page has always
+  offered had no way to stop the app's own Python.
+* Every "?" is the same button, and an add-on's guide is laid out in the
+  columns of the editor's own guide.
+* LaTeX: `\sinh` is one command, not `\sin` followed by an `h` - which was
+  even the preferred reading - and so for `\cosh`, `\tanh` and every command
+  that begins another (`\ge` in `\geq`, `\right` in `\rightarrow`);
+  `\coth`, `\sech`, `\csch` and the inverse hyperbolic functions are
+  functions now, rather than `cot(h*x)` and the like.  The reading is shown
+  once: each ambiguity showed the whole of it again beside its menu.
+  "Replace the selected range" replaces the range, not the whole expression.
+  The parsers are built as soon as the panel is shown, not at the first
+  reading.
 
 ### Elsewhere
 
