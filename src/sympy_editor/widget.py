@@ -28,11 +28,12 @@ class SympyEditorWidget(anywidget.AnyWidget):
     >>> w.expr                            # current (edited) expression
 
     Add-ons come the way they do for a page - ``addons=`` switched on,
-    ``available=`` there to be switched on while editing - and each may be
-    named by module, by add-on name, or given as an object:
+    ``available=`` the ones to list instead of every add-on installed in
+    this kernel (``available=[]`` lists none) - and each may be named by
+    module, by add-on name, or given as an object:
 
     >>> SympyEditorWidget(sin(x), addons=["sympy_editor_plot"])      # doctest: +SKIP
-    >>> SympyEditorWidget(sin(x), available=installed_addons())      # doctest: +SKIP
+    >>> SympyEditorWidget(sin(x), available=["plot", "tree"])        # doctest: +SKIP
 
     Their Python runs in this kernel, beside the document: an add-on's own
     methods answer over the same channel as an edit, so the plot's samples

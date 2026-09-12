@@ -199,6 +199,24 @@ def test_installed_lists_entry_points_and_specs_name_objects(tmp_path, monkeypat
         load_addon(Future())
 
 
+
+def test_every_installed_addon_is_listed_unless_available_says_otherwise(tmp_path, monkeypatch):
+    """What installing an add-on gets you: every document - a widget, a page,
+    the server - lists it without being asked, switched off.  ``available=``
+    names what to list instead, and ``available=[]`` nothing (what edit() and
+    the README promise)."""
+    import sympy_editor.document as document
+    (tmp_path / "an_installed_addon.py").write_text(
+        "from sympy_editor import Addon\nclass A(Addon):\n    name = 'installed_one'\nADDON = A()\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setattr(document, "installed", lambda: {"installed_one": "an_installed_addon:ADDON"})
+    listed = lambda **kw: [a["name"] for a in Document(x, **kw).available_addons()]
+    assert listed() == ["installed_one"]                    # nothing asked for: what is installed
+    assert Document(x).snapshot()["addons"] == []           # listed, not switched on
+    assert listed(available=[]) == []                       # the editor alone
+    assert listed(available=[ADDON]) == [ADDON.name]        # only what available= names
+
+
 def test_switching_on_and_off_at_run_time():
     doc = Document(Boxed(x + y), available=[ADDON])           # known, off
     snap = doc.snapshot()

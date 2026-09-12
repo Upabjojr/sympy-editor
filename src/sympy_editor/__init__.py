@@ -108,17 +108,22 @@ def edit(expr, backend="auto", **kwargs):
     ``addons=[...]``
         switched on from the start, their panels under the formula.
     ``available=[...]``
-        listed for the reader to switch on and off while editing, from the
-        top of the drawer the **≡** button opens.  Their front ends are sent
-        when they are switched on, not before.
+        the ones to list, instead of every add-on installed in the kernel:
+        they are switched on and off from the top of the drawer the **≡**
+        button opens (their front ends are sent when they are switched on,
+        not before), and ``available=[]`` lists none.
 
     >>> edit(sin(x), addons=["sympy_editor_plot"])            # doctest: +SKIP
-    >>> edit(sin(x), available=installed_addons())            # doctest: +SKIP
+    >>> edit(sin(x), available=["plot", "tree"])              # doctest: +SKIP
 
-    With neither, the editor is the editor alone.  An add-on runs in **this**
-    kernel, so its Python - `sympy-matching` for the rewrite rules, `lark` for
-    the LaTeX reader - is the kernel's to import; one that cannot be imported
-    is listed with the reason rather than silently missing.
+    With neither, every installed add-on is listed and none is switched on.
+    Each add-on is a package of its own, so ``pip install sympy-editor`` has
+    none of them: install the ones wanted (in a checkout, ``pip install -e
+    addons/sympy_editor_plot``; none is on PyPI yet) and restart the kernel.
+    An add-on runs in **this** kernel, so its Python - `sympy-matching` for
+    the rewrite rules, `lark` for the LaTeX reader - is the kernel's to
+    import; one that cannot be imported is listed with the reason rather than
+    silently missing.
     """
     if backend not in ("auto", "kernel", "pyodide"):
         raise ValueError("backend must be 'auto', 'kernel' or 'pyodide'")

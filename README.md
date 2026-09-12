@@ -51,22 +51,34 @@ with a warning otherwise.
 
 #### Add-ons in the notebook
 
-They work here as they do anywhere else, and their Python runs in **this**
-kernel — the plot's samples are the kernel's SymPy at work:
+Each add-on is a package of its own, so `pip install sympy-editor` brings
+none of them.  Install the ones you want — none is on PyPI yet, so from a
+checkout — and restart the kernel:
+
+```
+pip install -e addons/sympy_editor_plot -e addons/sympy_editor_latex
+pip install -e addons/sympy_editor_tree -e addons/sympy_editor_matching
+```
+
+Every installed add-on is then listed at the top of the drawer the **≡**
+button opens, to switch on and off while editing, and their Python runs in
+**this** kernel — the plot's samples are the kernel's SymPy at work:
 
 ```python
 from sympy_editor import edit, installed_addons
 
+installed_addons()                               # what this kernel has
+edit(sin(x))                                     # every one listed, none on
 edit(sin(x), addons=["sympy_editor_plot"])       # on from the start
-edit(sin(x), available=installed_addons())       # listed, to switch on while editing
+edit(sin(x), available=["plot", "tree"])         # only these two listed
+edit(sin(x), available=[])                       # the editor alone
 ```
 
-`addons=` switches them on; `available=` leaves them for the reader to turn
-on and off from the top of the drawer the **≡** button opens (their front
-ends are sent when they are switched on, not before).  Each may be named by
-module, by add-on name, or given as an `Addon`.  An add-on whose Python is
-not installed in the kernel is listed with the reason rather than silently
-missing.  `examples/addons.ipynb` walks through it.
+`addons=` switches them on, `available=` says which to list instead of all of
+them; each may be named by module, by add-on name, or given as an `Addon`,
+and their front ends are sent when they are switched on, not before.  An
+add-on whose Python is not installed in the kernel is listed with the reason
+rather than silently missing.  `examples/addons.ipynb` walks through it.
 
 `on_change` is also how the editor drives another widget.
 `examples/plot_alongside.ipynb` puts a graph beside the formula — every
