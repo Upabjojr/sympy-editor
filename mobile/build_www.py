@@ -59,10 +59,10 @@ sympy-editor          BSD-3
 
 
 def notice() -> str:
-    """The bundle's NOTICE.txt: the list above, then sympy-editor's NOTICE,
-    with SymPy's licence in full (a binary copy must carry it)."""
+    """The bundle's NOTICE.txt: the list above, then sympy-editor's LICENSE,
+    which carries SymPy's licence in full (a binary copy must carry it)."""
     listed = NOTICE.format(katex=KATEX_VERSION, pyodide=PYODIDE_VERSION, sympy=SYMPY_VERSION)
-    return listed + "\n" + (HERE.parent / "NOTICE").read_text(encoding="utf-8")
+    return listed + "\n" + (HERE.parent / "LICENSE").read_text(encoding="utf-8")
 
 
 def demo_expression():

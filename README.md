@@ -602,7 +602,7 @@ Jupyter widget and the apps all follow.
 
 | Component | Licence | How it is used |
 | --- | --- | --- |
-| [SymPy](https://www.sympy.org) (Copyright (c) 2006-2023 SymPy Development Team) | BSD-3 | required: it does all the mathematics; its licence is reproduced in [`NOTICE`](NOTICE) |
+| [SymPy](https://www.sympy.org) (Copyright (c) 2006-2023 SymPy Development Team) | BSD-3 | required: it does all the mathematics; its licence follows sympy-editor's in [`LICENSE`](LICENSE) |
 | anywidget (+ ipywidgets, traitlets) | MIT / BSD-3 | optional, Jupyter widget |
 | KaTeX | MIT | loaded from a CDN by the browser (URL configurable) |
 | Pyodide | MPL-2.0 | loaded from a CDN by the browser, standalone HTML only |
@@ -610,7 +610,7 @@ Jupyter widget and the apps all follow.
 
 sympy-editor itself is BSD-3-Clause, and so are its add-ons - except the
 handwriting add-on ([`addons/sympy_editor_ink`](addons/sympy_editor_ink)), which is
-AGPL-3.0-or-later. sympy-editor is built on SymPy: see [`NOTICE`](NOTICE).
+AGPL-3.0-or-later. [`LICENSE`](LICENSE) carries SymPy's licence after sympy-editor's own.
 
 ## Development
 
