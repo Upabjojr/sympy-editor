@@ -1794,6 +1794,18 @@ var SympyEditor = (function () {
         state: function () { return self.state; },
         selected: function () { return self.selected; },
         range: function () { return self.range; },
+        /** The caret, when there is one (a caret and a selection never coexist). */
+        caret: function () { return self.caret; },
+        /** Where text typed now would go, as the editor itself would send it -
+         *  {action: "insert", path, index, left, right, attach} between the
+         *  arguments of a node, {action: "extend", path, side} next to one -
+         *  or null without a caret. */
+        insertion: function () {
+          if (!self.caret) return null;
+          var msg = self._insertMessage(self.caret, "");
+          delete msg.src;
+          return msg;
+        },
         tree: function () { return self.tree; },
         node: function (path) { return self.state && self.state.nodes ? self.state.nodes[path] || null : null; },
         select: function (path) { self.select(path); },
@@ -4107,8 +4119,12 @@ var SympyEditor = (function () {
     }
 
     _hideCaret() {
+      var had = !!this.caret;
       this.caret = null;
       if (this.caretEl.parentNode) this.caretEl.parentNode.removeChild(this.caretEl);
+      // showing one notifies the add-ons (through _applySelection); its going
+      // must too, or a panel's "Add to cursor" would outlive the caret
+      if (had && this._addons) this._addonsNotify("onSelect", this.selected, this.range);
     }
 
     /** The operator glyph under the pointer - the "+" of a sum, the "\u22c5" of a

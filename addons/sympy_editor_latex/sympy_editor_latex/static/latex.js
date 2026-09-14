@@ -138,20 +138,30 @@ SympyEditor.registerAddon("latex", {
       updateInsert();
     }
 
-    function updateInsert() {
-      var ok = !!(last && last.ok);
-      insertAll.disabled = !ok;
-      var sel = api.selected(), r = api.range();
-      insertSel.disabled = !ok || (!sel && !r) || sel === "/";
-      insertSel.textContent = r ? "Replace the selected range" : "Replace the selection";
+    // Where the first button puts the reading: over the selection, at the
+    // caret, or after the whole formula when there is neither.
+    function target() {
+      if (api.range() || api.selected()) return "selection";
+      return api.insertion && api.insertion() ? "caret" : "end";
     }
 
-    function insert(path) {
+    function updateInsert() {
+      var ok = !!(last && last.ok), where = target();
+      insertAll.disabled = !ok;
+      insertSel.disabled = !ok;
+      insertSel.textContent = where === "caret" ? "Add to cursor" : where === "end" ? "Add to end"
+                            : api.range() ? "Replace the selected range" : "Replace the selection";
+    }
+
+    function insert(where) {
       if (!last || !last.ok) return;
       var text = input.value.trim();
-      var payload = { latex: text, choices: choices, constants: constants, path: path };
-      var r = api.range();
-      if (path !== "/" && r) { payload.path = r.parent; payload.children = api.editor._rangeIndices(); }
+      var payload = { latex: text, choices: choices, constants: constants, path: "/" };
+      var r = api.range(), sel = api.selected();
+      if (where === "selection" && r) { payload.path = r.parent; payload.children = api.editor._rangeIndices(); }
+      else if (where === "selection" && sel) payload.path = sel;
+      else if (where === "caret") payload.caret = api.insertion();
+      else if (where === "end") payload.end = true;
       api.call("insert", payload).then(function () {
         note.textContent = "Inserted.";
         note.className = "ltx-note";
@@ -170,11 +180,11 @@ SympyEditor.registerAddon("latex", {
     api.call("warm", { background: true }, { quiet: true }).then(null, function () {});
     input.addEventListener("keydown", function (ev) {
       ev.stopPropagation();                        // the editor's keys are not for the box
-      if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); insert(api.selected() && api.selected() !== "/" ? api.selected() : "/"); }
+      if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); insert(target()); }       // what the first button says
     });
     readBtn.addEventListener("click", read);
-    insertSel.addEventListener("click", function () { insert(api.range() ? api.range().parent : api.selected()); });
-    insertAll.addEventListener("click", function () { insert("/"); });
+    insertSel.addEventListener("click", function () { insert(target()); });
+    insertAll.addEventListener("click", function () { insert("whole"); });
 
     return {
       element: element,
@@ -184,7 +194,7 @@ SympyEditor.registerAddon("latex", {
         + "<li>Where the text can be read in several ways — <code>f(x)</code> applied or multiplied, how far <code>\\sin x \\cos y</code> reaches — a menu shows every reading of that part, the usual one chosen to begin with; pick another and the whole follows.</li>"
         + "<li>Names that usually mean a constant — <code>\\pi</code>, <code>e</code>, <code>i</code>, <code>\\gamma</code> — are switches: the constant, or a plain symbol of that name.</li>"
         + "<li>While you type, a text that stops in the middle of an expression (<code>\\frac{x</code>, <code>x +</code>) or of a command (<code>\\fr</code>) is only <i>not finished yet</i>, not an error: the last reading stays, dimmed, until the text reads again.</li>"
-        + "<li><b>Replace the selection</b> puts the reading over what is selected (a node or a range); <b>Replace the whole expression</b> makes it the formula. <kbd>Ctrl</kbd>+<kbd>Enter</kbd> in the box replaces the selected node when there is one, the whole expression otherwise.</li>"
+        + "<li><b>Replace the selection</b> puts the reading over what is selected (a node or a range); with a cursor in the formula instead the button is <b>Add to cursor</b>, and with neither <b>Add to end</b>: the reading goes in as if typed there - multiplied, or added when it begins with + or -. <b>Replace the whole expression</b> makes it the formula. <kbd>Ctrl</kbd>+<kbd>Enter</kbd> in the box does what the first button says.</li>"
         + "</ul></section>",
       onSelect: function () { updateInsert(); },
       destroy: function () { clearTimeout(timer); }

@@ -188,6 +188,39 @@ def test_insert_over_a_range_replaces_only_the_range():
     assert not snap.get("error") and doc.expr == x**3 + y
 
 
+
+def test_a_reading_goes_to_the_caret_or_after_the_formula():
+    """Without a selection the first button is "Add to cursor" (with a caret)
+    or "Add to end" (without one): the reading goes in as if typed there -
+    a new argument between two, multiplied next to a node, added to it when
+    the LaTeX begins with + or -."""
+    def put(doc, **payload):
+        snap = doc.handle(dict(payload, action="addon", addon="latex", method="insert"))
+        assert not snap.get("error"), snap["error"]
+
+    doc = Document(x + y, addons=[ADDON])
+    put(doc, latex="z", end=True)
+    assert doc.expr == (x + y) * z
+    doc.undo()
+    put(doc, latex="+ z", end=True)
+    assert doc.expr == x + y + z
+    doc.undo()
+    put(doc, latex="-2", end=True)
+    assert doc.expr == x + y - 2
+    doc.undo()
+    # a caret between the two terms: a new term
+    put(doc, latex=r"\frac{1}{2}", caret={"action": "insert", "path": "/", "index": 1, "left": 0, "right": 1, "attach": "left"})
+    assert doc.expr == x + y + Rational(1, 2)
+    doc.undo()
+    # a caret next to a node: multiplied after it, added before it with a sign
+    xp = next(p for p, n in doc.snapshot()["nodes"].items() if n["src"] == "x")
+    put(doc, latex="z", caret={"action": "extend", "path": xp, "side": "after"})
+    assert doc.expr == x * z + y
+    doc.undo()
+    put(doc, latex="+ z", caret={"action": "extend", "path": xp, "side": "before"})
+    assert doc.expr == x + y + z
+
+
 def test_a_command_is_not_read_inside_a_longer_one():
     r"""\sinh x was read as sin(h*x) - \sin running into the letter h - and
     that reading came first; the panel showed two menus over the same

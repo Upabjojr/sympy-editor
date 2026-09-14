@@ -104,6 +104,7 @@ def test_the_area_grows_scrolls_undoes_and_goes_full_screen():
             assert _wait(lambda: src.inner_text() == "sin(x)*cos(y) + pi")
             assert page.locator(".se-addon-ink .ink-point select").count() >= 1
             assert page.locator(".se-addon-ink .ink-const input").count() == 1
+            assert page.locator(".se-addon-ink .ink-insert").inner_text() == "Add to end"    # neither a selection nor a cursor
             g = page.evaluate(geometry)
             assert g["cw"] == g["w"] and page.locator(".se-addon-ink .ink-scroll-right").is_hidden()
             # ink near the right edge: room beyond it, and the strip to scroll there

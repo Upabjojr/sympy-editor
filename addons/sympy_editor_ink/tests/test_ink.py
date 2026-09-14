@@ -83,6 +83,13 @@ def test_a_reading_carries_its_options_and_an_insert_follows_the_picks():
     assert str(doc.expr) == "pi + sin(x*cos(y))" and "pi" not in [str(a) for a in doc.expr.atoms() if a.is_number]
 
 
+
+def test_a_reading_goes_after_the_formula_when_nothing_is_selected():
+    doc = Document(x, addons=[ADDON])
+    doc.handle({"action": "addon", "addon": "ink", "method": "insert", "latex": "+ y", "end": True})
+    assert doc.expr == x + y
+
+
 def test_a_missing_model_is_said_not_crashed_on(tmp_path):
     missing = StrokeRecognizer(mathocr=tmp_path)
     status = missing.status()

@@ -31,7 +31,10 @@ SympyEditor.registerAddon("ink", (function () {
       '<path transform="rotate(' + deg + ' 8 8)" fill="none" stroke="currentColor" stroke-width="1.8" ' +
       'stroke-linecap="round" stroke-linejoin="round" d="M3.5 10.2 8 5.7l4.5 4.5"/></svg>';
   }
-  var EDGE = 40;                    // px on screen: ink this near the right or bottom edge makes room beyond it
+  // Ink nearing the right or bottom edge makes room beyond it: within a
+  // quarter of the box's width (height) of it, on screen, and never less than
+  // EDGE px - early enough that the pen need not reach the very edge first.
+  var EDGE = 60;
   var MIN_ZOOM = 0.5, MAX_ZOOM = 4;
   var MAX_W = 6000, MAX_H = 4000;   // px: as far as the canvas grows
 
@@ -121,8 +124,10 @@ SympyEditor.registerAddon("ink", (function () {
       }
       function grow(x, y) {               // room beyond ink that nears the right or bottom edge
         var w = width, hh = height;
-        if (x > width - EDGE / zoom) w = Math.min(MAX_W, Math.ceil(x + Math.max(160, pad.clientWidth * 0.6) / zoom));
-        if (y > height - EDGE / zoom) hh = Math.min(MAX_H, Math.ceil(y + Math.max(120, pad.clientHeight * 0.6) / zoom));
+        var nearX = Math.max(EDGE, pad.clientWidth * 0.25) / zoom, nearY = Math.max(EDGE, pad.clientHeight * 0.25) / zoom;
+        // past the margin, and room beyond it: the next point does not grow it again
+        if (x > width - nearX) w = Math.min(MAX_W, Math.ceil(x + nearX + Math.max(160, pad.clientWidth * 0.6) / zoom));
+        if (y > height - nearY) hh = Math.min(MAX_H, Math.ceil(y + nearY + Math.max(120, pad.clientHeight * 0.6) / zoom));
         if (w > width || hh > height) { width = Math.max(width, w); height = Math.max(height, hh); applySize(); }
       }
       function growToFit() {
@@ -390,7 +395,7 @@ SympyEditor.registerAddon("ink", (function () {
       });
       field.addEventListener("keydown", function (ev) {
         ev.stopPropagation();                        // the editor's keys are not for the box
-        if (ev.key === "Enter") { ev.preventDefault(); insert(api.range() || (api.selected() && api.selected() !== "/") ? "selection" : "whole"); }
+        if (ev.key === "Enter") { ev.preventDefault(); insert(target()); }       // what the first button says
       });
 
       function show(reading) {
@@ -433,12 +438,18 @@ SympyEditor.registerAddon("ink", (function () {
       function latexBox() {
         return api.editor && api.editor.root ? api.editor.root.querySelector(".se-addon-latex .ltx-input") : null;
       }
+      // Where the first button puts the reading: over the selection, at the
+      // caret, or after the whole formula when there is neither.
+      function target() {
+        if (api.range() || api.selected()) return "selection";
+        return api.insertion && api.insertion() ? "caret" : "end";
+      }
       function updateInsert() {
-        var ok = !!(last && last.ok);
-        var sel = api.selected(), r = api.range();
+        var ok = !!(last && last.ok), where = target();
         insertAll.disabled = !ok;
-        insertSel.disabled = !ok || (!sel && !r) || sel === "/";
-        insertSel.textContent = r ? "Replace the selected range" : "Replace the selection";
+        insertSel.disabled = !ok;
+        insertSel.textContent = where === "caret" ? "Add to cursor" : where === "end" ? "Add to end"
+                              : api.range() ? "Replace the selected range" : "Replace the selection";
         toLatex.hidden = full || !latexBox() || !field.value.trim();
       }
       function updateSummary() {
@@ -454,7 +465,9 @@ SympyEditor.registerAddon("ink", (function () {
         var payload = { latex: field.value, path: "/", choices: picks.choices, constants: picks.constants };
         var r = api.range(), sel = api.selected();
         if (which === "selection" && r) { payload.path = r.parent; payload.children = api.editor._rangeIndices(); }
-        else if (which === "selection" && sel && sel !== "/") payload.path = sel;
+        else if (which === "selection" && sel) payload.path = sel;
+        else if (which === "caret") payload.caret = api.insertion();
+        else if (which === "end") payload.end = true;
         api.call("insert", payload).then(function () {
           setFull(false);                          // the formula it went into, in sight
           if (!clearInk()) reset();                // the ink goes too - Undo brings it back
@@ -466,7 +479,7 @@ SympyEditor.registerAddon("ink", (function () {
           updateSummary();
         });
       }
-      insertSel.addEventListener("click", function () { insert("selection"); });
+      insertSel.addEventListener("click", function () { insert(target()); });
       insertAll.addEventListener("click", function () { insert("whole"); });
       toLatex.addEventListener("click", function () {
         var box = latexBox();
@@ -521,11 +534,11 @@ SympyEditor.registerAddon("ink", (function () {
         title: "Handwriting",
         help: "<section><h3>Writing a formula by hand</h3><ul>"
           + "<li>Write in the area with a pen, a finger or the mouse. A moment after the pen lifts, what is written is read; <b>Read</b> reads it at once.</li>"
-          + "<li>Near the right or the bottom edge the area makes room beyond it; the strips along its edges scroll it, and so does the wheel.</li>"
+          + "<li>Nearing the right or the bottom edge, the area makes room beyond it; the strips along its edges scroll it, and so does the wheel.</li>"
           + "<li>Two fingers never write: pinch to zoom the area in or out, drag with two fingers to move it about (a pinch on a trackpad zooms too).</li>"
           + "<li><b>Undo</b> takes back the last stroke - or the clearing, or the ink an insertion took - and <b>Redo</b> puts it back; <b>Clear</b> starts again.</li>"
           + "<li>The best reading comes first and the others after it: pick the one you wrote. Its LaTeX is in the box, to correct; the line under it is what SymPy gets, with a menu for each part that can be read more than one way and a switch for each constant name.</li>"
-          + "<li><b>Replace the selection</b> puts it over what is selected (a node or a range); <b>Replace the whole expression</b> makes it the formula. Enter in the box does the first when something is selected, the second otherwise.</li>"
+          + "<li><b>Replace the selection</b> puts it over what is selected (a node or a range); with a cursor in the formula instead the button is <b>Add to cursor</b>, and with neither <b>Add to end</b>: the reading goes in as if typed there - multiplied, or added when it begins with + or -. <b>Replace the whole expression</b> makes it the formula. Enter in the box does what the first button says.</li>"
           + "<li>The corner button gives the writing area the whole screen, the tools on top and the readings in a sheet at the bottom that folds away; Esc or the button comes back, and so does inserting.</li>"
           + "<li>The reading is done by math-ocr's stroke model. It reads one formula at a time, and mixes up look-alike glyphs most (<code>1</code> and <code>|</code>, <code>V</code> and <code>v</code>).</li>"
           + "</ul></section>",

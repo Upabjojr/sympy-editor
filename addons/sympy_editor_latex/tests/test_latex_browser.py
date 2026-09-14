@@ -74,8 +74,9 @@ def test_the_panel_reads_offers_choices_and_inserts():
         as_symbol = str(Symbol("pi") + sin(x * cos(y)))                                   # another pi, printed elsewhere
         page.wait_for_function("s => document.querySelector('.ltx-src').textContent === s", arg=as_symbol)
         assert not page.locator(".ltx-const input").is_checked()
-        # nothing selected: only the whole expression can be replaced
-        assert page.locator(".ltx-insert").is_disabled() and not page.locator(".ltx-insert-all").is_disabled()
+        # nothing selected and no cursor: the first button adds after the formula
+        assert page.locator(".ltx-insert").inner_text() == "Add to end"
+        assert not page.locator(".ltx-insert").is_disabled() and not page.locator(".ltx-insert-all").is_disabled()
         page.locator(".ltx-insert-all").click()
         page.wait_for_function("s => document.querySelector('.se-source').textContent === s", arg=as_symbol)
         assert doc.expr == Symbol("pi") + sin(x * cos(y)) and pi not in doc.expr.atoms()
@@ -116,6 +117,58 @@ def test_the_panel_reads_offers_choices_and_inserts():
         browser.close()
     srv.shutdown()
     srv.server_close()
+
+
+
+def test_the_first_button_adds_at_the_cursor_or_at_the_end():
+    """With a selection it replaces the selection; with a cursor in the
+    formula it is "Add to cursor", and with neither "Add to end" - the
+    reading going in as if typed there."""
+    z = Symbol("z")
+    doc = Document(x + y, addons=[ADDON])
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with playwright.sync_playwright() as p:
+            try:
+                browser = p.chromium.launch()
+            except Exception as exc:
+                pytest.skip(f"chromium not available: {exc}")
+            page = browser.new_page()
+            errors = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.goto(srv.url)
+            page.wait_for_selector(".se-addon-latex .ltx-input", timeout=30000)
+            ed = "document.querySelector('.sympy-editor').__sympyEditor"
+            first = page.locator(".se-addon-latex .ltx-insert")
+            source = "document.querySelector('.se-source').textContent"
+            page.locator(".ltx-input").fill("z")
+            page.wait_for_function("document.querySelector('.ltx-src').textContent === 'z'")
+            assert first.inner_text() == "Add to end" and not first.is_disabled()
+            first.click()
+            page.wait_for_function(source + " === 'z*(x + y)'")
+            assert doc.expr == z * (x + y)
+            page.evaluate(ed + ".send({action: 'undo'})")
+            page.wait_for_function(source + " === 'x + y'")
+            # a cursor between the two terms: "Add to cursor", a new term there
+            page.evaluate("() => { const e = %s; const pos = e._caretPositions().find(q => !q.gap.extend && q.gap.path === '/' "
+                          "&& q.gap.leftEl && q.gap.rightEl); e._showCaret(pos.gap, pos.x); }" % ed)
+            page.wait_for_function("document.querySelector('.se-addon-latex .ltx-insert').textContent === 'Add to cursor'")
+            first.click()
+            page.wait_for_function(source + " === 'x + y + z'")
+            assert doc.expr == x + y + z
+            # a selection: replaced
+            xp = next(path for path, n in doc.snapshot()["nodes"].items() if n["src"] == "x")
+            page.evaluate("p => %s.select(p)" % ed, xp)
+            page.wait_for_function("document.querySelector('.se-addon-latex .ltx-insert').textContent === 'Replace the selection'")
+            # nothing selected and no cursor: the end again
+            page.evaluate(ed + ".select(null)")
+            page.wait_for_function("document.querySelector('.se-addon-latex .ltx-insert').textContent === 'Add to end'")
+            assert errors == []
+            browser.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
 
 
 def test_typing_goes_on_through_a_slow_reading_and_unfinished_text_is_no_error():

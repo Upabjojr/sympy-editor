@@ -106,19 +106,52 @@ class LatexAddon(Addon):
             result = self.read(doc, payload)
             if not result.get("ok"):
                 raise ValueError(result.get("error") or "This LaTeX could not be read")
-            expr: Basic = result["expr"]
-            path = str(payload.get("path") or "/")
-            children = payload.get("children")
-            if children:
-                # a range (some terms of a sum, factors of a product): those
-                # alone - the whole expression was replaced, the range ignored
-                doc.replace(path, expr, children=[int(i) for i in children])
-            elif path == "/":
-                doc.set(expr)
-            else:
-                doc.replace(path, expr)
+            self.put(doc, result["expr"], payload, str(payload.get("latex", "")))
             return None
         raise ValueError(f"The LaTeX add-on has no method {method!r}")
+
+    @staticmethod
+    def put(doc, expr: Basic, payload: Dict[str, Any], text: str = "") -> None:
+        """Put a reading into ``doc`` where ``payload`` says: at the caret
+        (``caret``, the editor's own description of it: ``{"action":
+        "insert", "path", "index", "left", "right", "attach"}`` between the
+        arguments of a node, ``{"action": "extend", "path", "side"}`` next to
+        one); after the whole formula (``end``); over the range ``children``
+        of the node at ``path``; or over the node at ``path`` - the whole
+        formula for ``"/"``.  The handwriting add-on puts its readings here
+        too.
+
+        At a caret or at the end the reading goes in as if it had been typed
+        there: between two arguments as a new one (a term of a sum, a factor
+        of a product), and next to a node multiplied by it - or added to it
+        when the LaTeX begins with + or - (``text``), as typing ``+ 1`` adds."""
+        caret = payload.get("caret") if isinstance(payload.get("caret"), dict) else None
+        if caret is not None and caret.get("action") == "insert":
+            doc.insert(str(caret.get("path") or "/"), int(caret.get("index") or 0), expr,
+                       left=caret.get("left"), right=caret.get("right"), attach=caret.get("attach"))
+            return
+        if caret is not None or payload.get("end"):
+            path = str((caret or {}).get("path") or "/")
+            after = str((caret or {}).get("side") or "after") == "after"
+            node = doc.get(path)
+            if str(text).lstrip()[:1] in ("+", "-"):
+                combined = node + expr if after else expr + node
+            else:
+                combined = node * expr if after else expr * node
+            if path == "/":
+                doc.set(combined)
+            else:
+                doc.replace(path, combined)
+            return
+        path = str(payload.get("path") or "/")
+        children = payload.get("children")
+        if children:
+            # a range (some terms of a sum, factors of a product): those alone
+            doc.replace(path, expr, children=[int(i) for i in children])
+        elif path == "/":
+            doc.set(expr)
+        else:
+            doc.replace(path, expr)
 
     def describe(self, method: str, payload: Dict[str, Any]):
         if method == "insert":

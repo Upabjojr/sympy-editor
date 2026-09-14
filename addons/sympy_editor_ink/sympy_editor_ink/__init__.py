@@ -93,15 +93,8 @@ class InkAddon(Addon):
             res = self._read(doc, str(payload.get("latex", "")), self._picks(payload))
             if not res.get("ok"):
                 raise ValueError(res.get("error") or "This could not be read")
-            expr: Basic = res["expr"]
-            path = str(payload.get("path") or "/")
-            children = payload.get("children")
-            if children:
-                doc.replace(path, expr, children=[int(i) for i in children])
-            elif path == "/":
-                doc.set(expr)
-            else:
-                doc.replace(path, expr)
+            # where the LaTeX panel would put it: the selection, the caret, the end
+            self._latex().put(doc, res["expr"], payload, str(payload.get("latex", "")))
             return None
         raise ValueError(f"The handwriting add-on has no method {method!r}")
 
