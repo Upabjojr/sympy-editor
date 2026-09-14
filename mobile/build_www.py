@@ -58,6 +58,13 @@ sympy-editor          BSD-3
 """
 
 
+def notice() -> str:
+    """The bundle's NOTICE.txt: the list above, then sympy-editor's NOTICE,
+    with SymPy's licence in full (a binary copy must carry it)."""
+    listed = NOTICE.format(katex=KATEX_VERSION, pyodide=PYODIDE_VERSION, sympy=SYMPY_VERSION)
+    return listed + "\n" + (HERE.parent / "NOTICE").read_text(encoding="utf-8")
+
+
 def demo_expression():
     x, y, n = symbols("x y n")
     f = Function("f")
@@ -90,7 +97,7 @@ def vendor(out: Path, cache: Path, pyodide: bool = True) -> dict:
     if not pyodide:
         shutil.rmtree(out / "vendor" / "pyodide", ignore_errors=True)     # a leftover from an earlier build
         (out / "vendor" / "NOTICE.txt").write_text(
-            NOTICE.format(katex=KATEX_VERSION, pyodide=PYODIDE_VERSION, sympy=SYMPY_VERSION)
+            notice()
             .replace("Pyodide", "(not vendored here) Pyodide"), encoding="utf-8")
         return {"katexJs": "vendor/katex/katex.min.js", "katexCss": "vendor/katex/katex.min.css"}
 
@@ -111,7 +118,7 @@ def vendor(out: Path, cache: Path, pyodide: bool = True) -> dict:
         fetch(pyodide_base + file_name, pdir / file_name, cache)
     wheel = SYMPY_WHEEL.rsplit("/", 1)[1]
     fetch(SYMPY_WHEEL, pdir / wheel, cache)
-    (out / "vendor" / "NOTICE.txt").write_text(NOTICE.format(katex=KATEX_VERSION, pyodide=PYODIDE_VERSION, sympy=SYMPY_VERSION), encoding="utf-8")
+    (out / "vendor" / "NOTICE.txt").write_text(notice(), encoding="utf-8")
     return {
         "katexJs": "vendor/katex/katex.min.js",
         "katexCss": "vendor/katex/katex.min.css",

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (c) 2026 Francesco Bonazzi
 """A sympy-editor add-on: write a formula by hand.
 
 A panel with a writing area under the formula.  What is written there - with a

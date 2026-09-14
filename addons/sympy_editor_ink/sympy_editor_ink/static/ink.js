@@ -1,4 +1,7 @@
 /*
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ * Copyright (c) 2026 Francesco Bonazzi
+ *
  * sympy-editor add-on "ink": write a formula by hand.
  *
  * A writing area under the formula: a box of its own size that scrolls, over a

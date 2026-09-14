@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (c) 2026 Francesco Bonazzi
 """The local server with the handwriting panel on, to try it in a browser.
 
     python addons/sympy_editor_ink/serve.py                          # opens the page

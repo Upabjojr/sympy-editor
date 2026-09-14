@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later
+ * Copyright (c) 2026 Francesco Bonazzi */
 /* The handwriting panel, scoped under the box the editor gives the add-on. */
 .se-addon-ink .ink-panel { display: flex; flex-direction: column; gap: 0.4rem; font-size: 12px; }
 .se-addon-ink .ink-bar, .se-addon-ink .ink-actions, .se-addon-ink .ink-cands { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }

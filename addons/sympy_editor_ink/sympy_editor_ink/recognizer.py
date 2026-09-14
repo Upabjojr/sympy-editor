@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (c) 2026 Francesco Bonazzi
 """math-ocr's stroke model, run beside the editor's Python.
 
 The model, and the code that turns pen strokes into its input, live in the

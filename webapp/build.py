@@ -536,6 +536,7 @@ def doc_pages(folder: Path) -> None:
     verbatim.  The pages a store listing and a curious visitor both ask
     for, kept where the site is built so a rebuild never loses them."""
     licence = (ROOT / "LICENSE").read_text(encoding="utf-8")
+    notice = (ROOT / "NOTICE").read_text(encoding="utf-8")      # SymPy's licence, with the word about it
     (folder / "LICENSE.txt").write_text(licence, encoding="utf-8")
     card = lambda icon, title, body: f'<section class="card">{DOC_ICONS[icon]}<div><h2>{title}</h2>{body}</div></section>'
     (folder / "license.html").write_text(DOC_PAGE.replace("\\u2014", "\u2014").replace("\\u2190", "\u2190").format(
@@ -546,9 +547,14 @@ def doc_pages(folder: Path) -> None:
 not &mdash; as long as the copyright notice travels with it, and without
 using the author's name to promote what you make from it. It comes with no
 warranty. The short version is not the licence; the licence is:</p>""")
-             + f'<pre class="licence">{html.escape(licence)}</pre>',
+             + f'<pre class="licence">{html.escape(licence)}</pre>'
+             + card("scale", "Built on SymPy",
+                    """<p>The mathematics is <a href="https://www.sympy.org">SymPy</a>'s, and the
+editor carries a copy of it. SymPy is Copyright &copy; 2006-2023 SymPy Development
+Team, free software under its own BSD licence:</p>""")
+             + f'<pre class="licence">{html.escape(notice)}</pre>',
         footer='The same text as a plain file: <a href="LICENSE.txt">LICENSE.txt</a>. '
-               'The rendering (KaTeX) and the in-browser Python (Pyodide, SymPy) have free licences of their own, '
+               'The rendering (KaTeX) and the in-browser Python (Pyodide) have free licences of their own, '
                'listed in <a href="https://github.com/Upabjojr/sympy-editor">the repository</a>.'),
         encoding="utf-8")
     cards = "".join(card(icon, title, body) for icon, title, body in PRIVACY_CARDS)
