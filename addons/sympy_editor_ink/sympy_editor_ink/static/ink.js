@@ -44,6 +44,27 @@ SympyEditor.registerAddon("ink", (function () {
   // Ink nearing the right or bottom edge makes room beyond it: within a
   // quarter of the box's width (height) of it, on screen, and never less than
   // EDGE px - early enough that the pen need not reach the very edge first.
+  // The tools' icons, drawn as the editor draws its own (16 x 16, the text's
+  // colour, round ends): a glyph would come from whichever font has it.
+  var TOOL_PATHS = {
+    undo: "M6 3.4 2.9 6.5 6 9.6M3.2 6.5h6.4a3.7 3.7 0 0 1 0 7.4H6.8",
+    redo: "M10 3.4l3.1 3.1L10 9.6M12.8 6.5H6.4a3.7 3.7 0 0 0 0 7.4h2.8",
+    erase: "M2.7 10.3 8.9 4.1a1.3 1.3 0 0 1 1.8 0l2.3 2.3a1.3 1.3 0 0 1 0 1.8l-5 5H5.4ZM5.8 7.2l4 4M7.9 13.2h5.6",
+    clear: "M2.9 4.5h10.2M6.2 4.5V3.1h3.6v1.4M4.3 4.5l.7 8.7a1 1 0 0 0 1 .9h4a1 1 0 0 0 1-.9l.7-8.7M6.9 6.9v4.7M9.1 6.9v4.7",
+    read: "M3 2.8h10a1.2 1.2 0 0 1 1.2 1.2v8a1.2 1.2 0 0 1-1.2 1.2H3A1.2 1.2 0 0 1 1.8 12V4A1.2 1.2 0 0 1 3 2.8ZM5.2 5.5h5.6M8 5.5v5.2"
+  };
+  // `size`: pixels, for the guide - which the panel's stylesheet does not reach
+  function toolIcon(name, size) {
+    var d = name === "full" ? "M2.8 6.2V2.8h3.4M9.8 2.8h3.4v3.4M13.2 9.8v3.4H9.8M6.2 13.2H2.8V9.8" : TOOL_PATHS[name];
+    var dims = size ? ' width="' + size + '" height="' + size + '" style="vertical-align: -0.2em"' : "";
+    return '<svg class="ink-icon" viewBox="0 0 16 16"' + dims + ' aria-hidden="true" focusable="false">' +
+      '<path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="' + d + '"/></svg>';
+  }
+  function toolButton(h, name, title, extra) {
+    var b = h("button", Object.assign({ type: "button", class: "ink-tool ink-" + name, title: title, "aria-label": title }, extra || {}));
+    b.innerHTML = toolIcon(name);
+    return b;
+  }
   var EDGE = 60;
   var MIN_ZOOM = 0.5, MAX_ZOOM = 4;
   var MAX_W = 6000, MAX_H = 4000;   // px: as far as the canvas grows
@@ -68,12 +89,11 @@ SympyEditor.registerAddon("ink", (function () {
         strips[dir] = b;
         stage.appendChild(b);
       });
-      var undoBtn = h("button", { type: "button", class: "ink-undo", title: "Take back the last stroke (or the clearing)", disabled: "" }, ["Undo"]);
-      var redoBtn = h("button", { type: "button", class: "ink-redo", title: "Put back what Undo took", disabled: "" }, ["Redo"]);
-      var eraseBtn = h("button", { type: "button", class: "ink-erase", "aria-pressed": "false",
-        title: "Erase: what the pen, the finger or the mouse passes over goes, one stroke at a time (Undo brings it back)" }, ["Erase"]);
-      var clearBtn = h("button", { type: "button", class: "ink-clear", title: "Start again (Undo brings it back)", disabled: "" }, ["Clear"]);
-      var readBtn = h("button", { type: "button", class: "ink-read", title: "Read what is written, now" }, ["Read"]);
+      var undoBtn = toolButton(h, "undo", "Undo: take back the last stroke, erasing or clearing", { disabled: "" });
+      var redoBtn = toolButton(h, "redo", "Redo: put back what Undo took", { disabled: "" });
+      var eraseBtn = toolButton(h, "erase", "Erase: what the pen, the finger or the mouse passes over goes (press again to write)", { "aria-pressed": "false" });
+      var clearBtn = toolButton(h, "clear", "Clear: take all the ink away (Undo brings it back)", { disabled: "" });
+      var readBtn = toolButton(h, "read", "Read: read what is written now");
       var bar = h("div", { class: "ink-bar" }, [undoBtn, redoBtn, eraseBtn, clearBtn, readBtn]);
 
       var note = h("div", { class: "ink-note", "aria-live": "polite" });
@@ -644,15 +664,20 @@ SympyEditor.registerAddon("ink", (function () {
       return {
         element: element,
         title: "Handwriting",
-        help: "<section><h3>Writing a formula by hand</h3><ul>"
-          + "<li>Write in the area with a pen, a finger or the mouse. A moment after the pen lifts, what is written is read; <b>Read</b> reads it at once.</li>"
+        help: "<section><h3>The tools</h3><ul>"
+          + "<li>" + toolIcon("undo", 16) + " <b>Undo</b> takes back the last stroke - or the erasing, the clearing, the ink an insertion took.</li>"
+          + "<li>" + toolIcon("redo", 16) + " <b>Redo</b> puts back what Undo took.</li>"
+          + "<li>" + toolIcon("erase", 16) + " <b>Erase</b> is a switch: while it is on, the pen, the finger or the mouse takes away every stroke it passes over instead of writing. Press it again to write. A pen turned round erases too.</li>"
+          + "<li>" + toolIcon("clear", 16) + " <b>Clear</b> takes all the ink away; Undo brings it back.</li>"
+          + "<li>" + toolIcon("read", 16) + " <b>Read</b> reads what is written now, without waiting for the pause.</li>"
+          + "<li>" + toolIcon("full", 16) + " <b>Full screen</b>, in the area's corner: the writing area as large as the screen, the tools on top and the readings in a sheet at the bottom that folds away. Esc or the same button comes back, and so does inserting.</li>"
+          + "</ul></section>"
+          + "<section><h3>Writing a formula by hand</h3><ul>"
+          + "<li>Write in the area with a pen, a finger or the mouse. A moment after the pen lifts, what is written is read.</li>"
           + "<li>Nearing the right or the bottom edge, the area makes room beyond it; the strips along its edges scroll it, and so does the wheel.</li>"
           + "<li>Two fingers never write: pinch to zoom the area in or out, drag with two fingers to move it about (a pinch on a trackpad zooms too).</li>"
-          + "<li><b>Erase</b> turns the pen, the finger or the mouse into an eraser: every stroke it passes over goes (a pen turned round erases too). Press it again to write.</li>"
-          + "<li><b>Undo</b> takes back the last stroke - or the clearing, or the ink an insertion took - and <b>Redo</b> puts it back; <b>Clear</b> starts again.</li>"
           + "<li>The best reading comes first and the others after it: pick the one you wrote. Its LaTeX is in the box, to correct; the line under it is what SymPy gets, with a menu for each part that can be read more than one way and a switch for each constant name.</li>"
           + "<li><b>Replace the selection</b> puts it over what is selected (a node or a range); with a cursor in the formula instead the button is <b>Add to cursor</b>, and with neither <b>Add to end</b>: the reading goes in as if typed there - multiplied, or added when it begins with + or -. <b>Replace the whole expression</b> makes it the formula. Enter in the box does what the first button says. Either way the page goes back up to the formula.</li>"
-          + "<li>The corner button gives the writing area the whole screen, the tools on top and the readings in a sheet at the bottom that folds away; Esc or the button comes back, and so does inserting.</li>"
           + "<li>The reading is done by math-ocr's stroke model. It reads one formula at a time, and mixes up look-alike glyphs most (<code>1</code> and <code>|</code>, <code>V</code> and <code>v</code>).</li>"
           + "</ul></section>",
         onSelect: function () { updateInsert(); },

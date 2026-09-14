@@ -97,6 +97,19 @@ def test_the_area_grows_scrolls_undoes_and_goes_full_screen():
                 page.mouse.up()
 
             strokes = lambda: int(panel.get_attribute("data-strokes"))
+            # the tools are icons, each named for a tooltip and a screen reader, and explained in the guide
+            tools = page.locator(".se-addon-ink .ink-bar button")
+            assert tools.count() == 5
+            for i in range(5):
+                assert tools.nth(i).inner_text().strip() == "" and tools.nth(i).locator("svg").count() == 1
+                assert tools.nth(i).get_attribute("aria-label")
+            page.locator(".se-addon-ink .se-addon-help").click()
+            guide = page.locator(".se-help-view")
+            for name in ("Undo", "Redo", "Erase", "Clear", "Read", "Full screen"):
+                assert name in guide.inner_text(), name
+            assert guide.locator("svg.ink-icon").count() == 6
+            page.keyboard.press("Escape")
+            assert _wait(lambda: page.locator(".se-help-view").count() == 0)
             # a stroke well inside: read (by the fake), with the reading's options
             stroke(g["left"] + 30, g["top"] + 40, g["left"] + 120, g["top"] + 70)
             page.wait_for_selector(".se-addon-ink .ink-cand", timeout=15000)

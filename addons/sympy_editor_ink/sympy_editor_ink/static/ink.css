@@ -7,6 +7,10 @@
   box-shadow: var(--se-btn-edge), var(--se-btn-shadow);
 }
 .se-addon-ink .ink-bar button:disabled, .se-addon-ink .ink-actions button:disabled { opacity: 0.4; cursor: default; box-shadow: none; background: none; }
+/* The tools are icons: square buttons, as the editor's arrows are, the name
+ * in the tooltip and the guide behind the panel's "?". */
+.se-addon-ink .ink-bar .ink-tool { display: inline-flex; align-items: center; justify-content: center; min-width: 2.1rem; padding: 0.25rem 0.4rem; }
+.se-addon-ink .ink-tool .ink-icon { display: block; width: 1.15rem; height: 1.15rem; }
 
 /* The writing area: a box of its own size that scrolls, over a canvas that
  * grows to the right and down as the ink nears those edges. */
@@ -97,6 +101,8 @@
 
 @media (any-pointer: coarse) {
   .se-addon-ink .ink-bar button, .se-addon-ink .ink-actions button { font-size: 14px; padding: 0.45rem 0.7rem; min-height: 2.2rem; }
+  .se-addon-ink .ink-bar .ink-tool { min-width: 2.8rem; padding: 0.4rem 0.6rem; }
+  .se-addon-ink .ink-tool .ink-icon { width: 1.35rem; height: 1.35rem; }
   .se-addon-ink .ink-pad { height: 220px; }
   .se-addon-ink .ink-latex, .se-addon-ink .ink-choice { font-size: 15px; }
   .se-addon-ink .ink-stage { --ink-corner: 3.2rem; }
