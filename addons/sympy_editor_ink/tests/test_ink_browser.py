@@ -128,6 +128,15 @@ def test_the_area_grows_scrolls_undoes_and_goes_full_screen():
             page.locator(".se-addon-ink .ink-scroll-right").click()
             assert _wait(lambda: page.evaluate(geometry)["sl"] > 0)
             assert _wait(lambda: page.locator(".se-addon-ink .ink-scroll-left").is_visible())
+            # only the button scrolls: along its edge, above and below it, the pen writes
+            chip = page.locator(".se-addon-ink .ink-scroll-left").bounding_box()
+            g = page.evaluate(geometry)
+            assert chip["height"] < g["h"] / 2 and chip["width"] < 60
+            before = strokes()
+            stroke(g["left"] + 6, g["top"] + 8, g["left"] + 14, chip["y"] - 6)
+            assert strokes() == before + 1
+            page.locator(".se-addon-ink .ink-undo").click()
+            assert strokes() == before
             # ... and near the bottom
             g = page.evaluate(geometry)
             stroke(g["left"] + 40, g["top"] + g["h"] - 60, g["left"] + 60, g["top"] + g["h"] - 6)

@@ -3,8 +3,8 @@
  *
  * A writing area under the formula: a box of its own size that scrolls, over a
  * canvas that grows to the right and down as the ink nears those edges, with a
- * strip along each edge there is more ink beyond (as the editor's formula
- * has).  Each stroke is kept as points [x, y, t] (canvas pixels, milliseconds
+ * small button in the middle of each edge there is more ink beyond (the rest
+ * of the edge still writes).  Each stroke is kept as points [x, y, t] (canvas pixels, milliseconds
  * from the first stroke); a pause after the pen lifts sends them to Python
  * (method "recognize"), where math-ocr's stroke model reads them.  The
  * readings come back as LaTeX, best first, each with what SymPy makes of it
@@ -674,7 +674,7 @@ SympyEditor.registerAddon("ink", (function () {
           + "</ul></section>"
           + "<section><h3>Writing a formula by hand</h3><ul>"
           + "<li>Write in the area with a pen, a finger or the mouse. A moment after the pen lifts, what is written is read.</li>"
-          + "<li>Nearing the right or the bottom edge, the area makes room beyond it; the strips along its edges scroll it, and so does the wheel.</li>"
+          + "<li>Nearing the right or the bottom edge, the area makes room beyond it; a small button in the middle of an edge scrolls it that way, and so does the wheel. Only that button scrolls: the rest of the edge writes.</li>"
           + "<li>Two fingers never write: pinch to zoom the area in or out, drag with two fingers to move it about (a pinch on a trackpad zooms too).</li>"
           + "<li>The best reading comes first and the others after it: pick the one you wrote. Its LaTeX is in the box, to correct; the line under it is what SymPy gets, with a menu for each part that can be read more than one way and a switch for each constant name.</li>"
           + "<li><b>Replace the selection</b> puts it over what is selected (a node or a range); with a cursor in the formula instead the button is <b>Add to cursor</b>, and with neither <b>Add to end</b>: the reading goes in as if typed there - multiplied, or added when it begins with + or -. <b>Replace the whole expression</b> makes it the formula. Enter in the box does what the first button says. Either way the page goes back up to the formula.</li>"
