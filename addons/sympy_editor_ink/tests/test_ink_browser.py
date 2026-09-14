@@ -52,6 +52,7 @@ class FakeRecognizer:
         return True
 
     def recognize(self, strokes, beam=4, limit=5):
+        self.last = strokes                          # what the page sent: what a test can look at
         return {"candidates": [{"latex": self.latex, "raw": self.latex, "score": 0.0}], "ms": 1.0,
                 "strokes": len(strokes or []), "points": sum(len(s) for s in strokes or [])}
 
@@ -171,6 +172,81 @@ def test_the_area_grows_scrolls_undoes_and_goes_full_screen():
         srv.server_close()
 
 
+
+def test_inserting_brings_the_formula_back_into_sight():
+    """The panel sits below the editor: after a reading goes in - at the end,
+    over the selection, as the whole expression - the page is back at the top
+    of the editor, wherever it had been scrolled to."""
+    doc = Document(x + y, addons=[InkAddon(FakeRecognizer()), LATEX])
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with playwright.sync_playwright() as p:
+            try:
+                browser = p.chromium.launch()
+            except Exception as exc:
+                pytest.skip(f"chromium not available: {exc}")
+            page = browser.new_page(viewport={"width": 760, "height": 520}, reduced_motion="reduce")
+            errors = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.goto(srv.url)
+            page.wait_for_selector(".se-addon-ink .ink-canvas", timeout=30000)
+            page.wait_for_function("document.querySelector('.se-addon-ink .ink-canvas').clientWidth > 0")
+            # room below the panel, so the page can be scrolled away from the formula
+            page.evaluate("document.body.appendChild(Object.assign(document.createElement('div'), {style: 'height: 3000px'}))")
+            ed = "document.querySelector('.sympy-editor').__sympyEditor"
+            top = "Math.round(document.querySelector('.sympy-editor').getBoundingClientRect().top)"
+            panel = page.locator(".se-addon-ink .ink-panel")
+            strokes = lambda: int(panel.get_attribute("data-strokes"))
+
+            def write():
+                page.locator(".se-addon-ink .ink-pad").scroll_into_view_if_needed()
+                r = page.evaluate("() => { const b = document.querySelector('.se-addon-ink .ink-pad').getBoundingClientRect();"
+                                  " return {left: b.left, top: b.top}; }")
+                page.mouse.move(r["left"] + 30, r["top"] + 40)
+                page.mouse.down()
+                for i in range(1, 7):
+                    page.mouse.move(r["left"] + 30 + 15 * i, r["top"] + 40 + 5 * i)
+                page.mouse.up()
+                assert _wait(lambda: not page.locator(".se-addon-ink .ink-insert").is_disabled(), timeout=15)
+
+            def scrolled_away():
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                page.wait_for_function(top + " < -100")
+
+            def back_at_the_formula():
+                page.wait_for_function(top + " >= -1 && " + top + " <= 1", timeout=5000)
+
+            write()                                                      # Add to end
+            assert page.locator(".se-addon-ink .ink-insert").inner_text() == "Add to end"
+            scrolled_away()
+            page.locator(".se-addon-ink .ink-insert").click()
+            assert _wait(lambda: strokes() == 0 and doc.expr != x + y)
+            back_at_the_formula()
+
+            write()                                                      # over the selection
+            xp = next(path for path, n in doc.snapshot()["nodes"].items() if n["src"] == "x")
+            page.evaluate("p => %s.select(p)" % ed, xp)
+            assert _wait(lambda: page.locator(".se-addon-ink .ink-insert").inner_text() == "Replace the selection")
+            before = doc.expr
+            scrolled_away()
+            page.locator(".se-addon-ink .ink-insert").click()
+            assert _wait(lambda: doc.expr != before)
+            back_at_the_formula()
+
+            page.evaluate(ed + ".select(null)")
+            write()                                                      # the whole expression
+            scrolled_away()
+            page.locator(".se-addon-ink .ink-insert-all").click()
+            assert _wait(lambda: doc.expr == sin(x) * cos(y) + Symbol("pi") or str(doc.expr) == "sin(x)*cos(y) + pi")
+            back_at_the_formula()
+            assert errors == []
+            browser.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 TOUCH = """(t) => {
     const c = document.querySelector('.se-addon-ink .ink-canvas');
     c.dispatchEvent(new PointerEvent(t.type, {pointerId: t.id, pointerType: 'touch', isPrimary: t.id === 1,
@@ -260,6 +336,69 @@ def test_two_fingers_zoom_and_scroll_the_area_and_never_write():
             page.mouse.wheel(0, 120)
             page.keyboard.up("Control")
             assert _wait(lambda: zoom() < 1.8)
+            assert errors == []
+            browser.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+
+def test_erase_takes_away_the_strokes_it_passes_over():
+    """Erase turns the pointer into an eraser: a stroke it passes over goes,
+    the others stay, in their order; Undo puts it back in its place, Redo
+    takes it again, and switched off the pointer writes again."""
+    fake = FakeRecognizer()
+    doc = Document(x, addons=[InkAddon(fake), LATEX])
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with playwright.sync_playwright() as p:
+            try:
+                browser = p.chromium.launch()
+            except Exception as exc:
+                pytest.skip(f"chromium not available: {exc}")
+            page = browser.new_page(viewport={"width": 760, "height": 900})
+            errors = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.goto(srv.url)
+            page.wait_for_selector(".se-addon-ink .ink-canvas", timeout=30000)
+            page.wait_for_function("document.querySelector('.se-addon-ink .ink-canvas').clientWidth > 0")
+            panel = page.locator(".se-addon-ink .ink-panel")
+            strokes = lambda: int(panel.get_attribute("data-strokes"))
+            c = page.evaluate("(() => { const r = document.querySelector('.se-addon-ink .ink-canvas').getBoundingClientRect(); return {x: r.left, y: r.top}; })()")
+
+            def drag(x0, y0, x1, y1, steps=6):
+                page.mouse.move(c["x"] + x0, c["y"] + y0)
+                page.mouse.down()
+                for i in range(1, steps + 1):
+                    page.mouse.move(c["x"] + x0 + (x1 - x0) * i / steps, c["y"] + y0 + (y1 - y0) * i / steps)
+                page.mouse.up()
+
+            def read_strokes():                      # the strokes the page last sent to be read, by where they begin
+                fake.last = None
+                assert _wait(lambda: fake.last is not None)
+                return [round(s[0][0] / 10) * 10 for s in fake.last]
+
+            for left in (30, 150, 270):              # three strokes apart from each other
+                drag(left, 50, left + 50, 60)
+            assert strokes() == 3
+            erase = page.locator(".se-addon-ink .ink-erase")
+            erase.click()
+            assert erase.get_attribute("aria-pressed") == "true"
+            drag(175, 20, 175, 90)                   # across the middle one only
+            assert strokes() == 2
+            assert read_strokes() == [30, 270]
+            page.locator(".se-addon-ink .ink-undo").click()      # back, in its place
+            assert strokes() == 3 and read_strokes() == [30, 150, 270]
+            page.locator(".se-addon-ink .ink-redo").click()
+            assert strokes() == 2 and read_strokes() == [30, 270]
+            drag(400, 20, 400, 90)                   # over nothing: nothing goes, nothing to undo
+            assert strokes() == 2
+            erase.click()                            # off: the pointer writes again
+            assert erase.get_attribute("aria-pressed") == "false"
+            drag(400, 50, 450, 60)
+            assert strokes() == 3 and read_strokes() == [30, 270, 400]
             assert errors == []
             browser.close()
     finally:

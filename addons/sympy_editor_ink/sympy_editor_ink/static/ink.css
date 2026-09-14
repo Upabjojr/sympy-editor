@@ -19,6 +19,9 @@
  * it; the strips (and the wheel) scroll the area */
 .se-addon-ink .ink-canvas { display: block; touch-action: none; cursor: crosshair; color: var(--se-fg); }
 .se-addon-ink .ink-canvas.ink-off { cursor: not-allowed; opacity: 0.5; }
+.se-addon-ink .ink-canvas.ink-erasing { cursor: cell; }
+/* Erase is a switch: pressed while on */
+.se-addon-ink .ink-bar button.ink-on { border-color: rgba(var(--se-accent), 0.85); background: rgba(var(--se-accent), 0.18); box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.15); }
 .se-addon-ink .ink-busy .ink-pad { border-color: rgba(var(--se-accent), 0.6); }
 
 /* A strip along each edge there is more ink beyond, as the editor's formula

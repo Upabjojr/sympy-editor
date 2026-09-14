@@ -17,6 +17,16 @@
  * sheet at the bottom that folds away.
  */
 SympyEditor.registerAddon("ink", (function () {
+  // After a reading goes in, the formula it went into is brought back into
+  // sight: the panel sits below the editor, often scrolled past it.
+  function showFormula(api) {
+    var root = api.editor && api.editor.root;
+    if (!root || !root.scrollIntoView) return;
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    try { root.scrollIntoView({ block: "start", behavior: reduce ? "auto" : "smooth" }); }
+    catch (e) { root.scrollIntoView(true); }       // no options object
+  }
+
   // The editor's icons (editor.js: expandSvg, chevronSvg), drawn the same way.
   function expandIcon(full) {
     var out = "M2.8 6.2V2.8h3.4M9.8 2.8h3.4v3.4M13.2 9.8v3.4H9.8M6.2 13.2H2.8V9.8";
@@ -60,9 +70,11 @@ SympyEditor.registerAddon("ink", (function () {
       });
       var undoBtn = h("button", { type: "button", class: "ink-undo", title: "Take back the last stroke (or the clearing)", disabled: "" }, ["Undo"]);
       var redoBtn = h("button", { type: "button", class: "ink-redo", title: "Put back what Undo took", disabled: "" }, ["Redo"]);
+      var eraseBtn = h("button", { type: "button", class: "ink-erase", "aria-pressed": "false",
+        title: "Erase: what the pen, the finger or the mouse passes over goes, one stroke at a time (Undo brings it back)" }, ["Erase"]);
       var clearBtn = h("button", { type: "button", class: "ink-clear", title: "Start again (Undo brings it back)", disabled: "" }, ["Clear"]);
       var readBtn = h("button", { type: "button", class: "ink-read", title: "Read what is written, now" }, ["Read"]);
-      var bar = h("div", { class: "ink-bar" }, [undoBtn, redoBtn, clearBtn, readBtn]);
+      var bar = h("div", { class: "ink-bar" }, [undoBtn, redoBtn, eraseBtn, clearBtn, readBtn]);
 
       var note = h("div", { class: "ink-note", "aria-live": "polite" });
       var cands = h("div", { class: "ink-cands", role: "listbox", "aria-label": "Readings, best first" });
@@ -100,6 +112,8 @@ SympyEditor.registerAddon("ink", (function () {
       var gesture = null;               // two fingers or more: where the pinch began
       var blocked = false;              // a finger left from a pinch: it writes nothing until all have lifted
       var dirty = false;                // ink not read since it changed
+      var erasing = false;              // the Erase mode: pointers take strokes away instead of writing
+      var erase = null;                 // an erasing drag: {id, at, removed: [{index, stroke}]}
 
       api.katex().then(function (k) { katex = k; }, function () {});
 
@@ -170,6 +184,16 @@ SympyEditor.registerAddon("ink", (function () {
           for (var i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
           ctx.stroke();
         }
+        if (erase && erase.at) {          // where the eraser is
+          ctx.save();
+          ctx.lineWidth = 1.2 / zoom;
+          ctx.setLineDash([3 / zoom, 3 / zoom]);
+          ctx.strokeStyle = "rgba(127, 127, 127, 0.9)";
+          ctx.beginPath();
+          ctx.arc(erase.at[0], erase.at[1], eraserRadius(), 0, 2 * Math.PI);
+          ctx.stroke();
+          ctx.restore();
+        }
       }
       function updateStrips() {
         var maxX = pad.scrollWidth - pad.clientWidth, maxY = pad.scrollHeight - pad.clientHeight;
@@ -193,6 +217,56 @@ SympyEditor.registerAddon("ink", (function () {
         return [Math.round((ev.clientX - r.left) / zoom * 10) / 10, Math.round((ev.clientY - r.top) / zoom * 10) / 10, Math.round(ev.timeStamp - t0)];
       }
 
+      // ---- erasing: a stroke goes when the eraser passes within reach of it ----------
+      var coarse = !!(window.matchMedia && window.matchMedia("(any-pointer: coarse)").matches);
+      function eraserRadius() { return (coarse ? 18 : 10) / zoom; }     // px on screen, in the canvas's own pixels
+      function nearSegment(qx, qy, a, b, r) {
+        var dx = b[0] - a[0], dy = b[1] - a[1], len = dx * dx + dy * dy;
+        var u = len ? Math.max(0, Math.min(1, ((qx - a[0]) * dx + (qy - a[1]) * dy) / len)) : 0;
+        var ex = a[0] + u * dx - qx, ey = a[1] + u * dy - qy;
+        return ex * ex + ey * ey <= r * r;
+      }
+      function reaches(stroke, from, to, r) {
+        // the eraser's path from one sample to the next, in steps of half its reach: a quick
+        // drag passes over a stroke between two samples
+        var steps = Math.max(1, Math.ceil(Math.hypot(to[0] - from[0], to[1] - from[1]) / (r / 2)));
+        for (var k = 0; k <= steps; k++) {
+          var qx = from[0] + (to[0] - from[0]) * k / steps, qy = from[1] + (to[1] - from[1]) * k / steps;
+          if (stroke.length === 1 && nearSegment(qx, qy, stroke[0], stroke[0], r)) return true;
+          for (var i = 1; i < stroke.length; i++) if (nearSegment(qx, qy, stroke[i - 1], stroke[i], r)) return true;
+        }
+        return false;
+      }
+      function eraseTo(p) {
+        var from = erase.at || p, r = eraserRadius(), gone = false;
+        for (var i = strokes.length - 1; i >= 0; i--) {
+          if (reaches(strokes[i], from, p, r)) {
+            erase.removed.push({ index: i, stroke: strokes[i] });  // the index at the time: undo puts each back in its place
+            strokes.splice(i, 1);
+            gone = true;
+          }
+        }
+        erase.at = p;
+        if (gone) element.setAttribute("data-strokes", String(strokes.length));
+        redraw();
+      }
+      function finishErase() {
+        var e = erase;
+        erase = null;
+        if (!e.removed.length) { redraw(); return; }
+        done.push({ kind: "erase", removed: e.removed });
+        undone = [];
+        refit();
+        changed(300);                     // what is left is read again
+      }
+      function setErasing(on) {
+        erasing = !!on;
+        eraseBtn.setAttribute("aria-pressed", erasing ? "true" : "false");
+        eraseBtn.classList.toggle("ink-on", erasing);
+        canvas.classList.toggle("ink-erasing", erasing);
+      }
+      eraseBtn.addEventListener("click", function () { setErasing(!erasing); });
+
       // ---- zooming and scrolling: two fingers, or a pinch on a trackpad ------------
       function zoomTo(z) {                // the new zoom, the canvas still covering the box
         z = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z));
@@ -214,6 +288,7 @@ SympyEditor.registerAddon("ink", (function () {
         return { dist: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)), x: m.x, y: m.y };
       }
       function startGesture() {
+        if (erase) finishErase();
         if (current) { current = null; currentId = null; refit(); redraw(); }   // what a first finger began is not a stroke - nor the room it made
         var s = pinch();
         gesture = { dist: s.dist, zoom: zoom, inkX: (pad.scrollLeft + s.x) / zoom, inkY: (pad.scrollTop + s.y) / zoom };
@@ -243,8 +318,16 @@ SympyEditor.registerAddon("ink", (function () {
           if (Object.keys(touches).length >= 2) { ev.preventDefault(); startGesture(); return; }
           if (blocked) return;
         }
-        if (current) return;                                               // a palm beside a pen
+        if (current || erase) return;                                      // a palm beside a pen
         if (!canRead || (ev.pointerType === "mouse" && ev.button !== 0)) return;
+        if (erasing || (ev.pointerType === "pen" && (ev.buttons & 32))) {  // the Erase mode, or a pen turned round
+          ev.preventDefault();
+          clearTimeout(timer);
+          try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* not capturable */ }
+          erase = { id: ev.pointerId, at: null, removed: [] };
+          eraseTo(point(ev));
+          return;
+        }
         ev.preventDefault();
         clearTimeout(timer);
         if (!strokes.length && !current) t0 = ev.timeStamp;
@@ -257,6 +340,12 @@ SympyEditor.registerAddon("ink", (function () {
         if (touches[ev.pointerId]) {
           touches[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
           if (gesture) { ev.preventDefault(); moveGesture(); return; }
+        }
+        if (erase && ev.pointerId === erase.id) {
+          var samples = (ev.getCoalescedEvents && ev.getCoalescedEvents()) || [];
+          if (!samples.length) samples = [ev];
+          for (var j = 0; j < samples.length; j++) eraseTo(point(samples[j]));
+          return;
         }
         if (!current || ev.pointerId !== currentId) return;
         var evs = (ev.getCoalescedEvents && ev.getCoalescedEvents()) || [];
@@ -288,6 +377,7 @@ SympyEditor.registerAddon("ink", (function () {
           }
           return;
         }
+        if (erase && ev.pointerId === erase.id) { finishErase(); return; }
         endStroke(ev);
       }
       canvas.addEventListener("pointerup", lift);
@@ -316,7 +406,12 @@ SympyEditor.registerAddon("ink", (function () {
       undoBtn.addEventListener("click", function () {
         var a = done.pop();
         if (!a) return;
-        strokes = a.kind === "stroke" ? strokes.slice(0, -1) : a.strokes.slice();
+        if (a.kind === "stroke") strokes = strokes.slice(0, -1);
+        else if (a.kind === "clear") strokes = a.strokes.slice();
+        else {                            // erased: each stroke back in its place, the last taken first
+          strokes = strokes.slice();
+          for (var i = a.removed.length - 1; i >= 0; i--) strokes.splice(a.removed[i].index, 0, a.removed[i].stroke);
+        }
         refit();                          // the room the ink taken back had made goes with it
         undone.push(a);
         changed(300);
@@ -325,7 +420,12 @@ SympyEditor.registerAddon("ink", (function () {
         var a = undone.pop();
         if (!a) return;
         if (a.kind === "stroke") { strokes.push(a.stroke); growToFit(); }
-        else { strokes = []; shrink(); }
+        else if (a.kind === "clear") { strokes = []; shrink(); }
+        else {                            // erased again, in the order it went
+          strokes = strokes.slice();
+          a.removed.forEach(function (r) { strokes.splice(r.index, 1); });
+          refit();
+        }
         done.push(a);
         changed(300);
       });
@@ -484,6 +584,7 @@ SympyEditor.registerAddon("ink", (function () {
           if (!clearInk()) reset();                // the ink goes too - Undo brings it back
           note.textContent = "Inserted.";
           updateSummary();
+          showFormula(api);                        // and the page back up to it
         }, function (e) {
           note.textContent = String((e && e.message) || e);
           note.className = "ink-note error";
@@ -547,9 +648,10 @@ SympyEditor.registerAddon("ink", (function () {
           + "<li>Write in the area with a pen, a finger or the mouse. A moment after the pen lifts, what is written is read; <b>Read</b> reads it at once.</li>"
           + "<li>Nearing the right or the bottom edge, the area makes room beyond it; the strips along its edges scroll it, and so does the wheel.</li>"
           + "<li>Two fingers never write: pinch to zoom the area in or out, drag with two fingers to move it about (a pinch on a trackpad zooms too).</li>"
+          + "<li><b>Erase</b> turns the pen, the finger or the mouse into an eraser: every stroke it passes over goes (a pen turned round erases too). Press it again to write.</li>"
           + "<li><b>Undo</b> takes back the last stroke - or the clearing, or the ink an insertion took - and <b>Redo</b> puts it back; <b>Clear</b> starts again.</li>"
           + "<li>The best reading comes first and the others after it: pick the one you wrote. Its LaTeX is in the box, to correct; the line under it is what SymPy gets, with a menu for each part that can be read more than one way and a switch for each constant name.</li>"
-          + "<li><b>Replace the selection</b> puts it over what is selected (a node or a range); with a cursor in the formula instead the button is <b>Add to cursor</b>, and with neither <b>Add to end</b>: the reading goes in as if typed there - multiplied, or added when it begins with + or -. <b>Replace the whole expression</b> makes it the formula. Enter in the box does what the first button says.</li>"
+          + "<li><b>Replace the selection</b> puts it over what is selected (a node or a range); with a cursor in the formula instead the button is <b>Add to cursor</b>, and with neither <b>Add to end</b>: the reading goes in as if typed there - multiplied, or added when it begins with + or -. <b>Replace the whole expression</b> makes it the formula. Enter in the box does what the first button says. Either way the page goes back up to the formula.</li>"
           + "<li>The corner button gives the writing area the whole screen, the tools on top and the readings in a sheet at the bottom that folds away; Esc or the button comes back, and so does inserting.</li>"
           + "<li>The reading is done by math-ocr's stroke model. It reads one formula at a time, and mixes up look-alike glyphs most (<code>1</code> and <code>|</code>, <code>V</code> and <code>v</code>).</li>"
           + "</ul></section>",
