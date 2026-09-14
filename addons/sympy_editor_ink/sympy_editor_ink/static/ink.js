@@ -1,265 +1,458 @@
 /*
  * sympy-editor add-on "ink": write a formula by hand.
  *
- * A writing area under the formula.  Each stroke is kept as points
- * [x, y, t] (CSS pixels, milliseconds from the first stroke); a pause after
- * the pen lifts sends them to Python (method "recognize"), where math-ocr's
- * stroke model reads them.  The readings come back as LaTeX, best first, each
- * with what SymPy makes of it; the chosen one can be corrected in its box and
- * goes in over the selection or as the whole expression.
+ * A writing area under the formula: a box of its own size that scrolls, over a
+ * canvas that grows to the right and down as the ink nears those edges, with a
+ * strip along each edge there is more ink beyond (as the editor's formula
+ * has).  Each stroke is kept as points [x, y, t] (canvas pixels, milliseconds
+ * from the first stroke); a pause after the pen lifts sends them to Python
+ * (method "recognize"), where math-ocr's stroke model reads them.  The
+ * readings come back as LaTeX, best first, each with what SymPy makes of it
+ * and the options of that reading - an ambiguity's alternatives, a constant's
+ * switch - and go in over the selection or as the whole expression.  Strokes,
+ * clearing and inserting can be undone and redone.  In full screen the panel
+ * covers the page: the tools on top, the writing area, and the readings in a
+ * sheet at the bottom that folds away.
  */
-SympyEditor.registerAddon("ink", {
-  mount: function (api) {
-    var h = api.h;
-    var status = (api.options && api.options.status) || { available: false, reason: "The add-on's Python said nothing about its model" };
-    var canvas = h("canvas", { class: "ink-canvas", "aria-label": "Writing area: write a formula with a pen, a finger or the mouse" });
-    var undoBtn = h("button", { type: "button", title: "Take back the last stroke" }, ["Undo stroke"]);
-    var clearBtn = h("button", { type: "button", title: "Start again" }, ["Clear"]);
-    var readBtn = h("button", { type: "button", title: "Read what is written, now" }, ["Read"]);
-    var note = h("div", { class: "ink-note", "aria-live": "polite" });
-    var cands = h("div", { class: "ink-cands", role: "listbox", "aria-label": "Readings, best first" });
-    var field = h("input", { class: "ink-latex", type: "text", spellcheck: "false", autocomplete: "off", autocapitalize: "off",
-      placeholder: "The reading as LaTeX - correct it here", "aria-label": "The reading as LaTeX" });
-    var src = h("code", { class: "ink-src", title: "What SymPy gets" });
-    var insertSel = h("button", { type: "button", class: "ink-insert", disabled: "" }, ["Replace the selection"]);
-    var insertAll = h("button", { type: "button", class: "ink-insert-all", disabled: "" }, ["Replace the whole expression"]);
-    var toLatex = h("button", { type: "button", class: "ink-to-latex", hidden: "",
-      title: "Hand the reading to the LaTeX panel, which offers every way it can be read" }, ["Open in the LaTeX panel"]);
-    var element = h("div", { class: "ink-panel" }, [
-      canvas,
-      h("div", { class: "ink-row" }, [undoBtn, clearBtn, readBtn]),
-      note, cands, field, src,
-      h("div", { class: "ink-actions" }, [insertSel, insertAll, toLatex])
-    ]);
+SympyEditor.registerAddon("ink", (function () {
+  // The editor's icons (editor.js: expandSvg, chevronSvg), drawn the same way.
+  function expandIcon(full) {
+    var out = "M2.8 6.2V2.8h3.4M9.8 2.8h3.4v3.4M13.2 9.8v3.4H9.8M6.2 13.2H2.8V9.8";
+    var back = "M6.2 2.8v3.4H2.8M13.2 6.2H9.8V2.8M9.8 13.2V9.8h3.4M2.8 9.8h3.4v3.4";
+    return '<svg class="ink-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
+      '<path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="' +
+      (full ? back : out) + '"/></svg>';
+  }
+  function chevronIcon(dir) {
+    var deg = { up: 0, right: 90, down: 180, left: 270 }[dir];
+    return '<svg class="ink-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
+      '<path transform="rotate(' + deg + ' 8 8)" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+      'stroke-linecap="round" stroke-linejoin="round" d="M3.5 10.2 8 5.7l4.5 4.5"/></svg>';
+  }
+  var EDGE = 40;                    // px: ink this near the right or bottom edge makes room beyond it
+  var MAX_W = 6000, MAX_H = 4000;   // px: as far as the canvas grows
 
-    var strokes = [];          // [[[x, y, t], ...], ...]
-    var current = null;        // the stroke being drawn, and its pointer
-    var currentId = null;
-    var t0 = 0;
-    var timer = null, readTimer = null, seq = 0;
-    var katex = null;
-    var last = null;           // the reading shown: {ok, src, latex, error, readings}
+  return {
+    mount: function (api) {
+      var h = api.h;
+      var status = (api.options && api.options.status) || { available: false, reason: "The add-on's Python said nothing about its model" };
+      var canRead = !!status.available;
 
-    api.katex().then(function (k) { katex = k; }, function () {});
-
-    // ---- the writing area ---------------------------------------------------
-    var ctx = canvas.getContext("2d");
-    function size() {
-      var r = canvas.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
-      var w = Math.max(1, Math.round(r.width * dpr)), hh = Math.max(1, Math.round(r.height * dpr));
-      if (canvas.width !== w || canvas.height !== hh) { canvas.width = w; canvas.height = hh; }
-      redraw();
-    }
-    function redraw() {
-      var dpr = window.devicePixelRatio || 1;
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.lineWidth = 2.2;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      ctx.strokeStyle = getComputedStyle(canvas).color || "#1f2328";
-      var all = current ? strokes.concat([current]) : strokes;
-      for (var s = 0; s < all.length; s++) {
-        var pts = all[s];
-        ctx.beginPath();
-        ctx.moveTo(pts[0][0], pts[0][1]);
-        if (pts.length === 1) ctx.lineTo(pts[0][0] + 0.1, pts[0][1]);      // a dot
-        for (var i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
-        ctx.stroke();
-      }
-    }
-    function point(ev) {
-      var r = canvas.getBoundingClientRect();
-      return [Math.round((ev.clientX - r.left) * 10) / 10, Math.round((ev.clientY - r.top) * 10) / 10, Math.round(ev.timeStamp - t0)];
-    }
-    var resizer = window.ResizeObserver ? new ResizeObserver(size) : null;
-    if (resizer) resizer.observe(canvas); else window.addEventListener("resize", size);
-
-    canvas.addEventListener("pointerdown", function (ev) {
-      if (!status.available || (ev.pointerType === "mouse" && ev.button !== 0)) return;
-      ev.preventDefault();
-      clearTimeout(timer);
-      if (!strokes.length && !current) t0 = ev.timeStamp;
-      try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* not capturable */ }
-      current = [point(ev)];
-      currentId = ev.pointerId;
-      redraw();
-    });
-    canvas.addEventListener("pointermove", function (ev) {
-      if (!current || ev.pointerId !== currentId) return;
-      var evs = (ev.getCoalescedEvents && ev.getCoalescedEvents()) || [];
-      if (!evs.length) evs = [ev];
-      for (var i = 0; i < evs.length; i++) current.push(point(evs[i]));
-      redraw();
-    });
-    function endStroke(ev) {
-      if (!current || ev.pointerId !== currentId) return;
-      strokes.push(current);
-      current = null;
-      currentId = null;
-      redraw();
-      clearTimeout(timer);
-      timer = setTimeout(recognize, 700);       // a pause: the formula may be finished
-    }
-    canvas.addEventListener("pointerup", endStroke);
-    canvas.addEventListener("pointercancel", endStroke);
-
-    undoBtn.addEventListener("click", function () {
-      strokes.pop();
-      redraw();
-      if (strokes.length) { clearTimeout(timer); timer = setTimeout(recognize, 300); } else reset();
-    });
-    clearBtn.addEventListener("click", function () { strokes = []; redraw(); reset(); });
-    readBtn.addEventListener("click", recognize);
-
-    function reset() {
-      clearTimeout(timer);
-      seq++;
-      cands.textContent = "";
-      field.value = "";
-      note.textContent = status.available ? "" : status.reason;
-      note.className = "ink-note" + (status.available ? "" : " error");
-      show(null);
-    }
-
-    // ---- reading ---------------------------------------------------------------
-    function typeset(el, tex, fallback) {
-      el.textContent = "";
-      if (katex && tex) {
-        try { el.innerHTML = katex.renderToString(tex, { throwOnError: false, displayMode: false, output: "html" }); return; }
-        catch (e) { /* the text, then */ }
-      }
-      el.textContent = fallback || tex || "";
-    }
-
-    function recognize() {
-      clearTimeout(timer);
-      if (!strokes.length || !status.available) return;
-      var my = ++seq;
-      element.classList.add("ink-busy");
-      note.textContent = "Reading…";
-      note.className = "ink-note";
-      // quiet: the editor's overlay would cover the area while one writes on
-      api.call("recognize", { strokes: strokes }, { quiet: true }).then(function (res) {
-        if (my !== seq) return;
-        element.classList.remove("ink-busy");
-        cands.textContent = "";
-        if (!res.candidates.length) { note.textContent = "Nothing could be read"; show(null); return; }
-        note.textContent = "Read in " + res.ms + " ms" + (res.candidates.length > 1 ? " — the best reading first, pick another if it is the one" : "");
-        res.candidates.forEach(function (c, i) {
-          var b = h("button", { type: "button", class: "ink-cand", role: "option", title: c.latex });
-          typeset(b, c.latex, c.latex);
-          b.addEventListener("click", function () { choose(c, b); });
-          cands.appendChild(b);
-          if (i === 0) choose(c, b);
-        });
-      }, function (e) {
-        if (my !== seq) return;
-        element.classList.remove("ink-busy");
-        note.textContent = String((e && e.message) || e);
-        note.className = "ink-note error";
+      // ---- the parts ------------------------------------------------------------
+      var canvas = h("canvas", { class: "ink-canvas", "aria-label": "Writing area: write a formula with a pen, a finger or the mouse" });
+      var pad = h("div", { class: "ink-pad" }, [canvas]);
+      var fullBtn = h("button", { type: "button", class: "ink-fullbtn" });
+      var stage = h("div", { class: "ink-stage" }, [pad, fullBtn]);
+      var strips = {};
+      ["left", "right", "up", "down"].forEach(function (dir) {
+        var title = "Scroll the writing area " + dir;
+        var b = h("button", { type: "button", class: "ink-scroll ink-scroll-" + dir, hidden: "", title: title, "aria-label": title, tabindex: "-1" });
+        b.innerHTML = chevronIcon(dir);
+        b.addEventListener("click", function (ev) { ev.preventDefault(); scrollPage(dir); });
+        strips[dir] = b;
+        stage.appendChild(b);
       });
-    }
+      var undoBtn = h("button", { type: "button", class: "ink-undo", title: "Take back the last stroke (or the clearing)", disabled: "" }, ["Undo"]);
+      var redoBtn = h("button", { type: "button", class: "ink-redo", title: "Put back what Undo took", disabled: "" }, ["Redo"]);
+      var clearBtn = h("button", { type: "button", class: "ink-clear", title: "Start again (Undo brings it back)", disabled: "" }, ["Clear"]);
+      var readBtn = h("button", { type: "button", class: "ink-read", title: "Read what is written, now" }, ["Read"]);
+      var bar = h("div", { class: "ink-bar" }, [undoBtn, redoBtn, clearBtn, readBtn]);
 
-    function choose(c, button) {
-      for (var i = 0; i < cands.children.length; i++) {
-        var b = cands.children[i];
-        b.classList.toggle("ink-chosen", b === button);
-        b.setAttribute("aria-selected", b === button ? "true" : "false");
+      var note = h("div", { class: "ink-note", "aria-live": "polite" });
+      var cands = h("div", { class: "ink-cands", role: "listbox", "aria-label": "Readings, best first" });
+      var field = h("input", { class: "ink-latex", type: "text", spellcheck: "false", autocomplete: "off", autocapitalize: "off",
+        placeholder: "The reading as LaTeX - correct it here", "aria-label": "The reading as LaTeX" });
+      var src = h("code", { class: "ink-src", title: "What SymPy gets" });
+      var ambig = h("div", { class: "ink-ambig" });
+      var consts = h("div", { class: "ink-consts" });
+      var insertSel = h("button", { type: "button", class: "ink-insert", disabled: "" }, ["Replace the selection"]);
+      var insertAll = h("button", { type: "button", class: "ink-insert-all", disabled: "" }, ["Replace the whole expression"]);
+      var toLatex = h("button", { type: "button", class: "ink-to-latex", hidden: "",
+        title: "Hand the reading to the LaTeX panel, which offers every way it can be read" }, ["Open in the LaTeX panel"]);
+      var sheetChevron = h("span", { class: "ink-sheet-chevron", "aria-hidden": "true" });
+      var sheetSummary = h("span", { class: "ink-sheet-summary" });
+      var sheetHead = h("button", { type: "button", class: "ink-sheet-head", "aria-expanded": "true",
+        title: "Fold the readings away, or bring them back" }, [sheetChevron, sheetSummary]);
+      var sheetBody = h("div", { class: "ink-sheet-body" }, [note, cands, field, src, ambig, consts,
+        h("div", { class: "ink-actions" }, [insertSel, insertAll, toLatex])]);
+      var sheet = h("div", { class: "ink-sheet" }, [sheetHead, sheetBody]);
+      var element = h("div", { class: "ink-panel", "data-strokes": "0" }, [bar, stage, sheet]);
+
+      // ---- state -------------------------------------------------------------------
+      var strokes = [];                 // [[[x, y, t], ...], ...]
+      var done = [], undone = [];       // {kind: "stroke", stroke} or {kind: "clear", strokes}
+      var current = null, currentId = null, t0 = 0;
+      var width = 0, height = 0;        // the canvas, in CSS pixels
+      var dpr = 1;
+      var timer = null, readTimer = null, seq = 0;
+      var katex = null;
+      var last = null;                  // the reading shown
+      var picks = { choices: {}, constants: {} };   // the options picked for the text in the box
+      var full = false, folded = false, pageOverflow = null;
+
+      api.katex().then(function (k) { katex = k; }, function () {});
+
+      // ---- the writing area ----------------------------------------------------------
+      var ctx = canvas.getContext("2d");
+      function applySize() {
+        dpr = Math.min(window.devicePixelRatio || 1, 2);
+        if (width * height * dpr * dpr > 16e6) dpr = Math.sqrt(16e6 / (width * height));   // what a phone's canvas takes
+        canvas.style.width = width + "px";
+        canvas.style.height = height + "px";
+        canvas.width = Math.max(1, Math.round(width * dpr));
+        canvas.height = Math.max(1, Math.round(height * dpr));
+        redraw();
+        updateStrips();
       }
-      field.value = c.latex;
-      show(c.reading);
-    }
+      function fitPad() {                 // never smaller than the box it scrolls in
+        var w = Math.max(width, pad.clientWidth), hh = Math.max(height, pad.clientHeight);
+        if (w !== width || hh !== height) { width = w; height = hh; applySize(); } else updateStrips();
+      }
+      function grow(x, y) {               // room beyond ink that nears the right or bottom edge
+        var w = width, hh = height;
+        if (x > width - EDGE) w = Math.min(MAX_W, Math.ceil(x + Math.max(160, pad.clientWidth * 0.6)));
+        if (y > height - EDGE) hh = Math.min(MAX_H, Math.ceil(y + Math.max(120, pad.clientHeight * 0.6)));
+        if (w > width || hh > height) { width = Math.max(width, w); height = Math.max(height, hh); applySize(); }
+      }
+      function growToFit() {
+        var maxX = 0, maxY = 0;
+        strokes.forEach(function (s) { s.forEach(function (p) { maxX = Math.max(maxX, p[0]); maxY = Math.max(maxY, p[1]); }); });
+        grow(maxX, maxY);
+      }
+      function shrink() {                 // no ink: back to the box
+        width = 0;
+        height = 0;
+        pad.scrollLeft = 0;
+        pad.scrollTop = 0;
+        fitPad();
+      }
+      function redraw() {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.lineWidth = 2.2;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.strokeStyle = getComputedStyle(canvas).color || "#1f2328";
+        var all = current ? strokes.concat([current]) : strokes;
+        for (var s = 0; s < all.length; s++) {
+          var pts = all[s];
+          ctx.beginPath();
+          ctx.moveTo(pts[0][0], pts[0][1]);
+          if (pts.length === 1) ctx.lineTo(pts[0][0] + 0.1, pts[0][1]);      // a dot
+          for (var i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+          ctx.stroke();
+        }
+      }
+      function updateStrips() {
+        var maxX = pad.scrollWidth - pad.clientWidth, maxY = pad.scrollHeight - pad.clientHeight;
+        strips.left.hidden = !(maxX > 1 && pad.scrollLeft > 1);
+        strips.right.hidden = !(maxX > 1 && pad.scrollLeft < maxX - 1);
+        strips.up.hidden = !(maxY > 1 && pad.scrollTop > 1);
+        strips.down.hidden = !(maxY > 1 && pad.scrollTop < maxY - 1);
+      }
+      function scrollPage(dir) {
+        var dx = dir === "left" ? -1 : dir === "right" ? 1 : 0, dy = dir === "up" ? -1 : dir === "down" ? 1 : 0;
+        var smooth = !(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+        pad.scrollBy({ left: dx * Math.max(40, pad.clientWidth * 0.7), top: dy * Math.max(40, pad.clientHeight * 0.7),
+                       behavior: smooth ? "smooth" : "auto" });
+      }
+      pad.addEventListener("scroll", updateStrips);
+      var resizer = window.ResizeObserver ? new ResizeObserver(fitPad) : null;
+      if (resizer) resizer.observe(pad); else window.addEventListener("resize", fitPad);
 
-    field.addEventListener("input", function () {
-      for (var i = 0; i < cands.children.length; i++) cands.children[i].classList.remove("ink-chosen");
-      clearTimeout(readTimer);
-      readTimer = setTimeout(function () {
+      function point(ev) {
+        var r = canvas.getBoundingClientRect();
+        return [Math.round((ev.clientX - r.left) * 10) / 10, Math.round((ev.clientY - r.top) * 10) / 10, Math.round(ev.timeStamp - t0)];
+      }
+      canvas.addEventListener("pointerdown", function (ev) {
+        if (!canRead || (ev.pointerType === "mouse" && ev.button !== 0)) return;
+        ev.preventDefault();
+        clearTimeout(timer);
+        if (!strokes.length && !current) t0 = ev.timeStamp;
+        try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* not capturable */ }
+        current = [point(ev)];
+        currentId = ev.pointerId;
+        redraw();
+      });
+      canvas.addEventListener("pointermove", function (ev) {
+        if (!current || ev.pointerId !== currentId) return;
+        var evs = (ev.getCoalescedEvents && ev.getCoalescedEvents()) || [];
+        if (!evs.length) evs = [ev];
+        for (var i = 0; i < evs.length; i++) current.push(point(evs[i]));
+        var p = current[current.length - 1];
+        grow(p[0], p[1]);
+        redraw();
+      });
+      function endStroke(ev) {
+        if (!current || ev.pointerId !== currentId) return;
+        strokes.push(current);
+        done.push({ kind: "stroke", stroke: current });
+        undone = [];
+        current = null;
+        currentId = null;
+        changed(700);                     // a pause: the formula may be finished
+      }
+      canvas.addEventListener("pointerup", endStroke);
+      canvas.addEventListener("pointercancel", endStroke);
+
+      // ---- undo, redo, clear -----------------------------------------------------------
+      function changed(delay) {
+        element.setAttribute("data-strokes", String(strokes.length));
+        undoBtn.disabled = !done.length;
+        redoBtn.disabled = !undone.length;
+        clearBtn.disabled = !strokes.length;
+        redraw();
+        clearTimeout(timer);
+        if (strokes.length) timer = setTimeout(recognize, delay); else reset();
+      }
+      function clearInk() {
+        if (!strokes.length) return false;
+        done.push({ kind: "clear", strokes: strokes.slice() });
+        undone = [];
+        strokes = [];
+        shrink();
+        changed(0);
+        return true;
+      }
+      undoBtn.addEventListener("click", function () {
+        var a = done.pop();
+        if (!a) return;
+        if (a.kind === "stroke") strokes.pop();
+        else { strokes = a.strokes.slice(); growToFit(); }
+        undone.push(a);
+        changed(300);
+      });
+      redoBtn.addEventListener("click", function () {
+        var a = undone.pop();
+        if (!a) return;
+        if (a.kind === "stroke") { strokes.push(a.stroke); growToFit(); }
+        else { strokes = []; shrink(); }
+        done.push(a);
+        changed(300);
+      });
+      clearBtn.addEventListener("click", clearInk);
+      readBtn.addEventListener("click", recognize);
+
+      // ---- reading -----------------------------------------------------------------------
+      function reset() {
+        clearTimeout(timer);
+        seq++;
+        cands.textContent = "";
+        field.value = "";
+        picks = { choices: {}, constants: {} };
+        note.textContent = canRead ? "" : status.reason;
+        note.className = "ink-note" + (canRead ? "" : " error");
+        show(null);
+      }
+      function typeset(el, tex, fallback) {
+        el.textContent = "";
+        if (katex && tex) {
+          try { el.innerHTML = katex.renderToString(tex, { throwOnError: false, displayMode: false, output: "html" }); return; }
+          catch (e) { /* the text, then */ }
+        }
+        el.textContent = fallback || tex || "";
+      }
+      function recognize() {
+        clearTimeout(timer);
+        if (!strokes.length || !canRead) return;
+        var my = ++seq;
+        element.classList.add("ink-busy");
+        note.textContent = "Reading…";
+        note.className = "ink-note";
+        updateSummary();
+        // quiet: the editor's overlay would cover the area while one writes on
+        api.call("recognize", { strokes: strokes }, { quiet: true }).then(function (res) {
+          if (my !== seq) return;
+          element.classList.remove("ink-busy");
+          cands.textContent = "";
+          if (!res.candidates.length) { note.textContent = "Nothing could be read"; show(null); return; }
+          note.textContent = "Read in " + res.ms + " ms" + (res.candidates.length > 1 ? " — the best reading first, pick another if it is the one" : "");
+          res.candidates.forEach(function (c, i) {
+            var b = h("button", { type: "button", class: "ink-cand", role: "option", title: c.latex });
+            typeset(b, c.latex, c.latex);
+            b.addEventListener("click", function () { choose(c, b); });
+            cands.appendChild(b);
+            if (i === 0) choose(c, b);
+          });
+        }, function (e) {
+          if (my !== seq) return;
+          element.classList.remove("ink-busy");
+          note.textContent = String((e && e.message) || e);
+          note.className = "ink-note error";
+          updateSummary();
+        });
+      }
+      function choose(c, button) {
+        for (var i = 0; i < cands.children.length; i++) {
+          var b = cands.children[i];
+          b.classList.toggle("ink-chosen", b === button);
+          b.setAttribute("aria-selected", b === button ? "true" : "false");
+        }
+        field.value = c.latex;
+        picks = { choices: {}, constants: {} };
+        show(c.reading);
+      }
+      function reread() {
         var my = ++seq;
         if (!field.value.trim()) { show(null); return; }
-        api.call("read", { latex: field.value }, { quiet: true }).then(function (res) { if (my === seq) show(res.reading); }, function () {});
-      }, 400);
-    });
-    field.addEventListener("keydown", function (ev) {
-      ev.stopPropagation();                        // the editor's keys are not for the box
-      if (ev.key === "Enter") { ev.preventDefault(); insert(api.range() || (api.selected() && api.selected() !== "/") ? "selection" : "whole"); }
-    });
-
-    function show(reading) {
-      last = reading || null;
-      if (!reading) {
-        src.textContent = "";
-      } else if (reading.ok) {
-        src.textContent = reading.src + (reading.readings > 1 ? "   — " + reading.readings + " ways to read it" : "");
-      } else {
-        src.textContent = reading.error || "This could not be read";
+        api.call("read", { latex: field.value, choices: picks.choices, constants: picks.constants }, { quiet: true })
+          .then(function (res) { if (my === seq) show(res.reading); }, function () {});
       }
-      src.className = "ink-src" + (reading && !reading.ok ? " error" : "");
-      updateInsert();
-    }
-
-    function latexBox() {
-      return api.editor && api.editor.root ? api.editor.root.querySelector(".se-addon-latex .ltx-input") : null;
-    }
-
-    function updateInsert() {
-      var ok = !!(last && last.ok);
-      var sel = api.selected(), r = api.range();
-      insertAll.disabled = !ok;
-      insertSel.disabled = !ok || (!sel && !r) || sel === "/";
-      insertSel.textContent = r ? "Replace the selected range" : "Replace the selection";
-      toLatex.hidden = !latexBox() || !field.value.trim();
-    }
-
-    function insert(which) {
-      if (!last || !last.ok) return;
-      var payload = { latex: field.value, path: "/" };
-      var r = api.range(), sel = api.selected();
-      if (which === "selection" && r) { payload.path = r.parent; payload.children = api.editor._rangeIndices(); }
-      else if (which === "selection" && sel && sel !== "/") payload.path = sel;
-      api.call("insert", payload).then(function () {
-        strokes = [];
-        redraw();
-        reset();
-        note.textContent = "Inserted.";
-      }, function (e) {
-        note.textContent = String((e && e.message) || e);
-        note.className = "ink-note error";
-      });
-    }
-    insertSel.addEventListener("click", function () { insert("selection"); });
-    insertAll.addEventListener("click", function () { insert("whole"); });
-    toLatex.addEventListener("click", function () {
-      var box = latexBox();
-      if (!box) return;
-      var d = box.closest("details");
-      if (d) d.open = true;
-      box.value = field.value;
-      box.dispatchEvent(new Event("input", { bubbles: true }));
-      box.focus();
-    });
-
-    if (!status.available) canvas.classList.add("ink-off");
-    reset();
-    setTimeout(size, 0);
-
-    return {
-      element: element,
-      title: "Handwriting",
-      help: "<section><h3>Writing a formula by hand</h3><ul>"
-        + "<li>Write in the area with a pen, a finger or the mouse. A moment after the pen lifts, what is written is read; <b>Read</b> reads it at once, <b>Undo stroke</b> takes back the last stroke, <b>Clear</b> starts again.</li>"
-        + "<li>The best reading comes first and the others after it: pick the one you wrote. Its LaTeX is in the box, to correct; the line under it is what SymPy gets.</li>"
-        + "<li><b>Replace the selection</b> puts it over what is selected (a node or a range); <b>Replace the whole expression</b> makes it the formula. Enter in the box does the first when something is selected, the second otherwise.</li>"
-        + "<li>Where it can be read in more than one way, <b>Open in the LaTeX panel</b> hands it to that panel, which offers every reading.</li>"
-        + "<li>The reading is done by math-ocr's stroke model, in this Python. It reads one formula at a time, and mixes up look-alike glyphs most (<code>1</code> and <code>|</code>, <code>V</code> and <code>v</code>).</li>"
-        + "</ul></section>",
-      onSelect: function () { updateInsert(); },
-      destroy: function () {
-        clearTimeout(timer);
+      field.addEventListener("input", function () {
+        for (var i = 0; i < cands.children.length; i++) cands.children[i].classList.remove("ink-chosen");
+        picks = { choices: {}, constants: {} };     // new text: the old picks do not apply to it
         clearTimeout(readTimer);
-        if (resizer) resizer.disconnect(); else window.removeEventListener("resize", size);
+        readTimer = setTimeout(reread, 400);
+      });
+      field.addEventListener("keydown", function (ev) {
+        ev.stopPropagation();                        // the editor's keys are not for the box
+        if (ev.key === "Enter") { ev.preventDefault(); insert(api.range() || (api.selected() && api.selected() !== "/") ? "selection" : "whole"); }
+      });
+
+      function show(reading) {
+        last = reading || null;
+        if (!reading) src.textContent = "";
+        else if (reading.ok) src.textContent = reading.src;
+        else src.textContent = reading.error || "This could not be read";
+        src.className = "ink-src" + (reading && !reading.ok ? " error" : "");
+        options(reading);
+        updateInsert();
+        updateSummary();
       }
-    };
-  }
-});
+      // The reading's options, as the LaTeX panel offers them: a menu per
+      // ambiguity with the whole expression under each alternative, a switch
+      // per constant name.  A pick reads the text again with it.
+      function options(reading) {
+        ambig.textContent = "";
+        consts.textContent = "";
+        if (!reading || !reading.ok) return;
+        picks.choices = Object.assign({}, reading.choices || {});   // every decision, so the next pick changes only itself
+        (reading.ambiguities || []).forEach(function (a) {
+          var sel = h("select", { class: "ink-choice", title: "How to read " + a.fragment });
+          a.options.forEach(function (o, i) {
+            var opt = h("option", { value: String(i) }, [o.invalid ? "(not a reading)" : o.src]);
+            if (o.invalid) opt.disabled = true;
+            if (i === a.choice) opt.selected = true;
+            sel.appendChild(opt);
+          });
+          sel.addEventListener("change", function () { picks.choices[a.key] = parseInt(sel.value, 10); reread(); });
+          ambig.appendChild(h("label", { class: "ink-point" }, [h("code", { class: "ink-fragment" }, [a.fragment]), " → ", sel]));
+        });
+        (reading.constants || []).forEach(function (c) {
+          var box = h("input", { type: "checkbox" });
+          box.checked = !!c.on;
+          box.addEventListener("change", function () { picks.constants[c.name] = box.checked; reread(); });
+          consts.appendChild(h("label", { class: "ink-const", title: c.label }, [box, " ", h("code", {}, [c.name]), " is " + c.value + " (" + c.label + ")"]));
+        });
+      }
+
+      function latexBox() {
+        return api.editor && api.editor.root ? api.editor.root.querySelector(".se-addon-latex .ltx-input") : null;
+      }
+      function updateInsert() {
+        var ok = !!(last && last.ok);
+        var sel = api.selected(), r = api.range();
+        insertAll.disabled = !ok;
+        insertSel.disabled = !ok || (!sel && !r) || sel === "/";
+        insertSel.textContent = r ? "Replace the selected range" : "Replace the selection";
+        toLatex.hidden = full || !latexBox() || !field.value.trim();
+      }
+      function updateSummary() {
+        sheetSummary.textContent = last && last.ok ? last.src : (note.textContent || "Readings");
+        sheetChevron.innerHTML = chevronIcon(folded ? "up" : "down");
+        sheetHead.setAttribute("aria-expanded", folded ? "false" : "true");
+        sheet.classList.toggle("ink-folded", folded);
+      }
+      sheetHead.addEventListener("click", function () { folded = !folded; updateSummary(); });
+
+      function insert(which) {
+        if (!last || !last.ok) return;
+        var payload = { latex: field.value, path: "/", choices: picks.choices, constants: picks.constants };
+        var r = api.range(), sel = api.selected();
+        if (which === "selection" && r) { payload.path = r.parent; payload.children = api.editor._rangeIndices(); }
+        else if (which === "selection" && sel && sel !== "/") payload.path = sel;
+        api.call("insert", payload).then(function () {
+          setFull(false);                          // the formula it went into, in sight
+          if (!clearInk()) reset();                // the ink goes too - Undo brings it back
+          note.textContent = "Inserted.";
+          updateSummary();
+        }, function (e) {
+          note.textContent = String((e && e.message) || e);
+          note.className = "ink-note error";
+          updateSummary();
+        });
+      }
+      insertSel.addEventListener("click", function () { insert("selection"); });
+      insertAll.addEventListener("click", function () { insert("whole"); });
+      toLatex.addEventListener("click", function () {
+        var box = latexBox();
+        if (!box) return;
+        var d = box.closest("details");
+        if (d) d.open = true;
+        box.value = field.value;
+        box.dispatchEvent(new Event("input", { bubbles: true }));
+        box.focus();
+      });
+
+      // ---- full screen --------------------------------------------------------------------
+      function onKey(ev) {
+        if (ev.key !== "Escape") return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        setFull(false);
+      }
+      function setFull(on) {
+        on = !!on;
+        if (on === full) return;
+        full = on;
+        element.classList.toggle("ink-full", on);
+        fullBtn.innerHTML = expandIcon(on);
+        var title = on ? "Leave full screen (Esc)" : "Full screen: the writing area as large as the screen";
+        fullBtn.setAttribute("title", title);
+        fullBtn.setAttribute("aria-label", title);
+        var page = document.documentElement;
+        if (on) {
+          pageOverflow = page.style.overflow;
+          page.style.overflow = "hidden";            // the page under the panel stays put
+          document.addEventListener("keydown", onKey, true);
+        } else {
+          page.style.overflow = pageOverflow || "";
+          document.removeEventListener("keydown", onKey, true);
+        }
+        if (api.editor && api.editor._nativeFullscreen) api.editor._nativeFullscreen(on);   // the Android app hides its bars
+        updateInsert();
+        setTimeout(fitPad, 0);
+      }
+      fullBtn.addEventListener("click", function (ev) { ev.preventDefault(); setFull(!full); });
+      fullBtn.innerHTML = expandIcon(false);
+      fullBtn.setAttribute("title", "Full screen: the writing area as large as the screen");
+      fullBtn.setAttribute("aria-label", "Full screen");
+
+      if (!canRead) canvas.classList.add("ink-off");
+      reset();
+      setTimeout(fitPad, 0);
+
+      return {
+        element: element,
+        title: "Handwriting",
+        help: "<section><h3>Writing a formula by hand</h3><ul>"
+          + "<li>Write in the area with a pen, a finger or the mouse. A moment after the pen lifts, what is written is read; <b>Read</b> reads it at once.</li>"
+          + "<li>Near the right or the bottom edge the area makes room beyond it; the strips along its edges scroll it (so does the wheel).</li>"
+          + "<li><b>Undo</b> takes back the last stroke - or the clearing, or the ink an insertion took - and <b>Redo</b> puts it back; <b>Clear</b> starts again.</li>"
+          + "<li>The best reading comes first and the others after it: pick the one you wrote. Its LaTeX is in the box, to correct; the line under it is what SymPy gets, with a menu for each part that can be read more than one way and a switch for each constant name.</li>"
+          + "<li><b>Replace the selection</b> puts it over what is selected (a node or a range); <b>Replace the whole expression</b> makes it the formula. Enter in the box does the first when something is selected, the second otherwise.</li>"
+          + "<li>The corner button gives the writing area the whole screen, the tools on top and the readings in a sheet at the bottom that folds away; Esc or the button comes back, and so does inserting.</li>"
+          + "<li>The reading is done by math-ocr's stroke model. It reads one formula at a time, and mixes up look-alike glyphs most (<code>1</code> and <code>|</code>, <code>V</code> and <code>v</code>).</li>"
+          + "</ul></section>",
+        onSelect: function () { updateInsert(); },
+        destroy: function () {
+          setFull(false);
+          clearTimeout(timer);
+          clearTimeout(readTimer);
+          if (resizer) resizer.disconnect(); else window.removeEventListener("resize", fitPad);
+        }
+      };
+    }
+  };
+})());

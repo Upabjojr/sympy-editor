@@ -54,12 +54,29 @@ class InkAddon(Addon):
                               "pip install -e addons/sympy_editor_latex") from None
         return latex
 
-    def _reading(self, doc, latex: str) -> Dict[str, Any]:
-        """The LaTeX as SymPy would get it - read as the LaTeX panel reads,
-        in the document's names - without the expression itself."""
-        res = self._latex().read(doc, {"latex": latex})
+    @staticmethod
+    def _picks(payload: Dict[str, Any]) -> Dict[str, Any]:
+        """The reader's options a payload carries: the alternative picked at
+        each ambiguity, and the constants switched on or off."""
+        choices, constants = payload.get("choices"), payload.get("constants")
+        return {"choices": dict(choices) if isinstance(choices, dict) else {},
+                "constants": dict(constants) if isinstance(constants, dict) else {}}
+
+    def _read(self, doc, latex: str, picks: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        return self._latex().read(doc, dict(picks or {}, latex=latex))
+
+    def _reading(self, doc, latex: str, picks: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """The LaTeX as SymPy would get it - read as the LaTeX panel reads, in
+        the document's names, with the options picked - and the options
+        themselves: each ambiguity with the whole expression under each of its
+        alternatives, each constant name with its switch, and every decision
+        taken (``choices``, so that the next pick changes only itself)."""
+        res = self._read(doc, latex, picks)
         out = {k: res.get(k) for k in ("ok", "src", "latex", "error", "incomplete")}
-        out["readings"] = 1 + sum(len(a.get("options") or []) - 1 for a in res.get("ambiguities") or [])
+        out["ambiguities"] = res.get("ambiguities") or []
+        out["constants"] = res.get("constants") or []
+        out["choices"] = res.get("choices") or {}
+        out["readings"] = 1 + sum(len(a.get("options") or []) - 1 for a in out["ambiguities"])
         return out
 
     def handle(self, doc, method: str, payload: Dict[str, Any]):
@@ -71,9 +88,9 @@ class InkAddon(Addon):
                 cand["reading"] = self._reading(doc, cand["latex"])
             return result
         if method == "read":
-            return {"reading": self._reading(doc, str(payload.get("latex", "")))}
+            return {"reading": self._reading(doc, str(payload.get("latex", "")), self._picks(payload))}
         if method == "insert":
-            res = self._latex().read(doc, {"latex": str(payload.get("latex", ""))})
+            res = self._read(doc, str(payload.get("latex", "")), self._picks(payload))
             if not res.get("ok"):
                 raise ValueError(res.get("error") or "This could not be read")
             expr: Basic = res["expr"]

@@ -46,6 +46,26 @@ def test_insert_replaces_a_range_or_the_whole_expression():
     assert doc.history_labels()["actions"][-1] == "Handwriting: \\frac{1}{2}"
 
 
+
+def test_a_reading_carries_its_options_and_an_insert_follows_the_picks():
+    """The bottom sheet of the full screen offers what the LaTeX panel does:
+    each ambiguity a menu, each constant name a switch; what goes in is the
+    reading with the options picked."""
+    doc = Document(x, addons=[ADDON])
+    call = lambda method, **payload: doc.handle(dict(payload, action="addon", addon="ink", method=method))
+    latex = r"\sin x \cos y + \pi"
+    reading = call("read", latex=latex)["query"]["result"]["reading"]
+    assert reading["ok"] and reading["src"] == "sin(x)*cos(y) + pi"
+    point = next(a for a in reading["ambiguities"] if a["fragment"] == r"\sin x \cos y")
+    other = next(i for i, o in enumerate(point["options"]) if o["src"] == "sin(x*cos(y)) + pi")
+    assert [c["name"] for c in reading["constants"]] == ["pi"] and reading["constants"][0]["on"]
+    picks = {"choices": dict(reading["choices"], **{point["key"]: other}), "constants": {"pi": False}}
+    picked = call("read", latex=latex, **picks)["query"]["result"]["reading"]
+    assert picked["src"] == "pi + sin(x*cos(y))"
+    call("insert", latex=latex, path="/", **picks)
+    assert str(doc.expr) == "pi + sin(x*cos(y))" and "pi" not in [str(a) for a in doc.expr.atoms() if a.is_number]
+
+
 def test_a_missing_model_is_said_not_crashed_on(tmp_path):
     missing = StrokeRecognizer(mathocr=tmp_path)
     status = missing.status()
