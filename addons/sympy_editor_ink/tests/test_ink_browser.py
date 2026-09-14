@@ -123,6 +123,8 @@ def test_the_area_grows_scrolls_undoes_and_goes_full_screen():
             # undo, redo, and a clear that undo brings back
             page.locator(".se-addon-ink .ink-undo").click()
             assert strokes() == 2
+            g = page.evaluate(geometry)
+            assert g["ch"] == g["h"] and g["cw"] > g["w"]      # the room below went with the stroke; the ink on the right keeps its own
             page.locator(".se-addon-ink .ink-redo").click()
             assert strokes() == 3 and page.locator(".se-addon-ink .ink-redo").is_disabled()
             page.locator(".se-addon-ink .ink-clear").click()
@@ -204,6 +206,20 @@ def test_two_fingers_zoom_and_scroll_the_area_and_never_write():
             scroll = lambda: page.evaluate("(() => { const p = document.querySelector('.se-addon-ink .ink-pad'); return [p.scrollLeft, p.scrollTop]; })()")
             r = page.locator(".se-addon-ink .ink-pad").bounding_box()
             cx, cy = r["x"] + r["width"] / 2, r["y"] + r["height"] / 2
+
+            # a finger writing to the right edge makes room; a second finger takes the stroke back, and the room
+            size = "(() => { const p = document.querySelector('.se-addon-ink .ink-pad'), c = document.querySelector('.se-addon-ink .ink-canvas'); return [c.clientWidth, p.clientWidth]; })()"
+            touch("pointerdown", 1, r["x"] + r["width"] - 90, cy)
+            for k in range(1, 5):
+                touch("pointermove", 1, r["x"] + r["width"] - 90 + 20 * k, cy)
+            canvas_w, pad_w = page.evaluate(size)
+            assert canvas_w > pad_w
+            touch("pointerdown", 2, cx, cy)
+            canvas_w, pad_w = page.evaluate(size)
+            assert canvas_w == pad_w
+            touch("pointerup", 2, cx, cy)
+            touch("pointerup", 1, r["x"] + r["width"] - 10, cy)
+            assert strokes() == 0
 
             # the first finger begins a stroke; the second one takes it back and pinches
             touch("pointerdown", 1, cx - 40, cy)

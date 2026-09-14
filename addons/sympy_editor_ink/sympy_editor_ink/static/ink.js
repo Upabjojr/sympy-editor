@@ -135,12 +135,23 @@ SympyEditor.registerAddon("ink", (function () {
         strokes.forEach(function (s) { s.forEach(function (p) { maxX = Math.max(maxX, p[0]); maxY = Math.max(maxY, p[1]); }); });
         grow(maxX, maxY);
       }
-      function shrink() {                 // no ink: back to the box
-        width = 0;
-        height = 0;
+      // The canvas with no ink: the box at a zoom of 1 - magnified, and so
+      // still scrolled about, when zoomed in; still covering the box when
+      // zoomed out.  Not the box at this zoom: zoomed in, that would leave
+      // nothing to scroll to.
+      function base() {
+        width = pad.clientWidth / Math.min(zoom, 1);
+        height = pad.clientHeight / Math.min(zoom, 1);
+      }
+      function refit() {                  // as large as the ink left needs, no larger: the base, and room beyond the ink
+        base();
+        applySize();
+        growToFit();
+      }
+      function shrink() {                 // no ink: back to the base, from its start
         pad.scrollLeft = 0;
         pad.scrollTop = 0;
-        fitPad();
+        refit();
       }
       function redraw() {
         ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -203,7 +214,7 @@ SympyEditor.registerAddon("ink", (function () {
         return { dist: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)), x: m.x, y: m.y };
       }
       function startGesture() {
-        if (current) { current = null; currentId = null; redraw(); }       // what a first finger began is not a stroke
+        if (current) { current = null; currentId = null; refit(); redraw(); }   // what a first finger began is not a stroke - nor the room it made
         var s = pinch();
         gesture = { dist: s.dist, zoom: zoom, inkX: (pad.scrollLeft + s.x) / zoom, inkY: (pad.scrollTop + s.y) / zoom };
       }
@@ -305,8 +316,8 @@ SympyEditor.registerAddon("ink", (function () {
       undoBtn.addEventListener("click", function () {
         var a = done.pop();
         if (!a) return;
-        if (a.kind === "stroke") strokes.pop();
-        else { strokes = a.strokes.slice(); growToFit(); }
+        strokes = a.kind === "stroke" ? strokes.slice(0, -1) : a.strokes.slice();
+        refit();                          // the room the ink taken back had made goes with it
         undone.push(a);
         changed(300);
       });
