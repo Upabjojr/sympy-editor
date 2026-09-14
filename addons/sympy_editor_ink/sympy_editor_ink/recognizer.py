@@ -13,6 +13,11 @@ Where: ``SYMPY_EDITOR_MATHOCR`` names the checkout; without it, a folder
 sympy-editor's).  Which model: ``SYMPY_EDITOR_MATHOCR_MODEL``, a folder of the
 checkout or any path, by default ``export/stroke_b_int8`` - the larger stroke
 model, quantised (38.9 % exact match on math-ocr's held-out test split).
+
+In the Android app (Chaquopy) there is no onnxruntime for Python: the model
+runs in onnxruntime-android, the Maven library, through Chaquopy's Java
+bridge (:class:`_JavaSession`), and math-ocr's two modules and the model come
+with the app - a debug build stages them beside its Python (mobile/build.py).
 """
 from __future__ import annotations
 
@@ -110,6 +115,113 @@ def with_braces(tokens: Sequence[str]) -> List[str]:
         piece, i = _unit(tokens, i)
         out += piece
     return out
+
+
+#: The model as an Android debug build carries it: a package of its own.
+APP_MODEL_PACKAGE = "mathocr_model"
+
+
+def _on_android() -> bool:
+    """The Android app's CPython (Chaquopy), with Java a module away."""
+    return "ANDROID_ROOT" in os.environ and importlib.util.find_spec("java") is not None
+
+
+def _android_status() -> Dict[str, Any]:
+    if importlib.util.find_spec(APP_MODEL_PACKAGE) is None or importlib.util.find_spec("mathocr") is None:
+        return {"available": False, "reason": "This build of the app carries no handwriting model "
+                                              "(a debug build made beside a math-ocr checkout does)"}
+    if importlib.util.find_spec("numpy") is None:
+        return {"available": False, "reason": "numpy is not in this build of the app"}
+    try:
+        from java import jclass
+        jclass("ai.onnxruntime.OrtEnvironment")
+    except Exception:  # noqa: BLE001 - a missing class is a Java exception
+        return {"available": False, "reason": "onnxruntime-android is not in this build of the app"}
+    return {"available": True, "model": "the app's own copy (debug build)", "mathocr": "the app's own copy"}
+
+
+def _primitive(jarr, dtype):
+    """A Java primitive array as a numpy array - through the buffer protocol
+    where Chaquopy offers it, element by element otherwise."""
+    import numpy as np
+    try:
+        return np.frombuffer(memoryview(jarr), dtype=dtype).copy()
+    except (TypeError, ValueError):
+        return np.array(list(jarr), dtype=dtype)
+
+
+class _JavaSession:
+    """onnxruntime-android behind the one call of onnxruntime's Python API
+    that the beam search makes - ``run(None, feeds)``, numpy arrays in and
+    out - through Chaquopy's Java bridge.  An input passed again as the very
+    same array (the encoder's memory, at every decoding step) is not copied
+    into Java again."""
+
+    def __init__(self, model: bytes, threads: int = 1) -> None:
+        from java import jarray, jbyte, jclass
+        self._env = jclass("ai.onnxruntime.OrtEnvironment").getEnvironment()
+        opts = jclass("ai.onnxruntime.OrtSession$SessionOptions")()
+        opts.setIntraOpNumThreads(max(1, int(threads)))
+        self._session = self._env.createSession(jarray(jbyte)(model), opts)
+        self._outputs = [str(name) for name in self._session.getOutputNames().toArray()]
+        self._cache: Dict[str, tuple] = {}
+
+    def _tensor(self, value):
+        import numpy as np
+        from java import jarray, jbyte, jclass, jfloat, jlong
+        tensor = jclass("ai.onnxruntime.OnnxTensor")
+        arr = np.asarray(value)
+        shape = jarray(jlong)([int(n) for n in arr.shape])
+        if arr.dtype == np.bool_:
+            data = jclass("java.nio.ByteBuffer").wrap(jarray(jbyte)(arr.astype(np.uint8).tobytes()))
+            return tensor.createTensor(self._env, data, shape, jclass("ai.onnxruntime.OnnxJavaType").BOOL)
+        if arr.dtype == np.int64:
+            data = jclass("java.nio.LongBuffer").wrap(jarray(jlong)(arr.ravel().tolist()))
+            return tensor.createTensor(self._env, data, shape)
+        data = jclass("java.nio.FloatBuffer").wrap(jarray(jfloat)(arr.astype(np.float32).ravel().tolist()))
+        return tensor.createTensor(self._env, data, shape)
+
+    @staticmethod
+    def _array(value):
+        import numpy as np
+        from java import jarray, jbyte, jfloat, jlong
+        info = value.getInfo()
+        shape = [int(n) for n in info.getShape()]
+        kind = str(info.type)
+        if kind == "FLOAT":
+            buf = value.getFloatBuffer()
+            out = jarray(jfloat)(buf.remaining())
+            buf.get(out)
+            flat = _primitive(out, np.float32)
+        elif kind == "BOOL":
+            buf = value.getByteBuffer()
+            out = jarray(jbyte)(buf.remaining())
+            buf.get(out)
+            flat = _primitive(out, np.int8) != 0
+        elif kind == "INT64":
+            buf = value.getLongBuffer()
+            out = jarray(jlong)(buf.remaining())
+            buf.get(out)
+            flat = _primitive(out, np.int64)
+        else:
+            raise TypeError(f"The model answered with a {kind} tensor")
+        return flat.reshape(shape)
+
+    def run(self, names, feeds):
+        from java import jclass
+        inputs = jclass("java.util.HashMap")()
+        for name, value in feeds.items():
+            cached = self._cache.get(name)
+            if cached is None or cached[0] is not value:
+                if cached is not None:
+                    cached[1].close()
+                cached = self._cache[name] = (value, self._tensor(value))   # the array kept: its id cannot be reused
+            inputs.put(name, cached[1])
+        result = self._session.run(inputs)
+        try:
+            return [self._array(result.get(self._outputs.index(n))) for n in (names or self._outputs)]
+        finally:
+            result.close()
 
 
 def find_mathocr() -> Optional[Path]:
@@ -222,6 +334,8 @@ class StrokeRecognizer:
     def status(self) -> Dict[str, Any]:
         """Whether recognition can run here - and if not, why - without
         loading anything."""
+        if _on_android():
+            return _android_status()
         if importlib.util.find_spec("onnxruntime") is None:
             return {"available": False, "reason": "onnxruntime is not installed in this Python (pip install onnxruntime)"}
         root = self.root
@@ -246,6 +360,26 @@ class StrokeRecognizer:
             st = self.status()
             if not st["available"]:
                 raise RuntimeError(st["reason"])
+            if _on_android():
+                import pkgutil
+                inkml = importlib.import_module("mathocr.data.inkml")
+                tokenizer = importlib.import_module("mathocr.tokenizer")
+
+                def data(name):
+                    try:
+                        got = pkgutil.get_data(APP_MODEL_PACKAGE, name)
+                        if got is not None:
+                            return got
+                    except Exception:  # noqa: BLE001 - an importer without get_data
+                        pass
+                    import importlib.resources
+                    return importlib.resources.files(APP_MODEL_PACKAGE).joinpath(name).read_bytes()
+
+                threads = int(self._threads or os.environ.get("MATHOCR_THREADS", 1))
+                enc, dec = _JavaSession(data("encoder.onnx"), threads), _JavaSession(data("decoder_step.onnx"), threads)
+                tok = tokenizer.Tokenizer(json.loads(data("vocab.json").decode("utf-8")))
+                self._loaded = (enc, dec, tok, inkml, tokenizer, json.loads(data("meta.json").decode("utf-8")))
+                return self._loaded
             root, model = Path(st["mathocr"]), Path(st["model"])
             if str(root) not in sys.path:
                 sys.path.insert(0, str(root))

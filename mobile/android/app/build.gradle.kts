@@ -72,6 +72,9 @@ chaquopy {
             // a test keeps this list in step with the manifests)
             install("sympy-matching>=0.0.4")
             install("lark>=1.1")
+            // the handwriting add-on reads strokes with math-ocr's numpy code;
+            // only a debug build carries it, like its model (mobile/build.py stage_ink)
+            if (gradle.startParameter.taskNames.any { it.contains("Debug", ignoreCase = true) }) install("numpy")
         }
     }
 }
@@ -79,4 +82,7 @@ chaquopy {
 dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.webkit:webkit:1.11.0")
+    // the handwriting add-on's model runs in ONNX Runtime; like the model
+    // itself (mobile/build.py stage_ink), only a debug build carries it
+    debugImplementation("com.microsoft.onnxruntime:onnxruntime-android:1.29.0")
 }

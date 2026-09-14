@@ -141,6 +141,51 @@ def stage_addons(dest: Path) -> Path:
     return dest
 
 
+#: The handwriting add-on: its manifest says "bundle": false - neither a
+#: Pyodide page nor a release can run it - and an Android debug build stages it
+#: itself, with what it reads with (stage_ink).
+INK_ADDON = "sympy_editor_ink"
+INK_MODEL_FILES = ("encoder.onnx", "decoder_step.onnx", "vocab.json", "meta.json")
+
+
+def stage_ink(dest: Path, wanted: bool) -> bool:
+    """The handwriting add-on in an Android debug build, beside the app's
+    Python in ``dest``: the add-on's folder, math-ocr's ``mathocr.tokenizer``
+    and ``mathocr.data.inkml`` (the features the model was trained on), and
+    the model as the package ``mathocr_model``, which onnxruntime-android - a
+    debug build's dependency only (build.gradle.kts) - runs.
+
+    The model is not ours to redistribute and must never reach git or a
+    release: every folder staged
+    here is git-ignored, and any other build removes what a debug build left."""
+    for name in ("mathocr", "mathocr_model"):
+        shutil.rmtree(dest / name, ignore_errors=True)
+    if not wanted:
+        return False
+    sys.path.insert(0, str(ADDONS / INK_ADDON))
+    from sympy_editor_ink.recognizer import StrokeRecognizer
+    rec = StrokeRecognizer()
+    root, model = rec.root, rec.model_dir()
+    if root is None or model is None or not all((model / f).is_file() for f in INK_MODEL_FILES):
+        print("+ no handwriting model (a math-ocr checkout beside this one, or SYMPY_EDITOR_MATHOCR): not staged")
+        return False
+    shutil.copytree(ADDONS / INK_ADDON, dest / "addons" / INK_ADDON, ignore=ADDON_SKIP)
+    package = dest / "mathocr"
+    (package / "data").mkdir(parents=True)
+    for init in (package / "__init__.py", package / "data" / "__init__.py"):
+        init.write_text("", encoding="utf-8")
+    shutil.copyfile(root / "mathocr" / "tokenizer.py", package / "tokenizer.py")
+    shutil.copyfile(root / "mathocr" / "data" / "inkml.py", package / "data" / "inkml.py")
+    models = dest / "mathocr_model"
+    models.mkdir()
+    (models / "__init__.py").write_text('"""math-ocr\'s stroke model, staged into a debug build: never commit it, never ship it."""\n',
+                                        encoding="utf-8")
+    for f in INK_MODEL_FILES:
+        shutil.copyfile(model / f, models / f)
+    print(f"+ staged the handwriting add-on and {model} (a debug build only)")
+    return True
+
+
 def addon_requirements() -> list[str]:
     """The pip requirements of the bundled add-ons (from their manifests):
     what each app must install beside SymPy."""
@@ -224,6 +269,7 @@ def android_build(release: bool, cdn: bool) -> list[Path]:
     # about which of the two is open.
     build_www(cdn, android=True, debug=not release)
     copy_python_sources(ANDROID / "app" / "src" / "main" / "python")
+    stage_ink(ANDROID / "app" / "src" / "main" / "python", wanted=not release)
     make_icons(ANDROID / "app/src/main/res/mipmap-mdpi/ic_launcher.png",
                ANDROID / "app/src/debug/res/mipmap-mdpi/ic_launcher.png")
     gradlew = ANDROID / ("gradlew.bat" if platform.system() == "Windows" else "gradlew")
