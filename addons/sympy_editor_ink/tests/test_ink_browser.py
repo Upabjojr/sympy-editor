@@ -3,6 +3,7 @@ undo / redo / clear, full screen with its sheet of readings, the reading's
 options, and inserting with them.  The model is faked - what is tested is the
 panel, not math-ocr - so it needs only Playwright with Chromium and the KaTeX
 CDN (skipped otherwise)."""
+import math
 import sys
 import threading
 import time
@@ -160,6 +161,88 @@ def test_the_area_grows_scrolls_undoes_and_goes_full_screen():
             assert strokes() == 0 and page.locator(".se-addon-ink .ink-note").inner_text() == "Inserted."
             page.locator(".se-addon-ink .ink-undo").click()                    # the ink comes back
             assert strokes() == 3
+            assert errors == []
+            browser.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+TOUCH = """(t) => {
+    const c = document.querySelector('.se-addon-ink .ink-canvas');
+    c.dispatchEvent(new PointerEvent(t.type, {pointerId: t.id, pointerType: 'touch', isPrimary: t.id === 1,
+        clientX: t.x, clientY: t.y, button: 0, buttons: t.type === 'pointerup' ? 0 : 1, bubbles: true, cancelable: true}));
+}"""
+
+
+def test_two_fingers_zoom_and_scroll_the_area_and_never_write():
+    """A second finger drops the stroke the first one began and pinches
+    instead: apart zooms in, both moving scroll - the way back after the area
+    has been scrolled on - and the finger left when the other lifts writes
+    nothing.  One finger writes again afterwards; a pinch on a trackpad
+    (Ctrl and the wheel) zooms too."""
+    doc = Document(x, addons=[InkAddon(FakeRecognizer()), LATEX])
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with playwright.sync_playwright() as p:
+            try:
+                browser = p.chromium.launch()
+            except Exception as exc:
+                pytest.skip(f"chromium not available: {exc}")
+            page = browser.new_page(viewport={"width": 760, "height": 900})
+            errors = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.goto(srv.url)
+            page.wait_for_selector(".se-addon-ink .ink-canvas", timeout=30000)
+            page.wait_for_function("document.querySelector('.se-addon-ink .ink-canvas').clientWidth > 0")
+            panel = page.locator(".se-addon-ink .ink-panel")
+            touch = lambda kind, pid, px, py: page.evaluate(TOUCH, {"type": kind, "id": pid, "x": px, "y": py})
+            strokes = lambda: int(panel.get_attribute("data-strokes"))
+            zoom = lambda: float(panel.get_attribute("data-zoom"))
+            scroll = lambda: page.evaluate("(() => { const p = document.querySelector('.se-addon-ink .ink-pad'); return [p.scrollLeft, p.scrollTop]; })()")
+            r = page.locator(".se-addon-ink .ink-pad").bounding_box()
+            cx, cy = r["x"] + r["width"] / 2, r["y"] + r["height"] / 2
+
+            # the first finger begins a stroke; the second one takes it back and pinches
+            touch("pointerdown", 1, cx - 40, cy)
+            touch("pointermove", 1, cx - 30, cy + 10)
+            touch("pointerdown", 2, cx + 40, cy)
+            for k in range(1, 6):                                          # apart: twice the distance
+                touch("pointermove", 1, cx - 40 - 8 * k, cy)
+                touch("pointermove", 2, cx + 40 + 8 * k, cy)
+            assert abs(zoom() - 160 / math.hypot(70, 10)) < 0.05, zoom()   # the fingers began 70 x 10 apart, end 160 apart
+            before = scroll()
+            for k in range(1, 6):                                          # both to the left: the area follows them
+                touch("pointermove", 1, cx - 80 - 12 * k, cy)
+                touch("pointermove", 2, cx + 80 - 12 * k, cy)
+            assert scroll()[0] > before[0] + 40, (before, scroll())
+            touch("pointerup", 2, cx + 20, cy)
+            touch("pointermove", 1, cx - 100, cy + 30)                      # the finger left behind
+            touch("pointermove", 1, cx - 60, cy + 50)
+            touch("pointerup", 1, cx - 60, cy + 50)
+            assert strokes() == 0
+            # back the other way, with two fingers again
+            touch("pointerdown", 1, cx - 60, cy)
+            touch("pointerdown", 2, cx + 60, cy)
+            far = scroll()[0]
+            for k in range(1, 8):
+                touch("pointermove", 1, cx - 60 + 15 * k, cy)
+                touch("pointermove", 2, cx + 60 + 15 * k, cy)
+            touch("pointerup", 1, cx, cy)
+            touch("pointerup", 2, cx, cy)
+            assert scroll()[0] < far - 60 and strokes() == 0
+            # one finger writes again
+            touch("pointerdown", 3, cx - 20, cy - 20)
+            touch("pointermove", 3, cx + 10, cy)
+            touch("pointerup", 3, cx + 20, cy + 10)
+            assert strokes() == 1
+            # a pinch on a trackpad: Ctrl and the wheel
+            page.mouse.move(cx, cy)
+            page.keyboard.down("Control")
+            page.mouse.wheel(0, 120)
+            page.keyboard.up("Control")
+            assert _wait(lambda: zoom() < 1.8)
             assert errors == []
             browser.close()
     finally:

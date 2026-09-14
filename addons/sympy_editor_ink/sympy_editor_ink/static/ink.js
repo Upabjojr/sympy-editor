@@ -10,7 +10,9 @@
  * readings come back as LaTeX, best first, each with what SymPy makes of it
  * and the options of that reading - an ambiguity's alternatives, a constant's
  * switch - and go in over the selection or as the whole expression.  Strokes,
- * clearing and inserting can be undone and redone.  In full screen the panel
+ * clearing and inserting can be undone and redone.  Two fingers never write:
+ * they pinch the area to zoom it and drag it to scroll, and the strokes keep
+ * the canvas's own coordinates whatever the zoom.  In full screen the panel
  * covers the page: the tools on top, the writing area, and the readings in a
  * sheet at the bottom that folds away.
  */
@@ -29,7 +31,8 @@ SympyEditor.registerAddon("ink", (function () {
       '<path transform="rotate(' + deg + ' 8 8)" fill="none" stroke="currentColor" stroke-width="1.8" ' +
       'stroke-linecap="round" stroke-linejoin="round" d="M3.5 10.2 8 5.7l4.5 4.5"/></svg>';
   }
-  var EDGE = 40;                    // px: ink this near the right or bottom edge makes room beyond it
+  var EDGE = 40;                    // px on screen: ink this near the right or bottom edge makes room beyond it
+  var MIN_ZOOM = 0.5, MAX_ZOOM = 4;
   var MAX_W = 6000, MAX_H = 4000;   // px: as far as the canvas grows
 
   return {
@@ -76,7 +79,7 @@ SympyEditor.registerAddon("ink", (function () {
       var sheetBody = h("div", { class: "ink-sheet-body" }, [note, cands, field, src, ambig, consts,
         h("div", { class: "ink-actions" }, [insertSel, insertAll, toLatex])]);
       var sheet = h("div", { class: "ink-sheet" }, [sheetHead, sheetBody]);
-      var element = h("div", { class: "ink-panel", "data-strokes": "0" }, [bar, stage, sheet]);
+      var element = h("div", { class: "ink-panel", "data-strokes": "0", "data-zoom": "1.00" }, [bar, stage, sheet]);
 
       // ---- state -------------------------------------------------------------------
       var strokes = [];                 // [[[x, y, t], ...], ...]
@@ -89,29 +92,37 @@ SympyEditor.registerAddon("ink", (function () {
       var last = null;                  // the reading shown
       var picks = { choices: {}, constants: {} };   // the options picked for the text in the box
       var full = false, folded = false, pageOverflow = null;
+      var zoom = 1;                     // on-screen pixels per canvas pixel
+      var touches = {};                 // the fingers down, by pointer id: {x, y} on the page
+      var gesture = null;               // two fingers or more: where the pinch began
+      var blocked = false;              // a finger left from a pinch: it writes nothing until all have lifted
+      var dirty = false;                // ink not read since it changed
 
       api.katex().then(function (k) { katex = k; }, function () {});
 
       // ---- the writing area ----------------------------------------------------------
       var ctx = canvas.getContext("2d");
+      // width, height: the canvas in its own pixels, those the strokes are
+      // kept in; on screen it is zoom times that.
       function applySize() {
+        var cssW = width * zoom, cssH = height * zoom;
         dpr = Math.min(window.devicePixelRatio || 1, 2);
-        if (width * height * dpr * dpr > 16e6) dpr = Math.sqrt(16e6 / (width * height));   // what a phone's canvas takes
-        canvas.style.width = width + "px";
-        canvas.style.height = height + "px";
-        canvas.width = Math.max(1, Math.round(width * dpr));
-        canvas.height = Math.max(1, Math.round(height * dpr));
+        if (cssW * cssH * dpr * dpr > 16e6) dpr = Math.sqrt(16e6 / (cssW * cssH));   // what a phone's canvas takes
+        canvas.style.width = cssW + "px";
+        canvas.style.height = cssH + "px";
+        canvas.width = Math.max(1, Math.round(cssW * dpr));
+        canvas.height = Math.max(1, Math.round(cssH * dpr));
         redraw();
         updateStrips();
       }
       function fitPad() {                 // never smaller than the box it scrolls in
-        var w = Math.max(width, pad.clientWidth), hh = Math.max(height, pad.clientHeight);
+        var w = Math.max(width, pad.clientWidth / zoom), hh = Math.max(height, pad.clientHeight / zoom);
         if (w !== width || hh !== height) { width = w; height = hh; applySize(); } else updateStrips();
       }
       function grow(x, y) {               // room beyond ink that nears the right or bottom edge
         var w = width, hh = height;
-        if (x > width - EDGE) w = Math.min(MAX_W, Math.ceil(x + Math.max(160, pad.clientWidth * 0.6)));
-        if (y > height - EDGE) hh = Math.min(MAX_H, Math.ceil(y + Math.max(120, pad.clientHeight * 0.6)));
+        if (x > width - EDGE / zoom) w = Math.min(MAX_W, Math.ceil(x + Math.max(160, pad.clientWidth * 0.6) / zoom));
+        if (y > height - EDGE / zoom) hh = Math.min(MAX_H, Math.ceil(y + Math.max(120, pad.clientHeight * 0.6) / zoom));
         if (w > width || hh > height) { width = Math.max(width, w); height = Math.max(height, hh); applySize(); }
       }
       function growToFit() {
@@ -129,7 +140,7 @@ SympyEditor.registerAddon("ink", (function () {
       function redraw() {
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom, 0, 0);
         ctx.lineWidth = 2.2;
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
@@ -161,11 +172,62 @@ SympyEditor.registerAddon("ink", (function () {
       var resizer = window.ResizeObserver ? new ResizeObserver(fitPad) : null;
       if (resizer) resizer.observe(pad); else window.addEventListener("resize", fitPad);
 
-      function point(ev) {
+      function point(ev) {                // in the canvas's own pixels, whatever the zoom
         var r = canvas.getBoundingClientRect();
-        return [Math.round((ev.clientX - r.left) * 10) / 10, Math.round((ev.clientY - r.top) * 10) / 10, Math.round(ev.timeStamp - t0)];
+        return [Math.round((ev.clientX - r.left) / zoom * 10) / 10, Math.round((ev.clientY - r.top) / zoom * 10) / 10, Math.round(ev.timeStamp - t0)];
       }
+
+      // ---- zooming and scrolling: two fingers, or a pinch on a trackpad ------------
+      function zoomTo(z) {                // the new zoom, the canvas still covering the box
+        z = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z));
+        if (Math.abs(z - zoom) < 1e-3) return false;
+        zoom = z;
+        width = Math.max(width, pad.clientWidth / zoom);
+        height = Math.max(height, pad.clientHeight / zoom);
+        applySize();
+        element.setAttribute("data-zoom", zoom.toFixed(2));
+        return true;
+      }
+      function padPoint(x, y) {           // a point of the page, in the box's own coordinates
+        var r = pad.getBoundingClientRect();
+        return { x: x - r.left - pad.clientLeft, y: y - r.top - pad.clientTop };
+      }
+      function pinch() {
+        var ids = Object.keys(touches), a = touches[ids[0]], b = touches[ids[1]];
+        var m = padPoint((a.x + b.x) / 2, (a.y + b.y) / 2);
+        return { dist: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)), x: m.x, y: m.y };
+      }
+      function startGesture() {
+        if (current) { current = null; currentId = null; redraw(); }       // what a first finger began is not a stroke
+        var s = pinch();
+        gesture = { dist: s.dist, zoom: zoom, inkX: (pad.scrollLeft + s.x) / zoom, inkY: (pad.scrollTop + s.y) / zoom };
+      }
+      function moveGesture() {
+        var s = pinch();
+        zoomTo(gesture.zoom * s.dist / gesture.dist);
+        pad.scrollLeft = gesture.inkX * zoom - s.x;                         // the ink under the fingers stays under them
+        pad.scrollTop = gesture.inkY * zoom - s.y;
+      }
+      pad.addEventListener("wheel", function (ev) {
+        if (!ev.ctrlKey) return;                                           // a pinch on a trackpad; the wheel alone scrolls
+        ev.preventDefault();
+        var p = padPoint(ev.clientX, ev.clientY), inkX = (pad.scrollLeft + p.x) / zoom, inkY = (pad.scrollTop + p.y) / zoom;
+        if (!zoomTo(zoom * Math.exp(-ev.deltaY * 0.01))) return;
+        pad.scrollLeft = inkX * zoom - p.x;
+        pad.scrollTop = inkY * zoom - p.y;
+      }, { passive: false });
+
+      // One finger, a pen or the mouse writes.  A second finger never does:
+      // the stroke the first one began is dropped, and the fingers pinch and
+      // drag until every one of them has lifted.
       canvas.addEventListener("pointerdown", function (ev) {
+        if (ev.pointerType === "touch") {
+          touches[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
+          try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* not capturable */ }
+          if (Object.keys(touches).length >= 2) { ev.preventDefault(); startGesture(); return; }
+          if (blocked) return;
+        }
+        if (current) return;                                               // a palm beside a pen
         if (!canRead || (ev.pointerType === "mouse" && ev.button !== 0)) return;
         ev.preventDefault();
         clearTimeout(timer);
@@ -176,6 +238,10 @@ SympyEditor.registerAddon("ink", (function () {
         redraw();
       });
       canvas.addEventListener("pointermove", function (ev) {
+        if (touches[ev.pointerId]) {
+          touches[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
+          if (gesture) { ev.preventDefault(); moveGesture(); return; }
+        }
         if (!current || ev.pointerId !== currentId) return;
         var evs = (ev.getCoalescedEvents && ev.getCoalescedEvents()) || [];
         if (!evs.length) evs = [ev];
@@ -193,12 +259,28 @@ SympyEditor.registerAddon("ink", (function () {
         currentId = null;
         changed(700);                     // a pause: the formula may be finished
       }
-      canvas.addEventListener("pointerup", endStroke);
-      canvas.addEventListener("pointercancel", endStroke);
+      function lift(ev) {
+        var finger = !!touches[ev.pointerId];
+        delete touches[ev.pointerId];
+        if (finger && (gesture || blocked)) {
+          var left = Object.keys(touches).length;
+          if (left >= 2) startGesture();                                   // one of three lifted: on from where the fingers are
+          else {
+            gesture = null;
+            blocked = left > 0;                                            // the finger left behind writes nothing
+            if (!left && dirty) { clearTimeout(timer); timer = setTimeout(recognize, 700); }   // the reading the first finger put off
+          }
+          return;
+        }
+        endStroke(ev);
+      }
+      canvas.addEventListener("pointerup", lift);
+      canvas.addEventListener("pointercancel", lift);
 
       // ---- undo, redo, clear -----------------------------------------------------------
       function changed(delay) {
         element.setAttribute("data-strokes", String(strokes.length));
+        dirty = strokes.length > 0;
         undoBtn.disabled = !done.length;
         redoBtn.disabled = !undone.length;
         clearBtn.disabled = !strokes.length;
@@ -256,6 +338,7 @@ SympyEditor.registerAddon("ink", (function () {
       function recognize() {
         clearTimeout(timer);
         if (!strokes.length || !canRead) return;
+        dirty = false;
         var my = ++seq;
         element.classList.add("ink-busy");
         note.textContent = "Reading…";
@@ -438,7 +521,8 @@ SympyEditor.registerAddon("ink", (function () {
         title: "Handwriting",
         help: "<section><h3>Writing a formula by hand</h3><ul>"
           + "<li>Write in the area with a pen, a finger or the mouse. A moment after the pen lifts, what is written is read; <b>Read</b> reads it at once.</li>"
-          + "<li>Near the right or the bottom edge the area makes room beyond it; the strips along its edges scroll it (so does the wheel).</li>"
+          + "<li>Near the right or the bottom edge the area makes room beyond it; the strips along its edges scroll it, and so does the wheel.</li>"
+          + "<li>Two fingers never write: pinch to zoom the area in or out, drag with two fingers to move it about (a pinch on a trackpad zooms too).</li>"
           + "<li><b>Undo</b> takes back the last stroke - or the clearing, or the ink an insertion took - and <b>Redo</b> puts it back; <b>Clear</b> starts again.</li>"
           + "<li>The best reading comes first and the others after it: pick the one you wrote. Its LaTeX is in the box, to correct; the line under it is what SymPy gets, with a menu for each part that can be read more than one way and a switch for each constant name.</li>"
           + "<li><b>Replace the selection</b> puts it over what is selected (a node or a range); <b>Replace the whole expression</b> makes it the formula. Enter in the box does the first when something is selected, the second otherwise.</li>"
