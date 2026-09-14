@@ -7,7 +7,7 @@ mathematics that reads the pen *trajectory*, not a picture of it — which
 answers with LaTeX and a few other readings, best first.  The LaTeX add-on's
 reader turns the chosen one into SymPy, in the document's own names; it can be
 corrected in its box, and goes in over the selection (a node or a range) or as
-the whole expression.
+the whole expression - and the page goes back up to the formula.
 
 ## What it needs
 

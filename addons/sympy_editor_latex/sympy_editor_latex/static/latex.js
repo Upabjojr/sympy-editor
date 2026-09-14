@@ -138,6 +138,16 @@ SympyEditor.registerAddon("latex", {
       updateInsert();
     }
 
+    // After a reading goes in, the formula it went into is brought back into
+    // sight: the panel sits below the editor, often scrolled past it.
+    function showFormula(api) {
+      var root = api.editor && api.editor.root;
+      if (!root || !root.scrollIntoView) return;
+      var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      try { root.scrollIntoView({ block: "start", behavior: reduce ? "auto" : "smooth" }); }
+      catch (e) { root.scrollIntoView(true); }       // no options object
+    }
+
     // Where the first button puts the reading: over the selection, at the
     // caret, or after the whole formula when there is neither.
     function target() {
@@ -165,6 +175,7 @@ SympyEditor.registerAddon("latex", {
       api.call("insert", payload).then(function () {
         note.textContent = "Inserted.";
         note.className = "ltx-note";
+        showFormula(api);                          // back up to the formula it went into
       }, function (e) {
         note.textContent = String(e && e.message || e);
         note.className = "ltx-note error";
@@ -194,7 +205,7 @@ SympyEditor.registerAddon("latex", {
         + "<li>Where the text can be read in several ways — <code>f(x)</code> applied or multiplied, how far <code>\\sin x \\cos y</code> reaches — a menu shows every reading of that part, the usual one chosen to begin with; pick another and the whole follows.</li>"
         + "<li>Names that usually mean a constant — <code>\\pi</code>, <code>e</code>, <code>i</code>, <code>\\gamma</code> — are switches: the constant, or a plain symbol of that name.</li>"
         + "<li>While you type, a text that stops in the middle of an expression (<code>\\frac{x</code>, <code>x +</code>) or of a command (<code>\\fr</code>) is only <i>not finished yet</i>, not an error: the last reading stays, dimmed, until the text reads again.</li>"
-        + "<li><b>Replace the selection</b> puts the reading over what is selected (a node or a range); with a cursor in the formula instead the button is <b>Add to cursor</b>, and with neither <b>Add to end</b>: the reading goes in as if typed there - multiplied, or added when it begins with + or -. <b>Replace the whole expression</b> makes it the formula. <kbd>Ctrl</kbd>+<kbd>Enter</kbd> in the box does what the first button says.</li>"
+        + "<li><b>Replace the selection</b> puts the reading over what is selected (a node or a range); with a cursor in the formula instead the button is <b>Add to cursor</b>, and with neither <b>Add to end</b>: the reading goes in as if typed there - multiplied, or added when it begins with + or -. <b>Replace the whole expression</b> makes it the formula. <kbd>Ctrl</kbd>+<kbd>Enter</kbd> in the box does what the first button says. Either way the page goes back up to the formula.</li>"
         + "</ul></section>",
       onSelect: function () { updateInsert(); },
       destroy: function () { clearTimeout(timer); }

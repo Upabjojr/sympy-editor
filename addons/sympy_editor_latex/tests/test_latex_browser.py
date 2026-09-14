@@ -219,3 +219,71 @@ def test_typing_goes_on_through_a_slow_reading_and_unfinished_text_is_no_error()
         browser.close()
     srv.shutdown()
     srv.server_close()
+
+
+def test_inserting_brings_the_formula_back_into_sight():
+    """The panel sits below the editor: after each way in - over the
+    selection, at the end, the whole expression, Ctrl+Enter - the page is
+    back at the top of the editor, wherever it had been scrolled to."""
+    z = Symbol("z")
+    doc = Document(x + y, addons=[ADDON])
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with playwright.sync_playwright() as p:
+            try:
+                browser = p.chromium.launch()
+            except Exception as exc:
+                pytest.skip(f"chromium not available: {exc}")
+            page = browser.new_page(viewport={"width": 760, "height": 420}, reduced_motion="reduce")
+            errors = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.goto(srv.url)
+            page.wait_for_selector(".se-addon-latex .ltx-input", timeout=30000)
+            # room below the panel, so the page can be scrolled away from the formula
+            page.evaluate("document.body.appendChild(Object.assign(document.createElement('div'), {style: 'height: 3000px'}))")
+            ed = "document.querySelector('.sympy-editor').__sympyEditor"
+            source = "document.querySelector('.se-source').textContent"
+            top = "Math.round(document.querySelector('.sympy-editor').getBoundingClientRect().top)"
+
+            def scrolled_away():
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                page.wait_for_function(top + " < -100")
+
+            def back_at_the_formula():
+                page.wait_for_function(top + " >= -1 && " + top + " <= 1", timeout=5000)
+
+            box = page.locator(".ltx-input")
+            box.fill("z")
+            page.wait_for_function("document.querySelector('.ltx-src').textContent === 'z'")
+
+            scrolled_away()                                              # Add to end
+            page.locator(".se-addon-latex .ltx-insert").click()
+            page.wait_for_function(source + " === 'z*(x + y)'")
+            back_at_the_formula()
+
+            xp = next(path for path, n in doc.snapshot()["nodes"].items() if n["src"] == "x")
+            page.evaluate("p => %s.select(p)" % ed, xp)
+            page.wait_for_function("document.querySelector('.se-addon-latex .ltx-insert').textContent === 'Replace the selection'")
+            scrolled_away()                                              # over the selection
+            page.locator(".se-addon-latex .ltx-insert").click()
+            page.wait_for_function("() => %s.includes('z**2') || %s === 'z*(y + z)'" % (source, source))
+            back_at_the_formula()
+
+            scrolled_away()                                              # the whole expression
+            page.locator(".se-addon-latex .ltx-insert-all").click()
+            page.wait_for_function(source + " === 'z'")
+            back_at_the_formula()
+            assert doc.expr == z
+
+            box.fill("y")
+            page.wait_for_function("document.querySelector('.ltx-src').textContent === 'y'")
+            scrolled_away()                                              # Ctrl+Enter in the box
+            box.press("Control+Enter")
+            page.wait_for_function(source + " !== 'z'")
+            back_at_the_formula()
+            assert errors == []
+            browser.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()

@@ -24,8 +24,8 @@ silent conversion a bad idea, and the panel puts both in the user's hands:
 
 **Replace the selection** puts the reading over what is selected in the
 editor, **Replace the whole expression** (or Ctrl+Enter in the box) makes it
-the formula.  Names the document already uses are reused with their
-assumptions or matrix shapes.
+the formula.  Either way the page goes back up to the formula.  Names the
+document already uses are reused with their assumptions or matrix shapes.
 
 ## Install
 
