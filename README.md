@@ -608,9 +608,15 @@ Jupyter widget and the apps all follow.
 | Pyodide | MPL-2.0 | loaded from a CDN by the browser, standalone HTML only |
 | SymPy wheel (PyPI) | BSD-3 | loaded by the browser into Pyodide (the newest SymPy, ahead of Pyodide's own package) |
 
-sympy-editor itself is BSD-3-Clause, and so are its add-ons - except the
-handwriting add-on ([`addons/sympy_editor_ink`](addons/sympy_editor_ink)), which is
-AGPL-3.0-or-later. [`LICENSE`](LICENSE) carries SymPy's licence after sympy-editor's own.
+sympy-editor itself is BSD-3-Clause; [`LICENSE`](LICENSE) carries SymPy's licence
+after sympy-editor's own.
+
+**Add-ons may have their own licence.** Each add-on is a separate package, and
+its licence is the one stated in its folder (a `LICENSE` file, or the `license`
+in its `pyproject.toml`); check it before you redistribute an add-on or a build
+that carries it. Today the add-ons in [`addons/`](addons) are BSD-3-Clause,
+except the handwriting add-on ([`addons/sympy_editor_ink`](addons/sympy_editor_ink)),
+which is AGPL-3.0-or-later.
 
 ## Development
 

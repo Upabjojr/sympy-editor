@@ -29,6 +29,18 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ================================================================================
+Add-ons
+================================================================================
+
+The licence above covers sympy-editor itself.  Add-ons (under addons/ in the
+repository, or installed separately) are distinct works and may have licences
+of their own: each add-on's licence is the one stated in its own folder (its
+LICENSE file, or its pyproject.toml where it has no LICENSE file), and an
+add-on without one of its own is under the licence above.  In particular,
+the handwriting add-on (addons/sympy_editor_ink) is under the GNU Affero
+General Public License, version 3 or later.
+
+================================================================================
 SymPy
 ================================================================================
 
