@@ -224,6 +224,64 @@ class _JavaSession:
             result.close()
 
 
+#: Delimiters that open and close a pair, and those that do both.
+OPENERS = ("(", "[", "\\{", "\\langle", "\\lfloor", "\\lceil")
+CLOSERS = (")", "]", "\\}", "\\rangle", "\\rfloor", "\\rceil")
+BARS = ("|", "\\|")
+
+
+def sized_delimiters(tokens: Sequence[str]) -> List[str]:
+    """``\\left`` and ``\\right`` on every pair of delimiters, for display: a
+    parenthesis round a fraction as tall as the fraction.  The model never
+    writes them - math-ocr's tokenizer drops them as purely visual.
+
+    A closer takes the nearest opener at its level, of any kind (``[0, 1)``
+    is an interval); bars pair with the bar before them, and one left over
+    (``P(A|B)``) stays as it is, as does anything unmatched.  A pair never
+    spans a brace, a cell of a matrix or an environment - LaTeX would refuse
+    it - and the bracket of ``\\sqrt[3]`` is syntax, not a delimiter."""
+    left, right = set(), set()
+    levels: List[List[Tuple[int, str]]] = [[]]
+    for i, t in enumerate(tokens):
+        if t == "{" or t.startswith("\\begin{"):
+            levels.append([])
+            continue
+        if t == "}" or t.startswith("\\end{"):
+            if len(levels) > 1:
+                levels.pop()
+            continue
+        stack = levels[-1]
+        if t in ("&", "\\\\"):
+            stack.clear()                                   # a new cell: nothing open crosses into it
+        elif t == "[" and i and tokens[i - 1] == "\\sqrt":
+            stack.append((i, "sqrt["))
+        elif t in OPENERS:
+            stack.append((i, t))
+        elif t in CLOSERS:
+            while stack and stack[-1][1] in BARS:
+                stack.pop()                                 # a bar left open inside: not a pair
+            if stack:
+                j, opener = stack.pop()
+                if opener != "sqrt[":
+                    left.add(j)
+                    right.add(i)
+        elif t in BARS:
+            if stack and stack[-1][1] == t:
+                j, _ = stack.pop()
+                left.add(j)
+                right.add(i)
+            else:
+                stack.append((i, t))
+    out: List[str] = []
+    for i, t in enumerate(tokens):
+        if i in left:
+            out.append("\\left")
+        elif i in right:
+            out.append("\\right")
+        out.append(t)
+    return out
+
+
 def find_mathocr() -> Optional[Path]:
     """The math-ocr checkout: ``SYMPY_EDITOR_MATHOCR``, or a ``math-ocr``
     folder beside one of the folders above this file."""
@@ -423,9 +481,10 @@ class StrokeRecognizer:
 
     def recognize(self, strokes, beam: int = 4, limit: int = 5) -> Dict[str, Any]:
         """The readings of ``strokes`` (lists of ``[x, y, t]``), best first:
-        ``{"candidates": [{"latex", "raw", "score"}], "ms", "strokes", "points"}``.
+        ``{"candidates": [{"latex", "display", "raw", "score"}], "ms", "strokes", "points"}``.
         ``latex`` is what the editor reads - functions as commands, every
-        argument braced; ``raw`` is the model's own text."""
+        argument braced; ``display`` the same with its delimiters sized, to
+        be shown; ``raw`` the model's own text."""
         enc, dec, tok, inkml, tokenizer, meta = self.load()
         ink = inkml.Ink(strokes=_strokes(strokes), label="")
         if not ink.strokes:
@@ -439,11 +498,13 @@ class StrokeRecognizer:
         out, seen = [], set()
         for score, ids in found:
             toks = [tok.itos[i] for i in ids if 0 <= i < len(tok.itos) and i not in specials]
-            latex = tokenizer.detokenize(with_braces(functions_as_commands(toks)))
+            fixed = with_braces(functions_as_commands(toks))
+            latex = tokenizer.detokenize(fixed)
             if not latex or latex in seen:
                 continue
             seen.add(latex)
-            out.append({"latex": latex, "raw": tokenizer.detokenize(toks), "score": round(float(score), 3)})
+            out.append({"latex": latex, "display": tokenizer.detokenize(sized_delimiters(fixed)),
+                        "raw": tokenizer.detokenize(toks), "score": round(float(score), 3)})
             if len(out) >= limit:
                 break
         return {"candidates": out, "ms": round(ms, 1), "strokes": len(ink.strokes),

@@ -13,7 +13,7 @@ sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE.parents[1] / "sympy_editor_latex"))
 
 from sympy_editor import Document  # noqa: E402
-from sympy_editor_ink import ADDON, InkAddon, StrokeRecognizer, functions_as_commands, with_braces  # noqa: E402
+from sympy_editor_ink import ADDON, InkAddon, StrokeRecognizer, functions_as_commands, sized_delimiters, with_braces  # noqa: E402
 
 x, y, M, r = symbols("x y M r")
 
@@ -34,6 +34,23 @@ def test_every_argument_gets_its_braces_back():
     assert with_braces(["\\frac", "{", "t", "^", "2", "}", "q"]) == ["\\frac", "{", "t", "^", "{", "2", "}", "}", "{", "q", "}"]
     assert with_braces(["\\sqrt", "[", "3", "]", "x"]) == ["\\sqrt", "[", "3", "]", "{", "x", "}"]
     assert with_braces(["e", "^", "\\frac", "1", "2"]) == ["e", "^", "{", "\\frac", "{", "1", "}", "{", "2", "}", "}"]
+
+
+
+def test_matching_delimiters_are_sized_for_display():
+    r"""\left and \right on every pair, so that a parenthesis is as tall as
+    what it holds; never where LaTeX would refuse them, nor on a lone bar."""
+    def sized(text):
+        return " ".join(sized_delimiters(text.split()))
+    assert sized(r"( \frac { 1 } { 2 } )") == r"\left ( \frac { 1 } { 2 } \right )"
+    assert sized(r"( [ a ] + \{ b \} )") == r"\left ( \left [ a \right ] + \left \{ b \right \} \right )"
+    assert sized(r"[ 0 , 1 )") == r"\left [ 0 , 1 \right )"                               # an interval
+    assert sized(r"| a | + \| b \|") == r"\left | a \right | + \left \| b \right \|"
+    assert sized(r"P ( A | B )") == r"P \left ( A | B \right )"                          # a lone bar stays
+    assert sized(r"\langle x \rangle \lfloor y \rfloor") == r"\left \langle x \right \rangle \left \lfloor y \right \rfloor"
+    for untouched in (r"\sqrt [ 3 ] { x }", r"( a", r"a )", r"{ ( } )", r"\begin{matrix} ( a & b ) \end{matrix}",
+                      r"\begin{matrix} ( a \\ b ) \end{matrix}"):
+        assert sized(untouched) == untouched, untouched
 
 
 def test_insert_replaces_a_range_or_the_whole_expression():

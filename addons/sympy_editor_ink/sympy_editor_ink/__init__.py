@@ -18,9 +18,9 @@ from sympy import Basic
 
 from sympy_editor.addons import Addon
 
-from .recognizer import StrokeRecognizer, functions_as_commands, with_braces
+from .recognizer import StrokeRecognizer, functions_as_commands, sized_delimiters, with_braces
 
-__all__ = ["InkAddon", "ADDON", "StrokeRecognizer", "functions_as_commands", "with_braces"]
+__all__ = ["InkAddon", "ADDON", "StrokeRecognizer", "functions_as_commands", "sized_delimiters", "with_braces"]
 
 STATIC = Path(__file__).parent / "static"
 

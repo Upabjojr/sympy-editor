@@ -353,7 +353,7 @@ SympyEditor.registerAddon("ink", (function () {
           note.textContent = "Read in " + res.ms + " ms" + (res.candidates.length > 1 ? " — the best reading first, pick another if it is the one" : "");
           res.candidates.forEach(function (c, i) {
             var b = h("button", { type: "button", class: "ink-cand", role: "option", title: c.latex });
-            typeset(b, c.latex, c.latex);
+            typeset(b, c.display || c.latex, c.latex);      // the delimiters sized (\left, \right): easier on the eye
             b.addEventListener("click", function () { choose(c, b); });
             cands.appendChild(b);
             if (i === 0) choose(c, b);
