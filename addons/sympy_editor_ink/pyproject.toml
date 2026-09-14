@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sympy-editor-ink"
+version = "0.0.1"
+description = "sympy-editor add-on: write a formula by hand, read by math-ocr's stroke model"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "BSD-3-Clause" }
+# The model itself is not a dependency pip can meet: a math-ocr checkout (see README.md).
+dependencies = ["sympy-editor", "sympy-editor-latex", "numpy", "onnxruntime"]
+
+[project.entry-points."sympy_editor.addons"]
+ink = "sympy_editor_ink:ADDON"
+
+[tool.setuptools.packages.find]
+include = ["sympy_editor_ink*"]
+
+[tool.setuptools.package-data]
+sympy_editor_ink = ["static/*"]

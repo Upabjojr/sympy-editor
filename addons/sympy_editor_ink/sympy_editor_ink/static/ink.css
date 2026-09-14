@@ -1,0 +1,31 @@
+/* The handwriting panel, scoped under the box the editor gives the add-on. */
+.se-addon-ink .ink-panel { display: flex; flex-direction: column; gap: 0.4rem; font-size: 12px; }
+/* none: a finger on the area writes - it neither scrolls the page nor zooms it */
+.se-addon-ink .ink-canvas {
+  display: block; width: 100%; height: 170px; touch-action: none; cursor: crosshair;
+  border: 1px solid var(--se-border); border-radius: 0.4rem; background: var(--se-bg); color: var(--se-fg);
+}
+.se-addon-ink .ink-canvas.ink-off { cursor: not-allowed; opacity: 0.5; }
+.se-addon-ink .ink-busy .ink-canvas { border-color: rgba(var(--se-accent), 0.6); }
+.se-addon-ink .ink-row, .se-addon-ink .ink-actions, .se-addon-ink .ink-cands { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.se-addon-ink .ink-panel button {
+  font: inherit; font-size: 12px; line-height: 1.2; padding: 0.2rem 0.6rem;
+  border: 1px solid var(--se-border); border-radius: 0.3rem; background: var(--se-btn); color: inherit; cursor: pointer;
+  box-shadow: var(--se-btn-edge), var(--se-btn-shadow);
+}
+.se-addon-ink .ink-panel button:disabled { opacity: 0.4; cursor: default; box-shadow: none; background: none; }
+.se-addon-ink .ink-note { min-height: 1.2em; color: var(--se-muted); }
+.se-addon-ink .ink-note.error, .se-addon-ink .ink-src.error { color: var(--se-error); }
+.se-addon-ink .ink-panel .ink-cand { font-size: 14px; padding: 0.3rem 0.6rem; }
+.se-addon-ink .ink-panel .ink-cand.ink-chosen { border-color: rgba(var(--se-accent), 0.85); background: rgba(var(--se-accent), 0.12); }
+.se-addon-ink .ink-latex {
+  font: inherit; font-family: var(--se-mono); font-size: 13px; padding: 0.3rem 0.5rem;
+  border: 1px solid var(--se-border); border-radius: 0.3rem; background: transparent; color: inherit;
+}
+.se-addon-ink .ink-src { font-family: var(--se-mono); color: var(--se-muted); word-break: break-word; min-height: 1.2em; }
+.se-addon-ink .ink-panel .ink-insert-all { border-color: rgba(var(--se-accent), 0.8); background: rgba(var(--se-accent), 0.12); }
+@media (any-pointer: coarse) {
+  .se-addon-ink .ink-panel button { font-size: 14px; padding: 0.45rem 0.7rem; min-height: 2.2rem; }
+  .se-addon-ink .ink-canvas { height: 220px; }
+  .se-addon-ink .ink-latex { font-size: 15px; }
+}
