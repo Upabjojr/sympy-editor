@@ -1,7 +1,7 @@
 {
-  "name": "ink",
+  "name": "handwriting",
   "label": "Handwriting",
-  "module": "sympy_editor_ink",
+  "module": "sympy_editor_handwriting",
   "version": "0.0.1",
   "description": "Write a formula by hand: math-ocr's stroke model reads the pen strokes, the LaTeX add-on turns the reading into SymPy.",
   "requires": ["numpy", "onnxruntime"],

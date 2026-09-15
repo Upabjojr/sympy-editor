@@ -5,7 +5,7 @@
 A panel with a writing area under the formula.  What is written there - with a
 pen, a finger or the mouse, as strokes of ``(x, y, t)`` points - goes to the
 stroke model of math-ocr (a checkout beside sympy-editor's: see
-:mod:`sympy_editor_ink.recognizer`), which answers with LaTeX and a few other
+:mod:`sympy_editor_handwriting.recognizer`), which answers with LaTeX and a few other
 readings.  The LaTeX add-on's reader turns the chosen one into SymPy, in the
 document's own names, and it goes in over the selection or as the whole
 expression.
@@ -22,18 +22,18 @@ from sympy_editor.addons import Addon
 
 from .recognizer import StrokeRecognizer, functions_as_commands, sized_delimiters, with_braces
 
-__all__ = ["InkAddon", "ADDON", "StrokeRecognizer", "functions_as_commands", "sized_delimiters", "with_braces"]
+__all__ = ["HandwritingAddon", "ADDON", "StrokeRecognizer", "functions_as_commands", "sized_delimiters", "with_braces"]
 
 STATIC = Path(__file__).parent / "static"
 
 
-class InkAddon(Addon):
-    name = "ink"
+class HandwritingAddon(Addon):
+    name = "handwriting"
     label = "Handwriting"
     #: pip names needed at run time - and a math-ocr checkout, which pip cannot give
     requires = ("numpy", "onnxruntime")
-    js = (STATIC / "ink.js").read_text(encoding="utf-8")
-    css = (STATIC / "ink.css").read_text(encoding="utf-8")
+    js = (STATIC / "handwriting.js").read_text(encoding="utf-8")
+    css = (STATIC / "handwriting.css").read_text(encoding="utf-8")
 
     def __init__(self, recognizer: Optional[StrokeRecognizer] = None) -> None:
         self.recognizer = recognizer or StrokeRecognizer()
@@ -107,4 +107,4 @@ class InkAddon(Addon):
         return None
 
 
-ADDON = InkAddon()
+ADDON = HandwritingAddon()

@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  * Copyright (c) 2026 Francesco Bonazzi
  *
- * sympy-editor add-on "ink": write a formula by hand.
+ * sympy-editor add-on "handwriting": write a formula by hand.
  *
  * A writing area under the formula: a box of its own size that scrolls, over a
  * canvas that grows to the right and down as the ink nears those edges, with a
@@ -19,7 +19,7 @@
  * covers the page: the tools on top, the writing area, and the readings in a
  * sheet at the bottom that folds away.
  */
-SympyEditor.registerAddon("ink", (function () {
+SympyEditor.registerAddon("handwriting", (function () {
   // After a reading goes in, the formula it went into is brought back into
   // sight: the panel sits below the editor, often scrolled past it.
   function showFormula(api) {

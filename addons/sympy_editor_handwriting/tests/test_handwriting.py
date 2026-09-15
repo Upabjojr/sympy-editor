@@ -13,7 +13,7 @@ sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE.parents[1] / "sympy_editor_latex"))
 
 from sympy_editor import Document  # noqa: E402
-from sympy_editor_ink import ADDON, InkAddon, StrokeRecognizer, functions_as_commands, sized_delimiters, with_braces  # noqa: E402
+from sympy_editor_handwriting import ADDON, HandwritingAddon, StrokeRecognizer, functions_as_commands, sized_delimiters, with_braces  # noqa: E402
 
 x, y, M, r = symbols("x y M r")
 
@@ -56,9 +56,9 @@ def test_matching_delimiters_are_sized_for_display():
 def test_insert_replaces_a_range_or_the_whole_expression():
     doc = Document(x**3 + 2*x**2 + x, addons=[ADDON])
     children = [i for i, arg in enumerate(doc.expr.args) if arg in (2*x**2, x)]
-    snap = doc.handle({"action": "addon", "addon": "ink", "method": "insert", "latex": "y", "path": "/", "children": children})
+    snap = doc.handle({"action": "addon", "addon": "handwriting", "method": "insert", "latex": "y", "path": "/", "children": children})
     assert not snap.get("error") and doc.expr == x**3 + y
-    doc.handle({"action": "addon", "addon": "ink", "method": "insert", "latex": "\\frac{1}{2}", "path": "/"})
+    doc.handle({"action": "addon", "addon": "handwriting", "method": "insert", "latex": "\\frac{1}{2}", "path": "/"})
     assert str(doc.expr) == "1/2"
     assert doc.history_labels()["actions"][-1] == "Handwriting: \\frac{1}{2}"
 
@@ -69,7 +69,7 @@ def test_a_reading_carries_its_options_and_an_insert_follows_the_picks():
     each ambiguity a menu, each constant name a switch; what goes in is the
     reading with the options picked."""
     doc = Document(x, addons=[ADDON])
-    call = lambda method, **payload: doc.handle(dict(payload, action="addon", addon="ink", method=method))
+    call = lambda method, **payload: doc.handle(dict(payload, action="addon", addon="handwriting", method=method))
     latex = r"\sin x \cos y + \pi"
     reading = call("read", latex=latex)["query"]["result"]["reading"]
     assert reading["ok"] and reading["src"] == "sin(x)*cos(y) + pi"
@@ -86,12 +86,12 @@ def test_a_reading_carries_its_options_and_an_insert_follows_the_picks():
 
 def test_a_reading_goes_after_the_formula_when_nothing_is_selected():
     doc = Document(x, addons=[ADDON])
-    doc.handle({"action": "addon", "addon": "ink", "method": "insert", "latex": "+ y", "end": True})
+    doc.handle({"action": "addon", "addon": "handwriting", "method": "insert", "latex": "+ y", "end": True})
     assert doc.expr == x + y
 
 
 def test_a_model_notice_is_text_for_the_guide():
-    from sympy_editor_ink.recognizer import read_notice
+    from sympy_editor_handwriting.recognizer import read_notice
     assert read_notice(b"  Terms of the model.\n") == "Terms of the model."
     assert read_notice(b"") is None and read_notice(None) is None
 
@@ -100,8 +100,8 @@ def test_a_missing_model_is_said_not_crashed_on(tmp_path):
     missing = StrokeRecognizer(mathocr=tmp_path)
     status = missing.status()
     assert status["available"] is False and "math-ocr was not found" in status["reason"]
-    doc = Document(x, addons=[InkAddon(missing)])                     # switched on all the same
-    snap = doc.handle({"action": "addon", "addon": "ink", "method": "recognize", "strokes": [[[0, 0, 0], [1, 1, 5]]]})
+    doc = Document(x, addons=[HandwritingAddon(missing)])                     # switched on all the same
+    snap = doc.handle({"action": "addon", "addon": "handwriting", "method": "recognize", "strokes": [[[0, 0, 0], [1, 1, 5]]]})
     assert "math-ocr was not found" in snap["query"]["error"] and doc.expr == x
 
 
@@ -143,7 +143,7 @@ def test_recognizing_in_a_document_answers_with_what_sympy_gets():
     item = next(i for i in records if i["l"] == "\\frac{1}{2M-r}")
     ink = inkml.parse_inkml(base / item["p"])
     doc = Document(x, addons=[ADDON])
-    snap = doc.handle({"action": "addon", "addon": "ink", "method": "recognize", "strokes": [s.tolist() for s in ink.strokes]})
+    snap = doc.handle({"action": "addon", "addon": "handwriting", "method": "recognize", "strokes": [s.tolist() for s in ink.strokes]})
     best = snap["query"]["result"]["candidates"][0]
     assert best["latex"] == "\\frac{1}{2M-r}" and best["reading"]["ok"]
     assert best["reading"]["src"] == str(1 / (2*M - r))

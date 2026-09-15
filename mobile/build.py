@@ -144,7 +144,7 @@ def stage_addons(dest: Path) -> Path:
 #: The handwriting add-on: its manifest says "bundle": false - neither a
 #: Pyodide page nor the iOS app can run it - and an Android build stages it
 #: itself, with what it reads with (stage_ink).
-INK_ADDON = "sympy_editor_ink"
+INK_ADDON = "sympy_editor_handwriting"
 INK_MODEL_FILES = ("encoder.onnx", "decoder_step.onnx", "vocab.json", "meta.json")
 #: The model's attribution and licence terms, beside its files in the export:
 #: they travel with the model, and the add-on's guide shows them.
@@ -166,7 +166,7 @@ def stage_ink(dest: Path, wanted: bool) -> bool:
     if not wanted:
         return False
     sys.path.insert(0, str(ADDONS / INK_ADDON))
-    from sympy_editor_ink.recognizer import StrokeRecognizer
+    from sympy_editor_handwriting.recognizer import StrokeRecognizer
     rec = StrokeRecognizer()
     root, model = rec.root, rec.model_dir()
     if root is None or model is None or not all((model / f).is_file() for f in INK_MODEL_FILES):

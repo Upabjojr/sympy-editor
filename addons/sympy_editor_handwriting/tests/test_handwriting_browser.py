@@ -24,7 +24,7 @@ pytest.importorskip("lark")
 from sympy_editor import Document  # noqa: E402
 from sympy_editor.html import default_urls  # noqa: E402
 from sympy_editor.server import EditorServer  # noqa: E402
-from sympy_editor_ink import InkAddon  # noqa: E402
+from sympy_editor_handwriting import HandwritingAddon  # noqa: E402
 from sympy_editor_latex import ADDON as LATEX  # noqa: E402
 
 x, y = symbols("x y")
@@ -67,7 +67,7 @@ def _wait(predicate, timeout=10.0):
 
 
 def test_the_area_grows_scrolls_undoes_and_goes_full_screen():
-    doc = Document(x, addons=[InkAddon(FakeRecognizer()), LATEX])
+    doc = Document(x, addons=[HandwritingAddon(FakeRecognizer()), LATEX])
     srv = EditorServer(doc, port=0)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
@@ -80,14 +80,14 @@ def test_the_area_grows_scrolls_undoes_and_goes_full_screen():
             errors = []
             page.on("pageerror", lambda e: errors.append(str(e)))
             page.goto(srv.url)
-            page.wait_for_selector(".se-addon-ink .ink-canvas", timeout=30000)
-            panel = page.locator(".se-addon-ink .ink-panel")
-            geometry = ("() => { const p = document.querySelector('.se-addon-ink .ink-pad'), r = p.getBoundingClientRect(),"
-                        " c = document.querySelector('.se-addon-ink .ink-canvas');"
+            page.wait_for_selector(".se-addon-handwriting .ink-canvas", timeout=30000)
+            panel = page.locator(".se-addon-handwriting .ink-panel")
+            geometry = ("() => { const p = document.querySelector('.se-addon-handwriting .ink-pad'), r = p.getBoundingClientRect(),"
+                        " c = document.querySelector('.se-addon-handwriting .ink-canvas');"
                         " return {left: r.left, top: r.top, w: p.clientWidth, h: p.clientHeight, cw: c.clientWidth, ch: c.clientHeight,"
                         " sl: p.scrollLeft, st: p.scrollTop}; }")
             g = page.evaluate(geometry)
-            page.wait_for_function("document.querySelector('.se-addon-ink .ink-canvas').clientWidth > 0")
+            page.wait_for_function("document.querySelector('.se-addon-handwriting .ink-canvas').clientWidth > 0")
 
             def stroke(x0, y0, x1, y1, steps=6):
                 page.mouse.move(x0, y0)
@@ -98,12 +98,12 @@ def test_the_area_grows_scrolls_undoes_and_goes_full_screen():
 
             strokes = lambda: int(panel.get_attribute("data-strokes"))
             # the tools are icons, each named for a tooltip and a screen reader, and explained in the guide
-            tools = page.locator(".se-addon-ink .ink-bar button")
+            tools = page.locator(".se-addon-handwriting .ink-bar button")
             assert tools.count() == 5
             for i in range(5):
                 assert tools.nth(i).inner_text().strip() == "" and tools.nth(i).locator("svg").count() == 1
                 assert tools.nth(i).get_attribute("aria-label")
-            page.locator(".se-addon-ink .se-addon-help").click()
+            page.locator(".se-addon-handwriting .se-addon-help").click()
             guide = page.locator(".se-help-view")
             for name in ("Undo", "Redo", "Erase", "Clear", "Read", "Full screen"):
                 assert name in guide.inner_text(), name
@@ -112,58 +112,58 @@ def test_the_area_grows_scrolls_undoes_and_goes_full_screen():
             assert _wait(lambda: page.locator(".se-help-view").count() == 0)
             # a stroke well inside: read (by the fake), with the reading's options
             stroke(g["left"] + 30, g["top"] + 40, g["left"] + 120, g["top"] + 70)
-            page.wait_for_selector(".se-addon-ink .ink-cand", timeout=15000)
+            page.wait_for_selector(".se-addon-handwriting .ink-cand", timeout=15000)
             assert strokes() == 1
-            src = page.locator(".se-addon-ink .ink-src")
+            src = page.locator(".se-addon-handwriting .ink-src")
             assert _wait(lambda: src.inner_text() == "sin(x)*cos(y) + pi")
-            assert page.locator(".se-addon-ink .ink-point select").count() >= 1
-            assert page.locator(".se-addon-ink .ink-const input").count() == 1
-            assert page.locator(".se-addon-ink .ink-insert").inner_text() == "Add to end"    # neither a selection nor a cursor
+            assert page.locator(".se-addon-handwriting .ink-point select").count() >= 1
+            assert page.locator(".se-addon-handwriting .ink-const input").count() == 1
+            assert page.locator(".se-addon-handwriting .ink-insert").inner_text() == "Add to end"    # neither a selection nor a cursor
             g = page.evaluate(geometry)
-            assert g["cw"] == g["w"] and page.locator(".se-addon-ink .ink-scroll-right").is_hidden()
+            assert g["cw"] == g["w"] and page.locator(".se-addon-handwriting .ink-scroll-right").is_hidden()
             # ink near the right edge: room beyond it, and the strip to scroll there
             stroke(g["left"] + g["w"] - 70, g["top"] + 40, g["left"] + g["w"] - 8, g["top"] + 50)
             g = page.evaluate(geometry)
-            assert g["cw"] > g["w"] and page.locator(".se-addon-ink .ink-scroll-right").is_visible()
-            page.locator(".se-addon-ink .ink-scroll-right").click()
+            assert g["cw"] > g["w"] and page.locator(".se-addon-handwriting .ink-scroll-right").is_visible()
+            page.locator(".se-addon-handwriting .ink-scroll-right").click()
             assert _wait(lambda: page.evaluate(geometry)["sl"] > 0)
-            assert _wait(lambda: page.locator(".se-addon-ink .ink-scroll-left").is_visible())
+            assert _wait(lambda: page.locator(".se-addon-handwriting .ink-scroll-left").is_visible())
             # only the button scrolls: along its edge, above and below it, the pen writes
-            chip = page.locator(".se-addon-ink .ink-scroll-left").bounding_box()
+            chip = page.locator(".se-addon-handwriting .ink-scroll-left").bounding_box()
             g = page.evaluate(geometry)
             assert chip["height"] < g["h"] / 2 and chip["width"] < 60
             before = strokes()
             stroke(g["left"] + 6, g["top"] + 8, g["left"] + 14, chip["y"] - 6)
             assert strokes() == before + 1
-            page.locator(".se-addon-ink .ink-undo").click()
+            page.locator(".se-addon-handwriting .ink-undo").click()
             assert strokes() == before
             # ... and near the bottom
             g = page.evaluate(geometry)
             stroke(g["left"] + 40, g["top"] + g["h"] - 60, g["left"] + 60, g["top"] + g["h"] - 6)
             g = page.evaluate(geometry)
-            assert g["ch"] > g["h"] and page.locator(".se-addon-ink .ink-scroll-down").is_visible()
+            assert g["ch"] > g["h"] and page.locator(".se-addon-handwriting .ink-scroll-down").is_visible()
             assert strokes() == 3
             # undo, redo, and a clear that undo brings back
-            page.locator(".se-addon-ink .ink-undo").click()
+            page.locator(".se-addon-handwriting .ink-undo").click()
             assert strokes() == 2
             g = page.evaluate(geometry)
             assert g["ch"] == g["h"] and g["cw"] > g["w"]      # the room below went with the stroke; the ink on the right keeps its own
-            page.locator(".se-addon-ink .ink-redo").click()
-            assert strokes() == 3 and page.locator(".se-addon-ink .ink-redo").is_disabled()
-            page.locator(".se-addon-ink .ink-clear").click()
+            page.locator(".se-addon-handwriting .ink-redo").click()
+            assert strokes() == 3 and page.locator(".se-addon-handwriting .ink-redo").is_disabled()
+            page.locator(".se-addon-handwriting .ink-clear").click()
             assert strokes() == 0 and page.evaluate(geometry)["cw"] == page.evaluate(geometry)["w"]   # back to the box
-            page.locator(".se-addon-ink .ink-undo").click()
+            page.locator(".se-addon-handwriting .ink-undo").click()
             assert strokes() == 3 and page.evaluate(geometry)["cw"] > page.evaluate(geometry)["w"]
-            page.wait_for_selector(".se-addon-ink .ink-cand", timeout=15000)
+            page.wait_for_selector(".se-addon-handwriting .ink-cand", timeout=15000)
 
             # full screen: the panel covers the window, the tools stay, the readings fold away
-            page.locator(".se-addon-ink .ink-fullbtn").click()
+            page.locator(".se-addon-handwriting .ink-fullbtn").click()
             assert "ink-full" in panel.get_attribute("class")
             box = panel.bounding_box()
             assert box["x"] == 0 and box["y"] == 0 and box["width"] == 760 and box["height"] == 900
             for name in ("undo", "redo", "clear"):
-                assert page.locator(f".se-addon-ink .ink-{name}").is_visible()
-            head, body = page.locator(".se-addon-ink .ink-sheet-head"), page.locator(".se-addon-ink .ink-sheet-body")
+                assert page.locator(f".se-addon-handwriting .ink-{name}").is_visible()
+            head, body = page.locator(".se-addon-handwriting .ink-sheet-head"), page.locator(".se-addon-handwriting .ink-sheet-body")
             assert head.is_visible() and body.is_visible()
             assert _wait(lambda: head.inner_text().strip() == "sin(x)*cos(y) + pi")
             pad_before = page.evaluate(geometry)["h"]
@@ -172,20 +172,20 @@ def test_the_area_grows_scrolls_undoes_and_goes_full_screen():
             head.click()
             assert body.is_visible()
             # the reading's options: another reading of the ambiguity, pi a symbol
-            select = page.locator(".se-addon-ink .ink-point select").filter(has=page.locator("option", has_text="sin(x*cos(y)) + pi")).first
+            select = page.locator(".se-addon-handwriting .ink-point select").filter(has=page.locator("option", has_text="sin(x*cos(y)) + pi")).first
             select.select_option(label="sin(x*cos(y)) + pi")
             assert _wait(lambda: src.inner_text() == "sin(x*cos(y)) + pi")
-            page.locator(".se-addon-ink .ink-const input").uncheck()
+            page.locator(".se-addon-handwriting .ink-const input").uncheck()
             assert _wait(lambda: src.inner_text() == "pi + sin(x*cos(y))")
             page.keyboard.press("Escape")
             assert "ink-full" not in panel.get_attribute("class")
             # inserting goes back to the formula, with the options picked, and takes the ink
-            page.locator(".se-addon-ink .ink-fullbtn").click()
-            page.locator(".se-addon-ink .ink-insert-all").click()
+            page.locator(".se-addon-handwriting .ink-fullbtn").click()
+            page.locator(".se-addon-handwriting .ink-insert-all").click()
             assert _wait(lambda: doc.expr == Symbol("pi") + sin(x * cos(y)))
             assert _wait(lambda: "ink-full" not in panel.get_attribute("class"))
-            assert strokes() == 0 and page.locator(".se-addon-ink .ink-note").inner_text() == "Inserted."
-            page.locator(".se-addon-ink .ink-undo").click()                    # the ink comes back
+            assert strokes() == 0 and page.locator(".se-addon-handwriting .ink-note").inner_text() == "Inserted."
+            page.locator(".se-addon-handwriting .ink-undo").click()                    # the ink comes back
             assert strokes() == 3
             assert errors == []
             browser.close()
@@ -199,7 +199,7 @@ def test_inserting_brings_the_formula_back_into_sight():
     """The panel sits below the editor: after a reading goes in - at the end,
     over the selection, as the whole expression - the page is back at the top
     of the editor, wherever it had been scrolled to."""
-    doc = Document(x + y, addons=[InkAddon(FakeRecognizer()), LATEX])
+    doc = Document(x + y, addons=[HandwritingAddon(FakeRecognizer()), LATEX])
     srv = EditorServer(doc, port=0)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
@@ -212,25 +212,25 @@ def test_inserting_brings_the_formula_back_into_sight():
             errors = []
             page.on("pageerror", lambda e: errors.append(str(e)))
             page.goto(srv.url)
-            page.wait_for_selector(".se-addon-ink .ink-canvas", timeout=30000)
-            page.wait_for_function("document.querySelector('.se-addon-ink .ink-canvas').clientWidth > 0")
+            page.wait_for_selector(".se-addon-handwriting .ink-canvas", timeout=30000)
+            page.wait_for_function("document.querySelector('.se-addon-handwriting .ink-canvas').clientWidth > 0")
             # room below the panel, so the page can be scrolled away from the formula
             page.evaluate("document.body.appendChild(Object.assign(document.createElement('div'), {style: 'height: 3000px'}))")
             ed = "document.querySelector('.sympy-editor').__sympyEditor"
             top = "Math.round(document.querySelector('.sympy-editor').getBoundingClientRect().top)"
-            panel = page.locator(".se-addon-ink .ink-panel")
+            panel = page.locator(".se-addon-handwriting .ink-panel")
             strokes = lambda: int(panel.get_attribute("data-strokes"))
 
             def write():
-                page.locator(".se-addon-ink .ink-pad").scroll_into_view_if_needed()
-                r = page.evaluate("() => { const b = document.querySelector('.se-addon-ink .ink-pad').getBoundingClientRect();"
+                page.locator(".se-addon-handwriting .ink-pad").scroll_into_view_if_needed()
+                r = page.evaluate("() => { const b = document.querySelector('.se-addon-handwriting .ink-pad').getBoundingClientRect();"
                                   " return {left: b.left, top: b.top}; }")
                 page.mouse.move(r["left"] + 30, r["top"] + 40)
                 page.mouse.down()
                 for i in range(1, 7):
                     page.mouse.move(r["left"] + 30 + 15 * i, r["top"] + 40 + 5 * i)
                 page.mouse.up()
-                assert _wait(lambda: not page.locator(".se-addon-ink .ink-insert").is_disabled(), timeout=15)
+                assert _wait(lambda: not page.locator(".se-addon-handwriting .ink-insert").is_disabled(), timeout=15)
 
             def scrolled_away():
                 page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
@@ -240,26 +240,26 @@ def test_inserting_brings_the_formula_back_into_sight():
                 page.wait_for_function(top + " >= -1 && " + top + " <= 1", timeout=5000)
 
             write()                                                      # Add to end
-            assert page.locator(".se-addon-ink .ink-insert").inner_text() == "Add to end"
+            assert page.locator(".se-addon-handwriting .ink-insert").inner_text() == "Add to end"
             scrolled_away()
-            page.locator(".se-addon-ink .ink-insert").click()
+            page.locator(".se-addon-handwriting .ink-insert").click()
             assert _wait(lambda: strokes() == 0 and doc.expr != x + y)
             back_at_the_formula()
 
             write()                                                      # over the selection
             xp = next(path for path, n in doc.snapshot()["nodes"].items() if n["src"] == "x")
             page.evaluate("p => %s.select(p)" % ed, xp)
-            assert _wait(lambda: page.locator(".se-addon-ink .ink-insert").inner_text() == "Replace the selection")
+            assert _wait(lambda: page.locator(".se-addon-handwriting .ink-insert").inner_text() == "Replace the selection")
             before = doc.expr
             scrolled_away()
-            page.locator(".se-addon-ink .ink-insert").click()
+            page.locator(".se-addon-handwriting .ink-insert").click()
             assert _wait(lambda: doc.expr != before)
             back_at_the_formula()
 
             page.evaluate(ed + ".select(null)")
             write()                                                      # the whole expression
             scrolled_away()
-            page.locator(".se-addon-ink .ink-insert-all").click()
+            page.locator(".se-addon-handwriting .ink-insert-all").click()
             assert _wait(lambda: doc.expr == sin(x) * cos(y) + Symbol("pi") or str(doc.expr) == "sin(x)*cos(y) + pi")
             back_at_the_formula()
             assert errors == []
@@ -270,7 +270,7 @@ def test_inserting_brings_the_formula_back_into_sight():
 
 
 TOUCH = """(t) => {
-    const c = document.querySelector('.se-addon-ink .ink-canvas');
+    const c = document.querySelector('.se-addon-handwriting .ink-canvas');
     c.dispatchEvent(new PointerEvent(t.type, {pointerId: t.id, pointerType: 'touch', isPrimary: t.id === 1,
         clientX: t.x, clientY: t.y, button: 0, buttons: t.type === 'pointerup' ? 0 : 1, bubbles: true, cancelable: true}));
 }"""
@@ -282,7 +282,7 @@ def test_two_fingers_zoom_and_scroll_the_area_and_never_write():
     has been scrolled on - and the finger left when the other lifts writes
     nothing.  One finger writes again afterwards; a pinch on a trackpad
     (Ctrl and the wheel) zooms too."""
-    doc = Document(x, addons=[InkAddon(FakeRecognizer()), LATEX])
+    doc = Document(x, addons=[HandwritingAddon(FakeRecognizer()), LATEX])
     srv = EditorServer(doc, port=0)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
@@ -295,18 +295,18 @@ def test_two_fingers_zoom_and_scroll_the_area_and_never_write():
             errors = []
             page.on("pageerror", lambda e: errors.append(str(e)))
             page.goto(srv.url)
-            page.wait_for_selector(".se-addon-ink .ink-canvas", timeout=30000)
-            page.wait_for_function("document.querySelector('.se-addon-ink .ink-canvas').clientWidth > 0")
-            panel = page.locator(".se-addon-ink .ink-panel")
+            page.wait_for_selector(".se-addon-handwriting .ink-canvas", timeout=30000)
+            page.wait_for_function("document.querySelector('.se-addon-handwriting .ink-canvas').clientWidth > 0")
+            panel = page.locator(".se-addon-handwriting .ink-panel")
             touch = lambda kind, pid, px, py: page.evaluate(TOUCH, {"type": kind, "id": pid, "x": px, "y": py})
             strokes = lambda: int(panel.get_attribute("data-strokes"))
             zoom = lambda: float(panel.get_attribute("data-zoom"))
-            scroll = lambda: page.evaluate("(() => { const p = document.querySelector('.se-addon-ink .ink-pad'); return [p.scrollLeft, p.scrollTop]; })()")
-            r = page.locator(".se-addon-ink .ink-pad").bounding_box()
+            scroll = lambda: page.evaluate("(() => { const p = document.querySelector('.se-addon-handwriting .ink-pad'); return [p.scrollLeft, p.scrollTop]; })()")
+            r = page.locator(".se-addon-handwriting .ink-pad").bounding_box()
             cx, cy = r["x"] + r["width"] / 2, r["y"] + r["height"] / 2
 
             # a finger writing to the right edge makes room; a second finger takes the stroke back, and the room
-            size = "(() => { const p = document.querySelector('.se-addon-ink .ink-pad'), c = document.querySelector('.se-addon-ink .ink-canvas'); return [c.clientWidth, p.clientWidth]; })()"
+            size = "(() => { const p = document.querySelector('.se-addon-handwriting .ink-pad'), c = document.querySelector('.se-addon-handwriting .ink-canvas'); return [c.clientWidth, p.clientWidth]; })()"
             touch("pointerdown", 1, r["x"] + r["width"] - 90, cy)
             for k in range(1, 5):
                 touch("pointermove", 1, r["x"] + r["width"] - 90 + 20 * k, cy)
@@ -371,7 +371,7 @@ def test_erase_takes_away_the_strokes_it_passes_over():
     the others stay, in their order; Undo puts it back in its place, Redo
     takes it again, and switched off the pointer writes again."""
     fake = FakeRecognizer()
-    doc = Document(x, addons=[InkAddon(fake), LATEX])
+    doc = Document(x, addons=[HandwritingAddon(fake), LATEX])
     srv = EditorServer(doc, port=0)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
@@ -384,11 +384,11 @@ def test_erase_takes_away_the_strokes_it_passes_over():
             errors = []
             page.on("pageerror", lambda e: errors.append(str(e)))
             page.goto(srv.url)
-            page.wait_for_selector(".se-addon-ink .ink-canvas", timeout=30000)
-            page.wait_for_function("document.querySelector('.se-addon-ink .ink-canvas').clientWidth > 0")
-            panel = page.locator(".se-addon-ink .ink-panel")
+            page.wait_for_selector(".se-addon-handwriting .ink-canvas", timeout=30000)
+            page.wait_for_function("document.querySelector('.se-addon-handwriting .ink-canvas').clientWidth > 0")
+            panel = page.locator(".se-addon-handwriting .ink-panel")
             strokes = lambda: int(panel.get_attribute("data-strokes"))
-            c = page.evaluate("(() => { const r = document.querySelector('.se-addon-ink .ink-canvas').getBoundingClientRect(); return {x: r.left, y: r.top}; })()")
+            c = page.evaluate("(() => { const r = document.querySelector('.se-addon-handwriting .ink-canvas').getBoundingClientRect(); return {x: r.left, y: r.top}; })()")
 
             def drag(x0, y0, x1, y1, steps=6):
                 page.mouse.move(c["x"] + x0, c["y"] + y0)
@@ -405,15 +405,15 @@ def test_erase_takes_away_the_strokes_it_passes_over():
             for left in (30, 150, 270):              # three strokes apart from each other
                 drag(left, 50, left + 50, 60)
             assert strokes() == 3
-            erase = page.locator(".se-addon-ink .ink-erase")
+            erase = page.locator(".se-addon-handwriting .ink-erase")
             erase.click()
             assert erase.get_attribute("aria-pressed") == "true"
             drag(175, 20, 175, 90)                   # across the middle one only
             assert strokes() == 2
             assert read_strokes() == [30, 270]
-            page.locator(".se-addon-ink .ink-undo").click()      # back, in its place
+            page.locator(".se-addon-handwriting .ink-undo").click()      # back, in its place
             assert strokes() == 3 and read_strokes() == [30, 150, 270]
-            page.locator(".se-addon-ink .ink-redo").click()
+            page.locator(".se-addon-handwriting .ink-redo").click()
             assert strokes() == 2 and read_strokes() == [30, 270]
             drag(400, 20, 400, 90)                   # over nothing: nothing goes, nothing to undo
             assert strokes() == 2

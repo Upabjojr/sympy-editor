@@ -615,7 +615,7 @@ after sympy-editor's own.
 its licence is the one stated in its folder (a `LICENSE` file, or the `license`
 in its `pyproject.toml`); check it before you redistribute an add-on or a build
 that carries it. Today the add-ons in [`addons/`](addons) are BSD-3-Clause,
-except the handwriting add-on ([`addons/sympy_editor_ink`](addons/sympy_editor_ink)),
+except the handwriting add-on ([`addons/sympy_editor_handwriting`](addons/sympy_editor_handwriting)),
 which is AGPL-3.0-or-later.
 
 ## Development

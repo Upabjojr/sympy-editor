@@ -3,7 +3,7 @@ requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "sympy-editor-ink"
+name = "sympy-editor-handwriting"
 version = "0.0.1"
 description = "sympy-editor add-on: write a formula by hand, read by math-ocr's stroke model"
 readme = "README.md"
@@ -14,10 +14,10 @@ classifiers = ["License :: OSI Approved :: GNU Affero General Public License v3 
 dependencies = ["sympy-editor", "sympy-editor-latex", "numpy", "onnxruntime"]
 
 [project.entry-points."sympy_editor.addons"]
-ink = "sympy_editor_ink:ADDON"
+handwriting = "sympy_editor_handwriting:ADDON"
 
 [tool.setuptools.packages.find]
-include = ["sympy_editor_ink*"]
+include = ["sympy_editor_handwriting*"]
 
 [tool.setuptools.package-data]
-sympy_editor_ink = ["static/*"]
+sympy_editor_handwriting = ["static/*"]

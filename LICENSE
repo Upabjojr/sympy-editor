@@ -37,7 +37,7 @@ repository, or installed separately) are distinct works and may have licences
 of their own: each add-on's licence is the one stated in its own folder (its
 LICENSE file, or its pyproject.toml where it has no LICENSE file), and an
 add-on without one of its own is under the licence above.  In particular,
-the handwriting add-on (addons/sympy_editor_ink) is under the GNU Affero
+the handwriting add-on (addons/sympy_editor_handwriting) is under the GNU Affero
 General Public License, version 3 or later.
 
 ================================================================================

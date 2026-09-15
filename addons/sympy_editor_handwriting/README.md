@@ -1,4 +1,4 @@
-# sympy-editor-ink — write a formula by hand
+# sympy-editor-handwriting — write a formula by hand
 
 A panel under the formula with an area to write in, with a pen, a finger or
 the mouse.  A moment after the pen lifts, the strokes go to the stroke model
@@ -33,11 +33,11 @@ unaffected.
 
 ```sh
 pip install onnxruntime
-pip install -e addons/sympy_editor_latex -e addons/sympy_editor_ink
-python addons/sympy_editor_ink/serve.py                    # the local server, with the panel on
+pip install -e addons/sympy_editor_latex -e addons/sympy_editor_handwriting
+python addons/sympy_editor_handwriting/serve.py                    # the local server, with the panel on
 ```
 
-or, from Python, `serve(expr, addons=["ink", "latex"])`.
+or, from Python, `serve(expr, addons=["handwriting", "latex"])`.
 
 ## Where it runs
 
@@ -66,7 +66,7 @@ Both done on its tokens, before the LaTeX reader sees them:
 
 ## Licence
 
-This add-on - everything under `addons/sympy_editor_ink/` - is free software
+This add-on - everything under `addons/sympy_editor_handwriting/` - is free software
 under the **GNU Affero General Public License, version 3 or (at your option)
 any later version** (`AGPL-3.0-or-later`, the text in [`LICENSE`](LICENSE)).
 Copyright (c) 2026 Francesco Bonazzi.
