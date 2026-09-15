@@ -426,3 +426,46 @@ def test_erase_takes_away_the_strokes_it_passes_over():
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_picking_a_reading_brings_its_buttons_into_sight():
+    doc = Document(x, addons=[HandwritingAddon(FakeRecognizer()), LATEX])
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with playwright.sync_playwright() as p:
+            try:
+                browser = p.chromium.launch()
+            except Exception as exc:
+                pytest.skip(f"chromium not available: {exc}")
+            page = browser.new_page(viewport={"width": 760, "height": 360})       # short: the buttons start below the fold
+            errors = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.goto(srv.url)
+            page.wait_for_selector(".se-addon-handwriting .ink-canvas", timeout=30000)
+            page.wait_for_function("document.querySelector('.se-addon-handwriting .ink-canvas').clientWidth > 0")
+            page.locator(".se-addon-handwriting .ink-pad").scroll_into_view_if_needed()
+            r = page.locator(".se-addon-handwriting .ink-pad").bounding_box()
+            page.mouse.move(r["x"] + 30, r["y"] + 40)
+            page.mouse.down()
+            for i in range(1, 7):
+                page.mouse.move(r["x"] + 30 + 15 * i, r["y"] + 40 + 5 * i)
+            page.mouse.up()
+            page.wait_for_selector(".se-addon-handwriting .ink-cand", timeout=15000)
+            # the first reading is chosen for the writer: the page stays with the pad
+            before = page.evaluate("window.scrollY")
+            page.wait_for_timeout(600)
+            assert page.evaluate("window.scrollY") == before
+            in_sight = ("() => { const b = document.querySelector('.se-addon-handwriting .ink-actions').getBoundingClientRect();"
+                        " return b.top >= 0 && b.bottom <= window.innerHeight + 1; }")
+            # as on a phone at the pad: the readings at the bottom of the screen, the buttons past it
+            page.evaluate("document.querySelector('.se-addon-handwriting .ink-cand').scrollIntoView({block: 'end'})")
+            assert not page.evaluate(in_sight)
+            # picked by hand: its LaTeX and the buttons that put it in come into sight
+            page.locator(".se-addon-handwriting .ink-cand").first.click()
+            assert _wait(lambda: page.evaluate(in_sight), 5)
+            assert errors == []
+            browser.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()

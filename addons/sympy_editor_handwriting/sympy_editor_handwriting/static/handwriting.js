@@ -29,6 +29,14 @@ SympyEditor.registerAddon("handwriting", (function () {
     try { root.scrollIntoView({ block: "start", behavior: reduce ? "auto" : "smooth" }); }
     catch (e) { root.scrollIntoView(true); }       // no options object
   }
+  // Bring an element into sight, gently unless motion is to be kept down;
+  // "end": what lies above it stays in sight when it fits.
+  function reveal(el, block) {
+    if (!el || !el.scrollIntoView) return;
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    try { el.scrollIntoView({ block: block || "nearest", behavior: reduce ? "auto" : "smooth" }); }
+    catch (e) { el.scrollIntoView(false); }
+  }
 
   // The editor's icons (editor.js: expandSvg, chevronSvg), drawn the same way.
   function expandIcon(full) {
@@ -118,8 +126,8 @@ SympyEditor.registerAddon("handwriting", (function () {
       var sheetSummary = h("span", { class: "ink-sheet-summary" });
       var sheetHead = h("button", { type: "button", class: "ink-sheet-head", "aria-expanded": "true",
         title: "Fold the readings away, or bring them back" }, [sheetChevron, sheetSummary]);
-      var sheetBody = h("div", { class: "ink-sheet-body" }, [note, cands, field, src, ambig, consts,
-        h("div", { class: "ink-actions" }, [insertSel, insertAll, toLatex])]);
+      var actions = h("div", { class: "ink-actions" }, [insertSel, insertAll, toLatex]);
+      var sheetBody = h("div", { class: "ink-sheet-body" }, [note, cands, field, src, ambig, consts, actions]);
       var sheet = h("div", { class: "ink-sheet" }, [sheetHead, sheetBody]);
       var element = h("div", { class: "ink-panel", "data-strokes": "0", "data-zoom": "1.00" }, [bar, stage, sheet]);
 
@@ -497,7 +505,12 @@ SympyEditor.registerAddon("handwriting", (function () {
           res.candidates.forEach(function (c, i) {
             var b = h("button", { type: "button", class: "ink-cand", role: "option", title: c.latex });
             typeset(b, c.display || c.latex, c.latex);      // the delimiters sized (\left, \right): easier on the eye
-            b.addEventListener("click", function () { choose(c, b); });
+            b.addEventListener("click", function () {
+              choose(c, b);
+              // picked by hand: on to its LaTeX, its options and the buttons that put it in
+              // (the first reading, chosen for the writer, leaves the page where it is)
+              requestAnimationFrame(function () { reveal(actions, "end"); });
+            });
             cands.appendChild(b);
             if (i === 0) choose(c, b);
           });
