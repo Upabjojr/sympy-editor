@@ -142,22 +142,25 @@ def stage_addons(dest: Path) -> Path:
 
 
 #: The handwriting add-on: its manifest says "bundle": false - neither a
-#: Pyodide page nor a release can run it - and an Android debug build stages it
+#: Pyodide page nor the iOS app can run it - and an Android build stages it
 #: itself, with what it reads with (stage_ink).
 INK_ADDON = "sympy_editor_ink"
 INK_MODEL_FILES = ("encoder.onnx", "decoder_step.onnx", "vocab.json", "meta.json")
+#: The model's attribution and licence terms, beside its files in the export:
+#: they travel with the model, and the add-on's guide shows them.
+INK_MODEL_NOTICE = "NOTICE"
 
 
 def stage_ink(dest: Path, wanted: bool) -> bool:
-    """The handwriting add-on in an Android debug build, beside the app's
-    Python in ``dest``: the add-on's folder, math-ocr's ``mathocr.tokenizer``
-    and ``mathocr.data.inkml`` (the features the model was trained on), and
-    the model as the package ``mathocr_model``, which onnxruntime-android - a
-    debug build's dependency only (build.gradle.kts) - runs.
+    """The handwriting add-on in an Android build (debug or release), beside
+    the app's Python in ``dest``: the add-on's folder, math-ocr's
+    ``mathocr.tokenizer`` and ``mathocr.data.inkml`` (the features the model
+    was trained on), and the model as the package ``mathocr_model``, which
+    onnxruntime-android (build.gradle.kts) runs.
 
-    The model is not ours to redistribute and must never reach git or a
-    release: every folder staged
-    here is git-ignored, and any other build removes what a debug build left."""
+    The model is math-ocr's and must never reach git: every folder staged
+    here is git-ignored.  Its NOTICE - the terms it is distributed under -
+    goes into the app with it, and a build whose export has none says so."""
     for name in ("mathocr", "mathocr_model"):
         shutil.rmtree(dest / name, ignore_errors=True)
     if not wanted:
@@ -178,11 +181,15 @@ def stage_ink(dest: Path, wanted: bool) -> bool:
     shutil.copyfile(root / "mathocr" / "data" / "inkml.py", package / "data" / "inkml.py")
     models = dest / "mathocr_model"
     models.mkdir()
-    (models / "__init__.py").write_text('"""math-ocr\'s stroke model, staged into a debug build: never commit it, never ship it."""\n',
+    (models / "__init__.py").write_text('"""math-ocr\'s stroke model, staged into an Android build: never commit it."""\n',
                                         encoding="utf-8")
     for f in INK_MODEL_FILES:
         shutil.copyfile(model / f, models / f)
-    print(f"+ staged the handwriting add-on and {model} (a debug build only)")
+    if (model / INK_MODEL_NOTICE).is_file():
+        shutil.copyfile(model / INK_MODEL_NOTICE, models / INK_MODEL_NOTICE)
+    else:
+        print(f"warning: {model} has no {INK_MODEL_NOTICE}: the app carries the model without the terms it is distributed under")
+    print(f"+ staged the handwriting add-on and {model}")
     return True
 
 
@@ -269,7 +276,7 @@ def android_build(release: bool, cdn: bool) -> list[Path]:
     # about which of the two is open.
     build_www(cdn, android=True, debug=not release)
     copy_python_sources(ANDROID / "app" / "src" / "main" / "python")
-    stage_ink(ANDROID / "app" / "src" / "main" / "python", wanted=not release)
+    stage_ink(ANDROID / "app" / "src" / "main" / "python", wanted=True)
     make_icons(ANDROID / "app/src/main/res/mipmap-mdpi/ic_launcher.png",
                ANDROID / "app/src/debug/res/mipmap-mdpi/ic_launcher.png")
     gradlew = ANDROID / ("gradlew.bat" if platform.system() == "Windows" else "gradlew")

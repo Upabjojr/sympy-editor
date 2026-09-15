@@ -43,13 +43,14 @@ or, from Python, `serve(expr, addons=["ink", "latex"])`.
 
 * **With a Python beside the editor** — the local server, the Jupyter widget —
   on onnxruntime and a math-ocr checkout, as above.
-* **In the Android app**, in a **debug** build (`python mobile/build.py
-  android`): the model runs in [onnxruntime-android](https://onnxruntime.ai/docs/install/#install-on-android),
+* **In the Android app**, debug and release builds alike (`python mobile/build.py
+  android`, `--release`): the model runs in [onnxruntime-android](https://onnxruntime.ai/docs/install/#install-on-android),
   the Maven library, which the add-on's Python calls through Chaquopy's Java
   bridge; the build stages the add-on, math-ocr's two modules and the model
   beside the app's Python (`stage_ink` in `mobile/build.py`), all of it
-  git-ignored.  A release build carries none of it — the model is not ours to
-  redistribute — and removes what a debug build left.
+  git-ignored.  The model's `NOTICE` (the terms it is distributed under), when
+  its export has one, goes into the app with it, and the add-on's guide shows
+  it; a build without one warns.
 * **Not** in a self-contained Pyodide page, the web site or the iOS app, so
   `addon.json` keeps it out of their bundles.
 

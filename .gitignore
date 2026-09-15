@@ -19,7 +19,7 @@ mobile/android/app/src/main/assets/
 mobile/android/app/src/main/python/sympy_editor/
 mobile/android/app/src/main/python/sympy_editor_app.py
 mobile/android/app/src/main/python/addons/
-# the handwriting add-on's model and math-ocr's modules, staged into debug builds
+# the handwriting add-on's model and math-ocr's modules, staged into Android builds
 # only: never committed
 mobile/android/app/src/main/python/mathocr/
 mobile/android/app/src/main/python/mathocr_model/

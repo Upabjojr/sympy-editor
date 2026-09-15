@@ -63,6 +63,10 @@ SympyEditor.registerAddon("ink", (function () {
     return '<svg class="ink-icon" viewBox="0 0 16 16"' + dims + ' aria-hidden="true" focusable="false">' +
       '<path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="' + d + '"/></svg>';
   }
+  // The model's NOTICE, as text in the guide (never as markup)
+  function noticeHtml(text) {
+    return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
   function toolButton(h, name, title, extra) {
     var b = h("button", Object.assign({ type: "button", class: "ink-tool ink-" + name, title: title, "aria-label": title }, extra || {}));
     b.innerHTML = toolIcon(name);
@@ -682,7 +686,8 @@ SympyEditor.registerAddon("ink", (function () {
           + "<li>The best reading comes first and the others after it: pick the one you wrote. Its LaTeX is in the box, to correct; the line under it is what SymPy gets, with a menu for each part that can be read more than one way and a switch for each constant name.</li>"
           + "<li><b>Replace the selection</b> puts it over what is selected (a node or a range); with a cursor in the formula instead the button is <b>Add to cursor</b>, and with neither <b>Add to end</b>: the reading goes in as if typed there - multiplied, or added when it begins with + or -. <b>Replace the whole expression</b> makes it the formula. Enter in the box does what the first button says. Either way the page goes back up to the formula.</li>"
           + "<li>The reading is done by math-ocr's stroke model. It reads one formula at a time, and mixes up look-alike glyphs most (<code>1</code> and <code>|</code>, <code>V</code> and <code>v</code>).</li>"
-          + "</ul></section>",
+          + "</ul></section>"
+          + (status.notice ? '<section><h3>About the model</h3><p style="white-space: pre-wrap">' + noticeHtml(status.notice) + "</p></section>" : ""),
         onSelect: function () { updateInsert(); },
         destroy: function () {
           setFull(false);

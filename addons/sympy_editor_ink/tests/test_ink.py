@@ -90,6 +90,12 @@ def test_a_reading_goes_after_the_formula_when_nothing_is_selected():
     assert doc.expr == x + y
 
 
+def test_a_model_notice_is_text_for_the_guide():
+    from sympy_editor_ink.recognizer import read_notice
+    assert read_notice(b"  Terms of the model.\n") == "Terms of the model."
+    assert read_notice(b"") is None and read_notice(None) is None
+
+
 def test_a_missing_model_is_said_not_crashed_on(tmp_path):
     missing = StrokeRecognizer(mathocr=tmp_path)
     status = missing.status()

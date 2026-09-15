@@ -19,7 +19,7 @@ model, quantised (38.9 % exact match on math-ocr's held-out test split).
 In the Android app (Chaquopy) there is no onnxruntime for Python: the model
 runs in onnxruntime-android, the Maven library, through Chaquopy's Java
 bridge (:class:`_JavaSession`), and math-ocr's two modules and the model come
-with the app - a debug build stages them beside its Python (mobile/build.py).
+with the app - its build stages them beside its Python (mobile/build.py).
 """
 from __future__ import annotations
 
@@ -119,8 +119,16 @@ def with_braces(tokens: Sequence[str]) -> List[str]:
     return out
 
 
-#: The model as an Android debug build carries it: a package of its own.
+#: The model as the Android app carries it: a package of its own.
 APP_MODEL_PACKAGE = "mathocr_model"
+#: The model's attribution and licence terms, a file beside its weights.
+MODEL_NOTICE = "NOTICE"
+
+
+def read_notice(data: Optional[bytes]) -> Optional[str]:
+    """A model's NOTICE as text for the add-on's guide, or None without one."""
+    text = data.decode("utf-8", errors="replace").strip() if data else ""
+    return text or None
 
 
 def _on_android() -> bool:
@@ -131,7 +139,7 @@ def _on_android() -> bool:
 def _android_status() -> Dict[str, Any]:
     if importlib.util.find_spec(APP_MODEL_PACKAGE) is None or importlib.util.find_spec("mathocr") is None:
         return {"available": False, "reason": "This build of the app carries no handwriting model "
-                                              "(a debug build made beside a math-ocr checkout does)"}
+                                              "(one built beside a math-ocr checkout does)"}
     if importlib.util.find_spec("numpy") is None:
         return {"available": False, "reason": "numpy is not in this build of the app"}
     try:
@@ -139,7 +147,12 @@ def _android_status() -> Dict[str, Any]:
         jclass("ai.onnxruntime.OrtEnvironment")
     except Exception:  # noqa: BLE001 - a missing class is a Java exception
         return {"available": False, "reason": "onnxruntime-android is not in this build of the app"}
-    return {"available": True, "model": "the app's own copy (debug build)", "mathocr": "the app's own copy"}
+    import pkgutil
+    try:
+        notice = read_notice(pkgutil.get_data(APP_MODEL_PACKAGE, MODEL_NOTICE))
+    except OSError:
+        notice = None
+    return {"available": True, "model": "the app's own copy", "mathocr": "the app's own copy", "notice": notice}
 
 
 def _primitive(jarr, dtype):
@@ -409,7 +422,8 @@ class StrokeRecognizer:
         mode = (_read_json(model / "meta.json") or {}).get("mode", "stroke")
         if mode != "stroke":
             return {"available": False, "reason": f"{model.name} is a {mode} model: pen strokes need a stroke model"}
-        return {"available": True, "model": str(model), "mathocr": str(root)}
+        notice = read_notice((model / MODEL_NOTICE).read_bytes()) if (model / MODEL_NOTICE).is_file() else None
+        return {"available": True, "model": str(model), "mathocr": str(root), "notice": notice}
 
     def load(self):
         """(encoder, decoder, tokenizer, math-ocr's inkml module, its

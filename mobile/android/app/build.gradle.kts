@@ -12,7 +12,7 @@ android {
         applicationId = "org.sympy.editor"
         minSdk = 24          // the app's CPython (Chaquopy 16) needs Android 7.0
         targetSdk = 36
-        versionCode = 6          // 0.1.1; every release Android accepts as an update needs a higher one
+        versionCode = 7          // 0.1.1; every release Android accepts as an update needs a higher one
         versionName = "0.1.1"
         // Chaquopy ships a CPython runtime per ABI: these two cover phones,
         // tablets and the emulator (every other ABI is long obsolete).
@@ -72,9 +72,9 @@ chaquopy {
             // a test keeps this list in step with the manifests)
             install("sympy-matching>=0.0.4")
             install("lark>=1.1")
-            // the handwriting add-on reads strokes with math-ocr's numpy code;
-            // only a debug build carries it, like its model (mobile/build.py stage_ink)
-            if (gradle.startParameter.taskNames.any { it.contains("Debug", ignoreCase = true) }) install("numpy")
+            // the handwriting add-on reads strokes with math-ocr's numpy code
+            // (its model is staged by mobile/build.py stage_ink)
+            install("numpy")
         }
     }
 }
@@ -82,7 +82,6 @@ chaquopy {
 dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.webkit:webkit:1.11.0")
-    // the handwriting add-on's model runs in ONNX Runtime; like the model
-    // itself (mobile/build.py stage_ink), only a debug build carries it
-    debugImplementation("com.microsoft.onnxruntime:onnxruntime-android:1.29.0")
+    // the handwriting add-on's model (mobile/build.py stage_ink) runs in ONNX Runtime
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.29.0")
 }
