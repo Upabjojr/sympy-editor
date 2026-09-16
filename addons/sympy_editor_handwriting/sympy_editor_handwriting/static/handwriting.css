@@ -43,6 +43,14 @@
 .se-addon-handwriting .ink-formula [data-inkhole] .rule { border-color: transparent !important; }
 .se-addon-handwriting .ink-canvas.ink-off { cursor: not-allowed; opacity: 0.5; }
 .se-addon-handwriting .ink-canvas.ink-erasing { cursor: cell; }
+.se-addon-handwriting .ink-canvas.ink-selecting { cursor: default; }
+/* Select, Pen, Eraser: one group, the pressed one what the pad does */
+.se-addon-handwriting .ink-modes { display: inline-flex; margin-right: 0.4rem; }
+.se-addon-handwriting .ink-modes button { border-radius: 0; }
+.se-addon-handwriting .ink-modes button + button { margin-left: -1px; }
+.se-addon-handwriting .ink-modes button:first-child { border-radius: 0.3rem 0 0 0.3rem; }
+.se-addon-handwriting .ink-modes button:last-child { border-radius: 0 0.3rem 0.3rem 0; }
+.se-addon-handwriting .ink-modes button.ink-on { position: relative; z-index: 1; }
 /* Erase is a switch: pressed while on */
 .se-addon-handwriting .ink-bar button.ink-on { border-color: rgba(var(--se-accent), 0.85); background: rgba(var(--se-accent), 0.18); box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.15); }
 .se-addon-handwriting .ink-busy .ink-pad { border-color: rgba(var(--se-accent), 0.6); }

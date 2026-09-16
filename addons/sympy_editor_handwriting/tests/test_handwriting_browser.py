@@ -100,15 +100,15 @@ def test_the_area_grows_scrolls_undoes_and_goes_full_screen():
             strokes = lambda: int(panel.get_attribute("data-strokes"))
             # the tools are icons, each named for a tooltip and a screen reader, and explained in the guide
             tools = page.locator(".se-addon-handwriting .ink-bar button")
-            assert tools.count() == 7
-            for i in range(7):
+            assert tools.count() == 8
+            for i in range(8):
                 assert tools.nth(i).inner_text().strip() == "" and tools.nth(i).locator("svg").count() == 1
                 assert tools.nth(i).get_attribute("aria-label")
             page.locator(".se-addon-handwriting .se-addon-help").click()
             guide = page.locator(".se-help-view")
-            for name in ("Write", "Done", "Undo", "Redo", "Erase", "Clear", "Read", "Full screen"):
+            for name in ("Select", "Pen", "Eraser", "Done", "Undo", "Redo", "Clear", "Read", "Full screen"):
                 assert name in guide.inner_text(), name
-            assert guide.locator("svg.ink-icon").count() == 10
+            assert guide.locator("svg.ink-icon").count() == 11
             page.keyboard.press("Escape")
             assert _wait(lambda: page.locator(".se-help-view").count() == 0)
             # a stroke well inside: read (by the fake), with the reading's options
@@ -526,20 +526,17 @@ def test_a_piece_of_the_formula_is_selected_and_written_over():
             a = (text.index("{a}") + 1, text.index("{a}") + 2)
             frac = (text.index(r"\frac"), len(text))
             box = lambda r: page.evaluate(PIECE_BOX, list(r))
-            # a tap selects the piece; again, what holds it; a tap on the piece, the piece again
+            # with Select, a tap selects the piece; again, what holds it; a tap on the piece, the piece again
+            page.locator(".se-addon-handwriting .ink-select").click()
+            assert panel.get_attribute("data-mode") == "select"
             page.mouse.click(box(a)["x"], box(a)["y"])
             assert panel.get_attribute("data-sel") == "%d,%d" % a
             page.mouse.click(box(a)["x"], box(a)["y"])
             assert panel.get_attribute("data-sel") == "%d,%d" % frac
             page.mouse.click(box(a)["x"], box(a)["y"])
-            assert panel.get_attribute("data-sel") == "%d,%d" % frac or panel.get_attribute("data-sel") == "%d,%d" % a
-            if panel.get_attribute("data-sel") != "%d,%d" % a:
-                page.mouse.click(box(a)["x"] + 200, box(a)["y"] - 200)       # nothing there: a space after the formula
-                assert panel.get_attribute("data-hole") == "%d,%d" % (len(text), len(text))
-                page.locator(".se-addon-handwriting .ink-done").click()
-                assert panel.get_attribute("data-hole") == "" and field.input_value() == text
-                page.mouse.click(box(a)["x"], box(a)["y"])
-                assert panel.get_attribute("data-sel") == "%d,%d" % a
+            assert panel.get_attribute("data-sel") == "%d,%d" % a
+            page.locator(".se-addon-handwriting .ink-pen").click()
+            assert panel.get_attribute("data-mode") == "pen"
             # writing over the selection: it gives way to a hole, and the stroke is in it
             c = box(a)
             _drag(page, c["x"], c["y"], c["x"] + 40, c["y"] + 8)
@@ -549,7 +546,8 @@ def test_a_piece_of_the_formula_is_selected_and_written_over():
             # the reading takes the piece's place in the text
             want = text[:a[0]] + READING + text[a[1]:]
             assert _wait(lambda: field.input_value() == want, 15)
-            # a tap outside the hole: the reading stays, the ink goes, and the new piece is selected
+            # with Select, a tap outside the hole: the reading stays, the ink goes, and the new piece is selected
+            page.locator(".se-addon-handwriting .ink-select").click()
             x_at = box((0, 1))
             page.mouse.click(x_at["x"], x_at["y"])
             assert _wait(lambda: panel.get_attribute("data-hole") == "")
@@ -570,24 +568,27 @@ def test_write_and_done_a_bare_script_and_a_space_after_the_formula():
         try:
             panel = page.locator(".se-addon-handwriting .ink-panel")
             field = page.locator(".se-addon-handwriting .ink-latex")
-            write, done = page.locator(".se-addon-handwriting .ink-write"), page.locator(".se-addon-handwriting .ink-done")
+            done = page.locator(".se-addon-handwriting .ink-done")
+            select, pen = page.locator(".se-addon-handwriting .ink-select"), page.locator(".se-addon-handwriting .ink-pen")
             field.fill("x^2")
             page.wait_for_selector(".se-addon-handwriting .ink-formula [data-ls]")
             two = page.evaluate(PIECE_BOX, [2, 3])
+            select.click()
             page.mouse.click(two["x"], two["y"])
             assert panel.get_attribute("data-sel") == "2,3"
-            write.click()
+            pen.click()
+            _drag(page, two["x"], two["y"], two["x"] + 40, two["y"] + 6)                  # the pen over the selection: room to write in
             assert panel.get_attribute("data-hole") == "2,3" and not done.is_disabled()
-            hole = page.locator(".se-addon-handwriting .ink-formula [data-inkhole] .rule").bounding_box()
-            _drag(page, hole["x"] + 6, hole["y"] + hole["height"] / 2, hole["x"] + hole["width"] - 6, hole["y"] + hole["height"] / 2)
             assert _wait(lambda: field.input_value() == "x^{" + READING + "}", 15)     # a bare script: braced
             done.click()
             assert panel.get_attribute("data-hole") == "" and field.input_value() == "x^{" + READING + "}"
             # ink anywhere else is free: its reading goes after the formula; clearing the ink gives the text back
             text = field.input_value()
             pad = page.locator(".se-addon-handwriting .ink-pad").bounding_box()
+            select.click()
             page.mouse.click(pad["x"] + pad["width"] - 30, pad["y"] + pad["height"] - 20)    # a tap on nothing: nothing selected
             assert panel.get_attribute("data-sel") == "" and panel.get_attribute("data-hole") == ""
+            pen.click()
             _drag(page, pad["x"] + pad["width"] - 160, pad["y"] + 40, pad["x"] + pad["width"] - 60, pad["y"] + 70)
             assert _wait(lambda: panel.get_attribute("data-hole") == "free")
             assert _wait(lambda: field.input_value() == text + " " + READING, 15)
@@ -620,6 +621,56 @@ def test_an_empty_pad_is_written_on_whole_and_done_draws_the_reading():
             assert panel.get_attribute("data-hole") == "" and panel.get_attribute("data-strokes") == "0"
             assert field.input_value() == READING
             assert page.locator(".se-addon-handwriting .ink-formula [data-ls]").count() > 0
+            assert page.errors == []
+        finally:
+            browser.close()
+            srv.shutdown()
+            srv.server_close()
+
+
+def test_undo_and_redo_go_through_every_edit_in_the_pad():
+    doc = Document(x, addons=[HandwritingAddon(FakeRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _pad_page(p, doc)
+        try:
+            panel = page.locator(".se-addon-handwriting .ink-panel")
+            field = page.locator(".se-addon-handwriting .ink-latex")
+            undo, redo = page.locator(".se-addon-handwriting .ink-undo"), page.locator(".se-addon-handwriting .ink-redo")
+            field.fill("x + y")
+            page.wait_for_selector(".se-addon-handwriting .ink-formula [data-ls]")
+            page.wait_for_timeout(1100)                                  # the typing so far is one edit
+            # a selection is an edit
+            page.locator(".se-addon-handwriting .ink-select").click()
+            y_at = page.evaluate(PIECE_BOX, [4, 5])
+            page.mouse.click(y_at["x"], y_at["y"])
+            assert panel.get_attribute("data-sel") == "4,5"
+            # typing in the LaTeX line in one go is one edit
+            field.press("End")
+            field.type(" + 1")
+            assert field.input_value() == "x + y + 1"
+            page.wait_for_timeout(1100)
+            undo.click()
+            assert field.input_value() == "x + y" and panel.get_attribute("data-sel") == "4,5"
+            undo.click()
+            assert field.input_value() == "x + y" and panel.get_attribute("data-sel") == ""
+            redo.click()
+            assert panel.get_attribute("data-sel") == "4,5"
+            redo.click()
+            assert field.input_value() == "x + y + 1" and panel.get_attribute("data-sel") == ""
+            assert redo.is_disabled()
+            # ink too: a stroke, taken back and put back, its reading with it
+            page.locator(".se-addon-handwriting .ink-pen").click()
+            pad = page.locator(".se-addon-handwriting .ink-pad").bounding_box()
+            _drag(page, pad["x"] + pad["width"] - 200, pad["y"] + 40, pad["x"] + pad["width"] - 80, pad["y"] + 70)
+            assert _wait(lambda: field.input_value() == "x + y + 1 " + READING, 15)
+            undo.click()
+            assert panel.get_attribute("data-strokes") == "0" and field.input_value() == "x + y + 1"
+            redo.click()
+            assert panel.get_attribute("data-strokes") == "1" and field.input_value() == "x + y + 1 " + READING
+            # Ctrl+Z in the LaTeX line is the pad's Undo
+            field.focus()
+            page.keyboard.press("Control+z")
+            assert panel.get_attribute("data-strokes") == "0" and field.input_value() == "x + y + 1"
             assert page.errors == []
         finally:
             browser.close()
