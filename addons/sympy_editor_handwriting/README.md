@@ -71,12 +71,11 @@ under the **GNU Affero General Public License, version 3 or (at your option)
 any later version** (`AGPL-3.0-or-later`, the text in [`LICENSE`](LICENSE)).
 Copyright (c) 2026 Francesco Bonazzi.
 
-It is the exception: sympy-editor and its other add-ons are BSD-3-Clause.
-Whoever distributes the add-on, or a build that carries it (an Android debug
-build does), or lets people use it over a network, must offer them its source
-under the same licence.
+The same licence as sympy-editor and its other add-ons.  Whoever distributes
+the add-on, or a build that carries it (the Android app does), or lets people
+use it over a network, must offer them its source under the same licence.
 
-What it runs on keeps its own terms: sympy-editor and the LaTeX add-on
-(BSD-3-Clause), SymPy (BSD-3-Clause), NumPy (BSD-3-Clause), onnxruntime and
-onnxruntime-android (MIT).  math-ocr and its model are not part of the add-on
-and are not distributed with it.
+What it runs on keeps its own terms: SymPy (BSD-3-Clause), NumPy
+(BSD-3-Clause), onnxruntime and onnxruntime-android (MIT).  math-ocr and its
+model are not part of the add-on; the Android app carries the model with the
+NOTICE that states its terms.

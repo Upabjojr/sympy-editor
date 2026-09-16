@@ -8,14 +8,14 @@ version = "0.1.1"
 description = "Click-to-edit WYSIWYG editor for SymPy expressions: Jupyter widget and standalone HTML"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "BSD-3-Clause" }
+license = { text = "AGPL-3.0-or-later" }
 authors = [{ name = "Francesco Bonazzi" }]
 keywords = ["sympy", "latex", "editor", "jupyter", "widget", "katex"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Framework :: Jupyter",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: BSD License",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
     "Programming Language :: Python :: 3",
     "Topic :: Scientific/Engineering :: Mathematics",
 ]

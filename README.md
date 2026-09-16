@@ -608,15 +608,19 @@ Jupyter widget and the apps all follow.
 | Pyodide | MPL-2.0 | loaded from a CDN by the browser, standalone HTML only |
 | SymPy wheel (PyPI) | BSD-3 | loaded by the browser into Pyodide (the newest SymPy, ahead of Pyodide's own package) |
 
-sympy-editor itself is BSD-3-Clause; [`LICENSE`](LICENSE) carries SymPy's licence
-after sympy-editor's own.
+sympy-editor is free software under the **GNU Affero General Public License,
+version 3 or later** (AGPL-3.0-or-later): use it, change it and share it, and
+whoever shares a changed version - or lets people use one over a network -
+must offer its source under the same licence. [`LICENSE`](LICENSE) carries SymPy's
+licence after sympy-editor's own. Versions up to and including 0.1.1 were
+released under the BSD 3-Clause License.
 
 **Add-ons may have their own licence.** Each add-on is a separate package, and
 its licence is the one stated in its folder (a `LICENSE` file, or the `license`
 in its `pyproject.toml`); check it before you redistribute an add-on or a build
-that carries it. Today the add-ons in [`addons/`](addons) are BSD-3-Clause,
-except the handwriting add-on ([`addons/sympy_editor_handwriting`](addons/sympy_editor_handwriting)),
-which is AGPL-3.0-or-later.
+that carries it. Today the add-ons in [`addons/`](addons) are AGPL-3.0-or-later, as
+sympy-editor is, except the add-on template ([`addons/template`](addons/template)),
+which is BSD-3-Clause so that add-ons started from it can choose their own.
 
 ## Development
 

@@ -243,7 +243,7 @@ def test_the_shelf_carries_the_licence_and_the_privacy_statement(tmp_path):
     out = build.derivations_page(tmp_path / "shelf", urls=None, editor_href="editor.html")
     folder = out.parent
     licence = (folder / "license.html").read_text(encoding="utf-8")
-    assert "BSD 3-Clause License" in licence and "Redistribution and use" in licence
+    assert "GNU Affero General Public License" in licence and "Remote Network Interaction" in licence
     assert (folder / "LICENSE.txt").read_text(encoding="utf-8") == (build.ROOT / "LICENSE").read_text(encoding="utf-8")
     privacy = (folder / "privacy.html").read_text(encoding="utf-8")
     for said in ("no accounts, no cookies, no analytics", "make no network\nrequests",

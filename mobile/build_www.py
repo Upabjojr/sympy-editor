@@ -54,7 +54,7 @@ Pyodide {pyodide}  MPL-2.0       https://pyodide.org  (core runtime, python_stdl
 CPython (in Pyodide)  PSF-2.0    https://www.python.org
 SymPy {sympy} (wheel from PyPI)  BSD-3  https://www.sympy.org
 mpmath (wheel)        BSD-3     https://mpmath.org
-sympy-editor          BSD-3
+sympy-editor          AGPL-3.0-or-later
 """
 
 

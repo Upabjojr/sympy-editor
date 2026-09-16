@@ -11,9 +11,10 @@ A WYSIWYG editor for SymPy expressions.  Requirements set by the project owner:
 - Render SymPy expressions nicely using LaTeX in HTML.
 - Expressions must be **selectable and click-editable** (structural editing of
   sub-expressions, not free-form LaTeX editing).
-- **No GPL dependencies** (GPL is incompatible with this project's BSD-3
-  licence).  Check the licence of anything you add: runtime, optional or
-  vendored, Python or JavaScript.
+- **Dependencies compatible with AGPL-3.0-or-later**, this project's licence:
+  BSD, MIT, Apache-2.0, MPL-2.0, and LGPL/GPL version 3 or later are;
+  GPL-2.0-only is not.  Check the licence of anything you add: runtime,
+  optional or vendored, Python or JavaScript.
 - Must work both **integrated in Jupyter** and as **standalone HTML**.
 - **No npx / node.js package dependencies.**  No bundler, no `package.json`,
   no build step.  JavaScript is plain, hand-written and shipped as static

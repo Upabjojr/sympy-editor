@@ -343,7 +343,7 @@ header a.button code {{ font-size: 0.85em; }}
 <body>
 <main>
 <header>
-  <p class="eyebrow">Free &amp; open source \u00b7 BSD 3-Clause</p>
+  <p class="eyebrow">Free &amp; open source \u00b7 AGPL-3.0</p>
   <h1><img src="icon.svg" alt="" width="56" height="56"> SymPy Editor</h1>
   <p>A click-to-edit editor for SymPy expressions: select a piece of a formula
   and change it in place - type over it, apply any SymPy function to it, pull
@@ -411,7 +411,7 @@ as a single file that works offline.
 <nav class="legal">\u00a9 2026 <a href="https://github.com/Upabjojr">Francesco Bonazzi</a> \u00b7
 <a href="https://github.com/Upabjojr/sympy-editor">GitHub</a> \u00b7
 <a href="https://pypi.org/project/sympy-editor/">PyPI</a> \u00b7
-<a href="license.html">License (BSD 3-Clause)</a> \u00b7
+<a href="license.html">License (AGPL-3.0)</a> \u00b7
 <a href="privacy.html">Privacy</a></nav></footer>
 </main>
 <script>
@@ -539,13 +539,14 @@ def doc_pages(folder: Path) -> None:
     (folder / "LICENSE.txt").write_text(licence, encoding="utf-8")
     card = lambda icon, title, body: f'<section class="card">{DOC_ICONS[icon]}<div><h2>{title}</h2>{body}</div></section>'
     (folder / "license.html").write_text(DOC_PAGE.replace("\\u2014", "\u2014").replace("\\u2190", "\u2190").format(
-        title="License", description="SymPy Editor is free software under the BSD 3-Clause License.",
-        lead="SymPy Editor is free software, under the BSD 3-Clause License.",
+        title="License", description="SymPy Editor is free software under the GNU Affero General Public License.",
+        lead="SymPy Editor is free software, under the GNU Affero General Public License, version 3 or later.",
         body=card("scale", "In short",
-                  """<p>Use it, copy it, change it, redistribute it &mdash; commercially or
-not &mdash; as long as the copyright notice travels with it, and without
-using the author's name to promote what you make from it. It comes with no
-warranty. The mathematics is <a href="https://www.sympy.org">SymPy</a>'s, and the editor
+                  """<p>Use it, copy it, study it, change it, redistribute it &mdash; commercially or
+not. Whoever shares it, changed or not, passes the same freedoms on: the
+source, under the same licence. And whoever changes it and lets people use
+the changed version over a network &mdash; a web site, say &mdash; must offer
+them its source too. It comes with no warranty. The mathematics is <a href="https://www.sympy.org">SymPy</a>'s, and the editor
 carries a copy of it: SymPy's own licence follows the editor's. The short version is not the
 licence; the licence is:</p>""")
              + f'<pre class="licence">{html.escape(licence)}</pre>',

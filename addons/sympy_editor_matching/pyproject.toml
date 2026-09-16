@@ -8,7 +8,7 @@ version = "0.0.1"
 description = "sympy-editor add-on: rewrite rules with wildcards, matched many-to-one (sympy-matching)"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "BSD-3-Clause" }
+license = { text = "AGPL-3.0-or-later" }   # as sympy-editor: see its LICENSE
 dependencies = ["sympy-editor", "sympy-matching>=0.0.4"]
 
 [project.entry-points."sympy_editor.addons"]

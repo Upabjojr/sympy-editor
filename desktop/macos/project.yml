@@ -43,7 +43,7 @@ targets:
         CFBundleVersion: ${MACOS_BUILD_NUMBER}
         LSApplicationCategoryType: public.app-category.education
         NSHighResolutionCapable: true
-        NSHumanReadableCopyright: BSD-3-Clause
+        NSHumanReadableCopyright: "Copyright © 2026 Francesco Bonazzi. AGPL-3.0-or-later"
     settings:
       base:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
