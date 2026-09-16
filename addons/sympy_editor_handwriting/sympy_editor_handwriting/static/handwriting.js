@@ -21,11 +21,12 @@
  *
  * The pad is also a LaTeX editor: the LaTeX in the box is drawn in it, under
  * the ink, and each piece of the drawing knows the piece of the text it came
- * from (LatexMap).  A tap selects a piece; writing over the selection makes it
- * a hole - the piece gone from sight, the room it took left to write in,
- * growing as the ink nears its edges - and the reading of the ink takes that
- * piece's place in the text.  With nothing in the box the whole pad is the
- * hole, as it always was.
+ * from (LatexMap).  It opens with the editor's formula.  A tap selects a
+ * piece; writing over the selection makes it a hole - the piece gone from
+ * sight, the room it took left to write in, growing as the ink nears its
+ * edges - and the reading of the ink takes that piece's place in the text.
+ * Written anywhere else, the ink is free: its reading goes after the formula.
+ * The selected piece can be typed over too, in the LaTeX line above the pad.
  */
 SympyEditor.registerAddon("handwriting", (function () {
   // After a reading goes in, the formula it went into is brought back into
@@ -72,7 +73,9 @@ SympyEditor.registerAddon("handwriting", (function () {
     clear: "M2.9 4.5h10.2M6.2 4.5V3.1h3.6v1.4M4.3 4.5l.7 8.7a1 1 0 0 0 1 .9h4a1 1 0 0 0 1-.9l.7-8.7M6.9 6.9v4.7M9.1 6.9v4.7",
     read: "M3 2.8h10a1.2 1.2 0 0 1 1.2 1.2v8a1.2 1.2 0 0 1-1.2 1.2H3A1.2 1.2 0 0 1 1.8 12V4A1.2 1.2 0 0 1 3 2.8ZM5.2 5.5h5.6M8 5.5v5.2",
     write: "M3.2 12.8l.9-3.3 7.1-7.1a1.5 1.5 0 0 1 2.1 2.1l-7.1 7.1ZM9.9 3.3l2.8 2.8",
-    done: "M3.2 8.6l3.1 3.1 6.5-7"
+    done: "M3.2 8.6l3.1 3.1 6.5-7",
+    type: "M2.2 4.5h11.6v7H2.2ZM4.6 6.9h.01M6.9 6.9h.01M9.1 6.9h.01M11.4 6.9h.01M5.4 9.2h5.2",
+    load: "M8 2.5v6.8M4.9 6.3 8 9.3l3.1-3M3 12.8h10"
   };
   // `size`: pixels, for the guide - which the panel's stylesheet does not reach
   function toolIcon(name, size) {
@@ -277,7 +280,10 @@ SympyEditor.registerAddon("handwriting", (function () {
       var note = h("div", { class: "ink-note", "aria-live": "polite" });
       var cands = h("div", { class: "ink-cands", role: "listbox", "aria-label": "Readings, best first" });
       var field = h("input", { class: "ink-latex", type: "text", spellcheck: "false", autocomplete: "off", autocapitalize: "off",
-        placeholder: "The formula as LaTeX - type it, or write it above", "aria-label": "The formula as LaTeX" });
+        placeholder: "LaTeX - type here, or write in the pad below", "aria-label": "The formula as LaTeX" });
+      var typeBtn = toolButton(h, "type", "Type over the selected piece: its LaTeX, selected in this line", { disabled: "" });
+      var loadBtn = toolButton(h, "load", "The editor's formula, into the pad");
+      var latexRow = h("div", { class: "ink-latexrow" }, [field, typeBtn, loadBtn]);
       var src = h("code", { class: "ink-src", title: "What SymPy gets" });
       var ambig = h("div", { class: "ink-ambig" });
       var consts = h("div", { class: "ink-consts" });
@@ -290,9 +296,9 @@ SympyEditor.registerAddon("handwriting", (function () {
       var sheetHead = h("button", { type: "button", class: "ink-sheet-head", "aria-expanded": "true",
         title: "Fold the readings away, or bring them back" }, [sheetChevron, sheetSummary]);
       var actions = h("div", { class: "ink-actions" }, [insertSel, insertAll, toLatex]);
-      var sheetBody = h("div", { class: "ink-sheet-body" }, [note, cands, field, src, ambig, consts, actions]);
+      var sheetBody = h("div", { class: "ink-sheet-body" }, [note, cands, src, ambig, consts, actions]);
       var sheet = h("div", { class: "ink-sheet" }, [sheetHead, sheetBody]);
-      var element = h("div", { class: "ink-panel", "data-strokes": "0", "data-zoom": "1.00", "data-hole": "", "data-sel": "" }, [bar, stage, sheet]);
+      var element = h("div", { class: "ink-panel", "data-strokes": "0", "data-zoom": "1.00", "data-hole": "", "data-sel": "" }, [bar, latexRow, stage, sheet]);
 
       // ---- state -------------------------------------------------------------------
       var strokes = [];                 // [[[x, y, t], ...], ...]
@@ -313,11 +319,12 @@ SympyEditor.registerAddon("handwriting", (function () {
       var erasing = false;              // the Erase mode: pointers take strokes away instead of writing
       var erase = null;                 // an erasing drag: {id, at, removed: [{index, stroke}]}
       var sel = null;                   // the selected piece of the text: {s, e} (s === e: a place in it)
-      var hole = null;                  // where the ink goes: {whole} - the pad - or {s, e, base, rect, ...}
+      var hole = null;                  // where the ink goes: {free} - anywhere, its reading after the text - or {s, e, base, rect, ...}
       var chosen = null;                // the text the chosen reading put in the hole's place
       var pieces = [];                  // the drawn pieces: {s, e, rect} in the canvas's pixels
       var formulaBox = null;            // the whole drawing, likewise; null: nothing drawn
-      var tap = null;                   // a pointer down on the formula: a tap, or a drag from the selection
+      var tap = null;                   // a pointer down on the formula: a tap, or a drag that writes
+      var touched = false;              // edited in the pad: it no longer follows the editor's formula
 
       api.katex().then(function (k) { katex = k; renderFormula(); }, function () {});
 
@@ -428,10 +435,12 @@ SympyEditor.registerAddon("handwriting", (function () {
       function source() { return field.value; }
       function fmt(v) { return String(Math.round(Math.max(0, v) * 1000) / 1000); }
       function emPx() { return parseFloat(getComputedStyle(formula).fontSize) || 24; }
+      // hole: {free: true, base, s, e} - ink written anywhere, its reading after the text -
+      // or {s, e, base, rect, ...} - a piece of the text given way to room to write in.
       function renderFormula() {
-        var open = hole && !hole.whole;
-        var text = open ? hole.base.slice(0, hole.s) + LatexMap.HOLE + hole.base.slice(hole.e) : source();
-        if (!katex || (hole && hole.whole) || !text.trim()) { formula.textContent = ""; layoutFormula(); return; }
+        var open = hole && !hole.free;
+        var text = open ? hole.base.slice(0, hole.s) + LatexMap.HOLE + hole.base.slice(hole.e) : hole ? hole.base : source();
+        if (!katex || !text.trim()) { formula.textContent = ""; layoutFormula(); return; }
         var holeTex = "";
         if (open) {                        // a transparent rule as large as the room asked for, its top where the piece's was
           var em = emPx();
@@ -439,7 +448,11 @@ SympyEditor.registerAddon("handwriting", (function () {
                     fmt(hole.wPx / em / hole.scaleW) + "em}{" + fmt(hole.hPx / em / hole.scaleH) + "em}}";
         }
         var tex = LatexMap.annotate(text, holeTex);
-        if (tex === null && open) { hole.whole = true; formula.textContent = ""; layoutFormula(); return; }   // not parsed: nowhere to show a hole
+        if (tex === null && open) {        // not parsed: nowhere to show the hole - the ink is free instead
+          hole = { free: true, base: hole.base, s: hole.base.length, e: hole.base.length };
+          renderFormula();
+          return;
+        }
         try { formula.innerHTML = katex.renderToString("\\displaystyle " + (tex === null ? text : tex), TRUST); }
         catch (e) { formula.textContent = text; }
         layoutFormula();
@@ -481,14 +494,14 @@ SympyEditor.registerAddon("handwriting", (function () {
             var q = unionRect(els[i]);
             if (q) pieces.push({ s: +els[i].getAttribute("data-ls"), e: +els[i].getAttribute("data-le"), rect: box(q) });
           }
-          var he = hole && !hole.whole ? formula.querySelector("[data-inkhole] .rule") : null;
+          var he = hole && !hole.free ? formula.querySelector("[data-inkhole] .rule") : null;
           if (he) {
             var hr = box(he.getBoundingClientRect());
             if (hole.rect) moveInk(hr.x - hole.rect.x, hr.y - hole.rect.y);     // the ink stays in the hole it was written in
             hole.rect = hr;
           }
         }
-        element.setAttribute("data-hole", !hole ? "" : hole.whole ? "whole" : hole.s + "," + hole.e);
+        element.setAttribute("data-hole", !hole ? "" : hole.free ? "free" : hole.s + "," + hole.e);
         element.setAttribute("data-sel", sel ? sel.s + "," + sel.e : "");
         if (formulaBox) grow(formulaBox.x + formulaBox.w, formulaBox.y + formulaBox.h);
         redraw();
@@ -526,9 +539,9 @@ SympyEditor.registerAddon("handwriting", (function () {
         for (var i = 0; i < pieces.length; i++) if (pieces[i].s === r.s && pieces[i].e === r.e) return pieces[i].rect;
         return null;
       }
-      function writesAt(p) {               // in the hole, or near the ink written in it
+      function writesAt(p) {               // free ink anywhere; in a hole, in it or near the ink written in it
         if (!hole) return false;
-        if (hole.whole) return true;
+        if (hole.free) return true;
         if (hole.rect && inside(p, hole.rect, 28 / zoom)) return true;
         return strokes.some(function (s) { return s.some(function (q) { return Math.abs(q[0] - p[0]) < 40 / zoom && Math.abs(q[1] - p[1]) < 40 / zoom; }); });
       }
@@ -551,7 +564,7 @@ SympyEditor.registerAddon("handwriting", (function () {
             ctx.stroke();
           }
         }
-        if (hole && !hole.whole && hole.rect) {
+        if (hole && !hole.free && hole.rect) {
           var hr = hole.rect;
           ctx.setLineDash([5 / zoom, 4 / zoom]);
           ctx.fillStyle = "rgba(" + a + ", 0.05)";
@@ -571,17 +584,30 @@ SympyEditor.registerAddon("handwriting", (function () {
         clearTimeout(timer);
         strokes = []; current = null; done = []; undone = [];
         element.setAttribute("data-strokes", "0");
-        hole = { s: r.s, e: r.e, base: text, whole: false, braces: !!(node && node.braces), rect: null, calibrated: false,
+        hole = { s: r.s, e: r.e, base: text, free: false, braces: !!(node && node.braces), rect: null, calibrated: false,
                  wPx: Math.max(rect ? rect.w : 0, 80), hPx: hPx, aPx: hPx * 0.72, scaleW: 1, scaleH: 1 };
         sel = null;
         chosen = null;
+        touched = true;
         clearReadings();
         renderFormula();
         changedTools();
         return true;
       }
+      // Ink anywhere: the formula stays as it is, the reading goes after it.
+      function openFree() {
+        if (hole || !canRead) return false;
+        var text = source();
+        hole = { free: true, base: text, s: text.length, e: text.length };
+        sel = null;
+        chosen = null;
+        if (text.trim()) touched = true;
+        renderFormula();
+        changedTools();
+        return true;
+      }
       function fitHole() {                 // the ink inside it, and it as large as the ink needs, with room beyond
-        if (!hole || hole.whole || !hole.rect || !strokes.length) return;
+        if (!hole || hole.free || !hole.rect || !strokes.length) return;
         var r = hole.rect, m = 28 / zoom, minX = Infinity, minY = Infinity;
         strokes.forEach(function (s) { s.forEach(function (p) { minX = Math.min(minX, p[0]); minY = Math.min(minY, p[1]); }); });
         // begun on a small piece, the ink may stand out above or left of the room made for it: in it
@@ -595,7 +621,7 @@ SympyEditor.registerAddon("handwriting", (function () {
           renderFormula();
         }
       }
-      // The hole closes: the chosen reading stays in the text (the text as it was, with none).
+      // The ink's reading into the text for good (the text as it was, with none): the ink goes.
       function commitHole() {
         if (!hole) return;
         var was = hole;
@@ -604,7 +630,11 @@ SympyEditor.registerAddon("handwriting", (function () {
         strokes = []; current = null; done = []; undone = [];
         element.setAttribute("data-strokes", "0");
         if (chosen === null) field.value = was.base;
-        sel = was.whole ? null : chosen === null ? { s: was.s, e: was.e } : { s: was.s, e: was.s + chosen.length };
+        if (chosen === null) sel = was.free ? null : { s: was.s, e: was.e };
+        else {                             // the piece it put in, spaces aside
+          var lead = chosen.length - chosen.replace(/^\s+/, "").length;
+          sel = { s: was.s + lead, e: was.s + chosen.replace(/\s+$/, "").length };
+        }
         chosen = null;
         clearReadings();
         renderFormula();
@@ -621,10 +651,9 @@ SympyEditor.registerAddon("handwriting", (function () {
         cands.textContent = "";
       }
       function tapAt(t) {
-        if (hole && !hole.whole) { commitHole(); return; }             // outside the hole: the reading goes in
-        var n = source().length;
-        if (!t.hit) { if (!openHole({ s: n, e: n })) { sel = null; layoutFormula(); } return; }   // past the formula: room to write more
-        if (sel && t.hit.s === sel.s && t.hit.e === sel.e) sel = enclosing(sel) || sel;      // again: what holds it
+        if (hole && !hole.free) { commitHole(); return; }              // outside the hole: the reading goes in
+        if (!t.hit) sel = null;                                        // nothing there: nothing selected
+        else if (sel && t.hit.s === sel.s && t.hit.e === sel.e) sel = enclosing(sel) || sel;   // again: what holds it
         else sel = { s: t.hit.s, e: t.hit.e };
         layoutFormula();
         changedTools();
@@ -632,9 +661,34 @@ SympyEditor.registerAddon("handwriting", (function () {
       function changedTools() {
         writeBtn.disabled = !canRead || !!hole || !source().trim();
         doneBtn.disabled = !hole;
+        typeBtn.disabled = !sel || !!hole;
       }
-      writeBtn.addEventListener("click", function () { var n = source().length; openHole(sel || { s: n, e: n }); });
+      writeBtn.addEventListener("click", function () {
+        if (sel) openHole(sel);
+        else if (openFree()) note.textContent = "Write anywhere in the pad: the reading goes after the formula";
+      });
       doneBtn.addEventListener("click", commitHole);
+      typeBtn.addEventListener("click", function () {   // the selected piece's LaTeX, selected in the line: typing replaces it
+        if (!sel || hole) return;
+        field.focus();
+        field.setSelectionRange(sel.s, sel.e);
+      });
+      function editorLatex() {
+        var st = api.state && api.state();
+        return st && typeof st.latex_plain === "string" ? st.latex_plain : "";
+      }
+      function loadFromEditor() {
+        if (hole) dropHole();
+        field.value = editorLatex();
+        sel = null;
+        touched = false;
+        clearReadings();
+        renderFormula();
+        refit();
+        changedTools();
+        reread();
+      }
+      loadBtn.addEventListener("click", loadFromEditor);
 
       // ---- erasing: a stroke goes when the eraser passes within reach of it ----------
       var coarse = !!(window.matchMedia && window.matchMedia("(any-pointer: coarse)").matches);
@@ -749,18 +803,14 @@ SympyEditor.registerAddon("handwriting", (function () {
           return;
         }
         var at = point(ev);
-        if (formulaBox && !writesAt(at)) {                                 // the formula: a tap selects, a drag from the selection writes over it
+        if (formulaBox && !writesAt(at)) {                                 // on the formula: a tap selects, a drag writes
           ev.preventDefault();
           try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* not capturable */ }
           var hit = pieceAt(at), selRect = sel && !hole ? rectFor(sel) : null;
           tap = { id: ev.pointerId, at: at, hit: hit, over: !!(selRect && inside(at, selRect, 4 / zoom)), moved: false };
           return;
         }
-        if (!hole) {                                                       // nothing drawn: the whole pad is the hole
-          hole = { whole: true, s: 0, e: 0, base: source() };
-          element.setAttribute("data-hole", "whole");
-          changedTools();
-        }
+        if (!hole) openFree();                                             // nothing drawn: the ink is free
         ev.preventDefault();
         clearTimeout(timer);
         if (!strokes.length && !current) t0 = ev.timeStamp;
@@ -778,7 +828,11 @@ SympyEditor.registerAddon("handwriting", (function () {
           var q = point(ev);
           if (!tap.moved && Math.hypot(q[0] - tap.at[0], q[1] - tap.at[1]) > 8 / zoom) {
             tap.moved = true;
-            if (tap.over && openHole(sel)) {                              // dragged from the selection: it is a hole, and this a stroke in it
+            var writes;
+            if (tap.over && !hole) writes = openHole(sel);                // from the selection: it gives way to a hole, and this is a stroke in it
+            else if (hole && !hole.free) { commitHole(); writes = openFree(); }   // outside a hole: that reading in, this ink free
+            else writes = !hole && openFree();                            // anywhere else: free ink
+            if (writes) {
               t0 = ev.timeStamp;
               current = [[tap.at[0], tap.at[1], 0], point(ev)];
               currentId = tap.id;
@@ -901,6 +955,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         hole = null;
         sel = null;
         chosen = null;
+        touched = false;
         renderFormula();
         changedTools();
         show(null);
@@ -956,10 +1011,11 @@ SympyEditor.registerAddon("handwriting", (function () {
           b.setAttribute("aria-selected", b === button ? "true" : "false");
         }
         picks = { choices: {}, constants: {} };
-        if (hole && !hole.whole) {         // in the hole's place in the text: braced where a bare argument was, apart from a command before it
+        if (hole && (!hole.free || hole.base.trim())) {   // into the text: in the hole's place, or after the formula
           var before = hole.base.slice(0, hole.s), after = hole.base.slice(hole.e), piece = c.latex;
-          if (hole.braces) piece = "{" + piece + "}";
-          else {
+          if (hole.free) piece = (/\s$/.test(before) ? "" : " ") + piece;
+          else if (hole.braces) piece = "{" + piece + "}";    // a bare argument: braced
+          else {                                              // apart from a command name before or after it
             if (/\\[A-Za-z]+$/.test(before) && /^[A-Za-z]/.test(piece)) piece = " " + piece;
             if (/\\[A-Za-z]+$/.test(piece) && /^[A-Za-z]/.test(after)) piece += " ";
           }
@@ -983,6 +1039,10 @@ SympyEditor.registerAddon("handwriting", (function () {
         picks = { choices: {}, constants: {} };     // new text: the old picks do not apply to it
         if (hole) dropHole();
         sel = null;
+        touched = true;
+        seq++;                                     // a reading still on its way is of the text before: dropped
+        last = null;                               // nor is the one shown this text's: nothing to put in until this one is read
+        updateInsert();
         renderFormula();
         refit();
         changedTools();
@@ -1068,6 +1128,7 @@ SympyEditor.registerAddon("handwriting", (function () {
           setFull(false);                          // the formula it went into, in sight
           if (strokes.length) clearInk();         // the ink goes too - Undo brings it back
           reset();
+          loadFromEditor();                        // and the pad shows the formula it went into
           note.textContent = "Inserted.";
           updateSummary();
           showFormula(api);                        // and the page back up to it
@@ -1125,14 +1186,17 @@ SympyEditor.registerAddon("handwriting", (function () {
 
       if (!canRead) canvas.classList.add("ink-off");
       reset();
+      loadFromEditor();                  // the editor's formula, to edit
       setTimeout(fitPad, 0);
 
       return {
         element: element,
         title: "Handwriting",
         help: "<section><h3>The tools</h3><ul>"
-          + "<li>" + toolIcon("write", 16) + " <b>Write</b> makes the selected piece of the formula a space to write in (with nothing selected, a space after the formula).</li>"
-          + "<li>" + toolIcon("done", 16) + " <b>Done</b> puts the reading in the written piece's place and closes the space; so does a tap outside it.</li>"
+          + "<li>" + toolIcon("write", 16) + " <b>Write</b> makes the selected piece of the formula a space to write in; with nothing selected, what is written anywhere goes after the formula.</li>"
+          + "<li>" + toolIcon("done", 16) + " <b>Done</b> puts the reading of the ink into the formula - in the written piece's place, or after it - and the ink goes.</li>"
+          + "<li>" + toolIcon("type", 16) + " <b>Type</b>, beside the LaTeX line: the selected piece's LaTeX, selected there, to type over.</li>"
+          + "<li>" + toolIcon("load", 16) + " <b>From the editor</b>: the editor's formula into the pad again.</li>"
           + "<li>" + toolIcon("undo", 16) + " <b>Undo</b> takes back the last stroke - or the erasing, the clearing, the ink an insertion took.</li>"
           + "<li>" + toolIcon("redo", 16) + " <b>Redo</b> puts back what Undo took.</li>"
           + "<li>" + toolIcon("erase", 16) + " <b>Erase</b> is a switch: while it is on, the pen, the finger or the mouse takes away every stroke it passes over instead of writing. Press it again to write. A pen turned round erases too.</li>"
@@ -1141,9 +1205,10 @@ SympyEditor.registerAddon("handwriting", (function () {
           + "<li>" + toolIcon("full", 16) + " <b>Full screen</b>, in the area's corner: the writing area as large as the screen, the tools on top and the readings in a sheet at the bottom that folds away. Esc or the same button comes back, and so does inserting.</li>"
           + "</ul></section>"
           + "<section><h3>The formula in the pad</h3><ul>"
-          + "<li>The LaTeX in the box is drawn in the pad: type it there, or write it by hand.</li>"
-          + "<li>Tap a piece of the formula to select it; tap it again for what holds it. Write over the selection - or press Write - and it gives way to a space to write in, which grows as the ink nears its edges.</li>"
-          + "<li>The reading of what is written there takes that piece's place in the text. A tap outside the space, or Done, keeps it; clearing the ink gives the piece back. A tap past the end of the formula opens a space after it.</li>"
+          + "<li>The pad opens with the editor's formula, drawn from the LaTeX in the line above it: type there, or write in the pad - the two mix freely.</li>"
+          + "<li>Tap a piece of the formula to select it; tap it again for what holds it. Write over the selection and it gives way to a space to write in, which grows as the ink nears its edges; its reading takes that piece's place in the LaTeX. A tap outside the space, or Done, keeps it; clearing the ink gives the piece back.</li>"
+          + "<li>Write anywhere else and the ink is free: Done puts its reading after the formula.</li>"
+          + "<li>Type over the selected piece with the keyboard button beside the LaTeX line: its LaTeX is selected there.</li>"
           + "</ul></section>"
           + "<section><h3>Writing a formula by hand</h3><ul>"
           + "<li>Write in the area with a pen, a finger or the mouse. A moment after the pen lifts, what is written is read.</li>"
@@ -1155,6 +1220,9 @@ SympyEditor.registerAddon("handwriting", (function () {
           + "</ul></section>"
           + (status.notice ? '<section><h3>About the model</h3><p style="white-space: pre-wrap">' + noticeHtml(status.notice) + "</p></section>" : ""),
         onSelect: function () { updateInsert(); },
+        onState: function () {           // the editor's formula, followed until the pad is edited
+          if (!touched && !hole && !strokes.length && field.value !== editorLatex()) loadFromEditor();
+        },
         destroy: function () {
           setFull(false);
           clearTimeout(timer);

@@ -88,6 +88,7 @@ def test_the_area_grows_scrolls_undoes_and_goes_full_screen():
                         " sl: p.scrollLeft, st: p.scrollTop}; }")
             g = page.evaluate(geometry)
             page.wait_for_function("document.querySelector('.se-addon-handwriting .ink-canvas').clientWidth > 0")
+            page.locator(".se-addon-handwriting .ink-latex").fill("")    # the pad opens with the formula: an empty one
 
             def stroke(x0, y0, x1, y1, steps=6):
                 page.mouse.move(x0, y0)
@@ -107,7 +108,7 @@ def test_the_area_grows_scrolls_undoes_and_goes_full_screen():
             guide = page.locator(".se-help-view")
             for name in ("Write", "Done", "Undo", "Redo", "Erase", "Clear", "Read", "Full screen"):
                 assert name in guide.inner_text(), name
-            assert guide.locator("svg.ink-icon").count() == 8
+            assert guide.locator("svg.ink-icon").count() == 10
             page.keyboard.press("Escape")
             assert _wait(lambda: page.locator(".se-help-view").count() == 0)
             # a stroke well inside: read (by the fake), with the reading's options
@@ -214,6 +215,7 @@ def test_inserting_brings_the_formula_back_into_sight():
             page.goto(srv.url)
             page.wait_for_selector(".se-addon-handwriting .ink-canvas", timeout=30000)
             page.wait_for_function("document.querySelector('.se-addon-handwriting .ink-canvas').clientWidth > 0")
+            page.locator(".se-addon-handwriting .ink-latex").fill("")    # the pad opens with the formula: an empty one
             # room below the panel, so the page can be scrolled away from the formula
             page.evaluate("document.body.appendChild(Object.assign(document.createElement('div'), {style: 'height: 3000px'}))")
             ed = "document.querySelector('.sympy-editor').__sympyEditor"
@@ -222,6 +224,7 @@ def test_inserting_brings_the_formula_back_into_sight():
             strokes = lambda: int(panel.get_attribute("data-strokes"))
 
             def write():
+                page.locator(".se-addon-handwriting .ink-latex").fill("")    # after an insertion the pad shows the new formula: write on an empty one
                 page.locator(".se-addon-handwriting .ink-pad").scroll_into_view_if_needed()
                 r = page.evaluate("() => { const b = document.querySelector('.se-addon-handwriting .ink-pad').getBoundingClientRect();"
                                   " return {left: b.left, top: b.top}; }")
@@ -297,6 +300,7 @@ def test_two_fingers_zoom_and_scroll_the_area_and_never_write():
             page.goto(srv.url)
             page.wait_for_selector(".se-addon-handwriting .ink-canvas", timeout=30000)
             page.wait_for_function("document.querySelector('.se-addon-handwriting .ink-canvas').clientWidth > 0")
+            page.locator(".se-addon-handwriting .ink-latex").fill("")    # the pad opens with the formula: an empty one
             panel = page.locator(".se-addon-handwriting .ink-panel")
             touch = lambda kind, pid, px, py: page.evaluate(TOUCH, {"type": kind, "id": pid, "x": px, "y": py})
             strokes = lambda: int(panel.get_attribute("data-strokes"))
@@ -386,6 +390,7 @@ def test_erase_takes_away_the_strokes_it_passes_over():
             page.goto(srv.url)
             page.wait_for_selector(".se-addon-handwriting .ink-canvas", timeout=30000)
             page.wait_for_function("document.querySelector('.se-addon-handwriting .ink-canvas').clientWidth > 0")
+            page.locator(".se-addon-handwriting .ink-latex").fill("")    # the pad opens with the formula: an empty one
             panel = page.locator(".se-addon-handwriting .ink-panel")
             strokes = lambda: int(panel.get_attribute("data-strokes"))
             c = page.evaluate("(() => { const r = document.querySelector('.se-addon-handwriting .ink-canvas').getBoundingClientRect(); return {x: r.left, y: r.top}; })()")
@@ -444,6 +449,7 @@ def test_picking_a_reading_brings_its_buttons_into_sight():
             page.goto(srv.url)
             page.wait_for_selector(".se-addon-handwriting .ink-canvas", timeout=30000)
             page.wait_for_function("document.querySelector('.se-addon-handwriting .ink-canvas').clientWidth > 0")
+            page.locator(".se-addon-handwriting .ink-latex").fill("")    # the pad opens with the formula: an empty one
             page.locator(".se-addon-handwriting .ink-pad").scroll_into_view_if_needed()
             r = page.locator(".se-addon-handwriting .ink-pad").bounding_box()
             page.mouse.move(r["x"] + 30, r["y"] + 40)
@@ -501,6 +507,7 @@ def _pad_page(p, doc):
     page.goto(srv.url)
     page.wait_for_selector(".se-addon-handwriting .ink-canvas", timeout=30000)
     page.wait_for_function("document.querySelector('.se-addon-handwriting .ink-canvas').clientWidth > 0")
+    page.locator(".se-addon-handwriting .ink-latex").fill("")    # the pad opens with the formula: an empty one
     page.locator(".se-addon-handwriting .ink-pad").scroll_into_view_if_needed()
     return srv, browser, page
 
@@ -583,18 +590,21 @@ def test_write_and_done_a_bare_script_and_a_space_after_the_formula():
             assert _wait(lambda: field.input_value() == "x^{" + READING + "}", 15)     # a bare script: braced
             done.click()
             assert panel.get_attribute("data-hole") == "" and field.input_value() == "x^{" + READING + "}"
-            # a tap past the formula: a space after it; clearing its ink gives the text back
+            # ink anywhere else is free: its reading goes after the formula; clearing the ink gives the text back
             text = field.input_value()
             pad = page.locator(".se-addon-handwriting .ink-pad").bounding_box()
-            page.mouse.click(pad["x"] + pad["width"] - 30, pad["y"] + pad["height"] - 20)
-            assert panel.get_attribute("data-hole") == "%d,%d" % (len(text), len(text))
-            hole = page.locator(".se-addon-handwriting .ink-formula [data-inkhole] .rule").bounding_box()
-            _drag(page, hole["x"] + 6, hole["y"] + hole["height"] / 2, hole["x"] + hole["width"] - 6, hole["y"] + hole["height"] / 2)
-            assert _wait(lambda: field.input_value() == text + READING, 15)
+            page.mouse.click(pad["x"] + pad["width"] - 30, pad["y"] + pad["height"] - 20)    # a tap on nothing: nothing selected
+            assert panel.get_attribute("data-sel") == "" and panel.get_attribute("data-hole") == ""
+            _drag(page, pad["x"] + pad["width"] - 160, pad["y"] + 40, pad["x"] + pad["width"] - 60, pad["y"] + 70)
+            assert _wait(lambda: panel.get_attribute("data-hole") == "free")
+            assert _wait(lambda: field.input_value() == text + " " + READING, 15)
             page.locator(".se-addon-handwriting .ink-clear").click()
             assert _wait(lambda: field.input_value() == text)
+            _drag(page, pad["x"] + pad["width"] - 160, pad["y"] + 40, pad["x"] + pad["width"] - 60, pad["y"] + 70)
+            assert _wait(lambda: field.input_value() == text + " " + READING, 15)
             done.click()
-            assert panel.get_attribute("data-hole") == "" and field.input_value() == text
+            assert panel.get_attribute("data-hole") == "" and field.input_value() == text + " " + READING
+            assert panel.get_attribute("data-sel") == "%d,%d" % (len(text) + 1, len(text) + 1 + len(READING))
             assert page.errors == []
         finally:
             browser.close()
@@ -611,7 +621,7 @@ def test_an_empty_pad_is_written_on_whole_and_done_draws_the_reading():
             field = page.locator(".se-addon-handwriting .ink-latex")
             pad = page.locator(".se-addon-handwriting .ink-pad").bounding_box()
             _drag(page, pad["x"] + 40, pad["y"] + 50, pad["x"] + 160, pad["y"] + 80)
-            assert panel.get_attribute("data-hole") == "whole"
+            assert panel.get_attribute("data-hole") == "free"
             assert _wait(lambda: field.input_value() == READING, 15)
             page.locator(".se-addon-handwriting .ink-done").click()
             assert panel.get_attribute("data-hole") == "" and panel.get_attribute("data-strokes") == "0"
