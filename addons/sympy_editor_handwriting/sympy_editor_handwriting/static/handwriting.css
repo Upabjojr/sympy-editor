@@ -24,6 +24,15 @@
 /* none: a finger on the ink writes - it neither scrolls the page nor zooms
  * it; the edge buttons (and the wheel) scroll the area */
 .se-addon-handwriting .ink-canvas { display: block; touch-action: none; cursor: crosshair; color: var(--se-fg); }
+/* The formula in the pad, under the ink: the LaTeX in the box, at the pad's zoom.
+ * Pointers go to the canvas; the pieces are found by where they are drawn. */
+.se-addon-handwriting .ink-layer { position: relative; width: max-content; }
+.se-addon-handwriting .ink-layer .ink-canvas { position: relative; z-index: 1; }
+.se-addon-handwriting .ink-formula {
+  position: absolute; left: 0; top: 0; z-index: 0; padding: 18px 24px; transform-origin: 0 0;
+  font-size: 24px; white-space: nowrap; color: var(--se-fg); pointer-events: none; user-select: none;
+}
+.se-addon-handwriting .ink-formula [data-inkhole] .rule { border-color: transparent !important; }
 .se-addon-handwriting .ink-canvas.ink-off { cursor: not-allowed; opacity: 0.5; }
 .se-addon-handwriting .ink-canvas.ink-erasing { cursor: cell; }
 /* Erase is a switch: pressed while on */

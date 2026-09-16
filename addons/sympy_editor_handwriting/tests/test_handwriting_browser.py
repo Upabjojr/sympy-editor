@@ -99,15 +99,15 @@ def test_the_area_grows_scrolls_undoes_and_goes_full_screen():
             strokes = lambda: int(panel.get_attribute("data-strokes"))
             # the tools are icons, each named for a tooltip and a screen reader, and explained in the guide
             tools = page.locator(".se-addon-handwriting .ink-bar button")
-            assert tools.count() == 5
-            for i in range(5):
+            assert tools.count() == 7
+            for i in range(7):
                 assert tools.nth(i).inner_text().strip() == "" and tools.nth(i).locator("svg").count() == 1
                 assert tools.nth(i).get_attribute("aria-label")
             page.locator(".se-addon-handwriting .se-addon-help").click()
             guide = page.locator(".se-help-view")
-            for name in ("Undo", "Redo", "Erase", "Clear", "Read", "Full screen"):
+            for name in ("Write", "Done", "Undo", "Redo", "Erase", "Clear", "Read", "Full screen"):
                 assert name in guide.inner_text(), name
-            assert guide.locator("svg.ink-icon").count() == 6
+            assert guide.locator("svg.ink-icon").count() == 8
             page.keyboard.press("Escape")
             assert _wait(lambda: page.locator(".se-help-view").count() == 0)
             # a stroke well inside: read (by the fake), with the reading's options
@@ -469,3 +469,156 @@ def test_picking_a_reading_brings_its_buttons_into_sight():
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+# ---- the formula in the pad ---------------------------------------------------------
+READING = FakeRecognizer.latex
+# where a piece of the drawn formula is: the glyphs in it, as the panel finds them
+PIECE_BOX = """([s, e]) => {
+  const el = document.querySelector(`.se-addon-handwriting .ink-formula [data-ls="${s}"][data-le="${e}"]`);
+  if (!el) return null;
+  let l = Infinity, t = Infinity, r = -Infinity, b = -Infinity;
+  for (const k of el.querySelectorAll('*')) {
+    if (k.firstElementChild || !k.textContent.replace(/[\\s\\u200b]/g, '')) continue;
+    const q = k.getBoundingClientRect();
+    l = Math.min(l, q.left); t = Math.min(t, q.top); r = Math.max(r, q.right); b = Math.max(b, q.bottom);
+  }
+  return {x: (l + r) / 2, y: (t + b) / 2};
+}"""
+
+
+def _pad_page(p, doc):
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        browser = p.chromium.launch()
+    except Exception as exc:
+        srv.shutdown()
+        pytest.skip(f"chromium not available: {exc}")
+    page = browser.new_page(viewport={"width": 900, "height": 1000})
+    page.errors = []
+    page.on("pageerror", lambda e: page.errors.append(str(e)))
+    page.goto(srv.url)
+    page.wait_for_selector(".se-addon-handwriting .ink-canvas", timeout=30000)
+    page.wait_for_function("document.querySelector('.se-addon-handwriting .ink-canvas').clientWidth > 0")
+    page.locator(".se-addon-handwriting .ink-pad").scroll_into_view_if_needed()
+    return srv, browser, page
+
+
+def _drag(page, x0, y0, x1, y1, steps=8):
+    page.mouse.move(x0, y0)
+    page.mouse.down()
+    for i in range(1, steps + 1):
+        page.mouse.move(x0 + (x1 - x0) * i / steps, y0 + (y1 - y0) * i / steps)
+    page.mouse.up()
+
+
+def test_a_piece_of_the_formula_is_selected_and_written_over():
+    doc = Document(x, addons=[HandwritingAddon(FakeRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _pad_page(p, doc)
+        try:
+            panel = page.locator(".se-addon-handwriting .ink-panel")
+            field = page.locator(".se-addon-handwriting .ink-latex")
+            text = r"x^{2} + \frac{a}{b}"
+            field.fill(text)
+            page.wait_for_selector(".se-addon-handwriting .ink-formula [data-ls]")
+            a = (text.index("{a}") + 1, text.index("{a}") + 2)
+            frac = (text.index(r"\frac"), len(text))
+            box = lambda r: page.evaluate(PIECE_BOX, list(r))
+            # a tap selects the piece; again, what holds it; a tap on the piece, the piece again
+            page.mouse.click(box(a)["x"], box(a)["y"])
+            assert panel.get_attribute("data-sel") == "%d,%d" % a
+            page.mouse.click(box(a)["x"], box(a)["y"])
+            assert panel.get_attribute("data-sel") == "%d,%d" % frac
+            page.mouse.click(box(a)["x"], box(a)["y"])
+            assert panel.get_attribute("data-sel") == "%d,%d" % frac or panel.get_attribute("data-sel") == "%d,%d" % a
+            if panel.get_attribute("data-sel") != "%d,%d" % a:
+                page.mouse.click(box(a)["x"] + 200, box(a)["y"] - 200)       # nothing there: a space after the formula
+                assert panel.get_attribute("data-hole") == "%d,%d" % (len(text), len(text))
+                page.locator(".se-addon-handwriting .ink-done").click()
+                assert panel.get_attribute("data-hole") == "" and field.input_value() == text
+                page.mouse.click(box(a)["x"], box(a)["y"])
+                assert panel.get_attribute("data-sel") == "%d,%d" % a
+            # writing over the selection: it gives way to a hole, and the stroke is in it
+            c = box(a)
+            _drag(page, c["x"], c["y"], c["x"] + 40, c["y"] + 8)
+            assert _wait(lambda: panel.get_attribute("data-hole") == "%d,%d" % a)
+            assert panel.get_attribute("data-strokes") == "1"
+            assert page.locator(".se-addon-handwriting .ink-formula [data-inkhole]").count() == 1
+            # the reading takes the piece's place in the text
+            want = text[:a[0]] + READING + text[a[1]:]
+            assert _wait(lambda: field.input_value() == want, 15)
+            # a tap outside the hole: the reading stays, the ink goes, and the new piece is selected
+            x_at = box((0, 1))
+            page.mouse.click(x_at["x"], x_at["y"])
+            assert _wait(lambda: panel.get_attribute("data-hole") == "")
+            assert panel.get_attribute("data-strokes") == "0" and field.input_value() == want
+            assert panel.get_attribute("data-sel") == "%d,%d" % (a[0], a[0] + len(READING))
+            assert page.locator(".se-addon-handwriting .ink-formula [data-inkhole]").count() == 0
+            assert page.errors == []
+        finally:
+            browser.close()
+            srv.shutdown()
+            srv.server_close()
+
+
+def test_write_and_done_a_bare_script_and_a_space_after_the_formula():
+    doc = Document(x, addons=[HandwritingAddon(FakeRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _pad_page(p, doc)
+        try:
+            panel = page.locator(".se-addon-handwriting .ink-panel")
+            field = page.locator(".se-addon-handwriting .ink-latex")
+            write, done = page.locator(".se-addon-handwriting .ink-write"), page.locator(".se-addon-handwriting .ink-done")
+            field.fill("x^2")
+            page.wait_for_selector(".se-addon-handwriting .ink-formula [data-ls]")
+            two = page.evaluate(PIECE_BOX, [2, 3])
+            page.mouse.click(two["x"], two["y"])
+            assert panel.get_attribute("data-sel") == "2,3"
+            write.click()
+            assert panel.get_attribute("data-hole") == "2,3" and not done.is_disabled()
+            hole = page.locator(".se-addon-handwriting .ink-formula [data-inkhole] .rule").bounding_box()
+            _drag(page, hole["x"] + 6, hole["y"] + hole["height"] / 2, hole["x"] + hole["width"] - 6, hole["y"] + hole["height"] / 2)
+            assert _wait(lambda: field.input_value() == "x^{" + READING + "}", 15)     # a bare script: braced
+            done.click()
+            assert panel.get_attribute("data-hole") == "" and field.input_value() == "x^{" + READING + "}"
+            # a tap past the formula: a space after it; clearing its ink gives the text back
+            text = field.input_value()
+            pad = page.locator(".se-addon-handwriting .ink-pad").bounding_box()
+            page.mouse.click(pad["x"] + pad["width"] - 30, pad["y"] + pad["height"] - 20)
+            assert panel.get_attribute("data-hole") == "%d,%d" % (len(text), len(text))
+            hole = page.locator(".se-addon-handwriting .ink-formula [data-inkhole] .rule").bounding_box()
+            _drag(page, hole["x"] + 6, hole["y"] + hole["height"] / 2, hole["x"] + hole["width"] - 6, hole["y"] + hole["height"] / 2)
+            assert _wait(lambda: field.input_value() == text + READING, 15)
+            page.locator(".se-addon-handwriting .ink-clear").click()
+            assert _wait(lambda: field.input_value() == text)
+            done.click()
+            assert panel.get_attribute("data-hole") == "" and field.input_value() == text
+            assert page.errors == []
+        finally:
+            browser.close()
+            srv.shutdown()
+            srv.server_close()
+
+
+def test_an_empty_pad_is_written_on_whole_and_done_draws_the_reading():
+    doc = Document(x, addons=[HandwritingAddon(FakeRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _pad_page(p, doc)
+        try:
+            panel = page.locator(".se-addon-handwriting .ink-panel")
+            field = page.locator(".se-addon-handwriting .ink-latex")
+            pad = page.locator(".se-addon-handwriting .ink-pad").bounding_box()
+            _drag(page, pad["x"] + 40, pad["y"] + 50, pad["x"] + 160, pad["y"] + 80)
+            assert panel.get_attribute("data-hole") == "whole"
+            assert _wait(lambda: field.input_value() == READING, 15)
+            page.locator(".se-addon-handwriting .ink-done").click()
+            assert panel.get_attribute("data-hole") == "" and panel.get_attribute("data-strokes") == "0"
+            assert field.input_value() == READING
+            assert page.locator(".se-addon-handwriting .ink-formula [data-ls]").count() > 0
+            assert page.errors == []
+        finally:
+            browser.close()
+            srv.shutdown()
+            srv.server_close()

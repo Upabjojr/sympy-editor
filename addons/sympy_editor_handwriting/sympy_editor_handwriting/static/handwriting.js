@@ -18,6 +18,14 @@
  * the canvas's own coordinates whatever the zoom.  In full screen the panel
  * covers the page: the tools on top, the writing area, and the readings in a
  * sheet at the bottom that folds away.
+ *
+ * The pad is also a LaTeX editor: the LaTeX in the box is drawn in it, under
+ * the ink, and each piece of the drawing knows the piece of the text it came
+ * from (LatexMap).  A tap selects a piece; writing over the selection makes it
+ * a hole - the piece gone from sight, the room it took left to write in,
+ * growing as the ink nears its edges - and the reading of the ink takes that
+ * piece's place in the text.  With nothing in the box the whole pad is the
+ * hole, as it always was.
  */
 SympyEditor.registerAddon("handwriting", (function () {
   // After a reading goes in, the formula it went into is brought back into
@@ -62,7 +70,9 @@ SympyEditor.registerAddon("handwriting", (function () {
     redo: "M10 3.4l3.1 3.1L10 9.6M12.8 6.5H6.4a3.7 3.7 0 0 0 0 7.4h2.8",
     erase: "M2.7 10.3 8.9 4.1a1.3 1.3 0 0 1 1.8 0l2.3 2.3a1.3 1.3 0 0 1 0 1.8l-5 5H5.4ZM5.8 7.2l4 4M7.9 13.2h5.6",
     clear: "M2.9 4.5h10.2M6.2 4.5V3.1h3.6v1.4M4.3 4.5l.7 8.7a1 1 0 0 0 1 .9h4a1 1 0 0 0 1-.9l.7-8.7M6.9 6.9v4.7M9.1 6.9v4.7",
-    read: "M3 2.8h10a1.2 1.2 0 0 1 1.2 1.2v8a1.2 1.2 0 0 1-1.2 1.2H3A1.2 1.2 0 0 1 1.8 12V4A1.2 1.2 0 0 1 3 2.8ZM5.2 5.5h5.6M8 5.5v5.2"
+    read: "M3 2.8h10a1.2 1.2 0 0 1 1.2 1.2v8a1.2 1.2 0 0 1-1.2 1.2H3A1.2 1.2 0 0 1 1.8 12V4A1.2 1.2 0 0 1 3 2.8ZM5.2 5.5h5.6M8 5.5v5.2",
+    write: "M3.2 12.8l.9-3.3 7.1-7.1a1.5 1.5 0 0 1 2.1 2.1l-7.1 7.1ZM9.9 3.3l2.8 2.8",
+    done: "M3.2 8.6l3.1 3.1 6.5-7"
   };
   // `size`: pixels, for the guide - which the panel's stylesheet does not reach
   function toolIcon(name, size) {
@@ -80,6 +90,155 @@ SympyEditor.registerAddon("handwriting", (function () {
     b.innerHTML = toolIcon(name);
     return b;
   }
+  // ---- the LaTeX in the pad: which piece of the text each rendered piece is ----
+  var LatexMap = (function () {
+    var HOLE = "\u0001";
+    // operators, relations and punctuation keep KaTeX's spacing: never wrapped
+    var BARE = /^(?:[+\-=<>,;:!?|()\[\]/*.']|\\(?:cdot|times|pm|mp|div|le|leq|ge|geq|ne|neq|approx|to|rightarrow|equiv|sim|in|notin|subset|cup|cap|wedge|vee|,|;|:|!| |quad|qquad|ldots|cdots|dots|mid))$/;
+    var ARGS = { "\\frac": 2, "\\dfrac": 2, "\\tfrac": 2, "\\binom": 2, "\\sqrt": 1, "\\overline": 1, "\\underline": 1,
+                 "\\hat": 1, "\\bar": 1, "\\vec": 1, "\\dot": 1, "\\ddot": 1, "\\tilde": 1, "\\widehat": 1, "\\widetilde": 1 };
+    var OPAQUE = { "\\mathrm": 1, "\\mathbf": 1, "\\mathit": 1, "\\mathbb": 1, "\\mathcal": 1, "\\mathfrak": 1, "\\mathsf": 1,
+                   "\\mathtt": 1, "\\boldsymbol": 1, "\\operatorname": 1, "\\text": 1, "\\textrm": 1, "\\textbf": 1, "\\textit": 1 };
+    // big operators take their limits above and below only as themselves: never wrapped alone
+    var BIGOP = /^\\(?:sum|prod|coprod|int|iint|iiint|oint|bigcup|bigcap|bigoplus|bigotimes|bigvee|bigwedge|lim|limsup|liminf|max|min|sup|inf)$/;
+    var FUNCS = /^\\(?:a?(?:sin|cos|tan|cot|sec|csc)h?|arc(?:sin|cos|tan)|log|ln|lg|exp|det|arg|deg|dim|gcd|ker)$/;
+
+    function parse(text) {
+      var i = 0, n = text.length;
+      function fail(why) { throw new Error(why + " at " + i); }
+      function skip() { while (i < n && /\s/.test(text[i])) i++; }
+      function token() {
+        var s = i, c = text[i];
+        if (c === "\\") {
+          if (/[A-Za-z]/.test(text[i + 1] || "")) { i += 2; while (i < n && /[A-Za-z]/.test(text[i])) i++; }
+          else i = Math.min(n, i + 2);
+        } else if (/[0-9]/.test(c)) { i++; while (i < n && /[0-9.]/.test(text[i])) i++; }
+        else i++;
+        return { s: s, e: i, t: text.slice(s, i) };
+      }
+      function isCmd(at, name) { return text.startsWith(name, at) && !/[A-Za-z]/.test(text[at + name.length] || ""); }
+      // {...}: not wrapped itself (its braces belong to whoever holds it); what is inside is
+      function group() {
+        var open = i; i++;
+        var kids = seq("}");
+        if (text[i] !== "}") fail("missing }");
+        i++;
+        return { s: open, e: i, kids: [inner(open + 1, i - 1, kids)] };
+      }
+      function inner(s, e, kids) {
+        if (kids.length === 1 && kids[0].s === s && kids[0].e === e) return kids[0];   // one piece: it wraps itself
+        return { s: s, e: e, kids: kids, wrap: kids.length > 0 };
+      }
+      function arg() {                          // a command's argument or a script: a group, or one token (braced when written out)
+        skip();
+        if (i >= n) fail("missing argument");
+        if (text[i] === "{") return group();
+        if (text[i] === "}") fail("missing argument");
+        var t = /[0-9]/.test(text[i]) ? (i++, { s: i - 1, e: i, t: text[i - 1] }) : token();     // \frac12: one digit each
+        return { s: t.s, e: t.e, kids: [], wrap: t.t !== HOLE, hole: t.t === HOLE, braces: true };
+      }
+      function atom() {
+        skip();
+        var s = i, c = text[i];
+        if (c === "{") return group();
+        if (isCmd(i, "\\left")) {
+          i += 5; skip(); token();
+          var kids = seq("\\right");
+          if (!isCmd(i, "\\right")) fail("missing \\right");
+          i += 6; skip(); if (i < n) token();
+          return { s: s, e: i, kids: kids, wrap: true };
+        }
+        if (isCmd(i, "\\begin")) {
+          var m = /^\\begin\s*\{([^}]*)\}/.exec(text.slice(i));
+          if (!m) fail("bad \\begin");
+          var depth = 0, re = new RegExp("\\\\(begin|end)\\s*\\{" + m[1].replace(/[*]/g, "\\*") + "\\}", "g");
+          re.lastIndex = i;
+          for (var mm; (mm = re.exec(text));) {
+            depth += mm[1] === "begin" ? 1 : -1;
+            if (!depth) { i = re.lastIndex; return { s: s, e: i, kids: [], wrap: true }; }
+          }
+          fail("missing \\end");
+        }
+        var t = token();
+        if (t.t === HOLE) return { s: s, e: i, kids: [], hole: true };
+        if (ARGS[t.t] || OPAQUE[t.t]) {
+          var args = [];
+          skip();
+          if (t.t === "\\sqrt" && text[i] === "[") {        // the index
+            var open = i; i++;
+            var ik = seq("]");
+            if (text[i] !== "]") fail("missing ]");
+            i++;
+            args.push(inner(open + 1, i - 1, ik));
+          }
+          for (var k = 0; k < (ARGS[t.t] || 1); k++) args.push(arg());
+          return { s: s, e: i, kids: OPAQUE[t.t] ? [] : args, wrap: true };
+        }
+        if (FUNCS.test(t.t)) {                              // a function takes what it applies to along
+          var scripts = scriptsAfter();
+          skip();
+          var a = (i < n && text[i] !== "}" && text[i] !== "]" && !isCmd(i, "\\right")) ? atom() : null;
+          return { s: s, e: a ? a.e : i, kids: a ? scripts.concat([a]) : scripts, wrap: true };
+        }
+        return { s: s, e: i, kids: [], wrap: !BARE.test(t.t) && !BIGOP.test(t.t) };
+      }
+      function scriptsAfter() {                 // ^ and _ after a base; i left just past the last one
+        var out = [];
+        for (;;) {
+          var at = i;
+          skip();
+          if (i < n && (text[i] === "^" || text[i] === "_")) { i++; out.push(arg()); }
+          else { i = at; return out; }
+        }
+      }
+      function seq(stop) {
+        var out = [];
+        for (;;) {
+          skip();
+          if (i >= n) break;
+          if (stop === "}" && text[i] === "}") break;
+          if (stop === "]" && text[i] === "]") break;
+          if (stop === "\\right" && isCmd(i, "\\right")) break;
+          if (text[i] === "}") fail("unexpected }");
+          var base = null;
+          if (text[i] !== "^" && text[i] !== "_") base = atom();
+          var scripts = scriptsAfter();
+          if (scripts.length) out.push({ s: base ? base.s : scripts[0].s - 1, e: i, kids: (base ? [base] : []).concat(scripts), wrap: true });
+          else out.push(base);
+        }
+        return out;
+      }
+      var kids = seq(null);
+      if (i < n) fail("unexpected " + text[i]);
+      return { s: 0, e: n, kids: kids, wrap: false };
+    }
+    function emit(text, node, holeTex) {
+      if (node.hole) return node.braces ? "{" + holeTex + "}" : holeTex;
+      var out = "", at = node.s;
+      node.kids.forEach(function (k) { out += text.slice(at, k.s) + emit(text, k, holeTex); at = k.e; });
+      out += text.slice(at, node.e);
+      if (node.wrap) out = "\\htmlData{ls=" + node.s + ",le=" + node.e + "}{" + out + "}";
+      if (node.braces) out = "{" + out + "}";
+      return out;
+    }
+    // text with each piece wrapped; a HOLE character in it becomes holeTex.  null: not parsed.
+    function annotate(text, holeTex) {
+      try { return emit(text, parse(text), holeTex || ""); } catch (e) { return null; }
+    }
+    // the piece of text from s to e, as parsed: whether it is a bare argument (written without braces)
+    function nodeAt(text, s, e) {
+      var root, found = null;
+      try { root = parse(text); } catch (err) { return null; }
+      (function walk(nd) {
+        if (found) return;
+        if (nd !== root && nd.s === s && nd.e === e && (nd.wrap || nd.hole)) { found = nd; return; }
+        nd.kids.forEach(walk);
+      })(root);
+      return found;
+    }
+    return { HOLE: HOLE, parse: parse, annotate: annotate, nodeAt: nodeAt };
+  })();
+
   var EDGE = 60;
   var MIN_ZOOM = 0.5, MAX_ZOOM = 4;
   var MAX_W = 6000, MAX_H = 4000;   // px: as far as the canvas grows
@@ -92,7 +251,9 @@ SympyEditor.registerAddon("handwriting", (function () {
 
       // ---- the parts ------------------------------------------------------------
       var canvas = h("canvas", { class: "ink-canvas", "aria-label": "Writing area: write a formula with a pen, a finger or the mouse" });
-      var pad = h("div", { class: "ink-pad" }, [canvas]);
+      var formula = h("div", { class: "ink-formula", "aria-hidden": "true" });     // the LaTeX in the box, under the ink
+      var layer = h("div", { class: "ink-layer" }, [formula, canvas]);
+      var pad = h("div", { class: "ink-pad" }, [layer]);
       var fullBtn = h("button", { type: "button", class: "ink-fullbtn" });
       var stage = h("div", { class: "ink-stage" }, [pad, fullBtn]);
       var strips = {};
@@ -109,12 +270,14 @@ SympyEditor.registerAddon("handwriting", (function () {
       var eraseBtn = toolButton(h, "erase", "Erase: what the pen, the finger or the mouse passes over goes (press again to write)", { "aria-pressed": "false" });
       var clearBtn = toolButton(h, "clear", "Clear: take all the ink away (Undo brings it back)", { disabled: "" });
       var readBtn = toolButton(h, "read", "Read: read what is written now");
-      var bar = h("div", { class: "ink-bar" }, [undoBtn, redoBtn, eraseBtn, clearBtn, readBtn]);
+      var writeBtn = toolButton(h, "write", "Write: by hand, over the selected piece of the formula (or after the formula)", { disabled: "" });
+      var doneBtn = toolButton(h, "done", "Done: the reading takes the written piece's place, and the writing space closes", { disabled: "" });
+      var bar = h("div", { class: "ink-bar" }, [writeBtn, doneBtn, undoBtn, redoBtn, eraseBtn, clearBtn, readBtn]);
 
       var note = h("div", { class: "ink-note", "aria-live": "polite" });
       var cands = h("div", { class: "ink-cands", role: "listbox", "aria-label": "Readings, best first" });
       var field = h("input", { class: "ink-latex", type: "text", spellcheck: "false", autocomplete: "off", autocapitalize: "off",
-        placeholder: "The reading as LaTeX - correct it here", "aria-label": "The reading as LaTeX" });
+        placeholder: "The formula as LaTeX - type it, or write it above", "aria-label": "The formula as LaTeX" });
       var src = h("code", { class: "ink-src", title: "What SymPy gets" });
       var ambig = h("div", { class: "ink-ambig" });
       var consts = h("div", { class: "ink-consts" });
@@ -129,7 +292,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       var actions = h("div", { class: "ink-actions" }, [insertSel, insertAll, toLatex]);
       var sheetBody = h("div", { class: "ink-sheet-body" }, [note, cands, field, src, ambig, consts, actions]);
       var sheet = h("div", { class: "ink-sheet" }, [sheetHead, sheetBody]);
-      var element = h("div", { class: "ink-panel", "data-strokes": "0", "data-zoom": "1.00" }, [bar, stage, sheet]);
+      var element = h("div", { class: "ink-panel", "data-strokes": "0", "data-zoom": "1.00", "data-hole": "", "data-sel": "" }, [bar, stage, sheet]);
 
       // ---- state -------------------------------------------------------------------
       var strokes = [];                 // [[[x, y, t], ...], ...]
@@ -149,8 +312,14 @@ SympyEditor.registerAddon("handwriting", (function () {
       var dirty = false;                // ink not read since it changed
       var erasing = false;              // the Erase mode: pointers take strokes away instead of writing
       var erase = null;                 // an erasing drag: {id, at, removed: [{index, stroke}]}
+      var sel = null;                   // the selected piece of the text: {s, e} (s === e: a place in it)
+      var hole = null;                  // where the ink goes: {whole} - the pad - or {s, e, base, rect, ...}
+      var chosen = null;                // the text the chosen reading put in the hole's place
+      var pieces = [];                  // the drawn pieces: {s, e, rect} in the canvas's pixels
+      var formulaBox = null;            // the whole drawing, likewise; null: nothing drawn
+      var tap = null;                   // a pointer down on the formula: a tap, or a drag from the selection
 
-      api.katex().then(function (k) { katex = k; }, function () {});
+      api.katex().then(function (k) { katex = k; renderFormula(); }, function () {});
 
       // ---- the writing area ----------------------------------------------------------
       var ctx = canvas.getContext("2d");
@@ -164,7 +333,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         canvas.style.height = cssH + "px";
         canvas.width = Math.max(1, Math.round(cssW * dpr));
         canvas.height = Math.max(1, Math.round(cssH * dpr));
-        redraw();
+        layoutFormula();
         updateStrips();
       }
       function fitPad() {                 // never smaller than the box it scrolls in
@@ -182,6 +351,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       function growToFit() {
         var maxX = 0, maxY = 0;
         strokes.forEach(function (s) { s.forEach(function (p) { maxX = Math.max(maxX, p[0]); maxY = Math.max(maxY, p[1]); }); });
+        if (formulaBox) { maxX = Math.max(maxX, formulaBox.x + formulaBox.w); maxY = Math.max(maxY, formulaBox.y + formulaBox.h); }
         grow(maxX, maxY);
       }
       // The canvas with no ink: the box at a zoom of 1 - magnified, and so
@@ -206,6 +376,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom, 0, 0);
+        drawMarks();
         ctx.lineWidth = 2.2;
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
@@ -251,6 +422,219 @@ SympyEditor.registerAddon("handwriting", (function () {
         var r = canvas.getBoundingClientRect();
         return [Math.round((ev.clientX - r.left) / zoom * 10) / 10, Math.round((ev.clientY - r.top) / zoom * 10) / 10, Math.round(ev.timeStamp - t0)];
       }
+
+      // ---- the formula in the pad ------------------------------------------------------
+      var TRUST = { throwOnError: false, displayMode: false, output: "html", trust: function (c) { return c.command === "\\htmlData"; } };
+      function source() { return field.value; }
+      function fmt(v) { return String(Math.round(Math.max(0, v) * 1000) / 1000); }
+      function emPx() { return parseFloat(getComputedStyle(formula).fontSize) || 24; }
+      function renderFormula() {
+        var open = hole && !hole.whole;
+        var text = open ? hole.base.slice(0, hole.s) + LatexMap.HOLE + hole.base.slice(hole.e) : source();
+        if (!katex || (hole && hole.whole) || !text.trim()) { formula.textContent = ""; layoutFormula(); return; }
+        var holeTex = "";
+        if (open) {                        // a transparent rule as large as the room asked for, its top where the piece's was
+          var em = emPx();
+          holeTex = "\\htmlData{inkhole=1}{\\rule[-" + fmt((hole.hPx - hole.aPx) / em / hole.scaleH) + "em]{" +
+                    fmt(hole.wPx / em / hole.scaleW) + "em}{" + fmt(hole.hPx / em / hole.scaleH) + "em}}";
+        }
+        var tex = LatexMap.annotate(text, holeTex);
+        if (tex === null && open) { hole.whole = true; formula.textContent = ""; layoutFormula(); return; }   // not parsed: nowhere to show a hole
+        try { formula.innerHTML = katex.renderToString("\\displaystyle " + (tex === null ? text : tex), TRUST); }
+        catch (e) { formula.textContent = text; }
+        layoutFormula();
+        if (open && hole.rect && !hole.calibrated) {   // an em in a script is not an em in the text: once, to the size asked
+          hole.calibrated = true;
+          var rw = hole.rect.w / hole.wPx, rh = hole.rect.h / hole.hPx;
+          if (rw > 0 && rh > 0 && (Math.abs(rw - 1) > 0.05 || Math.abs(rh - 1) > 0.05)) { hole.scaleW *= rw; hole.scaleH *= rh; renderFormula(); }
+        }
+      }
+      // What a piece covers: the glyphs, rules and drawings in it (a wrapper's own box
+      // is not where KaTeX puts what is in a script or a fraction).
+      function unionRect(root) {
+        var l = Infinity, tp = Infinity, r = -Infinity, b = -Infinity;
+        (function walk(el) {
+          var tag = el.tagName.toLowerCase();
+          if (tag === "svg" || !el.firstElementChild) {
+            var cls = tag === "svg" ? "" : el.className;
+            if (tag === "svg" || (/\b(rule|frac-line|overline-line|underline-line|hline)\b/.test(cls) || (el.textContent.replace(/[\s​]/g, "") && !/\bvlist-s\b/.test(cls)))) {
+              var q = el.getBoundingClientRect();
+              if (q.width > 0 || q.height > 0) { l = Math.min(l, q.left); tp = Math.min(tp, q.top); r = Math.max(r, q.right); b = Math.max(b, q.bottom); }
+            }
+            return;
+          }
+          for (var k = el.firstElementChild; k; k = k.nextElementSibling) walk(k);
+        })(root);
+        return l === Infinity ? null : { left: l, top: tp, width: r - l, height: b - tp };
+      }
+      function layoutFormula() {
+        formula.style.transform = zoom === 1 ? "" : "scale(" + zoom + ")";
+        pieces = [];
+        formulaBox = null;
+        if (formula.firstElementChild) {
+          var c = canvas.getBoundingClientRect();
+          var box = function (q) { return { x: (q.left - c.left) / zoom, y: (q.top - c.top) / zoom, w: q.width / zoom, h: q.height / zoom }; };
+          var all = unionRect(formula);
+          if (all) formulaBox = box(all);
+          var els = formula.querySelectorAll("[data-ls]");
+          for (var i = 0; i < els.length; i++) {
+            var q = unionRect(els[i]);
+            if (q) pieces.push({ s: +els[i].getAttribute("data-ls"), e: +els[i].getAttribute("data-le"), rect: box(q) });
+          }
+          var he = hole && !hole.whole ? formula.querySelector("[data-inkhole] .rule") : null;
+          if (he) {
+            var hr = box(he.getBoundingClientRect());
+            if (hole.rect) moveInk(hr.x - hole.rect.x, hr.y - hole.rect.y);     // the ink stays in the hole it was written in
+            hole.rect = hr;
+          }
+        }
+        element.setAttribute("data-hole", !hole ? "" : hole.whole ? "whole" : hole.s + "," + hole.e);
+        element.setAttribute("data-sel", sel ? sel.s + "," + sel.e : "");
+        if (formulaBox) grow(formulaBox.x + formulaBox.w, formulaBox.y + formulaBox.h);
+        redraw();
+      }
+      function moveInk(dx, dy) {           // every stroke, the ones Undo and Redo keep too
+        if (Math.abs(dx) < 0.05 && Math.abs(dy) < 0.05) return;
+        var seen = [];
+        var add = function (s) { if (s && seen.indexOf(s) < 0) seen.push(s); };
+        strokes.forEach(add);
+        add(current);
+        done.concat(undone).forEach(function (a) {
+          add(a.stroke);
+          (a.strokes || []).forEach(add);
+          (a.removed || []).forEach(function (r) { add(r.stroke); });
+        });
+        seen.forEach(function (s) { s.forEach(function (p) { p[0] += dx; p[1] += dy; }); });
+      }
+      function inside(p, r, m) { return p[0] >= r.x - m && p[0] <= r.x + r.w + m && p[1] >= r.y - m && p[1] <= r.y + r.h + m; }
+      function pieceAt(p) {                // the smallest piece under the pointer
+        var best = null, m = 3 / zoom;
+        pieces.forEach(function (q) { if (inside(p, q.rect, m) && (!best || q.rect.w * q.rect.h < best.rect.w * best.rect.h)) best = q; });
+        return best;
+      }
+      function enclosing(r) {              // the smallest piece holding r and more; the whole text last
+        var best = null, n = source().length;
+        pieces.forEach(function (q) {
+          if (q.s <= r.s && q.e >= r.e && (q.s < r.s || q.e > r.e) && (!best || q.e - q.s < best.e - best.s)) best = q;
+        });
+        if (best) return { s: best.s, e: best.e };
+        return r.s > 0 || r.e < n ? { s: 0, e: n } : null;
+      }
+      function rectFor(r) {
+        if (!r || !formulaBox) return null;
+        if (r.s === 0 && r.e === source().length) return formulaBox;
+        for (var i = 0; i < pieces.length; i++) if (pieces[i].s === r.s && pieces[i].e === r.e) return pieces[i].rect;
+        return null;
+      }
+      function writesAt(p) {               // in the hole, or near the ink written in it
+        if (!hole) return false;
+        if (hole.whole) return true;
+        if (hole.rect && inside(p, hole.rect, 28 / zoom)) return true;
+        return strokes.some(function (s) { return s.some(function (q) { return Math.abs(q[0] - p[0]) < 40 / zoom && Math.abs(q[1] - p[1]) < 40 / zoom; }); });
+      }
+      function accent() { return (getComputedStyle(element).getPropertyValue("--se-accent") || "").trim() || "9, 105, 218"; }
+      function roundRect(x, y, w, hh) {
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(x, y, w, hh, 4); else ctx.rect(x, y, w, hh);
+      }
+      function drawMarks() {
+        var a = accent();
+        ctx.save();
+        ctx.lineWidth = 1.2 / zoom;
+        if (sel && !hole) {
+          var sr = rectFor(sel);
+          if (sr) {
+            ctx.fillStyle = "rgba(" + a + ", 0.16)";
+            ctx.strokeStyle = "rgba(" + a + ", 0.7)";
+            roundRect(sr.x - 3, sr.y - 2, sr.w + 6, sr.h + 4);
+            ctx.fill();
+            ctx.stroke();
+          }
+        }
+        if (hole && !hole.whole && hole.rect) {
+          var hr = hole.rect;
+          ctx.setLineDash([5 / zoom, 4 / zoom]);
+          ctx.fillStyle = "rgba(" + a + ", 0.05)";
+          ctx.strokeStyle = "rgba(" + a + ", 0.8)";
+          roundRect(hr.x - 4, hr.y - 4, hr.w + 8, hr.h + 8);
+          ctx.fill();
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+      // A piece becomes a hole: out of sight, and as much room as it took (more for a
+      // small one) to write in.
+      function openHole(r) {
+        if (hole || !canRead || !r) return false;
+        var text = source(), rect = rectFor(r), node = LatexMap.nodeAt(text, r.s, r.e);
+        var hPx = Math.max(rect ? rect.h : 0, 44);
+        clearTimeout(timer);
+        strokes = []; current = null; done = []; undone = [];
+        element.setAttribute("data-strokes", "0");
+        hole = { s: r.s, e: r.e, base: text, whole: false, braces: !!(node && node.braces), rect: null, calibrated: false,
+                 wPx: Math.max(rect ? rect.w : 0, 80), hPx: hPx, aPx: hPx * 0.72, scaleW: 1, scaleH: 1 };
+        sel = null;
+        chosen = null;
+        clearReadings();
+        renderFormula();
+        changedTools();
+        return true;
+      }
+      function fitHole() {                 // the ink inside it, and it as large as the ink needs, with room beyond
+        if (!hole || hole.whole || !hole.rect || !strokes.length) return;
+        var r = hole.rect, m = 28 / zoom, minX = Infinity, minY = Infinity;
+        strokes.forEach(function (s) { s.forEach(function (p) { minX = Math.min(minX, p[0]); minY = Math.min(minY, p[1]); }); });
+        // begun on a small piece, the ink may stand out above or left of the room made for it: in it
+        var dx = minX < r.x + 4 / zoom ? r.x + 8 / zoom - minX : 0, dy = minY < r.y + 4 / zoom ? r.y + 8 / zoom - minY : 0;
+        if (dx || dy) moveInk(dx, dy);
+        var maxX = r.x + hole.wPx, maxY = r.y + hole.hPx;
+        strokes.forEach(function (s) { s.forEach(function (p) { maxX = Math.max(maxX, p[0] + m); maxY = Math.max(maxY, p[1] + m); }); });
+        if (maxX - r.x > hole.wPx + 1 || maxY - r.y > hole.hPx + 1) {
+          hole.wPx = Math.max(hole.wPx, maxX - r.x);
+          hole.hPx = Math.max(hole.hPx, maxY - r.y);
+          renderFormula();
+        }
+      }
+      // The hole closes: the chosen reading stays in the text (the text as it was, with none).
+      function commitHole() {
+        if (!hole) return;
+        var was = hole;
+        hole = null;
+        clearTimeout(timer);
+        strokes = []; current = null; done = []; undone = [];
+        element.setAttribute("data-strokes", "0");
+        if (chosen === null) field.value = was.base;
+        sel = was.whole ? null : chosen === null ? { s: was.s, e: was.e } : { s: was.s, e: was.s + chosen.length };
+        chosen = null;
+        clearReadings();
+        renderFormula();
+        refit();
+        changedTools();
+        reread();
+      }
+      function dropHole() {                // the text typed over: the ink goes, the text is what counts
+        hole = null;
+        chosen = null;
+        clearTimeout(timer);
+        strokes = []; current = null; done = []; undone = [];
+        element.setAttribute("data-strokes", "0");
+        cands.textContent = "";
+      }
+      function tapAt(t) {
+        if (hole && !hole.whole) { commitHole(); return; }             // outside the hole: the reading goes in
+        var n = source().length;
+        if (!t.hit) { if (!openHole({ s: n, e: n })) { sel = null; layoutFormula(); } return; }   // past the formula: room to write more
+        if (sel && t.hit.s === sel.s && t.hit.e === sel.e) sel = enclosing(sel) || sel;      // again: what holds it
+        else sel = { s: t.hit.s, e: t.hit.e };
+        layoutFormula();
+        changedTools();
+      }
+      function changedTools() {
+        writeBtn.disabled = !canRead || !!hole || !source().trim();
+        doneBtn.disabled = !hole;
+      }
+      writeBtn.addEventListener("click", function () { var n = source().length; openHole(sel || { s: n, e: n }); });
+      doneBtn.addEventListener("click", commitHole);
 
       // ---- erasing: a stroke goes when the eraser passes within reach of it ----------
       var coarse = !!(window.matchMedia && window.matchMedia("(any-pointer: coarse)").matches);
@@ -324,6 +708,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       }
       function startGesture() {
         if (erase) finishErase();
+        tap = null;
         if (current) { current = null; currentId = null; refit(); redraw(); }   // what a first finger began is not a stroke - nor the room it made
         var s = pinch();
         gesture = { dist: s.dist, zoom: zoom, inkX: (pad.scrollLeft + s.x) / zoom, inkY: (pad.scrollTop + s.y) / zoom };
@@ -363,6 +748,19 @@ SympyEditor.registerAddon("handwriting", (function () {
           eraseTo(point(ev));
           return;
         }
+        var at = point(ev);
+        if (formulaBox && !writesAt(at)) {                                 // the formula: a tap selects, a drag from the selection writes over it
+          ev.preventDefault();
+          try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* not capturable */ }
+          var hit = pieceAt(at), selRect = sel && !hole ? rectFor(sel) : null;
+          tap = { id: ev.pointerId, at: at, hit: hit, over: !!(selRect && inside(at, selRect, 4 / zoom)), moved: false };
+          return;
+        }
+        if (!hole) {                                                       // nothing drawn: the whole pad is the hole
+          hole = { whole: true, s: 0, e: 0, base: source() };
+          element.setAttribute("data-hole", "whole");
+          changedTools();
+        }
         ev.preventDefault();
         clearTimeout(timer);
         if (!strokes.length && !current) t0 = ev.timeStamp;
@@ -375,6 +773,20 @@ SympyEditor.registerAddon("handwriting", (function () {
         if (touches[ev.pointerId]) {
           touches[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
           if (gesture) { ev.preventDefault(); moveGesture(); return; }
+        }
+        if (tap && ev.pointerId === tap.id) {
+          var q = point(ev);
+          if (!tap.moved && Math.hypot(q[0] - tap.at[0], q[1] - tap.at[1]) > 8 / zoom) {
+            tap.moved = true;
+            if (tap.over && openHole(sel)) {                              // dragged from the selection: it is a hole, and this a stroke in it
+              t0 = ev.timeStamp;
+              current = [[tap.at[0], tap.at[1], 0], point(ev)];
+              currentId = tap.id;
+              tap = null;
+              redraw();
+            }
+          }
+          return;
         }
         if (erase && ev.pointerId === erase.id) {
           var samples = (ev.getCoalescedEvents && ev.getCoalescedEvents()) || [];
@@ -397,6 +809,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         undone = [];
         current = null;
         currentId = null;
+        fitHole();
         changed(700);                     // a pause: the formula may be finished
       }
       function lift(ev) {
@@ -412,6 +825,7 @@ SympyEditor.registerAddon("handwriting", (function () {
           }
           return;
         }
+        if (tap && ev.pointerId === tap.id) { var was = tap; tap = null; if (!was.moved) tapAt(was); return; }
         if (erase && ev.pointerId === erase.id) { finishErase(); return; }
         endStroke(ev);
       }
@@ -426,8 +840,13 @@ SympyEditor.registerAddon("handwriting", (function () {
         redoBtn.disabled = !undone.length;
         clearBtn.disabled = !strokes.length;
         redraw();
+        changedTools();
         clearTimeout(timer);
-        if (strokes.length) timer = setTimeout(recognize, delay); else reset();
+        if (strokes.length) { timer = setTimeout(recognize, delay); return; }
+        seq++;
+        clearReadings();
+        if (hole) { chosen = null; field.value = hole.base; }
+        reread();
       }
       function clearInk() {
         if (!strokes.length) return false;
@@ -468,14 +887,22 @@ SympyEditor.registerAddon("handwriting", (function () {
       readBtn.addEventListener("click", recognize);
 
       // ---- reading -----------------------------------------------------------------------
-      function reset() {
+      function clearReadings() {
         clearTimeout(timer);
-        seq++;
         cands.textContent = "";
-        field.value = "";
         picks = { choices: {}, constants: {} };
         note.textContent = canRead ? "" : status.reason;
         note.className = "ink-note" + (canRead ? "" : " error");
+      }
+      function reset() {                  // nothing: no text, no hole, no readings
+        seq++;
+        clearReadings();
+        field.value = "";
+        hole = null;
+        sel = null;
+        chosen = null;
+        renderFormula();
+        changedTools();
         show(null);
       }
       function typeset(el, tex, fallback) {
@@ -528,8 +955,21 @@ SympyEditor.registerAddon("handwriting", (function () {
           b.classList.toggle("ink-chosen", b === button);
           b.setAttribute("aria-selected", b === button ? "true" : "false");
         }
-        field.value = c.latex;
         picks = { choices: {}, constants: {} };
+        if (hole && !hole.whole) {         // in the hole's place in the text: braced where a bare argument was, apart from a command before it
+          var before = hole.base.slice(0, hole.s), after = hole.base.slice(hole.e), piece = c.latex;
+          if (hole.braces) piece = "{" + piece + "}";
+          else {
+            if (/\\[A-Za-z]+$/.test(before) && /^[A-Za-z]/.test(piece)) piece = " " + piece;
+            if (/\\[A-Za-z]+$/.test(piece) && /^[A-Za-z]/.test(after)) piece += " ";
+          }
+          chosen = piece;
+          field.value = before + piece + after;
+          reread();                        // the whole text, read
+          return;
+        }
+        chosen = c.latex;
+        field.value = c.latex;
         show(c.reading);
       }
       function reread() {
@@ -541,6 +981,11 @@ SympyEditor.registerAddon("handwriting", (function () {
       field.addEventListener("input", function () {
         for (var i = 0; i < cands.children.length; i++) cands.children[i].classList.remove("ink-chosen");
         picks = { choices: {}, constants: {} };     // new text: the old picks do not apply to it
+        if (hole) dropHole();
+        sel = null;
+        renderFormula();
+        refit();
+        changedTools();
         clearTimeout(readTimer);
         readTimer = setTimeout(reread, 400);
       });
@@ -621,7 +1066,8 @@ SympyEditor.registerAddon("handwriting", (function () {
         else if (which === "end") payload.end = true;
         api.call("insert", payload).then(function () {
           setFull(false);                          // the formula it went into, in sight
-          if (!clearInk()) reset();                // the ink goes too - Undo brings it back
+          if (strokes.length) clearInk();         // the ink goes too - Undo brings it back
+          reset();
           note.textContent = "Inserted.";
           updateSummary();
           showFormula(api);                        // and the page back up to it
@@ -685,12 +1131,19 @@ SympyEditor.registerAddon("handwriting", (function () {
         element: element,
         title: "Handwriting",
         help: "<section><h3>The tools</h3><ul>"
+          + "<li>" + toolIcon("write", 16) + " <b>Write</b> makes the selected piece of the formula a space to write in (with nothing selected, a space after the formula).</li>"
+          + "<li>" + toolIcon("done", 16) + " <b>Done</b> puts the reading in the written piece's place and closes the space; so does a tap outside it.</li>"
           + "<li>" + toolIcon("undo", 16) + " <b>Undo</b> takes back the last stroke - or the erasing, the clearing, the ink an insertion took.</li>"
           + "<li>" + toolIcon("redo", 16) + " <b>Redo</b> puts back what Undo took.</li>"
           + "<li>" + toolIcon("erase", 16) + " <b>Erase</b> is a switch: while it is on, the pen, the finger or the mouse takes away every stroke it passes over instead of writing. Press it again to write. A pen turned round erases too.</li>"
           + "<li>" + toolIcon("clear", 16) + " <b>Clear</b> takes all the ink away; Undo brings it back.</li>"
           + "<li>" + toolIcon("read", 16) + " <b>Read</b> reads what is written now, without waiting for the pause.</li>"
           + "<li>" + toolIcon("full", 16) + " <b>Full screen</b>, in the area's corner: the writing area as large as the screen, the tools on top and the readings in a sheet at the bottom that folds away. Esc or the same button comes back, and so does inserting.</li>"
+          + "</ul></section>"
+          + "<section><h3>The formula in the pad</h3><ul>"
+          + "<li>The LaTeX in the box is drawn in the pad: type it there, or write it by hand.</li>"
+          + "<li>Tap a piece of the formula to select it; tap it again for what holds it. Write over the selection - or press Write - and it gives way to a space to write in, which grows as the ink nears its edges.</li>"
+          + "<li>The reading of what is written there takes that piece's place in the text. A tap outside the space, or Done, keeps it; clearing the ink gives the piece back. A tap past the end of the formula opens a space after it.</li>"
           + "</ul></section>"
           + "<section><h3>Writing a formula by hand</h3><ul>"
           + "<li>Write in the area with a pen, a finger or the mouse. A moment after the pen lifts, what is written is read.</li>"
