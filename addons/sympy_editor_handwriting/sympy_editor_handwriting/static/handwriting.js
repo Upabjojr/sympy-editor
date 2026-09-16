@@ -12,7 +12,7 @@
  * (method "recognize"), where math-ocr's stroke model reads them.  The
  * readings come back as LaTeX, best first, each with what SymPy makes of it
  * and the options of that reading - an ambiguity's alternatives, a constant's
- * switch - and go in over the selection or as the whole expression.  Strokes,
+ * switch.  The pad holds the whole formula: Apply makes it the editor's.  Strokes,
  * clearing and inserting can be undone and redone.  Two fingers never write:
  * they pinch the area to zoom it and drag it to scroll, and the strokes keep
  * the canvas's own coordinates whatever the zoom.  In full screen the panel
@@ -287,15 +287,13 @@ SympyEditor.registerAddon("handwriting", (function () {
       var src = h("code", { class: "ink-src", title: "What SymPy gets" });
       var ambig = h("div", { class: "ink-ambig" });
       var consts = h("div", { class: "ink-consts" });
-      var insertSel = h("button", { type: "button", class: "ink-insert", disabled: "" }, ["Replace the selection"]);
-      var insertAll = h("button", { type: "button", class: "ink-insert-all", disabled: "" }, ["Replace the whole expression"]);
-      var toLatex = h("button", { type: "button", class: "ink-to-latex", hidden: "",
-        title: "Hand the reading to the LaTeX panel, which offers every way it can be read" }, ["Open in the LaTeX panel"]);
+      var apply = h("button", { type: "button", class: "ink-apply", disabled: "",
+        title: "The pad's formula becomes the editor's (Enter in the LaTeX line does the same)" }, ["Apply to the formula"]);
       var sheetChevron = h("span", { class: "ink-sheet-chevron", "aria-hidden": "true" });
       var sheetSummary = h("span", { class: "ink-sheet-summary" });
       var sheetHead = h("button", { type: "button", class: "ink-sheet-head", "aria-expanded": "true",
         title: "Fold the readings away, or bring them back" }, [sheetChevron, sheetSummary]);
-      var actions = h("div", { class: "ink-actions" }, [insertSel, insertAll, toLatex]);
+      var actions = h("div", { class: "ink-actions" }, [apply]);
       var sheetBody = h("div", { class: "ink-sheet-body" }, [note, cands, src, ambig, consts, actions]);
       var sheet = h("div", { class: "ink-sheet" }, [sheetHead, sheetBody]);
       var element = h("div", { class: "ink-panel", "data-strokes": "0", "data-zoom": "1.00", "data-hole": "", "data-sel": "" }, [bar, latexRow, stage, sheet]);
@@ -1051,7 +1049,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       });
       field.addEventListener("keydown", function (ev) {
         ev.stopPropagation();                        // the editor's keys are not for the box
-        if (ev.key === "Enter") { ev.preventDefault(); insert(target()); }       // what the first button says
+        if (ev.key === "Enter") { ev.preventDefault(); applyToEditor(); }
       });
 
       function show(reading) {
@@ -1091,22 +1089,9 @@ SympyEditor.registerAddon("handwriting", (function () {
         });
       }
 
-      function latexBox() {
-        return api.editor && api.editor.root ? api.editor.root.querySelector(".se-addon-latex .ltx-input") : null;
-      }
-      // Where the first button puts the reading: over the selection, at the
-      // caret, or after the whole formula when there is neither.
-      function target() {
-        if (api.range() || api.selected()) return "selection";
-        return api.insertion && api.insertion() ? "caret" : "end";
-      }
+      // Apply: nothing to put in without a reading of the text, nor when the pad shows the editor's formula as it is.
       function updateInsert() {
-        var ok = !!(last && last.ok), where = target();
-        insertAll.disabled = !ok;
-        insertSel.disabled = !ok;
-        insertSel.textContent = where === "caret" ? "Add to cursor" : where === "end" ? "Add to end"
-                              : api.range() ? "Replace the selected range" : "Replace the selection";
-        toLatex.hidden = full || !latexBox() || !field.value.trim();
+        apply.disabled = !(last && last.ok) || (!hole && field.value === editorLatex());
       }
       function updateSummary() {
         sheetSummary.textContent = last && last.ok ? last.src : (note.textContent || "Readings");
@@ -1116,20 +1101,15 @@ SympyEditor.registerAddon("handwriting", (function () {
       }
       sheetHead.addEventListener("click", function () { folded = !folded; updateSummary(); });
 
-      function insert(which) {
-        if (!last || !last.ok) return;
+      function applyToEditor() {
+        if (apply.disabled) return;
         var payload = { latex: field.value, path: "/", choices: picks.choices, constants: picks.constants };
-        var r = api.range(), sel = api.selected();
-        if (which === "selection" && r) { payload.path = r.parent; payload.children = api.editor._rangeIndices(); }
-        else if (which === "selection" && sel) payload.path = sel;
-        else if (which === "caret") payload.caret = api.insertion();
-        else if (which === "end") payload.end = true;
         api.call("insert", payload).then(function () {
           setFull(false);                          // the formula it went into, in sight
-          if (strokes.length) clearInk();         // the ink goes too - Undo brings it back
+          if (strokes.length) clearInk();          // the ink goes - Undo brings it back
           reset();
-          loadFromEditor();                        // and the pad shows the formula it went into
-          note.textContent = "Inserted.";
+          loadFromEditor();                        // and the pad shows the formula as the editor now has it
+          note.textContent = "Applied.";
           updateSummary();
           showFormula(api);                        // and the page back up to it
         }, function (e) {
@@ -1138,17 +1118,7 @@ SympyEditor.registerAddon("handwriting", (function () {
           updateSummary();
         });
       }
-      insertSel.addEventListener("click", function () { insert(target()); });
-      insertAll.addEventListener("click", function () { insert("whole"); });
-      toLatex.addEventListener("click", function () {
-        var box = latexBox();
-        if (!box) return;
-        var d = box.closest("details");
-        if (d) d.open = true;
-        box.value = field.value;
-        box.dispatchEvent(new Event("input", { bubbles: true }));
-        box.focus();
-      });
+      apply.addEventListener("click", applyToEditor);
 
       // ---- full screen --------------------------------------------------------------------
       function onKey(ev) {
@@ -1214,12 +1184,11 @@ SympyEditor.registerAddon("handwriting", (function () {
           + "<li>Write in the area with a pen, a finger or the mouse. A moment after the pen lifts, what is written is read.</li>"
           + "<li>Nearing the right or the bottom edge, the area makes room beyond it; a small button in the middle of an edge scrolls it that way, and so does the wheel. Only that button scrolls: the rest of the edge writes.</li>"
           + "<li>Two fingers never write: pinch to zoom the area in or out, drag with two fingers to move it about (a pinch on a trackpad zooms too).</li>"
-          + "<li>The best reading comes first and the others after it: pick the one you wrote. Its LaTeX is in the box, to correct; the line under it is what SymPy gets, with a menu for each part that can be read more than one way and a switch for each constant name.</li>"
-          + "<li><b>Replace the selection</b> puts it over what is selected (a node or a range); with a cursor in the formula instead the button is <b>Add to cursor</b>, and with neither <b>Add to end</b>: the reading goes in as if typed there - multiplied, or added when it begins with + or -. <b>Replace the whole expression</b> makes it the formula. Enter in the box does what the first button says. Either way the page goes back up to the formula.</li>"
+          + "<li>The best reading comes first and the others after it: pick the one you wrote. It goes into the LaTeX line, to correct; the line under the readings is what SymPy gets of the whole formula, with a menu for each part that can be read more than one way and a switch for each constant name.</li>"
+          + "<li><b>Apply to the formula</b> makes the pad's formula the editor's, and the page goes back up to it; Enter in the LaTeX line does the same.</li>"
           + "<li>The reading is done by math-ocr's stroke model. It reads one formula at a time, and mixes up look-alike glyphs most (<code>1</code> and <code>|</code>, <code>V</code> and <code>v</code>).</li>"
           + "</ul></section>"
           + (status.notice ? '<section><h3>About the model</h3><p style="white-space: pre-wrap">' + noticeHtml(status.notice) + "</p></section>" : ""),
-        onSelect: function () { updateInsert(); },
         onState: function () {           // the editor's formula, followed until the pad is edited
           if (!touched && !hole && !strokes.length && field.value !== editorLatex()) loadFromEditor();
         },

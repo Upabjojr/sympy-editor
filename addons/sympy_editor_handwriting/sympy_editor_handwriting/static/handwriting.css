@@ -88,7 +88,7 @@
   border: 1px solid var(--se-border); border-radius: 0.3rem; background: transparent; color: inherit;
 }
 .se-addon-handwriting .ink-src { font-family: var(--se-mono); color: var(--se-muted); word-break: break-word; min-height: 1.2em; }
-.se-addon-handwriting .ink-actions .ink-insert-all { border-color: rgba(var(--se-accent), 0.8); background: rgba(var(--se-accent), 0.12); }
+.se-addon-handwriting .ink-actions .ink-apply { border-color: rgba(var(--se-accent), 0.8); background: rgba(var(--se-accent), 0.12); }
 /* the reading's options, as the LaTeX panel shows them */
 .se-addon-handwriting .ink-ambig, .se-addon-handwriting .ink-consts { display: flex; flex-direction: column; gap: 0.25rem; }
 .se-addon-handwriting .ink-ambig:empty, .se-addon-handwriting .ink-consts:empty { display: none; }
@@ -118,7 +118,6 @@
 .se-addon-handwriting .ink-sheet-summary { font-family: var(--se-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .se-addon-handwriting .ink-full .ink-sheet-body { overflow: auto; min-height: 0; }
 .se-addon-handwriting .ink-full .ink-sheet.ink-folded .ink-sheet-body { display: none; }
-.se-addon-handwriting .ink-full .ink-to-latex { display: none; }
 
 @media (any-pointer: coarse) {
   .se-addon-handwriting .ink-bar button, .se-addon-handwriting .ink-actions button { font-size: 14px; padding: 0.45rem 0.7rem; min-height: 2.2rem; }

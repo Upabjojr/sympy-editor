@@ -119,7 +119,8 @@ def test_the_area_grows_scrolls_undoes_and_goes_full_screen():
             assert _wait(lambda: src.inner_text() == "sin(x)*cos(y) + pi")
             assert page.locator(".se-addon-handwriting .ink-point select").count() >= 1
             assert page.locator(".se-addon-handwriting .ink-const input").count() == 1
-            assert page.locator(".se-addon-handwriting .ink-insert").inner_text() == "Add to end"    # neither a selection nor a cursor
+            assert page.locator(".se-addon-handwriting .ink-apply").inner_text() == "Apply to the formula"
+            assert not page.locator(".se-addon-handwriting .ink-apply").is_disabled()
             g = page.evaluate(geometry)
             assert g["cw"] == g["w"] and page.locator(".se-addon-handwriting .ink-scroll-right").is_hidden()
             # ink near the right edge: room beyond it, and the strip to scroll there
@@ -180,12 +181,12 @@ def test_the_area_grows_scrolls_undoes_and_goes_full_screen():
             assert _wait(lambda: src.inner_text() == "pi + sin(x*cos(y))")
             page.keyboard.press("Escape")
             assert "ink-full" not in panel.get_attribute("class")
-            # inserting goes back to the formula, with the options picked, and takes the ink
+            # applying goes back to the formula, with the options picked, and takes the ink
             page.locator(".se-addon-handwriting .ink-fullbtn").click()
-            page.locator(".se-addon-handwriting .ink-insert-all").click()
+            page.locator(".se-addon-handwriting .ink-apply").click()
             assert _wait(lambda: doc.expr == Symbol("pi") + sin(x * cos(y)))
             assert _wait(lambda: "ink-full" not in panel.get_attribute("class"))
-            assert strokes() == 0 and page.locator(".se-addon-handwriting .ink-note").inner_text() == "Inserted."
+            assert strokes() == 0 and page.locator(".se-addon-handwriting .ink-note").inner_text() == "Applied."
             page.locator(".se-addon-handwriting .ink-undo").click()                    # the ink comes back
             assert strokes() == 3
             assert errors == []
@@ -233,7 +234,7 @@ def test_inserting_brings_the_formula_back_into_sight():
                 for i in range(1, 7):
                     page.mouse.move(r["left"] + 30 + 15 * i, r["top"] + 40 + 5 * i)
                 page.mouse.up()
-                assert _wait(lambda: not page.locator(".se-addon-handwriting .ink-insert").is_disabled(), timeout=15)
+                assert _wait(lambda: not page.locator(".se-addon-handwriting .ink-apply").is_disabled(), timeout=15)
 
             def scrolled_away():
                 page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
@@ -242,28 +243,20 @@ def test_inserting_brings_the_formula_back_into_sight():
             def back_at_the_formula():
                 page.wait_for_function(top + " >= -1 && " + top + " <= 1", timeout=5000)
 
-            write()                                                      # Add to end
-            assert page.locator(".se-addon-handwriting .ink-insert").inner_text() == "Add to end"
+            write()                                                      # the pad's formula becomes the editor's
+            assert page.locator(".se-addon-handwriting .ink-apply").inner_text() == "Apply to the formula"
             scrolled_away()
-            page.locator(".se-addon-handwriting .ink-insert").click()
-            assert _wait(lambda: strokes() == 0 and doc.expr != x + y)
+            page.locator(".se-addon-handwriting .ink-apply").click()
+            assert _wait(lambda: strokes() == 0 and str(doc.expr) == "sin(x)*cos(y) + pi")
             back_at_the_formula()
-
-            write()                                                      # over the selection
-            xp = next(path for path, n in doc.snapshot()["nodes"].items() if n["src"] == "x")
-            page.evaluate("p => %s.select(p)" % ed, xp)
-            assert _wait(lambda: page.locator(".se-addon-handwriting .ink-insert").inner_text() == "Replace the selection")
-            before = doc.expr
-            scrolled_away()
-            page.locator(".se-addon-handwriting .ink-insert").click()
-            assert _wait(lambda: doc.expr != before)
-            back_at_the_formula()
-
+            # the pad shows the editor's formula now, and Apply has nothing to put in
+            assert _wait(lambda: page.locator(".se-addon-handwriting .ink-latex").input_value() != "")
+            assert _wait(lambda: page.locator(".se-addon-handwriting .ink-apply").is_disabled())
             page.evaluate(ed + ".select(null)")
-            write()                                                      # the whole expression
+            write()                                                      # and again, from wherever the page was scrolled
             scrolled_away()
-            page.locator(".se-addon-handwriting .ink-insert-all").click()
-            assert _wait(lambda: doc.expr == sin(x) * cos(y) + Symbol("pi") or str(doc.expr) == "sin(x)*cos(y) + pi")
+            page.locator(".se-addon-handwriting .ink-apply").click()
+            assert _wait(lambda: strokes() == 0)
             back_at_the_formula()
             assert errors == []
             browser.close()
