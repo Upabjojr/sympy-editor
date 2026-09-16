@@ -618,9 +618,8 @@ released under the BSD 3-Clause License.
 **Add-ons may have their own licence.** Each add-on is a separate package, and
 its licence is the one stated in its folder (a `LICENSE` file, or the `license`
 in its `pyproject.toml`); check it before you redistribute an add-on or a build
-that carries it. Today the add-ons in [`addons/`](addons) are AGPL-3.0-or-later, as
-sympy-editor is, except the add-on template ([`addons/template`](addons/template)),
-which is BSD-3-Clause so that add-ons started from it can choose their own.
+that carries it. Today all the add-ons in [`addons/`](addons), the add-on template
+([`addons/template`](addons/template)) included, are AGPL-3.0-or-later, as sympy-editor is.
 
 ## Development
 

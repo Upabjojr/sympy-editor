@@ -686,10 +686,9 @@ The licence above covers sympy-editor itself.  Add-ons (under addons/ in the
 repository, or installed separately) are distinct works and may have licences
 of their own: each add-on's licence is the one stated in its own folder (its
 LICENSE file, or its pyproject.toml where it has no LICENSE file), and an
-add-on without one of its own is under the licence above.  The add-ons in
-addons/ are under the licence above, except the add-on template
-(addons/template), which stays under the BSD 3-Clause License stated in its
-pyproject.toml so that add-ons started from it may choose their own.
+add-on without one of its own is under the licence above.  All the add-ons in
+addons/, the add-on template (addons/template) included, are under the
+licence above.
 
 ================================================================================
 SymPy
