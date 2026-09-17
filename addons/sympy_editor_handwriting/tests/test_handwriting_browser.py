@@ -99,7 +99,7 @@ def test_the_area_grows_scrolls_undoes_and_goes_full_screen():
 
             strokes = lambda: int(panel.get_attribute("data-strokes"))
             # the tools are icons, each named for a tooltip and a screen reader, and explained in the guide
-            tools = page.locator(".se-addon-handwriting .ink-bar button")
+            tools = page.locator(".se-addon-handwriting .ink-bar .ink-tool")
             assert tools.count() == 8
             for i in range(8):
                 assert tools.nth(i).inner_text().strip() == "" and tools.nth(i).locator("svg").count() == 1
@@ -872,6 +872,67 @@ def test_the_cursor_takes_what_is_written_or_typed_as_a_new_piece():
             er = page.evaluate(PIECE_RECT, [3, 4])
             page.mouse.click(er["right"] - 1, (er["top"] + er["bottom"]) / 2)
             assert panel.get_attribute("data-sel") == "5,5"
+            assert page.errors == []
+        finally:
+            browser.close()
+            srv.shutdown()
+            srv.server_close()
+
+
+def test_zoom_buttons_and_the_room_to_write_in_brought_into_sight():
+    """The pad's zoom buttons go as the editor's; a room opened to write in
+    comes into the middle of the pad; a stroke ending near an edge of what is
+    in sight scrolls the pad on a little."""
+    doc = Document(x, addons=[HandwritingAddon(FakeRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _pad_page(p, doc)
+        try:
+            panel = page.locator(".se-addon-handwriting .ink-panel")
+            field = page.locator(".se-addon-handwriting .ink-latex")
+            plus, minus = page.locator(".se-addon-handwriting .ink-zoom-in"), page.locator(".se-addon-handwriting .ink-zoom-out")
+            level = page.locator(".se-addon-handwriting .ink-zoom-level")
+            assert level.inner_text() == "100%"
+            plus.click()
+            assert panel.get_attribute("data-zoom") == "1.20" and level.inner_text() == "120%"
+            minus.click()
+            minus.click()
+            assert panel.get_attribute("data-zoom") == "0.83" and level.inner_text() == "83%"
+            level.click()
+            assert panel.get_attribute("data-zoom") == "1.00" and level.inner_text() == "100%"
+            # a formula wider than the pad; the cursor at its far end, then the pad back at its start
+            text = " + ".join("x_{%d}" % i for i in range(40))
+            field.fill(text)
+            page.wait_for_selector(".se-addon-handwriting .ink-formula [data-ls]")
+            padbox = "() => { const p = document.querySelector('.se-addon-handwriting .ink-pad'); const r = p.getBoundingClientRect(); return {left: r.left, top: r.top, w: p.clientWidth, h: p.clientHeight, sl: p.scrollLeft}; }"
+            page.evaluate("document.querySelector('.se-addon-handwriting .ink-pad').scrollLeft = 1e6")
+            page.wait_for_timeout(200)
+            last = text.rindex("x_{39}")
+            page.locator(".se-addon-handwriting .ink-select").click()
+            lr = page.evaluate(PIECE_RECT, [last, len(text)])
+            page.mouse.click(lr["right"] - 1, (lr["top"] + lr["bottom"]) / 2)
+            assert panel.get_attribute("data-sel") == "%d,%d" % (len(text), len(text))
+            page.evaluate("document.querySelector('.se-addon-handwriting .ink-pad').scrollLeft = 0")
+            page.wait_for_timeout(200)
+            # the Pen: the room at the cursor, in the middle of the pad
+            page.locator(".se-addon-handwriting .ink-pen").click()
+            assert panel.get_attribute("data-hole") == "%d,%d" % (len(text), len(text))
+            def centred():
+                box = page.evaluate(padbox)
+                room = page.locator(".se-addon-handwriting .ink-formula [data-inkhole] .rule").bounding_box()
+                return abs(room["x"] + room["width"] / 2 - (box["left"] + box["w"] / 2)) <= 30
+            assert _wait(centred, 5)
+            # free ink (Select: the empty room goes; a tap on nothing: no cursor), a stroke ending near
+            # the right edge of what is in sight: the pad scrolls on a little
+            page.locator(".se-addon-handwriting .ink-select").click()
+            assert panel.get_attribute("data-hole") == ""
+            box = page.evaluate(padbox)
+            page.mouse.click(box["left"] + box["w"] * 0.25, box["top"] + box["h"] - 12)       # clear of the scroll buttons
+            assert panel.get_attribute("data-sel") == ""
+            page.locator(".se-addon-handwriting .ink-pen").click()
+            box = page.evaluate(padbox)
+            before = box["sl"]
+            _drag(page, box["left"] + box["w"] - 140, box["top"] + 40, box["left"] + box["w"] - 12, box["top"] + 60)
+            assert _wait(lambda: page.evaluate(padbox)["sl"] > before + 20, 5)
             assert page.errors == []
         finally:
             browser.close()

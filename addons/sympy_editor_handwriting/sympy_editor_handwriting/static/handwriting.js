@@ -269,7 +269,11 @@ SympyEditor.registerAddon("handwriting", (function () {
       var redoBtn = toolButton(h, "redo", "Redo: put back what Undo took", { disabled: "" });
       var clearBtn = toolButton(h, "clear", "Clear: take all the ink away (Undo brings it back)", { disabled: "" });
       var readBtn = toolButton(h, "read", "Read: read what is written now");
-      var bar = h("div", { class: "ink-bar" }, [modes, doneBtn, undoBtn, redoBtn, clearBtn, readBtn]);
+      var zoomOutBtn = h("button", { type: "button", class: "ink-zoom-out", title: "Zoom out (Ctrl+wheel, pinch)", "aria-label": "Zoom out" }, ["\u2212"]);
+      var zoomLevelBtn = h("button", { type: "button", class: "ink-zoom-level", title: "Reset the zoom", "aria-label": "Reset the zoom" }, ["100%"]);
+      var zoomInBtn = h("button", { type: "button", class: "ink-zoom-in", title: "Zoom in (Ctrl+wheel, pinch)", "aria-label": "Zoom in" }, ["+"]);
+      var zooms = h("div", { class: "ink-zooms", role: "group", "aria-label": "Zoom" }, [zoomOutBtn, zoomLevelBtn, zoomInBtn]);
+      var bar = h("div", { class: "ink-bar" }, [modes, doneBtn, undoBtn, redoBtn, clearBtn, readBtn, zooms]);
 
       var note = h("div", { class: "ink-note", "aria-live": "polite" });
       var cands = h("div", { class: "ink-cands", role: "listbox", "aria-label": "Readings, best first" });
@@ -412,6 +416,36 @@ SympyEditor.registerAddon("handwriting", (function () {
         strips.right.hidden = !(maxX > 1 && pad.scrollLeft < maxX - 1);
         strips.up.hidden = !(maxY > 1 && pad.scrollTop > 1);
         strips.down.hidden = !(maxY > 1 && pad.scrollTop < maxY - 1);
+      }
+      function smoothScroll() { return !(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches); }
+      // room on the canvas up to x, y (its own pixels): somewhere to scroll to
+      function ensureRoom(x, y) {
+        var w = Math.min(MAX_W, Math.max(width, Math.ceil(x))), hh = Math.min(MAX_H, Math.max(height, Math.ceil(y)));
+        if (w > width || hh > height) { width = w; height = hh; applySize(); }
+      }
+      // a rectangle of the canvas (its own pixels) in the middle of what is in sight
+      function centerOn(r) {
+        if (!r) return;
+        var cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+        ensureRoom(cx + pad.clientWidth / (2 * zoom), cy + pad.clientHeight / (2 * zoom));
+        pad.scrollTo({ left: Math.max(0, cx * zoom - pad.clientWidth / 2), top: Math.max(0, cy * zoom - pad.clientHeight / 2),
+                       behavior: smoothScroll() ? "smooth" : "auto" });
+      }
+      // A stroke that ends near an edge of what is in sight: the pad scrolls on a little that way,
+      // so that the next one has room.
+      function followStroke(stroke) {
+        var xs = stroke.map(function (p) { return p[0]; }), ys = stroke.map(function (p) { return p[1]; });
+        var minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs), minY = Math.min.apply(null, ys), maxY = Math.max.apply(null, ys);
+        var viewL = pad.scrollLeft / zoom, viewT = pad.scrollTop / zoom, viewW = pad.clientWidth / zoom, viewH = pad.clientHeight / zoom;
+        var mx = Math.max(48, pad.clientWidth * 0.15) / zoom, my = Math.max(36, pad.clientHeight * 0.15) / zoom;
+        var dx = 0, dy = 0;
+        if (maxX > viewL + viewW - mx) dx = viewW * 0.3;
+        else if (minX < viewL + mx && pad.scrollLeft > 1) dx = -viewW * 0.3;
+        if (maxY > viewT + viewH - my) dy = viewH * 0.3;
+        else if (minY < viewT + my && pad.scrollTop > 1) dy = -viewH * 0.3;
+        if (!dx && !dy) return;
+        ensureRoom(viewL + viewW + Math.max(dx, 0), viewT + viewH + Math.max(dy, 0));
+        pad.scrollBy({ left: dx * zoom, top: dy * zoom, behavior: smoothScroll() ? "smooth" : "auto" });
       }
       function scrollPage(dir) {
         var dx = dir === "left" ? -1 : dir === "right" ? 1 : 0, dy = dir === "up" ? -1 : dir === "down" ? 1 : 0;
@@ -609,6 +643,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         clearReadings();
         renderFormula();
         changedTools();
+        centerOn(hole.rect);               // the room to write in, in the middle of the pad
         return true;
       }
       // Ink anywhere: the formula stays as it is, the reading goes after it.
@@ -857,8 +892,26 @@ SympyEditor.registerAddon("handwriting", (function () {
         height = Math.max(height, pad.clientHeight / zoom);
         applySize();
         element.setAttribute("data-zoom", zoom.toFixed(2));
+        updateZoomButtons();
         return true;
       }
+      var ZOOM_STEP = 1.2;                // the editor's step
+      function updateZoomButtons() {
+        zoomLevelBtn.textContent = Math.round(zoom * 100) + "%";
+        zoomOutBtn.disabled = zoom <= MIN_ZOOM + 1e-3;
+        zoomInBtn.disabled = zoom >= MAX_ZOOM - 1e-3;
+      }
+      // zoomed about the middle of what is in sight: what is there stays there
+      function zoomAboutMiddle(z) {
+        var cx = pad.clientWidth / 2, cy = pad.clientHeight / 2;
+        var inkX = (pad.scrollLeft + cx) / zoom, inkY = (pad.scrollTop + cy) / zoom;
+        if (!zoomTo(z)) return;
+        pad.scrollLeft = inkX * zoom - cx;
+        pad.scrollTop = inkY * zoom - cy;
+      }
+      zoomOutBtn.addEventListener("click", function () { zoomAboutMiddle(zoom / ZOOM_STEP); });
+      zoomInBtn.addEventListener("click", function () { zoomAboutMiddle(zoom * ZOOM_STEP); });
+      zoomLevelBtn.addEventListener("click", function () { zoomAboutMiddle(1); });
       function padPoint(x, y) {           // a point of the page, in the box's own coordinates
         var r = pad.getBoundingClientRect();
         return { x: x - r.left - pad.clientLeft, y: y - r.top - pad.clientTop };
@@ -969,6 +1022,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         current = null;
         currentId = null;
         fitHole();
+        followStroke(strokes[strokes.length - 1]);
         changed(700);                     // a pause: the formula may be finished
       }
       function lift(ev) {
@@ -1439,6 +1493,7 @@ SympyEditor.registerAddon("handwriting", (function () {
           + "<li>" + toolIcon("done", 16) + " <b>Done</b> puts the reading of the ink into the formula for good, and the ink goes; with Select, a tap does the same.</li>"
           + "<li>" + toolIcon("undo", 16) + " <b>Undo</b> and " + toolIcon("redo", 16) + " <b>Redo</b> go back and forth through every edit in the pad: strokes, the eraser, selections, readings put in, typing in the LaTeX line (Ctrl+Z and Ctrl+Y there too), applying.</li>"
           + "<li>" + toolIcon("clear", 16) + " <b>Clear</b> takes all the ink away.</li>"
+          + "<li><b>\u2212 100% +</b> zoom the pad out and in about the middle of what is in sight; the level goes back to 100%.</li>"
           + "<li>" + toolIcon("read", 16) + " <b>Read</b> reads what is written now, without waiting for the pause.</li>"
           + "<li>" + toolIcon("type", 16) + " <b>Type</b>, beside the LaTeX line: the selected piece's LaTeX, selected there, to type over. " + toolIcon("load", 16) + " <b>From the editor</b>: the editor's formula into the pad again.</li>"
           + "<li>" + toolIcon("full", 16) + " <b>Full screen</b>, in the area's corner: the writing area as large as the screen, the tools on top and the readings in a sheet at the bottom that folds away. Esc or the same button comes back.</li>"
@@ -1449,7 +1504,7 @@ SympyEditor.registerAddon("handwriting", (function () {
           + "</ul></section>"
           + "<section><h3>Writing by hand</h3><ul>"
           + "<li>A moment after the pen lifts, what is written is read. The best reading comes first: pick the one you wrote, or press the pen beside it to edit its LaTeX. The line under the readings is what SymPy gets of what is written - of that piece alone while it is being written, of the whole formula otherwise - with a menu for each part that can be read more than one way and a switch for each constant name. An option picked for a piece stays with it in the formula.</li>"
-          + "<li>Nearing the right or the bottom edge, the area makes room beyond it; a small button in the middle of an edge scrolls it that way, and so does the wheel.</li>"
+          + "<li>Nearing the right or the bottom edge, the area makes room beyond it, and a stroke ending near an edge of what is in sight scrolls the pad on a little; a small button in the middle of an edge scrolls it that way, and so does the wheel. A room made to write in comes into the middle of the pad.</li>"
           + "<li>Two fingers never write: pinch to zoom the area in or out, drag with two fingers to move it about (a pinch on a trackpad zooms too).</li>"
           + "<li>The reading is done by math-ocr's stroke model. It reads one formula at a time, and mixes up look-alike glyphs most (<code>1</code> and <code>|</code>, <code>V</code> and <code>v</code>).</li>"
           + "</ul></section>"
