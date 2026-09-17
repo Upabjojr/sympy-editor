@@ -13,6 +13,7 @@ side where each platform's build expects them.
 
 from __future__ import annotations
 
+import inspect
 import json
 import threading
 from pathlib import Path
@@ -30,6 +31,12 @@ from sympy_editor.document import Document, Interrupted, interrupt_thread
 #: same way.
 ADDONS_DIR = Path(__file__).resolve().parent / "addons"
 BUNDLED_ADDONS = register_addons_folder(ADDONS_DIR) if ADDONS_DIR.is_dir() else {}
+
+#: The keyword arguments this version's Document takes.  A session saved by a
+#: newer app can carry settings it does not know (the app's storage outlives
+#: an install of an older build): those are left out, not a document lost.
+_DOCUMENT_SETTINGS = {name for name, prm in inspect.signature(Document.__init__).parameters.items()
+                      if prm.kind is inspect.Parameter.KEYWORD_ONLY}
 
 #: One Document per editor/session, by the id the page chose.
 _documents: Dict[str, Document] = {}
@@ -50,6 +57,7 @@ def new_doc(doc_id: str, srepr: str, settings_json: str) -> str:
         # of them (and only the on/off state is the page's to say).
         named = list(settings.get("available") or [])
         settings["available"] = named + [m["module"] for m in BUNDLED_ADDONS.values() if m["module"] not in named]
+    settings = {k: v for k, v in settings.items() if k in _DOCUMENT_SETTINGS}
     _documents[doc_id] = Document(srepr, **settings)
     return handle(doc_id, '{"action": "snapshot"}')
 

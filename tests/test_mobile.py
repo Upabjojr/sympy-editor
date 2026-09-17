@@ -162,6 +162,10 @@ def test_the_app_python_module_edits_documents():
     state = json.dumps({"history": [srepr(x), srepr(x + 1)], "index": 1})
     snap = json.loads(app.new_doc("d3", srepr(x + 1), state))
     assert snap["src"] == "x + 1" and snap["can_undo"]
+    # a session saved by a newer app, with a setting this one does not know: opened all the same
+    state = json.dumps({"history": [srepr(x), srepr(x + 1)], "index": 1, "a_setting_from_a_newer_app": True})
+    snap = json.loads(app.new_doc("d4", srepr(x + 1), state))
+    assert snap["src"] == "x + 1" and snap["can_undo"] and snap["error"] is None
     assert json.loads(app.version())["sympy"]
 
 
