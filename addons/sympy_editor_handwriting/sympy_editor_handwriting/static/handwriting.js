@@ -498,7 +498,10 @@ SympyEditor.registerAddon("handwriting", (function () {
           var he = hole && !hole.free ? formula.querySelector("[data-inkhole] .rule") : null;
           if (he) {
             var hr = box(he.getBoundingClientRect());
-            if (hole.rect) moveInk(hr.x - hole.rect.x, hr.y - hole.rect.y);     // the ink stays in the hole it was written in
+            if (hole.rect) {                                                    // the ink stays in the hole it was written in
+              moveInk(hr.x - hole.rect.x, hr.y - hole.rect.y);
+              if (hole.away) { hole.away.dx += hr.x - hole.rect.x; hole.away.dy += hr.y - hole.rect.y; }
+            }
             hole.rect = hr;
           }
         }
@@ -621,6 +624,27 @@ SympyEditor.registerAddon("handwriting", (function () {
         changedTools();
         return true;
       }
+      function boxOf(list) {
+        var b = null;
+        list.forEach(function (s) { s.forEach(function (p) {
+          if (!b) b = { minX: p[0], minY: p[1], maxX: p[0], maxY: p[1] };
+          else { b.minX = Math.min(b.minX, p[0]); b.minY = Math.min(b.minY, p[1]); b.maxX = Math.max(b.maxX, p[0]); b.maxY = Math.max(b.maxY, p[1]); }
+        }); });
+        return b;
+      }
+      function near(p, q, m) {
+        return !!(p && q && p.minX - m <= q.maxX && p.maxX + m >= q.minX && p.minY - m <= q.maxY && p.maxY + m >= q.minY);
+      }
+      // A stroke written where the ink was before it was brought into the room, and not beside
+      // it where it is now: brought along the same way - what is written in one go stays together.
+      function followAway(stroke) {
+        if (!hole || hole.free || !hole.away || !hole.rect) return;
+        var b = boxOf([stroke]), r = hole.rect, room = { minX: r.x, minY: r.y, maxX: r.x + r.w, maxY: r.y + r.h };
+        if (!near(b, hole.away.box, 120 / zoom) || near(b, boxOf(strokes), 40 / zoom) || near(b, room, 10 / zoom)) return;
+        stroke.forEach(function (p) { p[0] += hole.away.dx; p[1] += hole.away.dy; });
+        var a = hole.away.box;
+        a.minX = Math.min(a.minX, b.minX); a.minY = Math.min(a.minY, b.minY); a.maxX = Math.max(a.maxX, b.maxX); a.maxY = Math.max(a.maxY, b.maxY);
+      }
       function fitHole() {                 // the ink inside it, and it as large as the ink needs, with room beyond
         if (!hole || hole.free || !hole.rect || !strokes.length) return;
         var r = hole.rect, m = 34 / zoom, minX = Infinity, minY = Infinity, inkR = -Infinity, inkB = -Infinity;
@@ -629,9 +653,11 @@ SympyEditor.registerAddon("handwriting", (function () {
         }); });
         var dx = 0, dy = 0;
         if (inkR < r.x || minX > r.x + r.w || inkB < r.y || minY > r.y + r.h) {
-          // written away from the room made for it (the selection was elsewhere on the pad): the ink into it
+          // written away from the room made for it (the selection was elsewhere on the pad): the ink into it -
+          // and the next strokes written there after it, the same way (followAway)
           dx = r.x + 12 / zoom - minX;
           dy = r.y + 12 / zoom - minY;
+          hole.away = { dx: dx, dy: dy, box: { minX: minX, minY: minY, maxX: inkR, maxY: inkB } };
         } else {
           // begun on a small piece, the ink may stand out above or left of the room: in it
           if (minX < r.x + 6 / zoom) dx = r.x + 12 / zoom - minX;
@@ -929,6 +955,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       });
       function endStroke(ev) {
         if (!current || ev.pointerId !== currentId) return;
+        followAway(current);
         strokes.push(current);
         if (pending) { push(pending); pending = null; }
         current = null;

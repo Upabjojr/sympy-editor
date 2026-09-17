@@ -793,10 +793,13 @@ def test_with_a_piece_selected_the_pen_writes_in_its_place_wherever_it_writes():
               return {left: r.left, top: r.top, right: r.right, bottom: r.bottom};
             }""")
             assert inside["right"] > inside["left"]
-            # a second stroke far away: still that piece's, the room still open
-            _drag(page, pad["x"] + 30, pad["y"] + pad["height"] - 40, pad["x"] + 90, pad["y"] + pad["height"] - 20)
+            # a second stroke beside where the first was written: still that piece's, the room still open,
+            # and brought along with the first - the room does not stretch to the far side of the pad
+            _drag(page, pad["x"] + pad["width"] - 100, pad["y"] + pad["height"] - 60, pad["x"] + pad["width"] - 50, pad["y"] + pad["height"] - 30)
             assert _wait(lambda: panel.get_attribute("data-strokes") == "2")
             assert panel.get_attribute("data-hole") == "4,5"
+            room = page.locator(".se-addon-handwriting .ink-formula [data-inkhole] .rule").bounding_box()
+            assert room["width"] < 350, room
             assert _wait(lambda: field.input_value() == "x + " + READING, 15)
             assert page.errors == []
         finally:
