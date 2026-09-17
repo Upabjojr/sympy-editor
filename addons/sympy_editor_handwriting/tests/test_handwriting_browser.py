@@ -1081,3 +1081,52 @@ def test_free_ink_goes_where_it_is_written_against_the_formula():
             browser.close()
             srv.shutdown()
             srv.server_close()
+
+
+class StandInRecognizer(FakeRecognizer):
+    """Reads what it is told (with the stand-in, \\Delta, where the formula's piece is),
+    and keeps the strokes it was given."""
+    latex = r"\Delta"
+
+
+def test_free_ink_is_read_with_the_piece_it_is_written_against():
+    """The piece free ink is written against goes into the reading as a stand-in:
+    a bar and y under x read as a fraction with the stand-in over it, and the
+    reading takes x in the stand-in's place; so does an exponent."""
+    rec = StandInRecognizer()
+    doc = Document(x, addons=[HandwritingAddon(rec), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _pad_page(p, doc)
+        try:
+            panel = page.locator(".se-addon-handwriting .ink-panel")
+            field = page.locator(".se-addon-handwriting .ink-latex")
+            said = page.locator(".se-addon-handwriting .ink-reading-of")
+
+            def fresh(text, piece):
+                field.fill(text)
+                page.wait_for_selector(".se-addon-handwriting .ink-formula [data-ls]")
+                page.wait_for_timeout(200)
+                r = page.evaluate(PIECE_RECT, list(piece))
+                return r, r["bottom"] - r["top"]
+
+            # a bar under x and ink under it: read with x's stand-in over the bar; x taken in
+            rec.latex = r"\frac{\Delta}{y}"
+            r, hgt = fresh("x", (0, 1))
+            _drag(page, r["left"] - 4, r["bottom"] + 10, r["right"] + 4, r["bottom"] + 11)
+            _drag(page, r["left"], r["bottom"] + 22, r["right"], r["bottom"] + 44)
+            assert _wait(lambda: field.input_value() == r"\frac{x}{y}", 15), field.input_value()
+            assert len(rec.last) == 3                                     # the stand-in, the bar and the y
+            first = rec.last[0]
+            assert first[0][2] == 0 and min(p[2] for p in rec.last[1]) > first[-1][2]   # the stand-in first
+            assert _wait(lambda: "read together with x" in said.inner_text())      # once the whole it makes is read
+            assert _wait(lambda: page.locator(".se-addon-handwriting .ink-src").inner_text() == "x/y")
+            # in a sum, at b's top-right: b's exponent, the rest of the formula as it was
+            rec.latex = r"\Delta^{2}"
+            r, hgt = fresh("a + b", (4, 5))
+            _drag(page, r["right"] + 3, r["top"] - 0.3 * hgt, r["right"] + 13, r["top"] + 0.15 * hgt)
+            assert _wait(lambda: field.input_value() == "a + b^{2}", 15), field.input_value()
+            assert page.errors == []
+        finally:
+            browser.close()
+            srv.shutdown()
+            srv.server_close()
