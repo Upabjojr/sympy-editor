@@ -181,11 +181,12 @@ def test_the_area_grows_scrolls_undoes_and_goes_full_screen():
             assert _wait(lambda: src.inner_text() == "pi + sin(x*cos(y))")
             page.keyboard.press("Escape")
             assert "ink-full" not in panel.get_attribute("class")
-            # applying goes back to the formula, with the options picked, and takes the ink
+            # applying puts the reading in with the options picked, takes the ink, and stays in full screen
             page.locator(".se-addon-handwriting .ink-fullbtn").click()
             page.locator(".se-addon-handwriting .ink-apply").click()
             assert _wait(lambda: doc.expr == Symbol("pi") + sin(x * cos(y)))
-            assert _wait(lambda: "ink-full" not in panel.get_attribute("class"))
+            assert _wait(lambda: page.locator(".se-addon-handwriting .ink-note").inner_text() == "Applied.")
+            assert "ink-full" in panel.get_attribute("class")
             assert strokes() == 0 and page.locator(".se-addon-handwriting .ink-note").inner_text() == "Applied."
             page.locator(".se-addon-handwriting .ink-undo").click()                    # the ink comes back
             assert strokes() == 3
@@ -197,72 +198,50 @@ def test_the_area_grows_scrolls_undoes_and_goes_full_screen():
 
 
 
-def test_inserting_brings_the_formula_back_into_sight():
-    """The panel sits below the editor: after a reading goes in - at the end,
-    over the selection, as the whole expression - the page is back at the top
-    of the editor, wherever it had been scrolled to."""
+def test_applying_keeps_the_view_as_it_is():
+    """Apply makes the pad's formula the editor's and moves nothing: the pad
+    stays where it was on the page, and in full screen it stays in full screen."""
     doc = Document(x + y, addons=[HandwritingAddon(FakeRecognizer()), LATEX])
-    srv = EditorServer(doc, port=0)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    try:
-        with playwright.sync_playwright() as p:
-            try:
-                browser = p.chromium.launch()
-            except Exception as exc:
-                pytest.skip(f"chromium not available: {exc}")
-            page = browser.new_page(viewport={"width": 760, "height": 520}, reduced_motion="reduce")
-            errors = []
-            page.on("pageerror", lambda e: errors.append(str(e)))
-            page.goto(srv.url)
-            page.wait_for_selector(".se-addon-handwriting .ink-canvas", timeout=30000)
-            page.wait_for_function("document.querySelector('.se-addon-handwriting .ink-canvas').clientWidth > 0")
-            page.locator(".se-addon-handwriting .ink-latex").fill("")    # the pad opens with the formula: an empty one
-            # room below the panel, so the page can be scrolled away from the formula
-            page.evaluate("document.body.appendChild(Object.assign(document.createElement('div'), {style: 'height: 3000px'}))")
-            ed = "document.querySelector('.sympy-editor').__sympyEditor"
-            top = "Math.round(document.querySelector('.sympy-editor').getBoundingClientRect().top)"
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _pad_page(p, doc)
+        try:
             panel = page.locator(".se-addon-handwriting .ink-panel")
-            strokes = lambda: int(panel.get_attribute("data-strokes"))
+            field = page.locator(".se-addon-handwriting .ink-latex")
+            apply = page.locator(".se-addon-handwriting .ink-apply")
+            note = page.locator(".se-addon-handwriting .ink-note")
+            page.evaluate("document.body.appendChild(Object.assign(document.createElement('div'), {style: 'height: 3000px'}))")
+            top = lambda: round(page.evaluate("document.querySelector('.se-addon-handwriting .ink-pad').getBoundingClientRect().top"))
 
             def write():
-                page.locator(".se-addon-handwriting .ink-latex").fill("")    # after an insertion the pad shows the new formula: write on an empty one
-                page.locator(".se-addon-handwriting .ink-pad").scroll_into_view_if_needed()
-                r = page.evaluate("() => { const b = document.querySelector('.se-addon-handwriting .ink-pad').getBoundingClientRect();"
-                                  " return {left: b.left, top: b.top}; }")
-                page.mouse.move(r["left"] + 30, r["top"] + 40)
-                page.mouse.down()
-                for i in range(1, 7):
-                    page.mouse.move(r["left"] + 30 + 15 * i, r["top"] + 40 + 5 * i)
-                page.mouse.up()
-                assert _wait(lambda: not page.locator(".se-addon-handwriting .ink-apply").is_disabled(), timeout=15)
+                field.fill("")
+                box = page.locator(".se-addon-handwriting .ink-pad").bounding_box()
+                _drag(page, box["x"] + 40, box["y"] + 40, box["x"] + 160, box["y"] + 70)
+                assert _wait(lambda: not apply.is_disabled(), 15)
 
-            def scrolled_away():
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                page.wait_for_function(top + " < -100")
-
-            def back_at_the_formula():
-                page.wait_for_function(top + " >= -1 && " + top + " <= 1", timeout=5000)
-
-            write()                                                      # the pad's formula becomes the editor's
-            assert page.locator(".se-addon-handwriting .ink-apply").inner_text() == "Apply to the formula"
-            scrolled_away()
-            page.locator(".se-addon-handwriting .ink-apply").click()
-            assert _wait(lambda: strokes() == 0 and str(doc.expr) == "sin(x)*cos(y) + pi")
-            back_at_the_formula()
-            # the pad shows the editor's formula now, and Apply has nothing to put in
-            assert _wait(lambda: page.locator(".se-addon-handwriting .ink-latex").input_value() != "")
-            assert _wait(lambda: page.locator(".se-addon-handwriting .ink-apply").is_disabled())
-            page.evaluate(ed + ".select(null)")
-            write()                                                      # and again, from wherever the page was scrolled
-            scrolled_away()
-            page.locator(".se-addon-handwriting .ink-apply").click()
-            assert _wait(lambda: strokes() == 0)
-            back_at_the_formula()
-            assert errors == []
+            write()
+            page.evaluate("window.scrollBy(0, 120)")                      # the page scrolled a little past the editor
+            start = top()
+            apply.click()
+            assert _wait(lambda: str(doc.expr) == "sin(x)*cos(y) + pi")
+            assert _wait(lambda: note.inner_text() == "Applied.")
+            seen = []
+            for _ in range(15):                                         # while the pad reloads the formula and reads it
+                seen.append(top())
+                page.wait_for_timeout(100)
+            assert all(abs(t - start) <= 1 for t in seen), (start, seen)
+            assert _wait(lambda: field.input_value() != "")               # the pad shows the editor's formula now
+            # in full screen: still in full screen after applying
+            page.locator(".se-addon-handwriting .ink-fullbtn").click()
+            assert "ink-full" in panel.get_attribute("class")
+            write()
+            apply.click()
+            assert _wait(lambda: note.inner_text() == "Applied.")
+            assert "ink-full" in panel.get_attribute("class")
+            assert page.errors == []
+        finally:
             browser.close()
-    finally:
-        srv.shutdown()
-        srv.server_close()
+            srv.shutdown()
+            srv.server_close()
 
 
 TOUCH = """(t) => {

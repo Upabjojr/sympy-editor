@@ -29,15 +29,6 @@
  * The selected piece can be typed over too, in the LaTeX line above the pad.
  */
 SympyEditor.registerAddon("handwriting", (function () {
-  // After a reading goes in, the formula it went into is brought back into
-  // sight: the panel sits below the editor, often scrolled past it.
-  function showFormula(api) {
-    var root = api.editor && api.editor.root;
-    if (!root || !root.scrollIntoView) return;
-    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    try { root.scrollIntoView({ block: "start", behavior: reduce ? "auto" : "smooth" }); }
-    catch (e) { root.scrollIntoView(true); }       // no options object
-  }
   // Bring an element into sight, gently unless motion is to be kept down;
   // "end": what lies above it stays in sight when it fits.
   function reveal(el, block) {
@@ -1161,16 +1152,15 @@ SympyEditor.registerAddon("handwriting", (function () {
         var payload = { latex: field.value, path: "/", choices: picks.choices, constants: picks.constants };
         var before = snapshot();
         api.call("insert", payload).then(function () {
-          setFull(false);                          // the formula it went into, in sight
+          // the view stays as it is - the pad, full screen or not, where it was on the page
           push(before);                            // Undo brings the pad back as it was, ink and all
+          holdSheet();                             // the readings, emptied and read anew, take no less room meanwhile
           strokes = []; current = null;
           element.setAttribute("data-strokes", "0");
-          shrink();
           reset();
-          loadFromEditor();                        // and the pad shows the formula as the editor now has it
+          loadFromEditor();                        // the pad shows the formula as the editor now has it
           note.textContent = "Applied.";
           updateSummary();
-          showFormula(api);                        // and the page back up to it
         }, function (e) {
           note.textContent = String((e && e.message) || e);
           note.className = "ink-note error";
@@ -1232,11 +1222,11 @@ SympyEditor.registerAddon("handwriting", (function () {
           + "<li>" + toolIcon("clear", 16) + " <b>Clear</b> takes all the ink away.</li>"
           + "<li>" + toolIcon("read", 16) + " <b>Read</b> reads what is written now, without waiting for the pause.</li>"
           + "<li>" + toolIcon("type", 16) + " <b>Type</b>, beside the LaTeX line: the selected piece's LaTeX, selected there, to type over. " + toolIcon("load", 16) + " <b>From the editor</b>: the editor's formula into the pad again.</li>"
-          + "<li>" + toolIcon("full", 16) + " <b>Full screen</b>, in the area's corner: the writing area as large as the screen, the tools on top and the readings in a sheet at the bottom that folds away. Esc or the same button comes back, and so does applying.</li>"
+          + "<li>" + toolIcon("full", 16) + " <b>Full screen</b>, in the area's corner: the writing area as large as the screen, the tools on top and the readings in a sheet at the bottom that folds away. Esc or the same button comes back.</li>"
           + "</ul></section>"
           + "<section><h3>The formula in the pad</h3><ul>"
           + "<li>The pad opens with the editor's formula, drawn from the LaTeX in the line above it: type there, or write in the pad - the two mix.</li>"
-          + "<li><b>Apply to the formula</b> makes the pad's formula the editor's, and the page goes back up to it; Enter in the LaTeX line does the same.</li>"
+          + "<li><b>Apply to the formula</b> makes the pad's formula the editor's, and the view stays as it is; Enter in the LaTeX line does the same.</li>"
           + "</ul></section>"
           + "<section><h3>Writing by hand</h3><ul>"
           + "<li>A moment after the pen lifts, what is written is read. The best reading comes first: pick the one you wrote. The line under the readings is what SymPy gets of the whole formula, with a menu for each part that can be read more than one way and a switch for each constant name.</li>"
