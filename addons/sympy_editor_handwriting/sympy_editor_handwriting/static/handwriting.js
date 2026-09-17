@@ -46,6 +46,14 @@ SympyEditor.registerAddon("handwriting", (function () {
       '<path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="' +
       (full ? back : out) + '"/></svg>';
   }
+  // The editor's arrow (editor.js: arrowSvg): one icon, rotated four ways.
+  function arrowIcon(dir, size) {
+    var deg = { up: 0, right: 90, down: 180, left: 270 }[dir];
+    var dims = size ? ' width="' + size + '" height="' + size + '" style="vertical-align: -0.2em"' : "";
+    return '<svg class="ink-icon" viewBox="0 0 16 16"' + dims + ' aria-hidden="true" focusable="false">' +
+      '<g transform="rotate(' + deg + ' 8 8)" fill="none" stroke="currentColor" stroke-width="1.7" ' +
+      'stroke-linecap="round" stroke-linejoin="round"><path d="M8 13.2V3.2"/><path d="M3.9 7.3 8 3.2l4.1 4.1"/></g></svg>';
+  }
   function chevronIcon(dir) {
     var deg = { up: 0, right: 90, down: 180, left: 270 }[dir];
     return '<svg class="ink-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
@@ -248,7 +256,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       var canvas = h("canvas", { class: "ink-canvas", "aria-label": "Writing area: write a formula with a pen, a finger or the mouse" });
       var formula = h("div", { class: "ink-formula", "aria-hidden": "true" });     // the LaTeX in the box, under the ink
       var layer = h("div", { class: "ink-layer" }, [formula, canvas]);
-      var pad = h("div", { class: "ink-pad" }, [layer]);
+      var pad = h("div", { class: "ink-pad", tabindex: "0" }, [layer]);      // it takes the arrow keys, as the formula does
       var fullBtn = h("button", { type: "button", class: "ink-fullbtn" });
       var stage = h("div", { class: "ink-stage" }, [pad, fullBtn]);
       var strips = {};
@@ -260,10 +268,22 @@ SympyEditor.registerAddon("handwriting", (function () {
         strips[dir] = b;
         stage.appendChild(b);
       });
-      var selectBtn = toolButton(h, "select", "Select: a tap selects a piece of the formula, a second tap what holds it", { "aria-pressed": "false" });
-      var penBtn = toolButton(h, "pen", "Pen: writes - with a piece selected, in its place; with the cursor, there; with neither, after the formula", { "aria-pressed": "true" });
+      var selectBtn = toolButton(h, "select", "Select: a tap selects a piece of the formula, a second tap what holds it", { "aria-pressed": "true" });
+      var penBtn = toolButton(h, "pen", "Pen: writes - with a piece selected, in its place; with the cursor, there; with neither, after the formula", { "aria-pressed": "false" });
       var eraseBtn = toolButton(h, "erase", "Eraser: the strokes the pointer passes over go", { "aria-pressed": "false" });
       var modes = h("div", { class: "ink-modes", role: "group", "aria-label": "What a tap or a stroke on the pad does" }, [selectBtn, penBtn, eraseBtn]);
+      // the formula panel's arrows, in its order and words
+      var arrowBtns = {};
+      [["up", "Select the enclosing piece (\u2191)"],
+       ["down", "Select inside: the piece you came from, or the first one; on a piece with nothing inside, a cursor after it (\u2193)"],
+       ["left", "Select the previous piece beside it, or move the cursor left (\u2190)"],
+       ["right", "Select the next piece beside it, or move the cursor right (\u2192)"]].forEach(function (a) {
+        var b = h("button", { type: "button", class: "ink-arrow ink-arrow-" + a[0], title: a[1], "aria-label": a[1] });
+        b.innerHTML = arrowIcon(a[0]);
+        arrowBtns[a[0]] = b;
+      });
+      var arrows = h("div", { class: "ink-arrows", role: "group", "aria-label": "Moving the selection" },
+                     [arrowBtns.up, arrowBtns.down, arrowBtns.left, arrowBtns.right]);
       var doneBtn = toolButton(h, "done", "Done: the reading of the ink into the formula, and the ink goes", { disabled: "" });
       var undoBtn = toolButton(h, "undo", "Undo: take back the last edit - ink, selection, typing", { disabled: "" });
       var redoBtn = toolButton(h, "redo", "Redo: put back what Undo took", { disabled: "" });
@@ -273,7 +293,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       var zoomLevelBtn = h("button", { type: "button", class: "ink-zoom-level", title: "Reset the zoom", "aria-label": "Reset the zoom" }, ["100%"]);
       var zoomInBtn = h("button", { type: "button", class: "ink-zoom-in", title: "Zoom in (Ctrl+wheel, pinch)", "aria-label": "Zoom in" }, ["+"]);
       var zooms = h("div", { class: "ink-zooms", role: "group", "aria-label": "Zoom" }, [zoomOutBtn, zoomLevelBtn, zoomInBtn]);
-      var bar = h("div", { class: "ink-bar" }, [modes, doneBtn, undoBtn, redoBtn, clearBtn, readBtn, zooms]);
+      var bar = h("div", { class: "ink-bar" }, [modes, arrows, doneBtn, undoBtn, redoBtn, clearBtn, readBtn, zooms]);
 
       var note = h("div", { class: "ink-note", "aria-live": "polite" });
       var cands = h("div", { class: "ink-cands", role: "listbox", "aria-label": "Readings, best first" });
@@ -295,7 +315,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       var actions = h("div", { class: "ink-actions" }, [apply]);
       var sheetBody = h("div", { class: "ink-sheet-body" }, [note, cands, readingOf, src, ambig, consts, actions]);
       var sheet = h("div", { class: "ink-sheet" }, [sheetHead, sheetBody]);
-      var element = h("div", { class: "ink-panel", "data-strokes": "0", "data-zoom": "1.00", "data-hole": "", "data-sel": "", "data-mode": "pen" }, [bar, latexRow, stage, sheet]);
+      var element = h("div", { class: "ink-panel", "data-strokes": "0", "data-zoom": "1.00", "data-hole": "", "data-sel": "", "data-mode": "select" }, [bar, latexRow, stage, sheet]);
 
       // ---- state -------------------------------------------------------------------
       var strokes = [];                 // [[[x, y, t], ...], ...]
@@ -316,7 +336,8 @@ SympyEditor.registerAddon("handwriting", (function () {
       var gesture = null;               // two fingers or more: where the pinch began
       var blocked = false;              // a finger left from a pinch: it writes nothing until all have lifted
       var dirty = false;                // ink not read since it changed
-      var mode = "pen";                 // what a tap or a stroke on the pad does: "select", "pen" or "erase"
+      var mode = "select";              // what a tap or a stroke on the pad does: "select" (from the start), "pen" or "erase"
+      var cameFrom = null;              // the piece the up arrow came from: where the down arrow goes back to
       var erase = null;                 // an erasing drag: {id, at, removed: [{index, stroke}]}
       var sel = null;                   // the selected piece of the text: {s, e} (s === e: a place in it)
       var hole = null;                  // where the ink goes: {free} - anywhere, its reading after the text - or {s, e, base, rect, ...}
@@ -542,6 +563,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         element.setAttribute("data-hole", !hole ? "" : hole.free ? "free" : hole.s + "," + hole.e);
         element.setAttribute("data-sel", sel ? sel.s + "," + sel.e : "");
         if (formulaBox) grow(formulaBox.x + formulaBox.w, formulaBox.y + formulaBox.h);
+        for (var ak in arrowBtns) arrowBtns[ak].disabled = !!hole || !formulaBox;
         redraw();
       }
       function moveInk(dx, dy) {           // the ink on the pad (the history keeps copies of its own)
@@ -580,7 +602,13 @@ SympyEditor.registerAddon("handwriting", (function () {
         if (r.s === r.e) return caretRect(r.s);
         if (r.s === 0 && r.e === source().length) return formulaBox;
         for (var i = 0; i < pieces.length; i++) if (pieces[i].s === r.s && pieces[i].e === r.e) return pieces[i].rect;
-        return null;
+        var l = Infinity, tp = Infinity, rr = -Infinity, b = -Infinity;         // a range of pieces: all of them
+        pieces.forEach(function (q) {
+          if (q.s >= r.s && q.e <= r.e) {
+            l = Math.min(l, q.rect.x); tp = Math.min(tp, q.rect.y); rr = Math.max(rr, q.rect.x + q.rect.w); b = Math.max(b, q.rect.y + q.rect.h);
+          }
+        });
+        return l === Infinity ? null : { x: l, y: tp, w: rr - l, h: b - tp };
       }
       function writesAt(p) {               // free ink anywhere; in a hole, in it or near the ink written in it
         if (!hole) return false;
@@ -796,7 +824,96 @@ SympyEditor.registerAddon("handwriting", (function () {
       function changedTools() {
         doneBtn.disabled = !hole;
         typeBtn.disabled = !sel || !!hole;
+        for (var k in arrowBtns) arrowBtns[k].disabled = !!hole || !formulaBox;
       }
+      function sameRange(a, b) { return !!a && !!b && a.s === b.s && a.e === b.e; }
+      // The pieces right inside a range (the whole text for null): the children of a piece.
+      function childrenOf(r) {
+        var box = r || { s: 0, e: source().length }, list = [];
+        pieces.forEach(function (q) {
+          if (q.s >= box.s && q.e <= box.e && !(q.s <= box.s && q.e >= box.e) && !list.some(function (o) { return sameRange(o, q); })) list.push(q);
+        });
+        return list.filter(function (q) {
+          return !list.some(function (o) { return o !== q && o.s <= q.s && o.e >= q.e && (o.s < q.s || o.e > q.e); });
+        }).sort(function (a, b) { return a.s - b.s; });
+      }
+      function smallestHolding(r) {        // the smallest piece holding r (r itself included); null: only the whole text
+        var best = null;
+        pieces.forEach(function (q) { if (q.s <= r.s && q.e >= r.e && (!best || q.e - q.s < best.e - best.s)) best = q; });
+        return best;
+      }
+      // Dragged from one piece to another: the range of pieces beside each other that holds both.
+      function rangeBetween(a, b) {
+        var n = source().length, holder = smallestHolding({ s: Math.min(a.s, b.s), e: Math.max(a.e, b.e) });
+        if (holder && (sameRange(holder, a) || sameRange(holder, b))) return { s: holder.s, e: holder.e };
+        var kids = childrenOf(holder || { s: 0, e: n });
+        var ka = kids.filter(function (k) { return k.s <= a.s && k.e >= a.e; })[0], kb = kids.filter(function (k) { return k.s <= b.s && k.e >= b.e; })[0];
+        if (!ka || !kb) return holder ? { s: holder.s, e: holder.e } : { s: 0, e: n };
+        return { s: Math.min(ka.s, kb.s), e: Math.max(ka.e, kb.e) };
+      }
+      function setSelection(next) {
+        if (!next || sameRange(next, sel)) return false;
+        record();
+        sel = next;
+        layoutFormula();
+        changedTools();
+        return true;
+      }
+      // The arrows: up to what holds the selection, down back inside, left and right to the
+      // pieces beside it - or, with the cursor, to the next place in the text.
+      function navigate(dir) {
+        if (hole || !formulaBox) return;
+        var n = source().length, next = null;
+        if (!sel) {
+          if (dir === "left") next = { s: 0, e: 0 };
+          else if (dir === "right") next = { s: n, e: n };
+          else if (dir === "down") { var first = childrenOf(null)[0]; if (first) next = { s: first.s, e: first.e }; }
+        } else if (sel.s === sel.e) {
+          var pos = sel.s, marks = [0, n];
+          pieces.forEach(function (q) { marks.push(q.s, q.e); });
+          marks = marks.filter(function (v, i) { return marks.indexOf(v) === i; }).sort(function (a, b) { return a - b; });
+          if (dir === "right") { var r = marks.filter(function (v) { return v > pos; })[0]; if (r !== undefined) next = { s: r, e: r }; }
+          else if (dir === "left") { var l = marks.filter(function (v) { return v < pos; }).pop(); if (l !== undefined) next = { s: l, e: l }; }
+          else if (dir === "up") {
+            var around = null;
+            pieces.forEach(function (q) { if (q.s < pos && q.e > pos && (!around || q.e - q.s < around.e - around.s)) around = q; });
+            next = around ? { s: around.s, e: around.e } : { s: 0, e: n };
+          }
+        } else if (dir === "up") {
+          var up = enclosing(sel);
+          if (up) { cameFrom = { s: sel.s, e: sel.e }; next = up; }
+        } else if (dir === "down") {
+          var kids = childrenOf(sel);
+          if (!kids.length) next = { s: sel.e, e: sel.e };
+          else {
+            var back = cameFrom && kids.filter(function (k) { return k.s <= cameFrom.s && k.e >= cameFrom.e; })[0];
+            var into = back || kids[0];
+            next = { s: into.s, e: into.e };
+          }
+        } else {
+          var sibs = childrenOf(enclosing(sel) || { s: 0, e: n });
+          if (dir === "right") { var nx = sibs.filter(function (q) { return q.s >= sel.e; })[0]; next = nx ? { s: nx.s, e: nx.e } : { s: sel.e, e: sel.e }; }
+          else { var pv = sibs.filter(function (q) { return q.e <= sel.s; }).pop(); next = pv ? { s: pv.s, e: pv.e } : { s: sel.s, e: sel.s }; }
+          cameFrom = null;
+        }
+        setSelection(next);
+      }
+      // Shift with left and right: the range of pieces beside each other shrinks and grows at its end.
+      function extendRange(dir) {
+        if (hole || !sel || sel.s === sel.e) return;
+        var n = source().length, sibs = childrenOf(enclosing(sel) || { s: 0, e: n });
+        var within = sibs.filter(function (q) { return q.s >= sel.s && q.e <= sel.e; });
+        if (dir === "right") { var nx = sibs.filter(function (q) { return q.s >= sel.e; })[0]; if (nx) setSelection({ s: sel.s, e: nx.e }); }
+        else if (within.length > 1) setSelection({ s: sel.s, e: within[within.length - 2].e });
+      }
+      ["up", "down", "left", "right"].forEach(function (d) { arrowBtns[d].addEventListener("click", function () { navigate(d); }); });
+      pad.addEventListener("keydown", function (ev) {
+        var dir = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" }[ev.key];
+        if (!dir || ev.altKey || ev.ctrlKey || ev.metaKey) return;
+        ev.preventDefault();
+        ev.stopPropagation();                         // the editor's own keys are not for the pad
+        if (ev.shiftKey && (dir === "left" || dir === "right")) extendRange(dir); else navigate(dir);
+      });
       doneBtn.addEventListener("click", function () { if (hole) { record(); commitHole(); } });
       typeBtn.addEventListener("click", function () {   // the selected piece's LaTeX, selected in the line: typing replaces it
         if (!sel || hole) return;
@@ -962,8 +1079,9 @@ SympyEditor.registerAddon("handwriting", (function () {
         if (current || erase || tap) return;                               // a palm beside a pen
         if (ev.pointerType === "mouse" && ev.button !== 0) return;
         var at = point(ev);
-        if (mode === "select") {                                           // Select: a tap selects
+        if (mode === "select") {                                           // Select: a tap selects, a drag a range
           ev.preventDefault();
+          try { pad.focus({ preventScroll: true }); } catch (e) { /* no focus to take */ }
           try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* not capturable */ }
           tap = { id: ev.pointerId, at: at, hit: pieceAt(at), moved: false };
           return;
@@ -995,9 +1113,16 @@ SympyEditor.registerAddon("handwriting", (function () {
           touches[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
           if (gesture) { ev.preventDefault(); moveGesture(); return; }
         }
-        if (tap && ev.pointerId === tap.id) {                              // a drag is no tap
+        if (tap && ev.pointerId === tap.id) {                              // a drag is no tap: from piece to piece, a range
           var q = point(ev);
-          if (Math.hypot(q[0] - tap.at[0], q[1] - tap.at[1]) > 8 / zoom) tap.moved = true;
+          if (!tap.moved && Math.hypot(q[0] - tap.at[0], q[1] - tap.at[1]) > 8 / zoom) { tap.moved = true; tap.before = snapshot(); }
+          if (tap.moved && tap.hit && !hole) {
+            var over = pieceAt(q);
+            if (over) {
+              var range = rangeBetween(tap.hit, over);
+              if (!sameRange(range, sel)) { sel = range; layoutFormula(); changedTools(); }
+            }
+          }
           return;
         }
         if (erase && ev.pointerId === erase.id) {
@@ -1038,7 +1163,13 @@ SympyEditor.registerAddon("handwriting", (function () {
           }
           return;
         }
-        if (tap && ev.pointerId === tap.id) { var was = tap; tap = null; if (!was.moved) tapAt(was); return; }
+        if (tap && ev.pointerId === tap.id) {
+          var was = tap;
+          tap = null;
+          if (!was.moved) tapAt(was);
+          else if (was.before && !sameRange(was.before.sel, sel) && (was.before.sel || sel)) push(was.before);   // a range dragged: one edit
+          return;
+        }
         if (erase && ev.pointerId === erase.id) { finishErase(); return; }
         endStroke(ev);
       }
@@ -1487,7 +1618,8 @@ SympyEditor.registerAddon("handwriting", (function () {
         title: "Handwriting",
         help: "<section><h3>The tools</h3><ul>"
           + "<li>" + toolIcon("select", 16) + " <b>Select</b>, " + toolIcon("pen", 16) + " <b>Pen</b> and " + toolIcon("erase", 16) + " <b>Eraser</b> say what a tap or a stroke on the pad does - one at a time, the pressed one.</li>"
-          + "<li>With <b>Select</b>, a tap selects a piece of the formula, a second tap what holds it; a tap near the left or right edge of a piece, or beside the formula, puts the cursor there; a tap on nothing else clears both.</li>"
+          + "<li>The pad starts with <b>Select</b>. " + arrowIcon("up", 16) + " " + arrowIcon("down", 16) + " " + arrowIcon("left", 16) + " " + arrowIcon("right", 16) + " go as the formula panel's arrows: up to what holds the selection, down back inside (on a piece with nothing inside, a cursor after it), left and right to the pieces beside it - or, with the cursor, to the next place; with nothing selected, a cursor at the start or the end. The arrow keys do the same once the pad has been tapped, and Shift with left and right shrinks and grows a range.</li>"
+          + "<li>With <b>Select</b>, a tap selects a piece of the formula, a second tap what holds it; a drag from one piece to another selects the pieces beside each other between them; a tap near the left or right edge of a piece, or beside the formula, puts the cursor there; a tap on nothing else clears both.</li>"
           + "<li>With the <b>Pen</b> and a piece selected, what is written - anywhere on the pad - takes its place: the piece gives way to room to write in, the ink goes into it, the room grows as the ink nears its edges, and the reading takes the piece's place in the LaTeX. Pressing the Pen with a piece selected (or the cursor placed) makes that room at once, and every stroke goes there until Done. With nothing selected the ink is free: its reading goes after the formula (a tap on nothing, with Select, clears the selection).</li>"
           + "<li>With the <b>Pen</b> and the cursor, what is written - anywhere on the pad - goes in at the cursor, as a new piece of the formula, in a room made for it there. The keyboard button beside the LaTeX line puts the typing cursor at the same place.</li>"
           + "<li>With the <b>Eraser</b>, every stroke the pointer passes over goes. A pen turned round erases too.</li>"

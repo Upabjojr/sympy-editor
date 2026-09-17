@@ -89,6 +89,7 @@ def test_the_area_grows_scrolls_undoes_and_goes_full_screen():
             g = page.evaluate(geometry)
             page.wait_for_function("document.querySelector('.se-addon-handwriting .ink-canvas').clientWidth > 0")
             page.locator(".se-addon-handwriting .ink-latex").fill("")    # the pad opens with the formula: an empty one
+            page.locator(".se-addon-handwriting .ink-pen").click()                # it starts with Select: the Pen, to write
 
             def stroke(x0, y0, x1, y1, steps=6):
                 page.mouse.move(x0, y0)
@@ -108,7 +109,7 @@ def test_the_area_grows_scrolls_undoes_and_goes_full_screen():
             guide = page.locator(".se-help-view")
             for name in ("Select", "Pen", "Eraser", "Done", "Undo", "Redo", "Clear", "Read", "Full screen"):
                 assert name in guide.inner_text(), name
-            assert guide.locator("svg.ink-icon").count() == 11
+            assert guide.locator("svg.ink-icon").count() == 15
             page.keyboard.press("Escape")
             assert _wait(lambda: page.locator(".se-help-view").count() == 0)
             # a stroke well inside: read (by the fake), with the reading's options
@@ -275,6 +276,7 @@ def test_two_fingers_zoom_and_scroll_the_area_and_never_write():
             page.wait_for_selector(".se-addon-handwriting .ink-canvas", timeout=30000)
             page.wait_for_function("document.querySelector('.se-addon-handwriting .ink-canvas').clientWidth > 0")
             page.locator(".se-addon-handwriting .ink-latex").fill("")    # the pad opens with the formula: an empty one
+            page.locator(".se-addon-handwriting .ink-pen").click()                # it starts with Select: the Pen, to write
             panel = page.locator(".se-addon-handwriting .ink-panel")
             touch = lambda kind, pid, px, py: page.evaluate(TOUCH, {"type": kind, "id": pid, "x": px, "y": py})
             strokes = lambda: int(panel.get_attribute("data-strokes"))
@@ -365,6 +367,7 @@ def test_erase_takes_away_the_strokes_it_passes_over():
             page.wait_for_selector(".se-addon-handwriting .ink-canvas", timeout=30000)
             page.wait_for_function("document.querySelector('.se-addon-handwriting .ink-canvas').clientWidth > 0")
             page.locator(".se-addon-handwriting .ink-latex").fill("")    # the pad opens with the formula: an empty one
+            page.locator(".se-addon-handwriting .ink-pen").click()                # it starts with Select: the Pen, to write
             panel = page.locator(".se-addon-handwriting .ink-panel")
             strokes = lambda: int(panel.get_attribute("data-strokes"))
             c = page.evaluate("(() => { const r = document.querySelector('.se-addon-handwriting .ink-canvas').getBoundingClientRect(); return {x: r.left, y: r.top}; })()")
@@ -424,6 +427,7 @@ def test_picking_a_reading_brings_its_buttons_into_sight():
             page.wait_for_selector(".se-addon-handwriting .ink-canvas", timeout=30000)
             page.wait_for_function("document.querySelector('.se-addon-handwriting .ink-canvas').clientWidth > 0")
             page.locator(".se-addon-handwriting .ink-latex").fill("")    # the pad opens with the formula: an empty one
+            page.locator(".se-addon-handwriting .ink-pen").click()                # it starts with Select: the Pen, to write
             page.locator(".se-addon-handwriting .ink-pad").scroll_into_view_if_needed()
             r = page.locator(".se-addon-handwriting .ink-pad").bounding_box()
             page.mouse.move(r["x"] + 30, r["y"] + 40)
@@ -483,6 +487,8 @@ def _pad_page(p, doc):
     page.wait_for_function("document.querySelector('.se-addon-handwriting .ink-canvas').clientWidth > 0")
     page.locator(".se-addon-handwriting .ink-latex").fill("")    # the pad opens with the formula: an empty one
     page.locator(".se-addon-handwriting .ink-pad").scroll_into_view_if_needed()
+    assert page.locator(".se-addon-handwriting .ink-panel").get_attribute("data-mode") == "select"   # the pad starts with Select
+    page.locator(".se-addon-handwriting .ink-pen").click()                                           # the tests write: the Pen
     return srv, browser, page
 
 
@@ -935,6 +941,73 @@ def test_zoom_buttons_and_the_room_to_write_in_brought_into_sight():
             before = box["sl"]
             _drag(page, box["left"] + box["w"] - 140, box["top"] + 40, box["left"] + box["w"] - 12, box["top"] + 60)
             assert _wait(lambda: page.evaluate(padbox)["sl"] > before + 20, 5)
+            assert page.errors == []
+        finally:
+            browser.close()
+            srv.shutdown()
+            srv.server_close()
+
+
+def test_select_goes_as_the_formula_panel_arrows_keys_and_ranges():
+    """Select has the formula panel's ways: the arrows up, down, left and right,
+    the arrow keys, Shift to grow a range, and a drag across pieces."""
+    doc = Document(x, addons=[HandwritingAddon(FakeRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _pad_page(p, doc)
+        try:
+            panel = page.locator(".se-addon-handwriting .ink-panel")
+            field = page.locator(".se-addon-handwriting .ink-latex")
+            arrow = lambda d: page.locator(".se-addon-handwriting .ink-arrow-" + d)
+            sel = lambda: panel.get_attribute("data-sel")
+            field.fill("a + b + c")
+            page.wait_for_selector(".se-addon-handwriting .ink-formula [data-ls]")
+            page.locator(".se-addon-handwriting .ink-select").click()
+            # nothing selected: right, a cursor at the end; left, the place before
+            arrow("right").click()
+            assert sel() == "9,9"
+            arrow("left").click()
+            assert sel() == "8,8"
+            # b: left, a; right, b; right, c; up, the whole; down, back to c
+            b = page.evaluate(PIECE_BOX, [4, 5])
+            page.mouse.click(b["x"], b["y"])
+            assert sel() == "4,5"
+            arrow("left").click()
+            assert sel() == "0,1"
+            arrow("right").click()
+            assert sel() == "4,5"
+            arrow("right").click()
+            assert sel() == "8,9"
+            arrow("up").click()
+            assert sel() == "0,9"
+            arrow("down").click()
+            assert sel() == "8,9"
+            # right of the last one: a cursor after it; down on a piece with nothing inside: a cursor after it
+            arrow("right").click()
+            assert sel() == "9,9"
+            a = page.evaluate(PIECE_BOX, [0, 1])
+            page.mouse.click(a["x"], a["y"])
+            arrow("down").click()
+            assert sel() == "1,1"
+            # a drag from a to b: the range a + b
+            a, b = page.evaluate(PIECE_BOX, [0, 1]), page.evaluate(PIECE_BOX, [4, 5])
+            _drag(page, a["x"], a["y"], b["x"], b["y"])
+            assert sel() == "0,5"
+            page.locator(".se-addon-handwriting .ink-undo").click()            # a drag is one edit
+            assert sel() == "1,1"
+            # the keys, once the pad has been tapped; Shift grows and shrinks the range
+            page.mouse.click(b["x"], b["y"])
+            assert sel() == "4,5"
+            page.keyboard.press("ArrowLeft")
+            assert sel() == "0,1"
+            page.keyboard.press("Shift+ArrowRight")
+            assert sel() == "0,5"
+            page.keyboard.press("Shift+ArrowRight")
+            assert sel() == "0,9"
+            page.keyboard.press("Shift+ArrowLeft")
+            assert sel() == "0,5"
+            # a range too gives way to room to write in
+            page.locator(".se-addon-handwriting .ink-pen").click()
+            assert panel.get_attribute("data-hole") == "0,5"
             assert page.errors == []
         finally:
             browser.close()
