@@ -525,6 +525,10 @@ def test_a_piece_of_the_formula_is_selected_and_written_over():
             # the reading takes the piece's place in the text
             want = text[:a[0]] + READING + text[a[1]:]
             assert _wait(lambda: field.input_value() == want, 15)
+            # what SymPy gets is shown of the piece written alone
+            src = page.locator(".se-addon-handwriting .ink-src")
+            assert _wait(lambda: src.inner_text() == "sin(x)*cos(y) + pi")
+            assert "selected piece" in page.locator(".se-addon-handwriting .ink-reading-of").inner_text()
             # with Select, a tap outside the hole: the reading stays, the ink goes, and the new piece is selected
             page.locator(".se-addon-handwriting .ink-select").click()
             x_at = box((0, 1))
@@ -533,6 +537,9 @@ def test_a_piece_of_the_formula_is_selected_and_written_over():
             assert panel.get_attribute("data-strokes") == "0" and field.input_value() == want
             assert panel.get_attribute("data-sel") == "%d,%d" % (a[0], a[0] + len(READING))
             assert page.locator(".se-addon-handwriting .ink-formula [data-inkhole]").count() == 0
+            # the hole closed: the reading is of the whole formula again
+            assert _wait(lambda: src.inner_text() == "x**2 + (sin(x)*cos(y) + pi)/b")
+            assert page.locator(".se-addon-handwriting .ink-reading-of").inner_text() == "The formula:"
             assert page.errors == []
         finally:
             browser.close()
@@ -687,6 +694,72 @@ def test_undo_and_redo_keep_the_pad_where_it_is():
                     seen.append(top())
                     page.wait_for_timeout(100)
             assert all(abs(t - start) <= 1 for t in seen), (start, seen)
+            assert page.errors == []
+        finally:
+            browser.close()
+            srv.shutdown()
+            srv.server_close()
+
+
+def test_a_pieces_options_and_its_edited_latex_go_into_the_formula():
+    """The options of a piece written by hand are that piece's, and the one
+    picked stays with it in the formula; the pen beside the chosen reading
+    edits its LaTeX; Apply with the piece still open puts it all in."""
+    doc = Document(x, addons=[HandwritingAddon(FakeRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _pad_page(p, doc)
+        try:
+            panel = page.locator(".se-addon-handwriting .ink-panel")
+            field = page.locator(".se-addon-handwriting .ink-latex")
+            src = page.locator(".se-addon-handwriting .ink-src")
+            text = r"x^{2} + \frac{a}{b}"
+            field.fill(text)
+            page.wait_for_selector(".se-addon-handwriting .ink-formula [data-ls]")
+            a = (text.index("{a}") + 1, text.index("{a}") + 2)
+
+            def write_over_a():
+                page.locator(".se-addon-handwriting .ink-select").click()
+                c = page.evaluate(PIECE_BOX, list(a))
+                page.mouse.click(c["x"], c["y"])
+                assert panel.get_attribute("data-sel") == "%d,%d" % a
+                page.locator(".se-addon-handwriting .ink-pen").click()
+                _drag(page, c["x"], c["y"], c["x"] + 40, c["y"] + 8)
+                assert _wait(lambda: src.inner_text() == "sin(x)*cos(y) + pi", 15)
+
+            # an option picked for the piece: its reading, then the whole formula's, keeps it
+            write_over_a()
+            menu = page.locator(".se-addon-handwriting .ink-point select").filter(has=page.locator("option", has_text="sin(x*cos(y)) + pi")).first
+            menu.select_option(label="sin(x*cos(y)) + pi")
+            assert _wait(lambda: src.inner_text() == "sin(x*cos(y)) + pi")
+            page.locator(".se-addon-handwriting .ink-done").click()
+            assert _wait(lambda: src.inner_text() == "x**2 + (sin(x*cos(y)) + pi)/b")
+            assert field.input_value() == text[:a[0]] + READING + text[a[1]:]           # the LaTeX as written
+            # another piece written over: the option picked for the first one stays
+            written = field.input_value()
+            bb = (written.rindex("{b}") + 1, written.rindex("{b}") + 2)
+            page.locator(".se-addon-handwriting .ink-select").click()
+            c = page.evaluate(PIECE_BOX, list(bb))
+            page.mouse.click(c["x"], c["y"])
+            page.locator(".se-addon-handwriting .ink-pen").click()
+            _drag(page, c["x"], c["y"], c["x"] + 40, c["y"] + 8)
+            assert _wait(lambda: field.input_value() == written[:bb[0]] + READING + written[bb[1]:], 15)
+            page.locator(".se-addon-handwriting .ink-done").click()
+            assert _wait(lambda: src.inner_text().startswith("x**2 + (sin(x*cos(y)) + pi)/"))
+            # the pen beside the chosen reading: its LaTeX, edited, in the piece's place
+            field.fill(text)
+            page.wait_for_selector(".se-addon-handwriting .ink-formula [data-ls]")
+            write_over_a()
+            page.locator(".se-addon-handwriting .ink-cand-edit").click()
+            box = page.locator(".se-addon-handwriting .ink-cand-input")
+            assert box.input_value() == READING
+            box.fill("n + 1")
+            box.press("Enter")
+            assert _wait(lambda: field.input_value() == text.replace("{a}", "{n + 1}"))
+            assert _wait(lambda: src.inner_text() == "n + 1")
+            assert page.locator(".se-addon-handwriting .ink-cand.ink-edited.ink-chosen").count() == 1
+            # Apply with the piece still open: the formula, as it reads with the piece in
+            page.locator(".se-addon-handwriting .ink-apply").click()
+            assert _wait(lambda: str(doc.expr) == "x**2 + (n + 1)/b")
             assert page.errors == []
         finally:
             browser.close()

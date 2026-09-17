@@ -278,6 +278,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       var typeBtn = toolButton(h, "type", "Type over the selected piece: its LaTeX, selected in this line", { disabled: "" });
       var loadBtn = toolButton(h, "load", "The editor's formula, into the pad");
       var latexRow = h("div", { class: "ink-latexrow" }, [field, typeBtn, loadBtn]);
+      var readingOf = h("div", { class: "ink-reading-of" });                 // what the reading below is of: the piece written, or the formula
       var src = h("code", { class: "ink-src", title: "What SymPy gets" });
       var ambig = h("div", { class: "ink-ambig" });
       var consts = h("div", { class: "ink-consts" });
@@ -288,7 +289,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       var sheetHead = h("button", { type: "button", class: "ink-sheet-head", "aria-expanded": "true",
         title: "Fold the readings away, or bring them back" }, [sheetChevron, sheetSummary]);
       var actions = h("div", { class: "ink-actions" }, [apply]);
-      var sheetBody = h("div", { class: "ink-sheet-body" }, [note, cands, src, ambig, consts, actions]);
+      var sheetBody = h("div", { class: "ink-sheet-body" }, [note, cands, readingOf, src, ambig, consts, actions]);
       var sheet = h("div", { class: "ink-sheet" }, [sheetHead, sheetBody]);
       var element = h("div", { class: "ink-panel", "data-strokes": "0", "data-zoom": "1.00", "data-hole": "", "data-sel": "", "data-mode": "pen" }, [bar, latexRow, stage, sheet]);
 
@@ -316,6 +317,8 @@ SympyEditor.registerAddon("handwriting", (function () {
       var sel = null;                   // the selected piece of the text: {s, e} (s === e: a place in it)
       var hole = null;                  // where the ink goes: {free} - anywhere, its reading after the text - or {s, e, base, rect, ...}
       var chosen = null;                // the text the chosen reading put in the hole's place
+      var chosenLatex = null;           // that reading's own LaTeX (without the braces or spaces it went in with)
+      var piecePicked = false;          // an option of that reading picked by hand: its LaTeX goes in when the hole closes
       var pieces = [];                  // the drawn pieces: {s, e, rect} in the canvas's pixels
       var formulaBox = null;            // the whole drawing, likewise; null: nothing drawn
       var tap = null;                   // a pointer down on the formula: a tap, or a drag that writes
@@ -445,7 +448,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         }
         var tex = LatexMap.annotate(text, holeTex);
         if (tex === null && open) {        // not parsed: nowhere to show the hole - the ink is free instead
-          hole = { free: true, base: hole.base, s: hole.base.length, e: hole.base.length };
+          hole = { free: true, base: hole.base, s: hole.base.length, e: hole.base.length, picks: hole.picks };
           renderFormula();
           return;
         }
@@ -572,7 +575,8 @@ SympyEditor.registerAddon("handwriting", (function () {
         strokes = []; current = null;
         element.setAttribute("data-strokes", "0");
         hole = { s: r.s, e: r.e, base: text, free: false, braces: !!(node && node.braces), rect: null, calibrated: false,
-                 wPx: Math.max(rect ? rect.w : 0, 80), hPx: hPx, aPx: hPx * 0.72, scaleW: 1, scaleH: 1 };
+                 wPx: Math.max(rect ? rect.w : 0, 80), hPx: hPx, aPx: hPx * 0.72, scaleW: 1, scaleH: 1,
+                 picks: { choices: Object.assign({}, picks.choices), constants: Object.assign({}, picks.constants) } };
         sel = null;
         chosen = null;
         touched = true;
@@ -585,7 +589,8 @@ SympyEditor.registerAddon("handwriting", (function () {
       function openFree() {
         if (hole || !canRead) return false;
         var text = source();
-        hole = { free: true, base: text, s: text.length, e: text.length };
+        hole = { free: true, base: text, s: text.length, e: text.length,
+                 picks: { choices: Object.assign({}, picks.choices), constants: Object.assign({}, picks.constants) } };
         sel = null;
         chosen = null;
         if (text.trim()) touched = true;
@@ -611,6 +616,22 @@ SympyEditor.registerAddon("handwriting", (function () {
       // The ink's reading into the text for good (the text as it was, with none): the ink goes.
       function commitHole() {
         if (!hole) return;
+        // The options go on with the text, as written: the whole formula's as they were
+        // (moved past the piece that changed), and the piece's own where it now stands in
+        // the text - an option is known by the place of what it is of ("rule@start-end");
+        // a constant's switch, by its name.
+        var kept = hole.picks || { choices: {}, constants: {} };
+        var next = { choices: Object.assign({}, kept.choices), constants: Object.assign({}, kept.constants) };
+        if (pieceMode()) {
+          var at = hole.s + Math.max(0, chosen.indexOf(chosenLatex)), delta = chosen.length - (hole.e - hole.s);
+          next.choices = shiftChoices(kept.choices, hole.s, hole.e, delta);
+          Object.keys(picks.choices || {}).forEach(function (k) {
+            var m = /^(.*)@(\d+)-(\d+)$/.exec(k);
+            if (m) next.choices[m[1] + "@" + (+m[2] + at) + "-" + (+m[3] + at)] = picks.choices[k];
+          });
+          Object.assign(next.constants, picks.constants);
+        }
+        piecePicked = false;
         var was = hole;
         hole = null;
         clearTimeout(timer);
@@ -623,7 +644,9 @@ SympyEditor.registerAddon("handwriting", (function () {
           sel = { s: was.s + lead, e: was.s + chosen.replace(/\s+$/, "").length };
         }
         chosen = null;
+        chosenLatex = null;
         clearReadings();
+        picks = next;
         renderFormula();
         refit();
         changedTools();
@@ -889,7 +912,8 @@ SympyEditor.registerAddon("handwriting", (function () {
       }
       function snapshot(text) {
         return { text: text === undefined ? field.value : text, sel: sel ? { s: sel.s, e: sel.e } : null,
-                 hole: hole ? copyHole(hole) : null, strokes: strokes.map(copyStroke), chosen: chosen };
+                 hole: hole ? copyHole(hole) : null, strokes: strokes.map(copyStroke), chosen: chosen,
+                 chosenLatex: chosenLatex, piecePicked: piecePicked, picks: JSON.parse(JSON.stringify(picks)) };
       }
       function push(st) {
         past.push(st);
@@ -920,10 +944,12 @@ SympyEditor.registerAddon("handwriting", (function () {
         hole = st.hole ? copyHole(st.hole) : null;
         strokes = st.strokes.map(copyStroke);
         chosen = st.chosen;
+        chosenLatex = st.chosenLatex === undefined ? null : st.chosenLatex;
+        piecePicked = !!st.piecePicked;
         touched = true;
         element.setAttribute("data-strokes", String(strokes.length));
         clearTimeout(timer);
-        picks = { choices: {}, constants: {} };
+        picks = st.picks ? JSON.parse(JSON.stringify(st.picks)) : { choices: {}, constants: {} };
         if (!strokes.length) cands.textContent = "";   // readings of ink no longer there; otherwise they stay until the ink is read again
         renderFormula();
         refit();
@@ -957,7 +983,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         if (strokes.length) { timer = setTimeout(recognize, delay); return; }
         seq++;
         clearReadings();
-        if (hole) { chosen = null; setText(hole.base); }
+        if (hole) { chosen = null; chosenLatex = null; setText(hole.base); }
         reread();
       }
       function clearInk() {
@@ -1029,8 +1055,12 @@ SympyEditor.registerAddon("handwriting", (function () {
             });
             cands.appendChild(b);
             if (i === 0 && keep !== true) choose(c, b);
+            else if (keep === true && chosenLatex !== null && c.latex === chosenLatex) markChosen(b);
           });
-          if (keep === true) reread();
+          if (keep === true) {
+            if (chosenLatex !== null && !cands.querySelector(".ink-chosen")) addEdited(chosenLatex);
+            reread();
+          }
         }, function (e) {
           if (my !== seq) return;
           element.classList.remove("ink-busy");
@@ -1039,34 +1069,121 @@ SympyEditor.registerAddon("handwriting", (function () {
           updateSummary();
         });
       }
+      // A hole with a reading chosen for it: what is shown and read is that piece alone.
+      function pieceMode() { return !!hole && chosen !== null && chosenLatex !== null; }
+      function readingText() { return pieceMode() ? chosenLatex : field.value; }
+      // The reading as it goes in the hole's place: braced where a bare argument was, apart
+      // from a command name before or after it, after the formula with a space.
+      function fitPiece(latex) {
+        var before = hole.base.slice(0, hole.s), after = hole.base.slice(hole.e), piece = latex;
+        if (hole.free) return (!before.trim() || /\s$/.test(before) ? "" : " ") + piece;
+        if (hole.braces) return "{" + piece + "}";
+        if (/\\[A-Za-z]+$/.test(before) && /^[A-Za-z]/.test(piece)) piece = " " + piece;
+        if (/\\[A-Za-z]+$/.test(piece) && /^[A-Za-z]/.test(after)) piece += " ";
+        return piece;
+      }
+      // An option of the formula, known by the place in the text of what it is of, where it
+      // stands once the text from s to e has changed length by delta: past it, moved;
+      // around it, stretched; before it, as it was; within it, gone with what it was of.
+      function shiftChoices(choices, s, e, delta) {
+        var out = {};
+        Object.keys(choices || {}).forEach(function (k) {
+          var m = /^(.*)@(\d+)-(\d+)$/.exec(k);
+          if (!m) return;
+          var a = +m[2], b = +m[3];
+          if (b <= s) out[k] = choices[k];
+          else if (a >= e) out[m[1] + "@" + (a + delta) + "-" + (b + delta)] = choices[k];
+          else if (a <= s && b >= e) out[m[1] + "@" + a + "-" + (b + delta)] = choices[k];
+        });
+        return out;
+      }
+      function putPiece(latex) {
+        var piece = fitPiece(latex);
+        chosen = piece;
+        chosenLatex = latex;
+        setText(hole.base.slice(0, hole.s) + piece + hole.base.slice(hole.e));
+      }
+      function markChosen(button) {
+        var old = cands.querySelectorAll(".ink-cand-edit");
+        for (var k = 0; k < old.length; k++) old[k].remove();
+        var all = cands.querySelectorAll(".ink-cand");
+        for (var i = 0; i < all.length; i++) {
+          all[i].classList.toggle("ink-chosen", all[i] === button);
+          all[i].setAttribute("aria-selected", all[i] === button ? "true" : "false");
+        }
+        if (!button) return;
+        var edit = h("button", { type: "button", class: "ink-cand-edit", title: "Edit this reading's LaTeX", "aria-label": "Edit this reading's LaTeX" });
+        edit.innerHTML = toolIcon("pen");
+        edit.addEventListener("click", function () { editReading(); });
+        button.parentNode.insertBefore(edit, button.nextSibling);
+      }
       function choose(c, button) {
-        for (var i = 0; i < cands.children.length; i++) {
-          var b = cands.children[i];
-          b.classList.toggle("ink-chosen", b === button);
-          b.setAttribute("aria-selected", b === button ? "true" : "false");
-        }
+        markChosen(button);
         picks = { choices: {}, constants: {} };
-        if (hole && (!hole.free || hole.base.trim())) {   // into the text: in the hole's place, or after the formula
-          var before = hole.base.slice(0, hole.s), after = hole.base.slice(hole.e), piece = c.latex;
-          if (hole.free) piece = (/\s$/.test(before) ? "" : " ") + piece;
-          else if (hole.braces) piece = "{" + piece + "}";    // a bare argument: braced
-          else {                                              // apart from a command name before or after it
-            if (/\\[A-Za-z]+$/.test(before) && /^[A-Za-z]/.test(piece)) piece = " " + piece;
-            if (/\\[A-Za-z]+$/.test(piece) && /^[A-Za-z]/.test(after)) piece += " ";
-          }
-          chosen = piece;
-          setText(before + piece + after);
-          reread();                        // the whole text, read
-          return;
-        }
+        piecePicked = false;
+        if (hole) { putPiece(c.latex); show(c.reading); return; }     // the reading of what is written, alone
         chosen = c.latex;
+        chosenLatex = null;
         setText(c.latex);
         show(c.reading);
       }
+      // A reading typed over: in the row as a reading of its own, chosen.
+      function addEdited(latex) {
+        var old = cands.querySelector(".ink-edited");
+        if (old) old.remove();
+        var b = h("button", { type: "button", class: "ink-cand ink-edited", role: "option", title: latex });
+        typeset(b, latex, latex);
+        b.addEventListener("click", function () {
+          record();
+          markChosen(b);
+          picks = { choices: {}, constants: {} };
+          piecePicked = false;
+          if (hole) putPiece(latex); else { chosen = latex; setText(latex); }
+          reread();
+        });
+        cands.appendChild(b);
+        markChosen(b);
+        return b;
+      }
+      var editor = null;                  // the box a reading is typed over in, while open
+      function closeEditor() { if (editor) { editor.remove(); editor = null; } }
+      function editReading() {
+        closeEditor();
+        var input = h("input", { class: "ink-cand-input", type: "text", spellcheck: "false", autocomplete: "off", autocapitalize: "off",
+          "aria-label": "The reading's LaTeX" });
+        input.value = readingText();
+        var ok = toolButton(h, "done", "Use this LaTeX");
+        var cancel = h("button", { type: "button", class: "ink-cand-cancel", title: "Leave the reading as it was" }, ["Cancel"]);
+        editor = h("div", { class: "ink-cand-editor" }, [input, ok, cancel]);
+        cands.parentNode.insertBefore(editor, cands.nextSibling);
+        var use = function () {
+          var latex = input.value.trim();
+          closeEditor();
+          if (!latex || latex === readingText()) return;
+          record();
+          picks = { choices: {}, constants: {} };
+          piecePicked = false;
+          if (hole) putPiece(latex); else { chosen = latex; setText(latex); }
+          addEdited(latex);
+          renderFormula();
+          reread();
+        };
+        ok.addEventListener("click", use);
+        cancel.addEventListener("click", closeEditor);
+        input.addEventListener("keydown", function (ev) {
+          ev.stopPropagation();                                   // the editor's keys are not for the box
+          if (ev.key === "Enter") { ev.preventDefault(); use(); }
+          else if (ev.key === "Escape") { ev.preventDefault(); closeEditor(); }
+        });
+        input.focus();
+        input.select();
+      }
       function reread() {
         var my = ++seq;
-        if (!field.value.trim()) { show(null); return; }
-        api.call("read", { latex: field.value, choices: picks.choices, constants: picks.constants }, { quiet: true })
+        if (hole && !pieceMode()) { show(null); return; }        // a hole with nothing read in it yet: no reading
+        var text = readingText();
+        if (!text.trim()) { show(null); return; }
+        api.call("read", { latex: text, choices: picks.choices, constants: picks.constants }, { quiet: true })
           .then(function (res) { if (my === seq) show(res.reading); }, function () {});
       }
       field.addEventListener("input", function () {
@@ -1076,6 +1193,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         for (var i = 0; i < cands.children.length; i++) cands.children[i].classList.remove("ink-chosen");
         picks = { choices: {}, constants: {} };     // new text: the old picks do not apply to it
         if (hole) dropHole();
+        closeEditor();
         sel = null;
         touched = true;
         seq++;                                     // a reading still on its way is of the text before: dropped
@@ -1099,6 +1217,10 @@ SympyEditor.registerAddon("handwriting", (function () {
 
       function show(reading) {
         last = reading || null;
+        readingOf.textContent = !reading ? ""
+          : !pieceMode() ? (hole ? "What is written:" : "The formula:")
+          : hole.free ? (hole.base.trim() ? "What is written, to go after the formula:" : "What is written:")
+          : "What is written, in the selected piece's place:";
         if (!reading) src.textContent = "";
         else if (reading.ok) src.textContent = reading.src;
         else src.textContent = reading.error || "This could not be read";
@@ -1123,13 +1245,13 @@ SympyEditor.registerAddon("handwriting", (function () {
             if (i === a.choice) opt.selected = true;
             sel.appendChild(opt);
           });
-          sel.addEventListener("change", function () { picks.choices[a.key] = parseInt(sel.value, 10); reread(); });
+          sel.addEventListener("change", function () { picks.choices[a.key] = parseInt(sel.value, 10); if (pieceMode()) piecePicked = true; reread(); });
           ambig.appendChild(h("label", { class: "ink-point" }, [h("code", { class: "ink-fragment" }, [a.fragment]), " → ", sel]));
         });
         (reading.constants || []).forEach(function (c) {
           var box = h("input", { type: "checkbox" });
           box.checked = !!c.on;
-          box.addEventListener("change", function () { picks.constants[c.name] = box.checked; reread(); });
+          box.addEventListener("change", function () { picks.constants[c.name] = box.checked; if (pieceMode()) piecePicked = true; reread(); });
           consts.appendChild(h("label", { class: "ink-const", title: c.label }, [box, " ", h("code", {}, [c.name]), " is " + c.value + " (" + c.label + ")"]));
         });
       }
@@ -1149,8 +1271,9 @@ SympyEditor.registerAddon("handwriting", (function () {
 
       function applyToEditor() {
         if (apply.disabled) return;
-        var payload = { latex: field.value, path: "/", choices: picks.choices, constants: picks.constants };
         var before = snapshot();
+        if (hole) { closeEditor(); commitHole(); }   // the ink's reading into the formula first: one edit with the applying
+        var payload = { latex: field.value, path: "/", choices: picks.choices, constants: picks.constants };
         api.call("insert", payload).then(function () {
           // the view stays as it is - the pad, full screen or not, where it was on the page
           push(before);                            // Undo brings the pad back as it was, ink and all
@@ -1229,7 +1352,7 @@ SympyEditor.registerAddon("handwriting", (function () {
           + "<li><b>Apply to the formula</b> makes the pad's formula the editor's, and the view stays as it is; Enter in the LaTeX line does the same.</li>"
           + "</ul></section>"
           + "<section><h3>Writing by hand</h3><ul>"
-          + "<li>A moment after the pen lifts, what is written is read. The best reading comes first: pick the one you wrote. The line under the readings is what SymPy gets of the whole formula, with a menu for each part that can be read more than one way and a switch for each constant name.</li>"
+          + "<li>A moment after the pen lifts, what is written is read. The best reading comes first: pick the one you wrote, or press the pen beside it to edit its LaTeX. The line under the readings is what SymPy gets of what is written - of that piece alone while it is being written, of the whole formula otherwise - with a menu for each part that can be read more than one way and a switch for each constant name. An option picked for a piece stays with it in the formula.</li>"
           + "<li>Nearing the right or the bottom edge, the area makes room beyond it; a small button in the middle of an edge scrolls it that way, and so does the wheel.</li>"
           + "<li>Two fingers never write: pinch to zoom the area in or out, drag with two fingers to move it about (a pinch on a trackpad zooms too).</li>"
           + "<li>The reading is done by math-ocr's stroke model. It reads one formula at a time, and mixes up look-alike glyphs most (<code>1</code> and <code>|</code>, <code>V</code> and <code>v</code>).</li>"

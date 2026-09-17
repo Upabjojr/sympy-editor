@@ -93,6 +93,18 @@
 .se-addon-handwriting .ink-note.error, .se-addon-handwriting .ink-src.error { color: var(--se-error); }
 .se-addon-handwriting .ink-cands .ink-cand { font-size: 14px; padding: 0.3rem 0.6rem; }
 .se-addon-handwriting .ink-cands .ink-cand.ink-chosen { border-color: rgba(var(--se-accent), 0.85); background: rgba(var(--se-accent), 0.12); }
+/* the pen beside the chosen reading, and the box its LaTeX is edited in */
+.se-addon-handwriting .ink-cands .ink-cand-edit { display: inline-flex; align-items: center; padding: 0.25rem 0.35rem; margin-left: -0.2rem; }
+.se-addon-handwriting .ink-cand-edit .ink-icon { display: block; width: 1rem; height: 1rem; }
+.se-addon-handwriting .ink-cand-editor { display: flex; align-items: center; gap: 0.4rem; }
+.se-addon-handwriting .ink-cand-editor .ink-cand-input { flex: 1 1 auto; min-width: 0; font: inherit; font-family: var(--se-mono); font-size: 14px; padding: 0.3rem 0.5rem;
+  border: 1px solid rgba(var(--se-accent), 0.7); border-radius: 0.3rem; background: transparent; color: inherit; }
+.se-addon-handwriting .ink-cand-editor button { font: inherit; font-size: 12px; display: inline-flex; align-items: center; padding: 0.25rem 0.5rem;
+  border: 1px solid var(--se-border); border-radius: 0.3rem; background: var(--se-btn); color: inherit; cursor: pointer; }
+.se-addon-handwriting .ink-cand-editor .ink-icon { display: block; width: 1.1rem; height: 1.1rem; }
+/* what the reading below is of */
+.se-addon-handwriting .ink-reading-of { color: var(--se-muted); font-size: 11px; }
+.se-addon-handwriting .ink-reading-of:empty { display: none; }
 .se-addon-handwriting .ink-latex {
   font: inherit; font-family: var(--se-mono); font-size: 13px; padding: 0.3rem 0.5rem;
   border: 1px solid var(--se-border); border-radius: 0.3rem; background: transparent; color: inherit;
