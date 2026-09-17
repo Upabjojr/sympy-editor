@@ -676,3 +676,40 @@ def test_undo_and_redo_go_through_every_edit_in_the_pad():
             browser.close()
             srv.shutdown()
             srv.server_close()
+
+
+def test_undo_and_redo_keep_the_pad_where_it_is():
+    """Pressed again and again with the page scrolled down to the panel, Undo
+    and Redo never move the pad: the readings under it never take less room."""
+    doc = Document(x, addons=[HandwritingAddon(FakeRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _pad_page(p, doc)
+        try:
+            panel = page.locator(".se-addon-handwriting .ink-panel")
+            field = page.locator(".se-addon-handwriting .ink-latex")
+            field.fill("x + y")
+            page.wait_for_selector(".se-addon-handwriting .ink-formula [data-ls]")
+            pad = page.locator(".se-addon-handwriting .ink-pad").bounding_box()
+            for dy in (0, 60):                                                 # two strokes: readings with their options
+                _drag(page, pad["x"] + pad["width"] - 220, pad["y"] + 30 + dy, pad["x"] + pad["width"] - 90, pad["y"] + 50 + dy)
+                page.wait_for_timeout(900)
+            assert _wait(lambda: page.locator(".se-addon-handwriting .ink-cand").count() > 0, 15)
+            assert _wait(lambda: page.locator(".se-addon-handwriting .ink-point select").count() > 0, 15)
+            page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
+            top = lambda: round(page.evaluate("document.querySelector('.se-addon-handwriting .ink-pad').getBoundingClientRect().top"))
+            start = top()
+            undo, redo = page.locator(".se-addon-handwriting .ink-undo"), page.locator(".se-addon-handwriting .ink-redo")
+            seen = []
+            for button in (undo, undo, undo, redo, redo, undo, redo, redo):
+                if button.is_disabled():
+                    continue
+                button.click()
+                for _ in range(8):                                              # while it is read again, too
+                    seen.append(top())
+                    page.wait_for_timeout(100)
+            assert all(abs(t - start) <= 1 for t in seen), (start, seen)
+            assert page.errors == []
+        finally:
+            browser.close()
+            srv.shutdown()
+            srv.server_close()

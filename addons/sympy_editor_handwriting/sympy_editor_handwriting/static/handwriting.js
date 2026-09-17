@@ -904,7 +904,15 @@ SympyEditor.registerAddon("handwriting", (function () {
         past.push(st);
         if (past.length > HISTORY) past.shift();
         future = [];
+        sheetBody.style.minHeight = "";   // an edit of its own: the readings may take less room again
         updateHistory();
+      }
+      // Going back and forth through the history, the readings under the pad never take
+      // less room than they did: taking it would move the pad, the line and the tools
+      // (the page scrolls back up to fill it) under the finger about to press Undo again.
+      function holdSheet() {
+        var h = sheetBody.offsetHeight, held = parseFloat(sheetBody.style.minHeight) || 0;
+        if (h > held) sheetBody.style.minHeight = h + "px";
       }
       function record(text) { push(snapshot(text)); }
       function updateHistory() {
@@ -923,7 +931,9 @@ SympyEditor.registerAddon("handwriting", (function () {
         chosen = st.chosen;
         touched = true;
         element.setAttribute("data-strokes", String(strokes.length));
-        clearReadings();
+        clearTimeout(timer);
+        picks = { choices: {}, constants: {} };
+        if (!strokes.length) cands.textContent = "";   // readings of ink no longer there; otherwise they stay until the ink is read again
         renderFormula();
         refit();
         changedTools();
@@ -935,11 +945,13 @@ SympyEditor.registerAddon("handwriting", (function () {
       }
       function undo() {
         if (!past.length) return;
+        holdSheet();
         future.push(snapshot());
         restore(past.pop());
       }
       function redo() {
         if (!future.length) return;
+        holdSheet();
         past.push(snapshot());
         restore(future.pop());
       }
@@ -1136,6 +1148,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         apply.disabled = !(last && last.ok) || (!hole && field.value === editorLatex());
       }
       function updateSummary() {
+        note.title = note.textContent;
         sheetSummary.textContent = last && last.ok ? last.src : (note.textContent || "Readings");
         sheetChevron.innerHTML = chevronIcon(folded ? "up" : "down");
         sheetHead.setAttribute("aria-expanded", folded ? "false" : "true");

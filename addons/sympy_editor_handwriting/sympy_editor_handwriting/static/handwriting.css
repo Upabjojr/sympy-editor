@@ -87,7 +87,9 @@
 /* The readings: inline under the area; in full screen, a sheet at the bottom. */
 .se-addon-handwriting .ink-sheet, .se-addon-handwriting .ink-sheet-body { display: flex; flex-direction: column; gap: 0.4rem; }
 .se-addon-handwriting .ink-sheet-head { display: none; }
-.se-addon-handwriting .ink-note { min-height: 1.2em; color: var(--se-muted); }
+/* one line, and a row of readings however many there are (none included): what changes in them never moves what is above */
+.se-addon-handwriting .ink-note { min-height: 1.2em; color: var(--se-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.se-addon-handwriting .ink-cands { min-height: 2.2rem; }
 .se-addon-handwriting .ink-note.error, .se-addon-handwriting .ink-src.error { color: var(--se-error); }
 .se-addon-handwriting .ink-cands .ink-cand { font-size: 14px; padding: 0.3rem 0.6rem; }
 .se-addon-handwriting .ink-cands .ink-cand.ink-chosen { border-color: rgba(var(--se-accent), 0.85); background: rgba(var(--se-accent), 0.12); }
@@ -137,5 +139,6 @@
   .se-addon-handwriting .ink-scroll-left, .se-addon-handwriting .ink-scroll-right { width: 2.2rem; height: 3rem; }
   .se-addon-handwriting .ink-scroll-up, .se-addon-handwriting .ink-scroll-down { width: 3rem; height: 2.2rem; }
   .se-addon-handwriting .ink-full .ink-sheet-head { min-height: 2.6rem; }
+  .se-addon-handwriting .ink-cands { min-height: 2.8rem; }
 }
 @media (prefers-reduced-motion: reduce) { .se-addon-handwriting .ink-scroll, .se-addon-handwriting .ink-fullbtn { transition: none; } }
