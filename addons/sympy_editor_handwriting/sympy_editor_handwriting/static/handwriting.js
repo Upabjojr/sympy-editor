@@ -696,10 +696,17 @@ SympyEditor.registerAddon("handwriting", (function () {
       function caretAt(t) {
         var p = t.at;
         if (t.hit) {
-          var r = t.hit.rect, edge = Math.min(10 / zoom, r.w * 0.3);
-          if (p[0] <= r.x + edge) return t.hit.s;
-          if (p[0] >= r.x + r.w - edge) return t.hit.e;
-          return null;
+          var r = t.hit.rect, edge = Math.min(10 / zoom, r.w * 0.3), tol = 2 / zoom;
+          var left = p[0] <= r.x + edge, right = !left && p[0] >= r.x + r.w - edge;
+          if (!left && !right) return null;
+          // the outermost piece holding it whose edge that also is: after x^{2}, not after its 2
+          var best = t.hit;
+          pieces.forEach(function (q) {
+            if (q.s > t.hit.s || q.e < t.hit.e) return;
+            var same = left ? Math.abs(q.rect.x - r.x) <= tol : Math.abs(q.rect.x + q.rect.w - (r.x + r.w)) <= tol;
+            if (same && q.rect.w * q.rect.h > best.rect.w * best.rect.h) best = q;
+          });
+          return left ? best.s : best.e;
         }
         if (formulaBox && p[1] >= formulaBox.y - 24 / zoom && p[1] <= formulaBox.y + formulaBox.h + 24 / zoom) {
           if (p[0] > formulaBox.x + formulaBox.w) return source().length;

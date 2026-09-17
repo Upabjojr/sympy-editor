@@ -850,6 +850,13 @@ def test_the_cursor_takes_what_is_written_or_typed_as_a_new_piece():
             page.locator(".se-addon-handwriting .ink-done").click()
             assert panel.get_attribute("data-hole") == ""
             assert panel.get_attribute("data-sel") == "2,%d" % (2 + len(READING))       # the new piece, selected
+            # right of a power's exponent: the cursor after the power, not in its exponent
+            field.fill("x^{2} + y")
+            page.wait_for_selector(".se-addon-handwriting .ink-formula [data-ls]")
+            page.locator(".se-addon-handwriting .ink-select").click()
+            er = page.evaluate(PIECE_RECT, [3, 4])
+            page.mouse.click(er["right"] - 1, (er["top"] + er["bottom"]) / 2)
+            assert panel.get_attribute("data-sel") == "5,5"
             assert page.errors == []
         finally:
             browser.close()
