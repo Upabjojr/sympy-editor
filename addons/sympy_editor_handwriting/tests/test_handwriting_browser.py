@@ -516,9 +516,10 @@ def test_a_piece_of_the_formula_is_selected_and_written_over():
             assert panel.get_attribute("data-sel") == "%d,%d" % a
             page.locator(".se-addon-handwriting .ink-pen").click()
             assert panel.get_attribute("data-mode") == "pen"
-            # writing over the selection: it gives way to a hole, and the stroke is in it
-            c = box(a)
-            _drag(page, c["x"], c["y"], c["x"] + 40, c["y"] + 8)
+            # the Pen with the piece selected: it gives way to a hole at once, and what is written goes in it
+            assert panel.get_attribute("data-hole") == "%d,%d" % a and panel.get_attribute("data-strokes") == "0"
+            room = page.locator(".se-addon-handwriting .ink-formula [data-inkhole] .rule").bounding_box()
+            _drag(page, room["x"] + 10, room["y"] + room["height"] / 2, room["x"] + room["width"] - 10, room["y"] + room["height"] / 2)
             assert _wait(lambda: panel.get_attribute("data-hole") == "%d,%d" % a)
             assert panel.get_attribute("data-strokes") == "1"
             assert page.locator(".se-addon-handwriting .ink-formula [data-inkhole]").count() == 1
@@ -843,8 +844,15 @@ def test_the_cursor_takes_what_is_written_or_typed_as_a_new_piece():
             xr = page.evaluate(PIECE_RECT, [0, 1])
             page.mouse.click(xr["right"] - 1, (xr["top"] + xr["bottom"]) / 2)
             assert panel.get_attribute("data-sel") == "1,1"
+            # the Pen, pressed: the room to write in at the cursor, before any stroke; Select, pressed: gone again
+            page.locator(".se-addon-handwriting .ink-pen").click()
+            assert panel.get_attribute("data-hole") == "1,1" and panel.get_attribute("data-strokes") == "0"
+            assert page.locator(".se-addon-handwriting .ink-formula [data-inkhole]").count() == 1
+            page.locator(".se-addon-handwriting .ink-select").click()
+            assert panel.get_attribute("data-hole") == "" and panel.get_attribute("data-sel") == "1,1"
             # the Pen writes at the cursor: a new piece there
             page.locator(".se-addon-handwriting .ink-pen").click()
+            assert panel.get_attribute("data-hole") == "1,1"
             pad = page.locator(".se-addon-handwriting .ink-pad").bounding_box()
             _drag(page, pad["x"] + pad["width"] - 220, pad["y"] + 60, pad["x"] + pad["width"] - 120, pad["y"] + 90)
             assert panel.get_attribute("data-hole") == "1,1"

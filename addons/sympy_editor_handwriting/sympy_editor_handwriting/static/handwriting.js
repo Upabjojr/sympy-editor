@@ -836,8 +836,16 @@ SympyEditor.registerAddon("handwriting", (function () {
         canvas.classList.toggle("ink-selecting", m === "select");
         element.setAttribute("data-mode", m);
       }
-      selectBtn.addEventListener("click", function () { setMode("select"); });
-      penBtn.addEventListener("click", function () { setMode("pen"); });
+      selectBtn.addEventListener("click", function () {
+        // back to selecting before a stroke was written: the room made for it goes, the cursor or selection back
+        if (hole && !hole.free && !strokes.length) commitHole();
+        setMode("select");
+      });
+      penBtn.addEventListener("click", function () {
+        setMode("pen");
+        // the cursor placed or a piece selected: the room to write in, there, at once
+        if (!hole && canRead && sel && rectFor(sel)) { record(); openHole(sel); }
+      });
       eraseBtn.addEventListener("click", function () { setMode(mode === "erase" ? "pen" : "erase"); });
 
       // ---- zooming and scrolling: two fingers, or a pinch on a trackpad ------------
@@ -1425,7 +1433,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         help: "<section><h3>The tools</h3><ul>"
           + "<li>" + toolIcon("select", 16) + " <b>Select</b>, " + toolIcon("pen", 16) + " <b>Pen</b> and " + toolIcon("erase", 16) + " <b>Eraser</b> say what a tap or a stroke on the pad does - one at a time, the pressed one.</li>"
           + "<li>With <b>Select</b>, a tap selects a piece of the formula, a second tap what holds it; a tap near the left or right edge of a piece, or beside the formula, puts the cursor there; a tap on nothing else clears both.</li>"
-          + "<li>With the <b>Pen</b> and a piece selected, what is written - anywhere on the pad - takes its place: the piece gives way to room to write in, the ink goes into it, the room grows as the ink nears its edges, and the reading takes the piece's place in the LaTeX. Every stroke goes there until Done. With nothing selected the ink is free: its reading goes after the formula (a tap on nothing, with Select, clears the selection).</li>"
+          + "<li>With the <b>Pen</b> and a piece selected, what is written - anywhere on the pad - takes its place: the piece gives way to room to write in, the ink goes into it, the room grows as the ink nears its edges, and the reading takes the piece's place in the LaTeX. Pressing the Pen with a piece selected (or the cursor placed) makes that room at once, and every stroke goes there until Done. With nothing selected the ink is free: its reading goes after the formula (a tap on nothing, with Select, clears the selection).</li>"
           + "<li>With the <b>Pen</b> and the cursor, what is written - anywhere on the pad - goes in at the cursor, as a new piece of the formula, in a room made for it there. The keyboard button beside the LaTeX line puts the typing cursor at the same place.</li>"
           + "<li>With the <b>Eraser</b>, every stroke the pointer passes over goes. A pen turned round erases too.</li>"
           + "<li>" + toolIcon("done", 16) + " <b>Done</b> puts the reading of the ink into the formula for good, and the ink goes; with Select, a tap does the same.</li>"
