@@ -445,6 +445,8 @@ SympyEditor.registerAddon("handwriting", (function () {
           var em = emPx();
           holeTex = "\\htmlData{inkhole=1}{\\rule[-" + fmt((hole.hPx - hole.aPx) / em / hole.scaleH) + "em]{" +
                     fmt(hole.wPx / em / hole.scaleW) + "em}{" + fmt(hole.hPx / em / hole.scaleH) + "em}}";
+          // at the cursor, room either side: the space to write in not flush against its neighbours
+          if (hole.s === hole.e) holeTex = "\\hspace{0.5em}" + holeTex + "\\hspace{0.5em}";
         }
         var tex = LatexMap.annotate(text, holeTex);
         if (tex === null && open) {        // not parsed: nowhere to show the hole - the ink is free instead
@@ -591,12 +593,12 @@ SympyEditor.registerAddon("handwriting", (function () {
       function openHole(r) {
         if (hole || !canRead || !r) return false;
         var text = source(), rect = rectFor(r), node = LatexMap.nodeAt(text, r.s, r.e);
-        var hPx = Math.max(rect ? rect.h : 0, 44);
+        var hPx = Math.max(rect ? rect.h + 12 : 0, 56);             // a little larger than the piece, never small
         clearTimeout(timer);
         strokes = []; current = null;
         element.setAttribute("data-strokes", "0");
         hole = { s: r.s, e: r.e, base: text, free: false, braces: !!(node && node.braces), rect: null, calibrated: false,
-                 wPx: Math.max(rect ? rect.w : 0, 80), hPx: hPx, aPx: hPx * 0.72, scaleW: 1, scaleH: 1,
+                 wPx: Math.max(rect ? rect.w + 30 : 0, 110), hPx: hPx, aPx: hPx * 0.72, scaleW: 1, scaleH: 1,
                  picks: { choices: Object.assign({}, picks.choices), constants: Object.assign({}, picks.constants) } };
         sel = null;
         chosen = null;
@@ -621,19 +623,19 @@ SympyEditor.registerAddon("handwriting", (function () {
       }
       function fitHole() {                 // the ink inside it, and it as large as the ink needs, with room beyond
         if (!hole || hole.free || !hole.rect || !strokes.length) return;
-        var r = hole.rect, m = 28 / zoom, minX = Infinity, minY = Infinity, inkR = -Infinity, inkB = -Infinity;
+        var r = hole.rect, m = 34 / zoom, minX = Infinity, minY = Infinity, inkR = -Infinity, inkB = -Infinity;
         strokes.forEach(function (s) { s.forEach(function (p) {
           minX = Math.min(minX, p[0]); minY = Math.min(minY, p[1]); inkR = Math.max(inkR, p[0]); inkB = Math.max(inkB, p[1]);
         }); });
         var dx = 0, dy = 0;
         if (inkR < r.x || minX > r.x + r.w || inkB < r.y || minY > r.y + r.h) {
           // written away from the room made for it (the selection was elsewhere on the pad): the ink into it
-          dx = r.x + 8 / zoom - minX;
-          dy = r.y + 8 / zoom - minY;
+          dx = r.x + 12 / zoom - minX;
+          dy = r.y + 12 / zoom - minY;
         } else {
           // begun on a small piece, the ink may stand out above or left of the room: in it
-          if (minX < r.x + 4 / zoom) dx = r.x + 8 / zoom - minX;
-          if (minY < r.y + 4 / zoom) dy = r.y + 8 / zoom - minY;
+          if (minX < r.x + 6 / zoom) dx = r.x + 12 / zoom - minX;
+          if (minY < r.y + 6 / zoom) dy = r.y + 12 / zoom - minY;
         }
         if (dx || dy) moveInk(dx, dy);
         var maxX = r.x + hole.wPx, maxY = r.y + hole.hPx;

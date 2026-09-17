@@ -845,6 +845,10 @@ def test_the_cursor_takes_what_is_written_or_typed_as_a_new_piece():
             pad = page.locator(".se-addon-handwriting .ink-pad").bounding_box()
             _drag(page, pad["x"] + pad["width"] - 220, pad["y"] + 60, pad["x"] + pad["width"] - 120, pad["y"] + 90)
             assert panel.get_attribute("data-hole") == "1,1"
+            # room to write in at the cursor: not small, and apart from the x before it
+            room = page.locator(".se-addon-handwriting .ink-formula [data-inkhole] .rule").bounding_box()
+            xr = page.evaluate(PIECE_RECT, [0, 1])
+            assert room["width"] >= 100 and room["x"] - xr["right"] >= 5, (room, xr)
             assert _wait(lambda: field.input_value() == "x " + READING + " + y", 15)
             assert "at the cursor" in page.locator(".se-addon-handwriting .ink-reading-of").inner_text()
             page.locator(".se-addon-handwriting .ink-done").click()
