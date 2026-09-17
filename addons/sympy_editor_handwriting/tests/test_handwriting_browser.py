@@ -1130,3 +1130,45 @@ def test_free_ink_is_read_with_the_piece_it_is_written_against():
             browser.close()
             srv.shutdown()
             srv.server_close()
+
+
+def test_the_piece_ink_is_read_with_can_be_picked_among_the_others():
+    """The pieces free ink might be read together with are offered over the
+    readings; a tap reads it again with the one tapped, or alone; Undo takes
+    the pick back."""
+    rec = StandInRecognizer()
+    doc = Document(x, addons=[HandwritingAddon(rec), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _pad_page(p, doc)
+        try:
+            field = page.locator(".se-addon-handwriting .ink-latex")
+            options = page.locator(".se-addon-handwriting .ink-nest .ink-nest-option")
+            field.fill("a + x")
+            page.wait_for_selector(".se-addon-handwriting .ink-formula [data-ls]")
+            page.wait_for_timeout(200)
+            rec.latex = r"\Delta^{2}"
+            r = page.evaluate(PIECE_RECT, [4, 5])
+            hgt = r["bottom"] - r["top"]
+            _drag(page, r["right"] + 3, r["top"] - 0.3 * hgt, r["right"] + 13, r["top"] + 0.15 * hgt)
+            assert _wait(lambda: field.input_value() == "a + x^{2}", 15), field.input_value()
+            # offered: x (read with, now), the whole a + x, and alone
+            assert _wait(lambda: options.count() == 3)
+            ranges = options.evaluate_all("els => els.map(e => [e.dataset.s || null, e.dataset.e || null, e.classList.contains('ink-chosen')])")
+            assert ranges == [["4", "5", True], ["0", "5", False], [None, None, False]], ranges
+            # the whole: read with it instead
+            page.locator('.se-addon-handwriting .ink-nest-option[data-s="0"][data-e="5"]').click()
+            assert _wait(lambda: field.input_value() == r"\left(a + x\right)^{2}", 15), field.input_value()
+            assert _wait(lambda: page.locator('.se-addon-handwriting .ink-nest-option.ink-chosen[data-s="0"]').count() == 1)
+            # alone: the ink read by itself, after the formula
+            rec.latex = "y"
+            page.locator(".se-addon-handwriting .ink-nest-alone").click()
+            assert _wait(lambda: field.input_value() == "a + x y", 15), field.input_value()
+            assert page.locator(".se-addon-handwriting .ink-nest-alone.ink-chosen").count() == 1
+            # Undo: the pick before
+            page.locator(".se-addon-handwriting .ink-undo").click()
+            assert _wait(lambda: field.input_value() == r"\left(a + x\right)^{2}", 15), field.input_value()
+            assert page.errors == []
+        finally:
+            browser.close()
+            srv.shutdown()
+            srv.server_close()

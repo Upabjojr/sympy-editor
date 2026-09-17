@@ -121,6 +121,15 @@
 /* what the reading below is of */
 .se-addon-handwriting .ink-reading-of { color: var(--se-muted); font-size: 11px; }
 .se-addon-handwriting .ink-reading-of:empty { display: none; }
+/* the pieces the ink might be read together with */
+.se-addon-handwriting .ink-nest { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }
+.se-addon-handwriting .ink-nest:empty { display: none; }
+.se-addon-handwriting .ink-nest-label { color: var(--se-muted); font-size: 11px; }
+.se-addon-handwriting .ink-nest button {
+  font: inherit; font-size: 13px; line-height: 1.2; padding: 0.2rem 0.5rem;
+  border: 1px dashed rgba(var(--se-accent), 0.6); border-radius: 0.3rem; background: var(--se-btn); color: inherit; cursor: pointer;
+}
+.se-addon-handwriting .ink-nest button.ink-chosen { border-style: solid; border-color: rgba(var(--se-accent), 0.85); background: rgba(var(--se-accent), 0.12); }
 .se-addon-handwriting .ink-latex {
   font: inherit; font-family: var(--se-mono); font-size: 13px; padding: 0.3rem 0.5rem;
   border: 1px solid var(--se-border); border-radius: 0.3rem; background: transparent; color: inherit;
@@ -161,6 +170,7 @@
   .se-addon-handwriting .ink-bar button, .se-addon-handwriting .ink-actions button { font-size: 14px; padding: 0.45rem 0.7rem; min-height: 2.2rem; }
   .se-addon-handwriting .ink-bar .ink-tool, .se-addon-handwriting .ink-latexrow button { min-width: 2.8rem; padding: 0.4rem 0.6rem; }
   .se-addon-handwriting .ink-zooms button { min-width: 2.6rem; }
+  .se-addon-handwriting .ink-nest button { font-size: 15px; padding: 0.4rem 0.7rem; }
   .se-addon-handwriting .ink-arrows button { min-width: 2.8rem; padding: 0.4rem 0.6rem; }
   .se-addon-handwriting .ink-arrow .ink-icon { width: 1.35rem; height: 1.35rem; }
   .se-addon-handwriting .ink-zooms .ink-zoom-level { min-width: 3.8rem; }

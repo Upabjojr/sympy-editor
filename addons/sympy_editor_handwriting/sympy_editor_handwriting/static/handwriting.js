@@ -302,7 +302,8 @@ SympyEditor.registerAddon("handwriting", (function () {
       var typeBtn = toolButton(h, "type", "Type over the selected piece (its LaTeX, selected in this line) - or at the cursor", { disabled: "" });
       var loadBtn = toolButton(h, "load", "The editor's formula, into the pad");
       var latexRow = h("div", { class: "ink-latexrow" }, [field, typeBtn, loadBtn]);
-      var readingOf = h("div", { class: "ink-reading-of" });                 // what the reading below is of: the piece written, or the formula
+      var readingOf = h("div", { class: "ink-reading-of" });
+      var nestRow = h("div", { class: "ink-nest", role: "group", "aria-label": "What the ink is read together with" });                 // what the reading below is of: the piece written, or the formula
       var src = h("code", { class: "ink-src", title: "What SymPy gets" });
       var ambig = h("div", { class: "ink-ambig" });
       var consts = h("div", { class: "ink-consts" });
@@ -313,7 +314,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       var sheetHead = h("button", { type: "button", class: "ink-sheet-head", "aria-expanded": "true",
         title: "Fold the readings away, or bring them back" }, [sheetChevron, sheetSummary]);
       var actions = h("div", { class: "ink-actions" }, [apply]);
-      var sheetBody = h("div", { class: "ink-sheet-body" }, [note, cands, readingOf, src, ambig, consts, actions]);
+      var sheetBody = h("div", { class: "ink-sheet-body" }, [note, nestRow, cands, readingOf, src, ambig, consts, actions]);
       var sheet = h("div", { class: "ink-sheet" }, [sheetHead, sheetBody]);
       var element = h("div", { class: "ink-panel", "data-strokes": "0", "data-zoom": "1.00", "data-hole": "", "data-sel": "", "data-mode": "select" }, [bar, latexRow, stage, sheet]);
 
@@ -486,6 +487,8 @@ SympyEditor.registerAddon("handwriting", (function () {
       // ---- the formula in the pad ------------------------------------------------------
       var TRUST = { throwOnError: false, displayMode: false, output: "html", trust: function (c) { return c.command === "\\htmlData"; } };
       function source() { return field.value; }
+      // the text drawn: with free ink on the pad, the formula as it was before the ink's reading went in
+      function drawnText() { return hole && hole.free ? hole.base : field.value; }
       function setText(v) { field.value = v; shownText = v; }
       function fmt(v) { return String(Math.round(Math.max(0, v) * 1000) / 1000); }
       function emPx() { return parseFloat(getComputedStyle(formula).fontSize) || 24; }
@@ -577,7 +580,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         return best;
       }
       function enclosing(r) {              // the smallest piece holding r and more; the whole text last
-        var best = null, n = source().length;
+        var best = null, n = drawnText().length;
         pieces.forEach(function (q) {
           if (q.s <= r.s && q.e >= r.e && (q.s < r.s || q.e > r.e) && (!best || q.e - q.s < best.e - best.s)) best = q;
         });
@@ -600,7 +603,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       function rectFor(r) {
         if (!r || !formulaBox) return null;
         if (r.s === r.e) return caretRect(r.s);
-        if (r.s === 0 && r.e === source().length) return formulaBox;
+        if (r.s === 0 && r.e === drawnText().length) return formulaBox;
         for (var i = 0; i < pieces.length; i++) if (pieces[i].s === r.s && pieces[i].e === r.e) return pieces[i].rect;
         var l = Infinity, tp = Infinity, rr = -Infinity, b = -Infinity;         // a range of pieces: all of them
         pieces.forEach(function (q) {
@@ -1307,6 +1310,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       function clearReadings() {
         clearTimeout(timer);
         cands.textContent = "";
+        nestRow.textContent = "";
         picks = { choices: {}, constants: {} };
         note.textContent = canRead ? "" : status.reason;
         note.className = "ink-note" + (canRead ? "" : " error");
@@ -1370,8 +1374,19 @@ SympyEditor.registerAddon("handwriting", (function () {
         note.textContent = "Reading…";
         note.className = "ink-note";
         updateSummary();
-        var pl = hole && hole.free ? placeInk(strokes) : null, nestAt = pl && pl.nest ? rectFor(pl.nest) : null;
-        if (hole && hole.free) { hole.placement = pl; redraw(); }
+        var pl = hole && hole.free ? placeInk(strokes) : null;
+        if (hole && hole.free) {
+          hole.nestOptions = pl && pl.options ? pl.options : [];
+          if (hole.picked === "none") pl = null;                                   // alone, as asked
+          else if (hole.picked && pl) {
+            if (hole.nestOptions.some(function (o) { return sameRange(o, hole.picked); })) pl = Object.assign({}, pl, { nest: hole.picked });
+            else hole.picked = null;                                                // no longer one of them
+          }
+          hole.placement = pl;
+          redraw();
+          renderNestRow();
+        }
+        var nestAt = pl && pl.nest ? rectFor(pl.nest) : null;
         var failed = function (e) {
           if (my !== seq) return;
           element.classList.remove("ink-busy");
@@ -1400,9 +1415,40 @@ SympyEditor.registerAddon("handwriting", (function () {
             .then(function (res2) { if (my === seq) showCandidates(res2, keep); }, failed);
         }, failed);
       }
+      function renderNestRow() {
+        nestRow.textContent = "";
+        if (!hole || !hole.free || !hole.nestOptions || !hole.nestOptions.length || !strokes.length) return;
+        var reading = hole.placement && hole.placement.kind === "nest" ? hole.placement.target : null;
+        nestRow.appendChild(h("span", { class: "ink-nest-label" }, ["Read with:"]));
+        hole.nestOptions.forEach(function (r) {
+          var text = hole.base.slice(r.s, r.e);
+          var b = h("button", { type: "button", class: "ink-nest-option", "data-s": String(r.s), "data-e": String(r.e),
+                                title: "Read the ink together with " + text.trim() });
+          typeset(b, text, text);
+          var on = hole.picked && hole.picked !== "none" ? sameRange(hole.picked, r) : !hole.picked && !!reading && sameRange(reading, r);
+          b.classList.toggle("ink-chosen", on);
+          b.setAttribute("aria-pressed", on ? "true" : "false");
+          b.addEventListener("click", function () { pickNest({ s: r.s, e: r.e }); });
+          nestRow.appendChild(b);
+        });
+        var alone = h("button", { type: "button", class: "ink-nest-option ink-nest-alone", title: "Read the ink alone, after the formula" }, ["alone"]);
+        alone.classList.toggle("ink-chosen", hole.picked === "none");
+        alone.setAttribute("aria-pressed", hole.picked === "none" ? "true" : "false");
+        alone.addEventListener("click", function () { pickNest("none"); });
+        nestRow.appendChild(alone);
+      }
+      // A piece picked by hand (or "none": alone) to read the ink with: read again with it.
+      function pickNest(r) {
+        if (!hole || !hole.free) return;
+        if (r === "none" ? hole.picked === "none" : hole.picked && hole.picked !== "none" && sameRange(hole.picked, r)) return;
+        record();
+        hole.picked = r;
+        recognize(false);
+      }
       function showCandidates(res, keep) {
         element.classList.remove("ink-busy");
         cands.textContent = "";
+        renderNestRow();
         if (!res.candidates.length) { note.textContent = "Nothing could be read"; show(null); return; }
         note.textContent = "Read in " + res.ms + " ms" + (res.candidates.length > 1 ? " — the best reading first, pick another if it is the one" : "");
         res.candidates.forEach(function (c, i) {
@@ -1459,7 +1505,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       // ink over the bar: over it); smaller, at a piece's top-right corner: its exponent, at
       // its bottom-right: its subscript; beside a piece: after it (before it, on its left) -
       // a product.  null: nowhere in particular (after the formula).
-      function placeInk(list) {
+      function placeInkAt(list) {
         if (!hole || !hole.free || !hole.base.trim() || !formulaBox || !pieces.length || !list.length) return null;
         var tol = 6 / zoom, I = boxOf(list);
         for (var i = 0; i < list.length; i++) {
@@ -1469,15 +1515,16 @@ SympyEditor.registerAddon("handwriting", (function () {
           if (!rest.length) continue;
           var R = boxOf(rest), under = R.minY >= S.maxY - tol, over = R.maxY <= S.minY + tol;
           if (!under && !over) continue;
-          var bar = null;
+          var bar = null, bars = [];
           pieces.forEach(function (q) {
             var r = q.rect, shared = Math.min(r.x + r.w, S.maxX) - Math.max(r.x, S.minX);
             if (shared < 0.5 * r.w) return;
             var gap = under ? S.minY - (r.y + r.h) : r.y - S.maxY;
             if (gap < -tol || gap > Math.max(r.h, 24 / zoom)) return;
+            bars.push(q);
             if (!bar || r.w * r.h > bar.rect.w * bar.rect.h) bar = q;
           });
-          if (bar) return { kind: under ? "over" : "under", target: { s: bar.s, e: bar.e }, s: bar.s, e: bar.e, read: rest, nest: { s: bar.s, e: bar.e } };
+          if (bar) return { kind: under ? "over" : "under", target: { s: bar.s, e: bar.e }, s: bar.s, e: bar.e, read: rest, nest: { s: bar.s, e: bar.e }, others: bars };
         }
         var near = function (q) { return q.rect.y - I.maxY < q.rect.h && I.minY - (q.rect.y + q.rect.h) < q.rect.h; };
         var tolX = Math.max(12 / zoom, 0.25 * (I.maxX - I.minX));
@@ -1490,10 +1537,10 @@ SympyEditor.registerAddon("handwriting", (function () {
           var inner = atEdge.filter(function (q) { return q.rect.h >= 0.6 * tall; }).reduce(function (a, b) { return b.e - b.s < a.e - a.s ? b : a; });
           var r = inner.rect;
           if (I.minX - edge <= Math.max(28 / zoom, r.w) && I.maxY - I.minY <= 0.9 * r.h) {
-            if (I.maxY <= r.y + 0.55 * r.h) return { kind: "sup", target: { s: inner.s, e: inner.e }, s: inner.s, e: inner.e, nest: { s: inner.s, e: inner.e } };
-            if (I.minY >= r.y + 0.45 * r.h) return { kind: "sub", target: { s: inner.s, e: inner.e }, s: inner.s, e: inner.e, nest: { s: inner.s, e: inner.e } };
+            if (I.maxY <= r.y + 0.55 * r.h) return { kind: "sup", target: { s: inner.s, e: inner.e }, s: inner.s, e: inner.e, nest: { s: inner.s, e: inner.e }, others: atEdge };
+            if (I.minY >= r.y + 0.45 * r.h) return { kind: "sub", target: { s: inner.s, e: inner.e }, s: inner.s, e: inner.e, nest: { s: inner.s, e: inner.e }, others: atEdge };
           }
-          return { kind: "after", target: { s: outer.s, e: outer.e }, s: outer.e, e: outer.e, nest: { s: inner.s, e: inner.e } };
+          return { kind: "after", target: { s: outer.s, e: outer.e }, s: outer.e, e: outer.e, nest: { s: inner.s, e: inner.e }, others: atEdge };
         }
         var rights = pieces.filter(function (q) { return q.rect.x >= I.maxX - tolX && near(q); });
         if (rights.length) {
@@ -1502,9 +1549,22 @@ SympyEditor.registerAddon("handwriting", (function () {
           var first = atStart.reduce(function (a, b) { return b.e - b.s > a.e - a.s ? b : a; });
           var talls = Math.max.apply(null, atStart.map(function (q) { return q.rect.h; }));
           var firstInner = atStart.filter(function (q) { return q.rect.h >= 0.6 * talls; }).reduce(function (a, b) { return b.e - b.s < a.e - a.s ? b : a; });
-          return { kind: "before", target: { s: first.s, e: first.e }, s: first.s, e: first.s, nest: { s: firstInner.s, e: firstInner.e } };
+          return { kind: "before", target: { s: first.s, e: first.e }, s: first.s, e: first.s, nest: { s: firstInner.s, e: firstInner.e }, others: atStart };
         }
         return null;
+      }
+      // The pieces free ink might be read together with: the one picked first, the others
+      // at the same edge (or under the same bar), and what holds it, up to the whole formula.
+      function placeInk(list) {
+        var pl = placeInkAt(list);
+        if (!pl || !pl.nest) return pl;
+        var out = [];
+        var add = function (r) { if (r && !out.some(function (o) { return o.s === r.s && o.e === r.e; })) out.push({ s: r.s, e: r.e }); };
+        add(pl.nest);
+        (pl.others || []).slice().sort(function (a, b) { return (a.e - a.s) - (b.e - b.s); }).forEach(add);
+        for (var up = pl.nest, k = 0; k < 4 && up; k++) { up = enclosing(up); add(up); }
+        pl.options = out.slice(0, 5);
+        return pl;
       }
       // The text a reading goes in as, at the place free ink stands.
       function placedText(pl, latex) {
@@ -1788,7 +1848,7 @@ SympyEditor.registerAddon("handwriting", (function () {
           + "<li>" + toolIcon("select", 16) + " <b>Select</b>, " + toolIcon("pen", 16) + " <b>Pen</b> and " + toolIcon("erase", 16) + " <b>Eraser</b> say what a tap or a stroke on the pad does - one at a time, the pressed one.</li>"
           + "<li>The pad starts with <b>Select</b>. " + arrowIcon("up", 16) + " " + arrowIcon("down", 16) + " " + arrowIcon("left", 16) + " " + arrowIcon("right", 16) + " go as the formula panel's arrows: up to what holds the selection, down back inside (on a piece with nothing inside, a cursor after it), left and right to the pieces beside it - or, with the cursor, to the next place; with nothing selected, a cursor at the start or the end. The arrow keys do the same once the pad has been tapped, and Shift with left and right shrinks and grows a range.</li>"
           + "<li>With <b>Select</b>, a tap selects a piece of the formula, a second tap what holds it; a drag from one piece to another selects the pieces beside each other between them; a tap near the left or right edge of a piece, or beside the formula, puts the cursor there; a tap on nothing else clears both.</li>"
-          + "<li>With the <b>Pen</b> and a piece selected, what is written - anywhere on the pad - takes its place: the piece gives way to room to write in, the ink goes into it, the room grows as the ink nears its edges, and the reading takes the piece's place in the LaTeX. Pressing the Pen with a piece selected (or the cursor placed) makes that room at once, and every stroke goes there until Done. With nothing selected the ink is free, and where it is written against the formula says where its reading goes: beside a piece, after it (before it, on its left) as a product; smaller at a piece's top-right corner, its exponent - at its bottom-right, its subscript; under a bar drawn under a piece, a fraction over that piece (over a bar over it, a fraction over the ink). The piece is outlined, and the line over the reading says it. What is written is read together with that piece - the piece drawn into the ink as a stand-in the model reads - so that a bar and what is under it read as a fraction over the piece, a small letter at its corner as its exponent; the rules of thumb above are for when that reading does not take the piece in. Written nowhere in particular, the reading goes after the formula.</li>"
+          + "<li>With the <b>Pen</b> and a piece selected, what is written - anywhere on the pad - takes its place: the piece gives way to room to write in, the ink goes into it, the room grows as the ink nears its edges, and the reading takes the piece's place in the LaTeX. Pressing the Pen with a piece selected (or the cursor placed) makes that room at once, and every stroke goes there until Done. With nothing selected the ink is free, and where it is written against the formula says where its reading goes: beside a piece, after it (before it, on its left) as a product; smaller at a piece's top-right corner, its exponent - at its bottom-right, its subscript; under a bar drawn under a piece, a fraction over that piece (over a bar over it, a fraction over the ink). The piece is outlined, and the line over the reading says it. What is written is read together with that piece - the piece drawn into the ink as a stand-in the model reads - so that a bar and what is under it read as a fraction over the piece, a small letter at its corner as its exponent; the rules of thumb above are for when that reading does not take the piece in. When it might be another piece, the row over the readings offers them - and <i>alone</i>, the ink read by itself after the formula: a tap reads the ink again with the one tapped. Written nowhere in particular, the reading goes after the formula.</li>"
           + "<li>With the <b>Pen</b> and the cursor, what is written - anywhere on the pad - goes in at the cursor, as a new piece of the formula, in a room made for it there. The keyboard button beside the LaTeX line puts the typing cursor at the same place.</li>"
           + "<li>With the <b>Eraser</b>, every stroke the pointer passes over goes. A pen turned round erases too.</li>"
           + "<li>" + toolIcon("done", 16) + " <b>Done</b> puts the reading of the ink into the formula for good, and the ink goes; with Select, a tap does the same.</li>"
