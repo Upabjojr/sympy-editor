@@ -261,7 +261,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         stage.appendChild(b);
       });
       var selectBtn = toolButton(h, "select", "Select: a tap selects a piece of the formula, a second tap what holds it", { "aria-pressed": "false" });
-      var penBtn = toolButton(h, "pen", "Pen: writes - with a piece selected, in its place, wherever it is written; with nothing selected, after the formula", { "aria-pressed": "true" });
+      var penBtn = toolButton(h, "pen", "Pen: writes - with a piece selected, in its place; with the cursor, there; with neither, after the formula", { "aria-pressed": "true" });
       var eraseBtn = toolButton(h, "erase", "Eraser: the strokes the pointer passes over go", { "aria-pressed": "false" });
       var modes = h("div", { class: "ink-modes", role: "group", "aria-label": "What a tap or a stroke on the pad does" }, [selectBtn, penBtn, eraseBtn]);
       var doneBtn = toolButton(h, "done", "Done: the reading of the ink into the formula, and the ink goes", { disabled: "" });
@@ -275,7 +275,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       var cands = h("div", { class: "ink-cands", role: "listbox", "aria-label": "Readings, best first" });
       var field = h("input", { class: "ink-latex", type: "text", spellcheck: "false", autocomplete: "off", autocapitalize: "off",
         placeholder: "LaTeX - type here, or write in the pad below", "aria-label": "The formula as LaTeX" });
-      var typeBtn = toolButton(h, "type", "Type over the selected piece: its LaTeX, selected in this line", { disabled: "" });
+      var typeBtn = toolButton(h, "type", "Type over the selected piece (its LaTeX, selected in this line) - or at the cursor", { disabled: "" });
       var loadBtn = toolButton(h, "load", "The editor's formula, into the pad");
       var latexRow = h("div", { class: "ink-latexrow" }, [field, typeBtn, loadBtn]);
       var readingOf = h("div", { class: "ink-reading-of" });                 // what the reading below is of: the piece written, or the formula
@@ -523,8 +523,22 @@ SympyEditor.registerAddon("handwriting", (function () {
         if (best) return { s: best.s, e: best.e };
         return r.s > 0 || r.e < n ? { s: 0, e: n } : null;
       }
+      // A place in the text: a line where it is drawn, as tall as what is beside it.
+      function caretRect(pos) {
+        var best = null, x = null;
+        pieces.forEach(function (q) {
+          var at = q.e === pos ? q.rect.x + q.rect.w : q.s === pos ? q.rect.x : null;
+          if (at !== null && (!best || q.rect.w * q.rect.h < best.rect.w * best.rect.h)) { best = q; x = at; }
+        });
+        if (best) return { x: x, y: best.rect.y, w: 0, h: best.rect.h };
+        if (!formulaBox) return null;
+        if (pos >= source().replace(/\s+$/, "").length) return { x: formulaBox.x + formulaBox.w, y: formulaBox.y, w: 0, h: formulaBox.h };
+        if (pos <= source().length - source().replace(/^\s+/, "").length) return { x: formulaBox.x, y: formulaBox.y, w: 0, h: formulaBox.h };
+        return null;
+      }
       function rectFor(r) {
         if (!r || !formulaBox) return null;
+        if (r.s === r.e) return caretRect(r.s);
         if (r.s === 0 && r.e === source().length) return formulaBox;
         for (var i = 0; i < pieces.length; i++) if (pieces[i].s === r.s && pieces[i].e === r.e) return pieces[i].rect;
         return null;
@@ -546,7 +560,14 @@ SympyEditor.registerAddon("handwriting", (function () {
         ctx.lineWidth = 1.2 / zoom;
         if (sel && !hole) {
           var sr = rectFor(sel);
-          if (sr) {
+          if (sr && sel.s === sel.e) {     // the cursor: a line
+            ctx.strokeStyle = "rgba(" + a + ", 0.95)";
+            ctx.lineWidth = 2 / zoom;
+            ctx.beginPath();
+            ctx.moveTo(sr.x + 1 / zoom, sr.y - 2 / zoom);
+            ctx.lineTo(sr.x + 1 / zoom, sr.y + sr.h + 2 / zoom);
+            ctx.stroke();
+          } else if (sr) {
             ctx.fillStyle = "rgba(" + a + ", 0.16)";
             ctx.strokeStyle = "rgba(" + a + ", 0.7)";
             roundRect(sr.x - 3, sr.y - 2, sr.w + 6, sr.h + 4);
@@ -670,15 +691,35 @@ SympyEditor.registerAddon("handwriting", (function () {
         element.setAttribute("data-strokes", "0");
         cands.textContent = "";
       }
+      // A tap near the left or right edge of a piece, or beside the formula: the cursor
+      // there, a place in the text.  null: no place.
+      function caretAt(t) {
+        var p = t.at;
+        if (t.hit) {
+          var r = t.hit.rect, edge = Math.min(10 / zoom, r.w * 0.3);
+          if (p[0] <= r.x + edge) return t.hit.s;
+          if (p[0] >= r.x + r.w - edge) return t.hit.e;
+          return null;
+        }
+        if (formulaBox && p[1] >= formulaBox.y - 24 / zoom && p[1] <= formulaBox.y + formulaBox.h + 24 / zoom) {
+          if (p[0] > formulaBox.x + formulaBox.w) return source().length;
+          if (p[0] < formulaBox.x) return 0;
+        }
+        return null;
+      }
       function tapAt(t) {
         if (hole) { record(); commitHole(); return; }                  // the ink's reading in first
-        var next = !t.hit ? null                                       // nothing there: nothing selected
-                 : sel && t.hit.s === sel.s && t.hit.e === sel.e ? enclosing(sel) || sel   // again: what holds it
+        var pos = caretAt(t);
+        var next = pos !== null ? { s: pos, e: pos }                   // at an edge, or beside the formula: the cursor
+                 : !t.hit ? null                                       // nothing there: nothing selected
+                 : sel && sel.s !== sel.e && t.hit.s === sel.s && t.hit.e === sel.e ? enclosing(sel) || sel   // again: what holds it
                  : { s: t.hit.s, e: t.hit.e };
         if ((next ? next.s + "," + next.e : "") === (sel ? sel.s + "," + sel.e : "")) return;
         record();
         sel = next;
-        if (sel && !cands.children.length) note.textContent = "Selected: with the Pen, write over it - or type over it with the keyboard button";
+        if (sel && !cands.children.length) note.textContent = sel.s === sel.e
+          ? "Cursor: with the Pen, what is written goes in here - or type here with the keyboard button"
+          : "Selected: with the Pen, write over it - or type over it with the keyboard button";
         layoutFormula();
         changedTools();
       }
@@ -1084,6 +1125,8 @@ SympyEditor.registerAddon("handwriting", (function () {
       function fitPiece(latex) {
         var before = hole.base.slice(0, hole.s), after = hole.base.slice(hole.e), piece = latex;
         if (hole.free) return (!before.trim() || /\s$/.test(before) ? "" : " ") + piece;
+        if (hole.s === hole.e)             // at the cursor: a new piece, apart from what is either side of it
+          return (before && !/[\s{(\[]$/.test(before) ? " " : "") + piece + (after && !/^[\s})\]]/.test(after) ? " " : "");
         if (hole.braces) return "{" + piece + "}";
         if (/\\[A-Za-z]+$/.test(before) && /^[A-Za-z]/.test(piece)) piece = " " + piece;
         if (/\\[A-Za-z]+$/.test(piece) && /^[A-Za-z]/.test(after)) piece += " ";
@@ -1227,6 +1270,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         readingOf.textContent = !reading ? ""
           : !pieceMode() ? (hole ? "What is written:" : "The formula:")
           : hole.free ? (hole.base.trim() ? "What is written, to go after the formula:" : "What is written:")
+          : hole.s === hole.e ? "What is written, at the cursor:"
           : "What is written, in the selected piece's place:";
         if (!reading) src.textContent = "";
         else if (reading.ok) src.textContent = reading.src;
@@ -1344,8 +1388,9 @@ SympyEditor.registerAddon("handwriting", (function () {
         title: "Handwriting",
         help: "<section><h3>The tools</h3><ul>"
           + "<li>" + toolIcon("select", 16) + " <b>Select</b>, " + toolIcon("pen", 16) + " <b>Pen</b> and " + toolIcon("erase", 16) + " <b>Eraser</b> say what a tap or a stroke on the pad does - one at a time, the pressed one.</li>"
-          + "<li>With <b>Select</b>, a tap selects a piece of the formula, a second tap what holds it, a tap on nothing clears the selection.</li>"
+          + "<li>With <b>Select</b>, a tap selects a piece of the formula, a second tap what holds it; a tap near the left or right edge of a piece, or beside the formula, puts the cursor there; a tap on nothing else clears both.</li>"
           + "<li>With the <b>Pen</b> and a piece selected, what is written - anywhere on the pad - takes its place: the piece gives way to room to write in, the ink goes into it, the room grows as the ink nears its edges, and the reading takes the piece's place in the LaTeX. Every stroke goes there until Done. With nothing selected the ink is free: its reading goes after the formula (a tap on nothing, with Select, clears the selection).</li>"
+          + "<li>With the <b>Pen</b> and the cursor, what is written - anywhere on the pad - goes in at the cursor, as a new piece of the formula, in a room made for it there. The keyboard button beside the LaTeX line puts the typing cursor at the same place.</li>"
           + "<li>With the <b>Eraser</b>, every stroke the pointer passes over goes. A pen turned round erases too.</li>"
           + "<li>" + toolIcon("done", 16) + " <b>Done</b> puts the reading of the ink into the formula for good, and the ink goes; with Select, a tap does the same.</li>"
           + "<li>" + toolIcon("undo", 16) + " <b>Undo</b> and " + toolIcon("redo", 16) + " <b>Redo</b> go back and forth through every edit in the pad: strokes, the eraser, selections, readings put in, typing in the LaTeX line (Ctrl+Z and Ctrl+Y there too), applying.</li>"

@@ -803,3 +803,55 @@ def test_with_a_piece_selected_the_pen_writes_in_its_place_wherever_it_writes():
             browser.close()
             srv.shutdown()
             srv.server_close()
+
+
+PIECE_RECT = """([s, e]) => {
+  const el = document.querySelector(`.se-addon-handwriting .ink-formula [data-ls="${s}"][data-le="${e}"]`);
+  let l = Infinity, t = Infinity, r = -Infinity, b = -Infinity;
+  for (const k of el.querySelectorAll('*')) {
+    if (k.firstElementChild || !k.textContent.replace(/[\\s\\u200b]/g, '')) continue;
+    const q = k.getBoundingClientRect();
+    l = Math.min(l, q.left); t = Math.min(t, q.top); r = Math.max(r, q.right); b = Math.max(b, q.bottom);
+  }
+  return {left: l, top: t, right: r, bottom: b};
+}"""
+
+
+def test_the_cursor_takes_what_is_written_or_typed_as_a_new_piece():
+    """A tap near a piece's edge, or beside the formula, puts the cursor
+    there: what the Pen writes goes in at it as a new piece, and the keyboard
+    button types there."""
+    doc = Document(x, addons=[HandwritingAddon(FakeRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _pad_page(p, doc)
+        try:
+            panel = page.locator(".se-addon-handwriting .ink-panel")
+            field = page.locator(".se-addon-handwriting .ink-latex")
+            field.fill("x + y")
+            page.wait_for_selector(".se-addon-handwriting .ink-formula [data-ls]")
+            page.locator(".se-addon-handwriting .ink-select").click()
+            # beside the formula, to its right: the cursor at the end; the keyboard button types there
+            yr = page.evaluate(PIECE_RECT, [4, 5])
+            page.mouse.click(yr["right"] + 60, (yr["top"] + yr["bottom"]) / 2)
+            assert panel.get_attribute("data-sel") == "5,5"
+            page.locator(".se-addon-handwriting .ink-type").click()
+            assert page.evaluate("[document.activeElement.className, document.activeElement.selectionStart, document.activeElement.selectionEnd]") == ["ink-latex", 5, 5]
+            # at the right edge of x: the cursor after it
+            xr = page.evaluate(PIECE_RECT, [0, 1])
+            page.mouse.click(xr["right"] - 1, (xr["top"] + xr["bottom"]) / 2)
+            assert panel.get_attribute("data-sel") == "1,1"
+            # the Pen writes at the cursor: a new piece there
+            page.locator(".se-addon-handwriting .ink-pen").click()
+            pad = page.locator(".se-addon-handwriting .ink-pad").bounding_box()
+            _drag(page, pad["x"] + pad["width"] - 220, pad["y"] + 60, pad["x"] + pad["width"] - 120, pad["y"] + 90)
+            assert panel.get_attribute("data-hole") == "1,1"
+            assert _wait(lambda: field.input_value() == "x " + READING + " + y", 15)
+            assert "at the cursor" in page.locator(".se-addon-handwriting .ink-reading-of").inner_text()
+            page.locator(".se-addon-handwriting .ink-done").click()
+            assert panel.get_attribute("data-hole") == ""
+            assert panel.get_attribute("data-sel") == "2,%d" % (2 + len(READING))       # the new piece, selected
+            assert page.errors == []
+        finally:
+            browser.close()
+            srv.shutdown()
+            srv.server_close()
