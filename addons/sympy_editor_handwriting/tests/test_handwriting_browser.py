@@ -1029,3 +1029,55 @@ def test_select_goes_as_the_formula_panel_arrows_keys_and_ranges():
             browser.close()
             srv.shutdown()
             srv.server_close()
+
+
+class LetterRecognizer(FakeRecognizer):
+    """Reads anything as y."""
+    latex = "y"
+
+
+def test_free_ink_goes_where_it_is_written_against_the_formula():
+    """With no selection and no cursor, where free ink is written against the
+    formula says what it is: beside x, a product; at its top-right, its
+    exponent; under a bar under it, a fraction over it."""
+    rec = LetterRecognizer()
+    doc = Document(x, addons=[HandwritingAddon(rec), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _pad_page(p, doc)
+        try:
+            panel = page.locator(".se-addon-handwriting .ink-panel")
+            field = page.locator(".se-addon-handwriting .ink-latex")
+            said = page.locator(".se-addon-handwriting .ink-reading-of")
+
+            def fresh():
+                field.fill("x")
+                page.wait_for_selector(".se-addon-handwriting .ink-formula [data-ls]")
+                page.wait_for_timeout(200)
+                r = page.evaluate(PIECE_RECT, [0, 1])
+                return r, r["bottom"] - r["top"], r["right"] - r["left"]
+
+            # beside x, at its height: after it, a product
+            r, hgt, wid = fresh()
+            _drag(page, r["right"] + 40, r["top"] + 0.25 * hgt, r["right"] + 60, r["bottom"] - 0.1 * hgt)
+            assert _wait(lambda: field.input_value() == "x y", 15), field.input_value()
+            assert "after x" in said.inner_text()
+            # smaller, at its top-right corner: its exponent
+            r, hgt, wid = fresh()
+            _drag(page, r["right"] + 3, r["top"] - 0.3 * hgt, r["right"] + 13, r["top"] + 0.15 * hgt)
+            assert _wait(lambda: field.input_value() == "x^{y}", 15), field.input_value()
+            assert "exponent of x" in said.inner_text()
+            # a bar under x, and ink under the bar: a fraction over x, the bar no part of the reading
+            r, hgt, wid = fresh()
+            _drag(page, r["left"] - 4, r["bottom"] + 10, r["right"] + 4, r["bottom"] + 11)
+            _drag(page, r["left"], r["bottom"] + 22, r["right"], r["bottom"] + 44)
+            assert _wait(lambda: field.input_value() == r"\frac{x}{y}", 15), field.input_value()
+            assert len(rec.last) == 1
+            assert "fraction over x" in said.inner_text()
+            # done: the formula is the fraction, drawn
+            page.locator(".se-addon-handwriting .ink-done").click()
+            assert panel.get_attribute("data-hole") == "" and field.input_value() == r"\frac{x}{y}"
+            assert page.errors == []
+        finally:
+            browser.close()
+            srv.shutdown()
+            srv.server_close()

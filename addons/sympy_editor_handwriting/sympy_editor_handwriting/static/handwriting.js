@@ -642,6 +642,17 @@ SympyEditor.registerAddon("handwriting", (function () {
             ctx.stroke();
           }
         }
+        if (hole && hole.free && hole.placement) {  // free ink: the piece its place is against, outlined
+          var pr = rectFor(hole.placement.target);
+          if (pr) {
+            ctx.save();
+            ctx.setLineDash([4 / zoom, 3 / zoom]);
+            ctx.strokeStyle = "rgba(" + a + ", 0.75)";
+            roundRect(pr.x - 3, pr.y - 2, pr.w + 6, pr.h + 4);
+            ctx.stroke();
+            ctx.restore();
+          }
+        }
         if (hole && !hole.free && hole.rect) {
           var hr = hole.rect;
           ctx.setLineDash([5 / zoom, 4 / zoom]);
@@ -1329,8 +1340,14 @@ SympyEditor.registerAddon("handwriting", (function () {
         note.textContent = "Reading…";
         note.className = "ink-note";
         updateSummary();
+        var ink = strokes;
+        if (hole && hole.free) {
+          hole.placement = placeInk(strokes);
+          if (hole.placement && hole.placement.read) ink = hole.placement.read;   // a fraction's bar is no part of the reading
+          redraw();
+        }
         // quiet: the editor's overlay would cover the area while one writes on
-        api.call("recognize", { strokes: strokes }, { quiet: true }).then(function (res) {
+        api.call("recognize", { strokes: ink }, { quiet: true }).then(function (res) {
           if (my !== seq) return;
           element.classList.remove("ink-busy");
           cands.textContent = "";
@@ -1392,7 +1409,80 @@ SympyEditor.registerAddon("handwriting", (function () {
         });
         return out;
       }
+      // Free ink, with a formula already drawn: what its place against the formula means.
+      // A bar under a piece with ink under the bar: a fraction over it (a bar over a piece,
+      // ink over the bar: over it); smaller, at a piece's top-right corner: its exponent, at
+      // its bottom-right: its subscript; beside a piece: after it (before it, on its left) -
+      // a product.  null: nowhere in particular (after the formula).
+      function placeInk(list) {
+        if (!hole || !hole.free || !hole.base.trim() || !formulaBox || !pieces.length || !list.length) return null;
+        var tol = 6 / zoom, I = boxOf(list);
+        for (var i = 0; i < list.length; i++) {
+          var S = boxOf([list[i]]), sw = S.maxX - S.minX, sh = S.maxY - S.minY;
+          if (sw < 18 / zoom || sw < 3 * Math.max(sh, 1 / zoom)) continue;
+          var rest = list.filter(function (s, k) { return k !== i; });
+          if (!rest.length) continue;
+          var R = boxOf(rest), under = R.minY >= S.maxY - tol, over = R.maxY <= S.minY + tol;
+          if (!under && !over) continue;
+          var bar = null;
+          pieces.forEach(function (q) {
+            var r = q.rect, shared = Math.min(r.x + r.w, S.maxX) - Math.max(r.x, S.minX);
+            if (shared < 0.5 * r.w) return;
+            var gap = under ? S.minY - (r.y + r.h) : r.y - S.maxY;
+            if (gap < -tol || gap > Math.max(r.h, 24 / zoom)) return;
+            if (!bar || r.w * r.h > bar.rect.w * bar.rect.h) bar = q;
+          });
+          if (bar) return { kind: under ? "over" : "under", target: { s: bar.s, e: bar.e }, s: bar.s, e: bar.e, read: rest };
+        }
+        var near = function (q) { return q.rect.y - I.maxY < q.rect.h && I.minY - (q.rect.y + q.rect.h) < q.rect.h; };
+        var tolX = Math.max(12 / zoom, 0.25 * (I.maxX - I.minX));
+        var lefts = pieces.filter(function (q) { return q.rect.x + q.rect.w <= I.minX + tolX && near(q); });
+        if (lefts.length) {
+          var edge = Math.max.apply(null, lefts.map(function (q) { return q.rect.x + q.rect.w; }));
+          var atEdge = lefts.filter(function (q) { return Math.abs(q.rect.x + q.rect.w - edge) <= 2 / zoom; });
+          var outer = atEdge.reduce(function (a, b) { return b.e - b.s > a.e - a.s ? b : a; });
+          var tall = Math.max.apply(null, atEdge.map(function (q) { return q.rect.h; }));
+          var inner = atEdge.filter(function (q) { return q.rect.h >= 0.6 * tall; }).reduce(function (a, b) { return b.e - b.s < a.e - a.s ? b : a; });
+          var r = inner.rect;
+          if (I.minX - edge <= Math.max(28 / zoom, r.w) && I.maxY - I.minY <= 0.9 * r.h) {
+            if (I.maxY <= r.y + 0.55 * r.h) return { kind: "sup", target: { s: inner.s, e: inner.e }, s: inner.s, e: inner.e };
+            if (I.minY >= r.y + 0.45 * r.h) return { kind: "sub", target: { s: inner.s, e: inner.e }, s: inner.s, e: inner.e };
+          }
+          return { kind: "after", target: { s: outer.s, e: outer.e }, s: outer.e, e: outer.e };
+        }
+        var rights = pieces.filter(function (q) { return q.rect.x >= I.maxX - tolX && near(q); });
+        if (rights.length) {
+          var start = Math.min.apply(null, rights.map(function (q) { return q.rect.x; }));
+          var first = rights.filter(function (q) { return Math.abs(q.rect.x - start) <= 2 / zoom; })
+                            .reduce(function (a, b) { return b.e - b.s > a.e - a.s ? b : a; });
+          return { kind: "before", target: { s: first.s, e: first.e }, s: first.s, e: first.s };
+        }
+        return null;
+      }
+      // The text a reading goes in as, at the place free ink stands.
+      function placedText(pl, latex) {
+        var base = hole.base, b = base.slice(pl.target.s, pl.target.e);
+        var single = /^(?:[A-Za-z0-9]|\\[A-Za-z]+|\{[^{}]*\})$/.test(b.trim());
+        var based = single ? b : "\\left(" + b + "\\right)";
+        if (pl.kind === "sup") return (/_\{[^{}]*\}$/.test(b) ? b : based) + "^{" + latex + "}";
+        if (pl.kind === "sub") return (/\^\{[^{}]*\}$/.test(b) ? b : based) + "_{" + latex + "}";
+        if (pl.kind === "over") return "\\frac{" + b + "}{" + latex + "}";
+        if (pl.kind === "under") return "\\frac{" + latex + "}{" + b + "}";
+        var before = base.slice(0, pl.s), after = base.slice(pl.s);
+        if (pl.kind === "before") return latex + (after && !/^[\s})\]]/.test(after) ? " " : "");
+        return (before && !/[\s{(\[]$/.test(before) ? " " : "") + latex + (after && !/^[\s})\]]/.test(after) ? " " : "");
+      }
       function putPiece(latex) {
+        if (hole.free && hole.placement) {            // free ink with a place against the formula: in there
+          var pl = hole.placement, rep = placedText(pl, latex);
+          hole.s = pl.s;
+          hole.e = pl.e;
+          chosen = rep;
+          chosenLatex = latex;
+          setText(hole.base.slice(0, pl.s) + rep + hole.base.slice(pl.e));
+          return;
+        }
+        if (hole.free) hole.s = hole.e = hole.base.length;
         var piece = fitPiece(latex);
         chosen = piece;
         chosenLatex = latex;
@@ -1510,11 +1600,19 @@ SympyEditor.registerAddon("handwriting", (function () {
         if (ev.key === "Enter") { ev.preventDefault(); applyToEditor(); }
       });
 
+      function placementWords() {
+        var pl = hole.placement;
+        if (!pl) return "What is written, to go after the formula:";
+        var what = hole.base.slice(pl.target.s, pl.target.e).trim();
+        if (what.length > 32) what = what.slice(0, 31) + "\u2026";
+        return "What is written, " + ({ after: "after ", before: "before ", sup: "as the exponent of ", sub: "as the subscript of ",
+                                        over: "under a bar, as a fraction over ", under: "over a bar, as the numerator over " }[pl.kind]) + what + ":";
+      }
       function show(reading) {
         last = reading || null;
         readingOf.textContent = !reading ? ""
           : !pieceMode() ? (hole ? "What is written:" : "The formula:")
-          : hole.free ? (hole.base.trim() ? "What is written, to go after the formula:" : "What is written:")
+          : hole.free ? (!hole.base.trim() ? "What is written:" : placementWords())
           : hole.s === hole.e ? "What is written, at the cursor:"
           : "What is written, in the selected piece's place:";
         if (!reading) src.textContent = "";
@@ -1637,7 +1735,7 @@ SympyEditor.registerAddon("handwriting", (function () {
           + "<li>" + toolIcon("select", 16) + " <b>Select</b>, " + toolIcon("pen", 16) + " <b>Pen</b> and " + toolIcon("erase", 16) + " <b>Eraser</b> say what a tap or a stroke on the pad does - one at a time, the pressed one.</li>"
           + "<li>The pad starts with <b>Select</b>. " + arrowIcon("up", 16) + " " + arrowIcon("down", 16) + " " + arrowIcon("left", 16) + " " + arrowIcon("right", 16) + " go as the formula panel's arrows: up to what holds the selection, down back inside (on a piece with nothing inside, a cursor after it), left and right to the pieces beside it - or, with the cursor, to the next place; with nothing selected, a cursor at the start or the end. The arrow keys do the same once the pad has been tapped, and Shift with left and right shrinks and grows a range.</li>"
           + "<li>With <b>Select</b>, a tap selects a piece of the formula, a second tap what holds it; a drag from one piece to another selects the pieces beside each other between them; a tap near the left or right edge of a piece, or beside the formula, puts the cursor there; a tap on nothing else clears both.</li>"
-          + "<li>With the <b>Pen</b> and a piece selected, what is written - anywhere on the pad - takes its place: the piece gives way to room to write in, the ink goes into it, the room grows as the ink nears its edges, and the reading takes the piece's place in the LaTeX. Pressing the Pen with a piece selected (or the cursor placed) makes that room at once, and every stroke goes there until Done. With nothing selected the ink is free: its reading goes after the formula (a tap on nothing, with Select, clears the selection).</li>"
+          + "<li>With the <b>Pen</b> and a piece selected, what is written - anywhere on the pad - takes its place: the piece gives way to room to write in, the ink goes into it, the room grows as the ink nears its edges, and the reading takes the piece's place in the LaTeX. Pressing the Pen with a piece selected (or the cursor placed) makes that room at once, and every stroke goes there until Done. With nothing selected the ink is free, and where it is written against the formula says where its reading goes: beside a piece, after it (before it, on its left) as a product; smaller at a piece's top-right corner, its exponent - at its bottom-right, its subscript; under a bar drawn under a piece, a fraction over that piece (over a bar over it, a fraction over the ink). The piece is outlined, and the line over the reading says it. Written nowhere in particular, the reading goes after the formula.</li>"
           + "<li>With the <b>Pen</b> and the cursor, what is written - anywhere on the pad - goes in at the cursor, as a new piece of the formula, in a room made for it there. The keyboard button beside the LaTeX line puts the typing cursor at the same place.</li>"
           + "<li>With the <b>Eraser</b>, every stroke the pointer passes over goes. A pen turned round erases too.</li>"
           + "<li>" + toolIcon("done", 16) + " <b>Done</b> puts the reading of the ink into the formula for good, and the ink goes; with Select, a tap does the same.</li>"
