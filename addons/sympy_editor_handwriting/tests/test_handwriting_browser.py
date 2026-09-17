@@ -233,6 +233,22 @@ def test_applying_keeps_the_view_as_it_is():
                 page.wait_for_timeout(100)
             assert all(abs(t - start) <= 1 for t in seen), (start, seen)
             assert _wait(lambda: field.input_value() != "")               # the pad shows the editor's formula now
+            # Undo in the pad takes the applying back - in the editor too; Redo applies it again
+            undo, redo = page.locator(".se-addon-handwriting .ink-undo"), page.locator(".se-addon-handwriting .ink-redo")
+            undo.click()
+            assert _wait(lambda: str(doc.expr) == "x + y")
+            assert panel.get_attribute("data-strokes") == "1"
+            redo.click()
+            assert _wait(lambda: str(doc.expr) == "sin(x)*cos(y) + pi")
+            assert _wait(lambda: panel.get_attribute("data-strokes") == "0")
+            # the formula edited in the editor since: Undo in the pad leaves the editor be
+            page.wait_for_timeout(300)
+            page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.send({action: 'set', src: 'z'})")
+            assert _wait(lambda: str(doc.expr) == "z")
+            undo.click()
+            page.wait_for_timeout(600)
+            assert str(doc.expr) == "z" and panel.get_attribute("data-strokes") == "1"
+            redo.click()
             # in full screen: still in full screen after applying
             page.locator(".se-addon-handwriting .ink-fullbtn").click()
             assert "ink-full" in panel.get_attribute("class")

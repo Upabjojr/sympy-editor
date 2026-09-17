@@ -1237,17 +1237,33 @@ SympyEditor.registerAddon("handwriting", (function () {
         if (strokes.length) timer = setTimeout(function () { recognize(true); }, 250);   // the ink read again, the text kept as it was
         else reread();
       }
+      // The editor's own count of what it has done: an applying is taken back in it only
+      // while nothing else has been done there since.
+      function editorSeq() {
+        var st = api.state && api.state();
+        return st && typeof st.seq === "number" ? st.seq : null;
+      }
       function undo() {
         if (!past.length) return;
         holdSheet();
-        future.push(snapshot());
-        restore(past.pop());
+        var st = past.pop(), now = snapshot();
+        if (st.applied && st.applied.seq !== null && editorSeq() === st.applied.seq) {
+          now.reapply = true;                      // Redo applies it again
+          api.send({ action: "undo" }).then(null, function () {});   // past the applying: the formula in the editor back too
+        }
+        future.push(now);
+        restore(st);
       }
       function redo() {
         if (!future.length) return;
         holdSheet();
-        past.push(snapshot());
-        restore(future.pop());
+        var st = future.pop(), now = snapshot();
+        if (st.reapply) {
+          now.applied = { seq: null };
+          api.send({ action: "redo" }).then(function () { now.applied.seq = editorSeq(); }, function () {});
+        }
+        past.push(now);
+        restore(st);
       }
       function changed(delay) {
         element.setAttribute("data-strokes", String(strokes.length));
@@ -1556,6 +1572,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         var payload = { latex: field.value, path: "/", choices: picks.choices, constants: picks.constants };
         api.call("insert", payload).then(function () {
           // the view stays as it is - the pad, full screen or not, where it was on the page
+          before.applied = { seq: editorSeq() };   // Undo past it takes the formula in the editor back as well
           push(before);                            // Undo brings the pad back as it was, ink and all
           holdSheet();                             // the readings, emptied and read anew, take no less room meanwhile
           strokes = []; current = null;
@@ -1624,7 +1641,7 @@ SympyEditor.registerAddon("handwriting", (function () {
           + "<li>With the <b>Pen</b> and the cursor, what is written - anywhere on the pad - goes in at the cursor, as a new piece of the formula, in a room made for it there. The keyboard button beside the LaTeX line puts the typing cursor at the same place.</li>"
           + "<li>With the <b>Eraser</b>, every stroke the pointer passes over goes. A pen turned round erases too.</li>"
           + "<li>" + toolIcon("done", 16) + " <b>Done</b> puts the reading of the ink into the formula for good, and the ink goes; with Select, a tap does the same.</li>"
-          + "<li>" + toolIcon("undo", 16) + " <b>Undo</b> and " + toolIcon("redo", 16) + " <b>Redo</b> go back and forth through every edit in the pad: strokes, the eraser, selections, readings put in, typing in the LaTeX line (Ctrl+Z and Ctrl+Y there too), applying.</li>"
+          + "<li>" + toolIcon("undo", 16) + " <b>Undo</b> and " + toolIcon("redo", 16) + " <b>Redo</b> go back and forth through every edit in the pad: strokes, the eraser, selections, readings put in, typing in the LaTeX line (Ctrl+Z and Ctrl+Y there too), applying - past an applying, the formula in the editor goes back too, unless it has been edited there since.</li>"
           + "<li>" + toolIcon("clear", 16) + " <b>Clear</b> takes all the ink away.</li>"
           + "<li><b>\u2212 100% +</b> zoom the pad out and in about the middle of what is in sight; the level goes back to 100%.</li>"
           + "<li>" + toolIcon("read", 16) + " <b>Read</b> reads what is written now, without waiting for the pause.</li>"
