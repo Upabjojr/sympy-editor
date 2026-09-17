@@ -136,6 +136,16 @@
 }
 .se-addon-handwriting .ink-src { font-family: var(--se-mono); color: var(--se-muted); word-break: break-word; min-height: 1.2em; }
 .se-addon-handwriting .ink-actions .ink-apply { border-color: rgba(var(--se-accent), 0.8); background: rgba(var(--se-accent), 0.12); }
+/* what an applying did: the formula before and after it, to keep or to take back */
+.se-addon-handwriting .ink-applied { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; padding: 0.35rem 0.55rem;
+  border: 1px solid rgba(var(--se-accent), 0.5); border-radius: 0.4rem; background: rgba(var(--se-accent), 0.06); }
+.se-addon-handwriting .ink-applied[hidden] { display: none; }
+.se-addon-handwriting .ink-applied-label { color: var(--se-muted); font-size: 11px; }
+.se-addon-handwriting .ink-applied-arrow { color: var(--se-muted); }
+.se-addon-handwriting .ink-was { opacity: 0.65; }
+.se-addon-handwriting .ink-applied button { font: inherit; font-size: 12px; padding: 0.2rem 0.6rem; border: 1px solid var(--se-border);
+  border-radius: 0.3rem; background: var(--se-btn); color: inherit; cursor: pointer; }
+.se-addon-handwriting .ink-applied .ink-keep { border-color: rgba(var(--se-accent), 0.8); background: rgba(var(--se-accent), 0.12); }
 /* the reading's options, as the LaTeX panel shows them */
 .se-addon-handwriting .ink-ambig, .se-addon-handwriting .ink-consts { display: flex; flex-direction: column; gap: 0.25rem; }
 .se-addon-handwriting .ink-ambig:empty, .se-addon-handwriting .ink-consts:empty { display: none; }

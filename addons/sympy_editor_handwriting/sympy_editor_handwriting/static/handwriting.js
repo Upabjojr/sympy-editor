@@ -307,6 +307,13 @@ SympyEditor.registerAddon("handwriting", (function () {
       var src = h("code", { class: "ink-src", title: "What SymPy gets" });
       var ambig = h("div", { class: "ink-ambig" });
       var consts = h("div", { class: "ink-consts" });
+      var wasFormula = h("span", { class: "ink-was" });
+      var nowFormula = h("span", { class: "ink-now" });
+      var keepBtn = h("button", { type: "button", class: "ink-keep", title: "Leave the formula as it now is" }, ["Keep"]);
+      var undoApplied = h("button", { type: "button", class: "ink-undo-applied", title: "The formula as it was, in the editor too" }, ["Undo the change"]);
+      var appliedRow = h("div", { class: "ink-applied", hidden: "" },
+        [h("span", { class: "ink-applied-label" }, ["Applied:"]), wasFormula, h("span", { class: "ink-applied-arrow", "aria-hidden": "true" }, ["\u2192"]),
+         nowFormula, keepBtn, undoApplied]);
       var apply = h("button", { type: "button", class: "ink-apply", disabled: "",
         title: "The pad's formula becomes the editor's (Enter in the LaTeX line does the same)" }, ["Apply to the formula"]);
       var sheetChevron = h("span", { class: "ink-sheet-chevron", "aria-hidden": "true" });
@@ -314,7 +321,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       var sheetHead = h("button", { type: "button", class: "ink-sheet-head", "aria-expanded": "true",
         title: "Fold the readings away, or bring them back" }, [sheetChevron, sheetSummary]);
       var actions = h("div", { class: "ink-actions" }, [apply]);
-      var sheetBody = h("div", { class: "ink-sheet-body" }, [note, nestRow, cands, readingOf, src, ambig, consts, actions]);
+      var sheetBody = h("div", { class: "ink-sheet-body" }, [note, nestRow, cands, readingOf, src, ambig, consts, appliedRow, actions]);
       var sheet = h("div", { class: "ink-sheet" }, [sheetHead, sheetBody]);
       var element = h("div", { class: "ink-panel", "data-strokes": "0", "data-zoom": "1.00", "data-hole": "", "data-sel": "", "data-mode": "select" }, [bar, latexRow, stage, sheet]);
 
@@ -1207,6 +1214,7 @@ SympyEditor.registerAddon("handwriting", (function () {
                  chosenLatex: chosenLatex, piecePicked: piecePicked, picks: JSON.parse(JSON.stringify(picks)) };
       }
       function push(st) {
+        hideApplied();                    // an edit of its own: what the applying did is answered for
         past.push(st);
         if (past.length > HISTORY) past.shift();
         future = [];
@@ -1226,6 +1234,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         redoBtn.disabled = !future.length;
       }
       function restore(st) {
+        hideApplied();
         clearTimeout(readTimer);
         seq++;
         current = null; currentId = null; erase = null; tap = null; pending = null;
@@ -1785,9 +1794,20 @@ SympyEditor.registerAddon("handwriting", (function () {
       }
       sheetHead.addEventListener("click", function () { folded = !folded; updateSummary(); });
 
+      // What an applying did: the formula as it was and as it now is, to keep or to take back.
+      function showApplied(was, now) {
+        wasFormula.setAttribute("data-latex", was);
+        nowFormula.setAttribute("data-latex", now);
+        typeset(wasFormula, was, was);
+        typeset(nowFormula, now, now);
+        appliedRow.hidden = false;
+      }
+      function hideApplied() { appliedRow.hidden = true; }
+      keepBtn.addEventListener("click", hideApplied);
+      undoApplied.addEventListener("click", function () { hideApplied(); undo(); });
       function applyToEditor() {
         if (apply.disabled) return;
-        var before = snapshot();
+        var before = snapshot(), wasLatex = editorLatex();
         if (hole) { closeEditor(); commitHole(); }   // the ink's reading into the formula first: one edit with the applying
         var payload = { latex: field.value, path: "/", choices: picks.choices, constants: picks.constants };
         api.call("insert", payload).then(function () {
@@ -1802,6 +1822,7 @@ SympyEditor.registerAddon("handwriting", (function () {
           setMode("select");                       // and is back to selecting in it, not writing
           note.textContent = "Applied.";
           updateSummary();
+          showApplied(wasLatex, editorLatex());    // what it did, to keep or to take back
         }, function (e) {
           note.textContent = String((e && e.message) || e);
           note.className = "ink-note error";
@@ -1870,7 +1891,7 @@ SympyEditor.registerAddon("handwriting", (function () {
           + "</ul></section>"
           + "<section><h3>The formula in the pad</h3><ul>"
           + "<li>The pad opens with the editor's formula, drawn from the LaTeX in the line above it: type there, or write in the pad - the two mix.</li>"
-          + "<li><b>Apply to the formula</b> makes the pad's formula the editor's, and the view stays as it is (the pad back to Select); Enter in the LaTeX line does the same.</li>"
+          + "<li><b>Apply to the formula</b> makes the pad's formula the editor's, and the view stays as it is (the pad back to Select); Enter in the LaTeX line does the same. What it did is then shown - the formula as it was, and as it now is - to <b>Keep</b> or to <b>Undo the change</b>, which takes it back in the editor too.</li>"
           + "</ul></section>"
           + "<section><h3>Writing by hand</h3><ul>"
           + "<li>A moment after the pen lifts, what is written is read. The best reading comes first: pick the one you wrote, or press the pen beside it to edit its LaTeX. The line under the readings is what SymPy gets of what is written - of that piece alone while it is being written, of the whole formula otherwise - with a menu for each part that can be read more than one way and a switch for each constant name. An option picked for a piece stays with it in the formula.</li>"

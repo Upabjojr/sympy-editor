@@ -233,6 +233,16 @@ def test_applying_keeps_the_view_as_it_is():
                 page.wait_for_timeout(100)
             assert all(abs(t - start) <= 1 for t in seen), (start, seen)
             assert _wait(lambda: field.input_value() != "")               # the pad shows the editor's formula now
+            # what it did, shown: the formula as it was and as it now is, to keep or to take back
+            applied = page.locator(".se-addon-handwriting .ink-applied")
+            assert applied.is_visible()
+            assert page.locator(".se-addon-handwriting .ink-was").get_attribute("data-latex") == "x + y"
+            assert page.locator(".se-addon-handwriting .ink-now").get_attribute("data-latex") != "x + y"
+            page.locator(".se-addon-handwriting .ink-undo-applied").click()      # taken back, in the editor too
+            assert _wait(lambda: str(doc.expr) == "x + y")
+            assert applied.is_hidden()
+            page.locator(".se-addon-handwriting .ink-redo").click()              # and applied again
+            assert _wait(lambda: str(doc.expr) == "sin(x)*cos(y) + pi")
             # Undo in the pad takes the applying back - in the editor too; Redo applies it again
             undo, redo = page.locator(".se-addon-handwriting .ink-undo"), page.locator(".se-addon-handwriting .ink-redo")
             undo.click()
@@ -255,6 +265,8 @@ def test_applying_keeps_the_view_as_it_is():
             write()
             apply.click()
             assert _wait(lambda: note.inner_text() == "Applied.")
+            page.locator(".se-addon-handwriting .ink-keep").click()               # kept: the strip goes, the formula stays
+            assert page.locator(".se-addon-handwriting .ink-applied").is_hidden()
             assert "ink-full" in panel.get_attribute("class")
             assert page.errors == []
         finally:
