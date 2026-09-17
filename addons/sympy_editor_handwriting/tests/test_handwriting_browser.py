@@ -765,3 +765,41 @@ def test_a_pieces_options_and_its_edited_latex_go_into_the_formula():
             browser.close()
             srv.shutdown()
             srv.server_close()
+
+
+def test_with_a_piece_selected_the_pen_writes_in_its_place_wherever_it_writes():
+    """A stroke begun away from the selected piece - easily, with a finger on a
+    small one - still writes in its place, and so does the next one."""
+    doc = Document(x, addons=[HandwritingAddon(FakeRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _pad_page(p, doc)
+        try:
+            panel = page.locator(".se-addon-handwriting .ink-panel")
+            field = page.locator(".se-addon-handwriting .ink-latex")
+            field.fill("x + y")
+            page.wait_for_selector(".se-addon-handwriting .ink-formula [data-ls]")
+            page.locator(".se-addon-handwriting .ink-select").click()
+            y_at = page.evaluate(PIECE_BOX, [4, 5])
+            page.mouse.click(y_at["x"], y_at["y"])
+            assert panel.get_attribute("data-sel") == "4,5"
+            page.locator(".se-addon-handwriting .ink-pen").click()
+            pad = page.locator(".se-addon-handwriting .ink-pad").bounding_box()
+            _drag(page, pad["x"] + pad["width"] - 220, pad["y"] + pad["height"] - 60, pad["x"] + pad["width"] - 120, pad["y"] + pad["height"] - 30)
+            assert panel.get_attribute("data-hole") == "4,5"
+            assert _wait(lambda: field.input_value() == "x + " + READING, 15)
+            # the ink went into the room made for the piece
+            inside = page.evaluate("""() => {
+              const r = document.querySelector('.se-addon-handwriting .ink-formula [data-inkhole] .rule').getBoundingClientRect();
+              return {left: r.left, top: r.top, right: r.right, bottom: r.bottom};
+            }""")
+            assert inside["right"] > inside["left"]
+            # a second stroke far away: still that piece's, the room still open
+            _drag(page, pad["x"] + 30, pad["y"] + pad["height"] - 40, pad["x"] + 90, pad["y"] + pad["height"] - 20)
+            assert _wait(lambda: panel.get_attribute("data-strokes") == "2")
+            assert panel.get_attribute("data-hole") == "4,5"
+            assert _wait(lambda: field.input_value() == "x + " + READING, 15)
+            assert page.errors == []
+        finally:
+            browser.close()
+            srv.shutdown()
+            srv.server_close()

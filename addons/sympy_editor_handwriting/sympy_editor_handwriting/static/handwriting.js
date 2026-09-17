@@ -261,7 +261,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         stage.appendChild(b);
       });
       var selectBtn = toolButton(h, "select", "Select: a tap selects a piece of the formula, a second tap what holds it", { "aria-pressed": "false" });
-      var penBtn = toolButton(h, "pen", "Pen: writes - over the selected piece, room to write in takes its place; anywhere else, after the formula", { "aria-pressed": "true" });
+      var penBtn = toolButton(h, "pen", "Pen: writes - with a piece selected, in its place, wherever it is written; with nothing selected, after the formula", { "aria-pressed": "true" });
       var eraseBtn = toolButton(h, "erase", "Eraser: the strokes the pointer passes over go", { "aria-pressed": "false" });
       var modes = h("div", { class: "ink-modes", role: "group", "aria-label": "What a tap or a stroke on the pad does" }, [selectBtn, penBtn, eraseBtn]);
       var doneBtn = toolButton(h, "done", "Done: the reading of the ink into the formula, and the ink goes", { disabled: "" });
@@ -600,10 +600,20 @@ SympyEditor.registerAddon("handwriting", (function () {
       }
       function fitHole() {                 // the ink inside it, and it as large as the ink needs, with room beyond
         if (!hole || hole.free || !hole.rect || !strokes.length) return;
-        var r = hole.rect, m = 28 / zoom, minX = Infinity, minY = Infinity;
-        strokes.forEach(function (s) { s.forEach(function (p) { minX = Math.min(minX, p[0]); minY = Math.min(minY, p[1]); }); });
-        // begun on a small piece, the ink may stand out above or left of the room made for it: in it
-        var dx = minX < r.x + 4 / zoom ? r.x + 8 / zoom - minX : 0, dy = minY < r.y + 4 / zoom ? r.y + 8 / zoom - minY : 0;
+        var r = hole.rect, m = 28 / zoom, minX = Infinity, minY = Infinity, inkR = -Infinity, inkB = -Infinity;
+        strokes.forEach(function (s) { s.forEach(function (p) {
+          minX = Math.min(minX, p[0]); minY = Math.min(minY, p[1]); inkR = Math.max(inkR, p[0]); inkB = Math.max(inkB, p[1]);
+        }); });
+        var dx = 0, dy = 0;
+        if (inkR < r.x || minX > r.x + r.w || inkB < r.y || minY > r.y + r.h) {
+          // written away from the room made for it (the selection was elsewhere on the pad): the ink into it
+          dx = r.x + 8 / zoom - minX;
+          dy = r.y + 8 / zoom - minY;
+        } else {
+          // begun on a small piece, the ink may stand out above or left of the room: in it
+          if (minX < r.x + 4 / zoom) dx = r.x + 8 / zoom - minX;
+          if (minY < r.y + 4 / zoom) dy = r.y + 8 / zoom - minY;
+        }
         if (dx || dy) moveInk(dx, dy);
         var maxX = r.x + hole.wPx, maxY = r.y + hole.hPx;
         strokes.forEach(function (s) { s.forEach(function (p) { maxX = Math.max(maxX, p[0] + m); maxY = Math.max(maxY, p[1] + m); }); });
@@ -830,15 +840,12 @@ SympyEditor.registerAddon("handwriting", (function () {
           eraseTo(at);
           return;
         }
-        // the Pen: over the selected piece, room to write in takes its place; outside a
-        // piece's room, that reading goes in; anywhere else, the ink is free
+        // the Pen: with a piece selected, what is written - wherever on the pad - takes its
+        // place (the piece gives way to room to write in, and the ink goes into it); with
+        // nothing selected, the ink is free.  A room open takes every stroke until it is done.
         ev.preventDefault();
         pending = snapshot();
-        if (hole && !hole.free && !writesAt(at)) commitHole();
-        if (!hole) {
-          var selRect = sel ? rectFor(sel) : null;
-          if (selRect && inside(at, selRect, 6 / zoom)) openHole(sel); else openFree();
-        }
+        if (!hole) { if (sel && rectFor(sel)) openHole(sel); else openFree(); }
         clearTimeout(timer);
         if (!strokes.length) t0 = ev.timeStamp;
         try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* not capturable */ }
@@ -1338,7 +1345,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         help: "<section><h3>The tools</h3><ul>"
           + "<li>" + toolIcon("select", 16) + " <b>Select</b>, " + toolIcon("pen", 16) + " <b>Pen</b> and " + toolIcon("erase", 16) + " <b>Eraser</b> say what a tap or a stroke on the pad does - one at a time, the pressed one.</li>"
           + "<li>With <b>Select</b>, a tap selects a piece of the formula, a second tap what holds it, a tap on nothing clears the selection.</li>"
-          + "<li>With the <b>Pen</b>, writing over the selected piece makes it room to write in - the piece out of sight, the room growing as the ink nears its edges - and the reading takes its place in the LaTeX. Written anywhere else the ink is free: its reading goes after the formula.</li>"
+          + "<li>With the <b>Pen</b> and a piece selected, what is written - anywhere on the pad - takes its place: the piece gives way to room to write in, the ink goes into it, the room grows as the ink nears its edges, and the reading takes the piece's place in the LaTeX. Every stroke goes there until Done. With nothing selected the ink is free: its reading goes after the formula (a tap on nothing, with Select, clears the selection).</li>"
           + "<li>With the <b>Eraser</b>, every stroke the pointer passes over goes. A pen turned round erases too.</li>"
           + "<li>" + toolIcon("done", 16) + " <b>Done</b> puts the reading of the ink into the formula for good, and the ink goes; with Select, a tap does the same.</li>"
           + "<li>" + toolIcon("undo", 16) + " <b>Undo</b> and " + toolIcon("redo", 16) + " <b>Redo</b> go back and forth through every edit in the pad: strokes, the eraser, selections, readings put in, typing in the LaTeX line (Ctrl+Z and Ctrl+Y there too), applying.</li>"
