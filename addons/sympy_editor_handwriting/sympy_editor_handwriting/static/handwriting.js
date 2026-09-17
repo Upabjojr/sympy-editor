@@ -1200,6 +1200,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       fullBtn.setAttribute("title", "Full screen: the writing area as large as the screen");
       fullBtn.setAttribute("aria-label", "Full screen");
 
+      setMode(mode);                     // the Pen, pressed from the start
       if (!canRead) canvas.classList.add("ink-off");
       reset();
       loadFromEditor();                  // the editor's formula, to edit
