@@ -1524,23 +1524,32 @@ SympyEditor.registerAddon("handwriting", (function () {
             bars.push(q);
             if (!bar || r.w * r.h > bar.rect.w * bar.rect.h) bar = q;
           });
-          if (bar) return { kind: under ? "over" : "under", target: { s: bar.s, e: bar.e }, s: bar.s, e: bar.e, read: rest, nest: { s: bar.s, e: bar.e }, others: bars };
+          if (bar) return { kind: under ? "over" : "under", target: { s: bar.s, e: bar.e }, s: bar.s, e: bar.e, read: rest, nest: { s: bar.s, e: bar.e }, others: bars.slice().sort(function (p1, p2) { return p2.rect.w * p2.rect.h - p1.rect.w * p1.rect.h; }) };
         }
         var near = function (q) { return q.rect.y - I.maxY < q.rect.h && I.minY - (q.rect.y + q.rect.h) < q.rect.h; };
         var tolX = Math.max(12 / zoom, 0.25 * (I.maxX - I.minX));
         var lefts = pieces.filter(function (q) { return q.rect.x + q.rect.w <= I.minX + tolX && near(q); });
         if (lefts.length) {
-          var edge = Math.max.apply(null, lefts.map(function (q) { return q.rect.x + q.rect.w; }));
-          var atEdge = lefts.filter(function (q) { return Math.abs(q.rect.x + q.rect.w - edge) <= 2 / zoom; });
-          var outer = atEdge.reduce(function (a, b) { return b.e - b.s > a.e - a.s ? b : a; });
-          var tall = Math.max.apply(null, atEdge.map(function (q) { return q.rect.h; }));
-          var inner = atEdge.filter(function (q) { return q.rect.h >= 0.6 * tall; }).reduce(function (a, b) { return b.e - b.s < a.e - a.s ? b : a; });
-          var r = inner.rect;
-          if (I.minX - edge <= Math.max(28 / zoom, r.w) && I.maxY - I.minY <= 0.9 * r.h) {
-            if (I.maxY <= r.y + 0.55 * r.h) return { kind: "sup", target: { s: inner.s, e: inner.e }, s: inner.s, e: inner.e, nest: { s: inner.s, e: inner.e }, others: atEdge };
-            if (I.minY >= r.y + 0.45 * r.h) return { kind: "sub", target: { s: inner.s, e: inner.e }, s: inner.s, e: inner.e, nest: { s: inner.s, e: inner.e }, others: atEdge };
-          }
-          return { kind: "after", target: { s: outer.s, e: outer.e }, s: outer.e, e: outer.e, nest: { s: inner.s, e: inner.e }, others: atEdge };
+          // each piece on the ink's left, as what the ink would be to it - its exponent (the ink
+          // small, high), its subscript (small, low) or what comes after it - and how near the ink
+          // is to where that would be written, in the piece's own heights: the nearest is the one
+          var ih = I.maxY - I.minY;
+          var scored = lefts.map(function (q) {
+            var r = q.rect, kind = "after", ax = r.x + r.w, ay = r.y + r.h / 2, by = (I.minY + I.maxY) / 2;
+            var close = I.minX - (r.x + r.w) <= Math.max(28 / zoom, r.w);          // a script is written right by its piece
+            if (close && ih <= 0.9 * r.h && I.maxY <= r.y + 0.55 * r.h) { kind = "sup"; ay = r.y + 0.25 * r.h; by = I.maxY; }
+            else if (close && ih <= 0.9 * r.h && I.minY >= r.y + 0.45 * r.h) { kind = "sub"; ay = r.y + 0.75 * r.h; by = I.minY; }
+            return { q: q, kind: kind, d: Math.hypot(I.minX - ax, by - ay) / Math.max(r.h, 1) };
+          }).sort(function (x1, x2) { return x1.d - x2.d; });
+          var best = scored[0], bq = best.q;
+          var alike = scored.filter(function (o) { return o.d <= best.d + 1; }).map(function (o) { return o.q; });
+          if (best.kind !== "after") return { kind: best.kind, target: { s: bq.s, e: bq.e }, s: bq.s, e: bq.e, nest: { s: bq.s, e: bq.e }, others: alike };
+          // after it: after all that ends where it ends (not inside an exponent the piece is the end of)
+          var outer = bq;
+          pieces.forEach(function (q) {
+            if (q.s <= bq.s && q.e >= bq.e && Math.abs(q.rect.x + q.rect.w - (bq.rect.x + bq.rect.w)) <= 2 / zoom && q.e - q.s > outer.e - outer.s) outer = q;
+          });
+          return { kind: "after", target: { s: outer.s, e: outer.e }, s: outer.e, e: outer.e, nest: { s: bq.s, e: bq.e }, others: alike };
         }
         var rights = pieces.filter(function (q) { return q.rect.x >= I.maxX - tolX && near(q); });
         if (rights.length) {
@@ -1561,7 +1570,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         var out = [];
         var add = function (r) { if (r && !out.some(function (o) { return o.s === r.s && o.e === r.e; })) out.push({ s: r.s, e: r.e }); };
         add(pl.nest);
-        (pl.others || []).slice().sort(function (a, b) { return (a.e - a.s) - (b.e - b.s); }).forEach(add);
+        (pl.others || []).forEach(add);        // nearest first
         for (var up = pl.nest, k = 0; k < 4 && up; k++) { up = enclosing(up); add(up); }
         pl.options = out.slice(0, 5);
         return pl;
