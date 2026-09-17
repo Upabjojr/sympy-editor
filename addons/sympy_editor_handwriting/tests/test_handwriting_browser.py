@@ -214,6 +214,7 @@ def test_applying_keeps_the_view_as_it_is():
 
             def write():
                 field.fill("")
+                page.locator(".se-addon-handwriting .ink-pen").click()
                 box = page.locator(".se-addon-handwriting .ink-pad").bounding_box()
                 _drag(page, box["x"] + 40, box["y"] + 40, box["x"] + 160, box["y"] + 70)
                 assert _wait(lambda: not apply.is_disabled(), 15)
@@ -224,6 +225,7 @@ def test_applying_keeps_the_view_as_it_is():
             apply.click()
             assert _wait(lambda: str(doc.expr) == "sin(x)*cos(y) + pi")
             assert _wait(lambda: note.inner_text() == "Applied.")
+            assert panel.get_attribute("data-mode") == "select"                  # applied: back to selecting
             seen = []
             for _ in range(15):                                         # while the pad reloads the formula and reads it
                 seen.append(top())

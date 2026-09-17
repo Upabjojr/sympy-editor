@@ -1431,6 +1431,7 @@ SympyEditor.registerAddon("handwriting", (function () {
           element.setAttribute("data-strokes", "0");
           reset();
           loadFromEditor();                        // the pad shows the formula as the editor now has it
+          setMode("select");                       // and is back to selecting in it, not writing
           note.textContent = "Applied.";
           updateSummary();
         }, function (e) {
@@ -1500,7 +1501,7 @@ SympyEditor.registerAddon("handwriting", (function () {
           + "</ul></section>"
           + "<section><h3>The formula in the pad</h3><ul>"
           + "<li>The pad opens with the editor's formula, drawn from the LaTeX in the line above it: type there, or write in the pad - the two mix.</li>"
-          + "<li><b>Apply to the formula</b> makes the pad's formula the editor's, and the view stays as it is; Enter in the LaTeX line does the same.</li>"
+          + "<li><b>Apply to the formula</b> makes the pad's formula the editor's, and the view stays as it is (the pad back to Select); Enter in the LaTeX line does the same.</li>"
           + "</ul></section>"
           + "<section><h3>Writing by hand</h3><ul>"
           + "<li>A moment after the pen lifts, what is written is read. The best reading comes first: pick the one you wrote, or press the pen beside it to edit its LaTeX. The line under the readings is what SymPy gets of what is written - of that piece alone while it is being written, of the whole formula otherwise - with a menu for each part that can be read more than one way and a switch for each constant name. An option picked for a piece stays with it in the formula.</li>"
