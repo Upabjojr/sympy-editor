@@ -145,7 +145,9 @@ def test_without_the_pen_the_editor_is_the_editor_it_was():
             assert page.locator(".se-view").count() == 1
             assert page.locator("canvas").count() == 1
             assert page.locator(".se-stage > canvas.hw-ink").count() == 1
-            assert page.locator(".se-addon-handwriting canvas").count() == 0
+            # no box, no name, nothing under the editor: the add-on shows nowhere
+            assert page.locator(".se-addons [data-addon=handwriting]").count() == 0
+            assert page.locator(".hw-panel").is_hidden()
             inert = "getComputedStyle(document.querySelector('.hw-ink')).pointerEvents"
             assert page.evaluate(inert) == "none"
             # the formula still selects on a tap
@@ -156,6 +158,7 @@ def test_without_the_pen_the_editor_is_the_editor_it_was():
             # the Pen: the layer takes the pointer, the formula grows
             page.locator('[data-cmd="addon:handwriting:pen"]').click()
             assert _wait(lambda: page.evaluate(inert) == "auto")
+            assert _wait(lambda: page.locator(".hw-panel").is_visible())   # and the strip, with the Pen
             assert page.locator(".sympy-editor.se-inking").count() == 1
             assert _wait(lambda: page.evaluate("document.querySelector('.se-view').clientHeight") > was)
             assert page.locator('[data-cmd="addon:handwriting:pen"]').get_attribute("aria-pressed") == "true"
@@ -164,6 +167,7 @@ def test_without_the_pen_the_editor_is_the_editor_it_was():
             assert _wait(lambda: page.evaluate(inert) == "none")
             assert page.locator(".sympy-editor.se-inking").count() == 0
             assert _wait(lambda: page.evaluate("document.querySelector('.se-view').clientHeight") == was)
+            assert page.locator(".hw-panel").is_hidden()
             assert page.errors == []
         finally:
             _close(srv, browser)
@@ -183,21 +187,21 @@ def test_what_is_written_over_a_selection_takes_its_place_at_once():
             view = page.locator(".se-view").bounding_box()
             _drag(page, view["x"] + 40, view["y"] + 90, view["x"] + 110, view["y"] + 120)
             assert _wait(lambda: str(doc.expr) == "x + z", 15), str(doc.expr)
-            said = page.locator(".se-addon-handwriting .hw-reading-of")
+            said = page.locator(".hw-reading-of")
             assert _wait(lambda: "selection's place" in said.inner_text())
             # the line under the readings is the reading itself, as SymPy gets it
-            assert page.locator(".se-addon-handwriting .hw-src").inner_text() == "z"
+            assert page.locator(".hw-src").inner_text() == "z"
             # the ink has gone off the formula: the formula itself says it now
-            assert page.locator(".se-addon-handwriting .hw-panel").get_attribute("data-strokes") == "0"
+            assert page.locator(".hw-panel").get_attribute("data-strokes") == "0"
             # and the strip: from x + y (what went, red) to x + z (what came, green)
-            strip = page.locator(".se-addon-handwriting .hw-applied")
+            strip = page.locator(".hw-applied")
             assert not strip.is_hidden()
             assert strip.locator(".hw-was").get_attribute("data-latex") == "x + y"
             assert strip.locator(".hw-now").get_attribute("data-latex") == "x + z"
             assert strip.locator(".hw-was .rep-removed").count() >= 1
             assert strip.locator(".hw-now .rep-added").count() >= 1
             # Undo the change: the formula as it was, and the strip goes
-            page.locator(".se-addon-handwriting .hw-back").click()
+            page.locator(".hw-back").click()
             assert _wait(lambda: str(doc.expr) == "x + y", 15), str(doc.expr)
             assert _wait(lambda: strip.is_hidden())
             assert page.errors == []
@@ -222,16 +226,16 @@ def test_free_ink_is_read_together_with_the_piece_it_is_written_by():
             assert _wait(lambda: str(doc.expr) == "x**2", 15), str(doc.expr)
             # the model was sent the piece as a stand-in: a stroke more than was written
             assert len(rec.last) == 2
-            said = page.locator(".se-addon-handwriting .hw-reading-of")
+            said = page.locator(".hw-reading-of")
             assert "together with" in said.inner_text()
-            options = page.locator(".se-addon-handwriting .hw-with-option")
+            options = page.locator(".hw-with-option")
             assert _wait(lambda: options.count() >= 2)
-            assert page.locator(".se-addon-handwriting .hw-alone").count() == 1
+            assert page.locator(".hw-alone").count() == 1
             # alone: the ink by itself, after the formula - and the piece is not lost
             rec.latex = "y"
-            page.locator(".se-addon-handwriting .hw-alone").click()
+            page.locator(".hw-alone").click()
             assert _wait(lambda: str(doc.expr) == "x*y", 15), str(doc.expr)
-            assert page.locator(".se-addon-handwriting .hw-alone").get_attribute("aria-pressed") == "true"
+            assert page.locator(".hw-alone").get_attribute("aria-pressed") == "true"
             assert page.errors == []
         finally:
             _close(srv, browser)
@@ -247,15 +251,15 @@ def test_another_reading_changes_the_formula_instead_of_piling_up():
             view = page.locator(".se-view").bounding_box()
             _drag(page, view["x"] + 200, view["y"] + 60, view["x"] + 260, view["y"] + 100)
             assert _wait(lambda: str(doc.expr) == "x*y", 15), str(doc.expr)
-            cands = page.locator(".se-addon-handwriting .hw-cand")
+            cands = page.locator(".hw-cand")
             assert _wait(lambda: cands.count() == 2)
             assert cands.nth(0).get_attribute("aria-selected") == "true"
             cands.nth(1).click()
             assert _wait(lambda: str(doc.expr) == "x*z", 15), str(doc.expr)
             assert cands.nth(1).get_attribute("aria-selected") == "true"
             # Keep: the strip goes, the formula stays as it is
-            page.locator(".se-addon-handwriting .hw-keep").click()
-            assert _wait(lambda: page.locator(".se-addon-handwriting .hw-applied").is_hidden())
+            page.locator(".hw-keep").click()
+            assert _wait(lambda: page.locator(".hw-applied").is_hidden())
             assert str(doc.expr) == "x*z"
             assert page.errors == []
         finally:
@@ -267,12 +271,12 @@ def test_the_eraser_takes_strokes_away_and_clear_takes_them_all():
     with playwright.sync_playwright() as p:
         srv, browser, page = _page(p, doc)
         try:
-            panel = page.locator(".se-addon-handwriting .hw-panel")
+            panel = page.locator(".hw-panel")
             view = page.locator(".se-view").bounding_box()
             _drag(page, view["x"] + 200, view["y"] + 40, view["x"] + 240, view["y"] + 70)
             _drag(page, view["x"] + 300, view["y"] + 40, view["x"] + 340, view["y"] + 70)
             assert _wait(lambda: panel.get_attribute("data-strokes") == "2")
-            assert _wait(lambda: "Nothing could be read" in page.locator(".se-addon-handwriting .hw-note").inner_text(), 15)
+            assert _wait(lambda: "Nothing could be read" in page.locator(".hw-note").inner_text(), 15)
             page.locator('[data-cmd="addon:handwriting:erase"]').click()
             _drag(page, view["x"] + 195, view["y"] + 55, view["x"] + 245, view["y"] + 55)
             assert _wait(lambda: panel.get_attribute("data-strokes") == "1")
@@ -294,9 +298,12 @@ def test_the_tools_are_icons_and_the_guide_explains_them():
             assert tools.count() == 3
             for i in range(3):
                 assert tools.nth(i).inner_text().strip() == ""
-                assert tools.nth(i).locator("svg").count() == 1
+                icon = tools.nth(i).locator("svg")
+                assert icon.count() == 1
+                assert icon.bounding_box()["width"] >= 12, i        # drawn, not a button of nothing
                 assert tools.nth(i).get_attribute("aria-label")
-            page.locator(".se-addon-handwriting .se-addon-help").click()
+            page.locator('[data-cmd="addon:handwriting:pen"]').click()      # the strip, with its "?"
+            page.locator(".hw-help").click()
             guide = page.locator(".se-help-view")
             for word in ("Write", "Erase", "Clear ink", "Read with", "Keep", "Undo the change"):
                 assert word in guide.inner_text(), word

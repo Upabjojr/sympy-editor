@@ -34,8 +34,11 @@ SympyEditor.registerAddon("handwriting", (function () {
     clear: "M2.9 4.5h10.2M6.2 4.5V3.1h3.6v1.4M4.3 4.5l.7 8.7a1 1 0 0 0 1 .9h4a1 1 0 0 0 1-.9l.7-8.7M6.9 6.9v4.7M9.1 6.9v4.7"
   };
   function toolIcon(name, size) {
+    // se-icon is what the editor sizes its own tools' icons with; hw-icon is
+    // for this add-on's own rules (the guide draws them in a line of text).
     var dims = size ? ' width="' + size + '" height="' + size + '" style="vertical-align: -0.2em"' : "";
-    return '<svg class="hw-icon" viewBox="0 0 16 16"' + dims + ' aria-hidden="true" focusable="false">' +
+    return '<svg class="' + (size ? "hw-icon" : "se-icon hw-icon") + '" viewBox="0 0 16 16"' + dims +
+      ' aria-hidden="true" focusable="false">' +
       '<path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="' +
       TOOL_PATHS[name] + '"/></svg>';
   }
@@ -47,6 +50,21 @@ SympyEditor.registerAddon("handwriting", (function () {
     var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     try { el.scrollIntoView({ block: "nearest", behavior: reduce ? "auto" : "smooth" }); }
     catch (e) { el.scrollIntoView(false); }
+  }
+
+  // The add-on's page of the editor's help overlay, opened by the "?" in the
+  // strip under the formula.
+  function HELP(status) {
+    return "<section><h3>Writing on the formula</h3><ul>"
+      + "<li>" + toolIcon("pen", 16) + " <b>Write</b>, among the editor's tools, takes the pointer and gives the formula room to write in; with it off the editor is the editor it was - the formula is tapped, selected and edited in the usual way.</li>"
+      + "<li>A moment after the pen lifts what is written is read, and the best reading goes into the formula at once. The others are offered under it: picking one puts that in instead (the one before it is taken back first, so they never pile up).</li>"
+      + "<li>Where it goes is what the editor says: over the selected sub-expression (or the selected range), at the cursor, and - with neither - against the piece of the formula it is written by. That piece is outlined, and it is read <i>together with</i> the ink: a bar under it with ink under the bar is a fraction over it, a small letter at its top-right corner its exponent, a letter beside it a product. <b>Read with</b> offers the other pieces it might be, and <i>alone</i>: the reading by itself, after the formula.</li>"
+      + "<li>" + toolIcon("erase", 16) + " <b>Erase</b> takes away the strokes the pointer passes over (a pen turned round erases too), and " + toolIcon("clear", 16) + " <b>Clear ink</b> takes all of it.</li>"
+      + "<li>What the reading did is shown under the editor - the formula as it was and as it now is, what went marked red and what came marked green - to <b>Keep</b> or to <b>Undo the change</b>; the editor's own Undo takes it back too.</li>"
+      + "<li>Under the readings: what SymPy gets of the one in the formula, with a menu for each part of the LaTeX that can be read more than one way and a switch for each constant name.</li>"
+      + "<li>The reading is done by math-ocr's stroke model. It reads one formula at a time, and mixes up look-alike glyphs most (<code>1</code> and <code>|</code>, <code>V</code> and <code>v</code>).</li>"
+      + "</ul></section>"
+      + (status.notice ? '<section><h3>About the model</h3><p style="white-space: pre-wrap">' + plain(status.notice) + "</p></section>" : "");
   }
 
   return {
@@ -69,7 +87,9 @@ SympyEditor.registerAddon("handwriting", (function () {
         { available: false, reason: "The add-on's Python said nothing about its model" };
       var canRead = !!status.available;
 
-      /* ---- the panel under the editor: the readings and what came of them ---- */
+      var guide;                     // the add-on's own page of the help overlay, below
+
+      /* ---- the strip under the editor: the readings and what came of them ---- */
       var note = h("div", { class: "hw-note", "aria-live": "polite" });
       var withRow = h("div", { class: "hw-with", role: "group", "aria-label": "What the ink is read together with" });
       var withDivide = h("hr", { class: "hw-divide", hidden: "" });
@@ -88,11 +108,18 @@ SympyEditor.registerAddon("handwriting", (function () {
         h("div", { class: "hw-applied-row" }, [h("span", { class: "hw-applied-label" }, ["from"]), wasFormula]),
         h("div", { class: "hw-applied-row" }, [h("span", { class: "hw-applied-label" }, ["to"]), nowFormula]),
         h("div", { class: "hw-applied-ask" }, [keepBtn, backBtn])]);
-      var element = h("div", { class: "hw-panel", "data-strokes": "0", "data-pen": "off", "data-aim": "" },
-        [note, cands, withDivide, withRow, readingOf, src, parseBlock, appliedRow]);
+      var helpBtn = h("button", { type: "button", class: "hw-help", title: "How writing by hand works" }, ["?"]);
+      var element = h("div", { class: "hw-panel", "data-strokes": "0", "data-pen": "off", "data-aim": "", hidden: "" },
+        [h("div", { class: "hw-head" }, [note, helpBtn]), cands, withDivide, withRow, readingOf, src, parseBlock, appliedRow]);
+      helpBtn.addEventListener("click", function () { api.showHelp(guide, "Handwriting"); });
+      // The keys of a menu or a button here are the panel's own, not the formula's.
+      element.addEventListener("keydown", function (ev) { ev.stopPropagation(); });
 
       /* ---- the ink, on the editor's own formula ---- */
       var editor = api.editor, stage = editor && editor.stage, view = editor && editor.view;
+      if (editor && editor.addonHost && editor.addonHost.parentNode) {
+        editor.addonHost.parentNode.insertBefore(element, editor.addonHost);
+      }
       var canvas = h("canvas", { class: "hw-ink", "aria-hidden": "true" });
       if (stage) stage.appendChild(canvas);
       var ctx = canvas.getContext("2d");
@@ -338,6 +365,12 @@ SympyEditor.registerAddon("handwriting", (function () {
       function say(text, bad) {
         note.textContent = text || "";
         note.className = "hw-note" + (bad ? " error" : "");
+        showPanel();
+      }
+      // Nothing written and nothing read: the editor is the editor it was, with
+      // nothing of this add-on under it.
+      function showPanel() {
+        element.hidden = !(pen || strokes.length || readings.length || applied);
       }
       function typeset(el, tex, fallback) {
         el.textContent = "";
@@ -538,9 +571,10 @@ SympyEditor.registerAddon("handwriting", (function () {
         wasFormula.setAttribute("data-latex", was.plain);
         nowFormula.setAttribute("data-latex", now.plain);
         appliedRow.hidden = false;
+        showPanel();
         reveal(element);
       }
-      function hideApplied() { appliedRow.hidden = true; applied = null; puts++; }
+      function hideApplied() { appliedRow.hidden = true; applied = null; puts++; showPanel(); }
       keepBtn.addEventListener("click", function () { hideApplied(); forget(); clearReadings(); });
       backBtn.addEventListener("click", function () {
         mine++;
@@ -589,6 +623,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         if (editor && editor.root) editor.root.classList.toggle("se-inking", pen);
         canvas.style.pointerEvents = pen ? "auto" : "none";
         if (!strokes.length) say(idle(), !canRead);
+        showPanel();
         updateTools();
         setTimeout(layout, 0);
       }
@@ -679,24 +714,14 @@ SympyEditor.registerAddon("handwriting", (function () {
       setTimeout(layout, 0);
       clearReadings();
 
+      guide = HELP(status);
       return {
-        element: element,
-        title: "Handwriting",
         writing: function () { return pen; },
         erasing: function () { return erasing; },
         setPen: setPen,
         setErasing: setErasing,
         clearInk: clearInk,
-        help: "<section><h3>Writing on the formula</h3><ul>"
-          + "<li>" + toolIcon("pen", 16) + " <b>Write</b>, among the editor's tools, takes the pointer and gives the formula room to write in; with it off the editor is the editor it was - the formula is tapped, selected and edited in the usual way.</li>"
-          + "<li>A moment after the pen lifts what is written is read, and the best reading goes into the formula at once. The others are offered under it: picking one puts that in instead (the one before it is taken back first, so they never pile up).</li>"
-          + "<li>Where it goes is what the editor says: over the selected sub-expression (or the selected range), at the cursor, and - with neither - against the piece of the formula it is written by. That piece is outlined, and it is read <i>together with</i> the ink: a bar under it with ink under the bar is a fraction over it, a small letter at its top-right corner its exponent, a letter beside it a product. <b>Read with</b> offers the other pieces it might be, and <i>alone</i>: the reading by itself, after the formula.</li>"
-          + "<li>" + toolIcon("erase", 16) + " <b>Erase</b> takes away the strokes the pointer passes over (a pen turned round erases too), and " + toolIcon("clear", 16) + " <b>Clear ink</b> takes all of it.</li>"
-          + "<li>What the reading did is shown under the editor - the formula as it was and as it now is, what went marked red and what came marked green - to <b>Keep</b> or to <b>Undo the change</b>; the editor's own Undo takes it back too.</li>"
-          + "<li>Under the readings: what SymPy gets of the one in the formula, with a menu for each part of the LaTeX that can be read more than one way and a switch for each constant name.</li>"
-          + "<li>The reading is done by math-ocr's stroke model. It reads one formula at a time, and mixes up look-alike glyphs most (<code>1</code> and <code>|</code>, <code>V</code> and <code>v</code>).</li>"
-          + "</ul></section>"
-          + (status.notice ? '<section><h3>About the model</h3><p style="white-space: pre-wrap">' + plain(status.notice) + "</p></section>" : ""),
+        help: guide,
         onSelect: function () { if (strokes.length) redraw(); },
         onState: function () {
           dressTools();

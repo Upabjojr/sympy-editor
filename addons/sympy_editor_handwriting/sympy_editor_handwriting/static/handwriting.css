@@ -29,23 +29,51 @@
 .sympy-editor.se-full.se-inking .se-view { min-height: 0; }
 /* the tools: the Pen and the Eraser stay pressed while they are on */
 .sympy-editor .se-tools button.hw-tool { line-height: 1; }
+.sympy-editor .se-tools button.hw-tool .se-icon { display: block; width: 1.2em; height: 1.2em; }
+.se-help-view .hw-icon { vertical-align: -0.2em; }
 .sympy-editor .se-tools button.hw-on {
   background: rgba(var(--se-accent), 0.14);
   border-color: rgba(var(--se-accent), 0.65);
 }
 
-/* ---- the panel: the readings and what came of them ---- */
+/* ---- the strip under the formula: the readings and what came of them ----
+ * It is no box and has no name of its own: it is part of the editor, and with
+ * nothing written and nothing read it is not there at all. */
 /* a class with a display beats the browser's own [hidden]: say it here */
-.se-addon-handwriting [hidden] { display: none !important; }
-.se-addon-handwriting .hw-panel { display: flex; flex-direction: column; gap: 0.45rem; }
-.se-addon-handwriting .hw-note { font-size: 12px; color: var(--se-muted); }
-.se-addon-handwriting .hw-note:empty { display: none; }
-.se-addon-handwriting .hw-note.error { color: var(--se-bad, #d1242f); }
-.se-addon-handwriting .hw-panel.hw-busy .hw-note { opacity: 0.7; }
+.hw-panel[hidden], .hw-panel [hidden] { display: none !important; }
+.hw-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-top: 0.4rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--se-rule);
+  border-left: 3px solid rgba(var(--se-accent), 0.6);
+  border-radius: 0.4rem;
+  background: var(--se-surface);
+}
+.hw-head { display: flex; align-items: baseline; gap: 0.5rem; }
+.hw-head .hw-note { flex: 1 1 auto; }
+.hw-help {
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--se-rule);
+  border-radius: 0.3rem;
+  background: var(--se-btn);
+  color: var(--se-muted);
+  cursor: pointer;
+}
+.hw-note { font-size: 12px; color: var(--se-muted); }
+.hw-note:empty { display: none; }
+.hw-note.error { color: var(--se-bad, #d1242f); }
+.hw-panel.hw-busy .hw-note { opacity: 0.7; }
 
-.se-addon-handwriting .hw-cands { display: flex; flex-wrap: wrap; gap: 0.35rem; }
-.se-addon-handwriting .hw-cands:empty { display: none; }
-.se-addon-handwriting .hw-cand {
+.hw-cands { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.hw-cands:empty { display: none; }
+.hw-cand {
   font: inherit;
   font-size: 15px;
   line-height: 1.2;
@@ -56,17 +84,17 @@
   color: inherit;
   cursor: pointer;
 }
-.se-addon-handwriting .hw-cand.hw-chosen {
+.hw-cand.hw-chosen {
   border-color: rgba(var(--se-accent), 0.85);
   background: rgba(var(--se-accent), 0.12);
 }
 
 /* the pieces the ink can be read together with, and the line that keeps them
  * apart from the LaTeX parser's own options */
-.se-addon-handwriting .hw-with { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }
-.se-addon-handwriting .hw-with:empty { display: none; }
-.se-addon-handwriting .hw-with-label { color: var(--se-muted); font-size: 11px; }
-.se-addon-handwriting .hw-with button {
+.hw-with { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }
+.hw-with:empty { display: none; }
+.hw-with-label { color: var(--se-muted); font-size: 11px; }
+.hw-with button {
   font: inherit;
   font-size: 13px;
   line-height: 1.2;
@@ -77,31 +105,31 @@
   color: inherit;
   cursor: pointer;
 }
-.se-addon-handwriting .hw-with button.hw-chosen {
+.hw-with button.hw-chosen {
   border-style: solid;
   border-color: rgba(var(--se-accent), 0.85);
   background: rgba(var(--se-accent), 0.12);
 }
-.se-addon-handwriting .hw-divide { width: 100%; height: 0; margin: 0.1rem 0; border: 0; border-top: 1px solid var(--se-rule); }
+.hw-divide { width: 100%; height: 0; margin: 0.1rem 0; border: 0; border-top: 1px solid var(--se-rule); }
 
-.se-addon-handwriting .hw-reading-of { font-size: 11px; color: var(--se-muted); }
-.se-addon-handwriting .hw-reading-of:empty { display: none; }
-.se-addon-handwriting .hw-src { font-size: 12px; word-break: break-word; }
-.se-addon-handwriting .hw-src:empty { display: none; }
-.se-addon-handwriting .hw-src.error { color: var(--se-bad, #d1242f); }
+.hw-reading-of { font-size: 11px; color: var(--se-muted); }
+.hw-reading-of:empty { display: none; }
+.hw-src { font-size: 12px; word-break: break-word; }
+.hw-src:empty { display: none; }
+.hw-src.error { color: var(--se-bad, #d1242f); }
 
 /* the LaTeX parser's options */
-.se-addon-handwriting .hw-parse { display: flex; flex-direction: column; gap: 0.3rem; }
-.se-addon-handwriting .hw-parse-label { font-size: 11px; color: var(--se-muted); }
-.se-addon-handwriting .hw-ambig,
-.se-addon-handwriting .hw-consts { display: flex; flex-wrap: wrap; gap: 0.4rem 0.8rem; align-items: center; }
-.se-addon-handwriting .hw-point,
-.se-addon-handwriting .hw-const { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 12px; }
-.se-addon-handwriting .hw-fragment { font-size: 12px; }
-.se-addon-handwriting .hw-choice { font: inherit; font-size: 12px; max-width: 16rem; }
+.hw-parse { display: flex; flex-direction: column; gap: 0.3rem; }
+.hw-parse-label { font-size: 11px; color: var(--se-muted); }
+.hw-ambig,
+.hw-consts { display: flex; flex-wrap: wrap; gap: 0.4rem 0.8rem; align-items: center; }
+.hw-point,
+.hw-const { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 12px; }
+.hw-fragment { font-size: 12px; }
+.hw-choice { font: inherit; font-size: 12px; max-width: 16rem; }
 
 /* what the reading did: the formula as it was, as it now is, and the ask */
-.se-addon-handwriting .hw-applied {
+.hw-applied {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
@@ -110,11 +138,11 @@
   border-radius: 0.4rem;
   background: var(--se-surface);
 }
-.se-addon-handwriting .hw-applied-row { display: flex; align-items: baseline; gap: 0.45rem; flex-wrap: wrap; }
-.se-addon-handwriting .hw-applied-label { font-size: 11px; color: var(--se-muted); min-width: 2.2rem; }
-.se-addon-handwriting .hw-formula { font-size: 15px; overflow-x: auto; }
-.se-addon-handwriting .hw-applied-ask { display: flex; gap: 0.4rem; margin-top: 0.1rem; }
-.se-addon-handwriting .hw-applied-ask button {
+.hw-applied-row { display: flex; align-items: baseline; gap: 0.45rem; flex-wrap: wrap; }
+.hw-applied-label { font-size: 11px; color: var(--se-muted); min-width: 2.2rem; }
+.hw-formula { font-size: 15px; overflow-x: auto; }
+.hw-applied-ask { display: flex; gap: 0.4rem; margin-top: 0.1rem; }
+.hw-applied-ask button {
   font: inherit;
   font-size: 12px;
   padding: 0.25rem 0.6rem;
@@ -124,23 +152,23 @@
   color: inherit;
   cursor: pointer;
 }
-.se-addon-handwriting .hw-keep { border-color: rgba(var(--se-accent), 0.65); }
+.hw-keep { border-color: rgba(var(--se-accent), 0.65); }
 
 /* what went and what came, marked as the history's own report marks a step
  * (those colours live in the report's CSS: here they are, for this panel) */
-.se-addon-handwriting .hw-applied .rep-added,
-.se-addon-handwriting .hw-applied .rep-removed { font-weight: bold; }
-.se-addon-handwriting .hw-applied .rep-added { color: #1a7f37; }
-.se-addon-handwriting .hw-applied .rep-removed { color: #d1242f; }
+.hw-applied .rep-added,
+.hw-applied .rep-removed { font-weight: bold; }
+.hw-applied .rep-added { color: #1a7f37; }
+.hw-applied .rep-removed { color: #d1242f; }
 @media (prefers-color-scheme: dark) {
-  .se-addon-handwriting .hw-applied .rep-added { color: #3fb950; }
-  .se-addon-handwriting .hw-applied .rep-removed { color: #ff7b72; }
+  .hw-applied .rep-added { color: #3fb950; }
+  .hw-applied .rep-removed { color: #ff7b72; }
 }
-.sympy-editor[data-theme="dark"] .se-addon-handwriting .hw-applied .rep-added { color: #3fb950; }
-.sympy-editor[data-theme="dark"] .se-addon-handwriting .hw-applied .rep-removed { color: #ff7b72; }
+.sympy-editor[data-theme="dark"] .hw-applied .rep-added { color: #3fb950; }
+.sympy-editor[data-theme="dark"] .hw-applied .rep-removed { color: #ff7b72; }
 
 @media (any-pointer: coarse) {
-  .se-addon-handwriting .hw-cand { font-size: 17px; padding: 0.4rem 0.7rem; }
-  .se-addon-handwriting .hw-with button { font-size: 15px; padding: 0.4rem 0.7rem; }
-  .se-addon-handwriting .hw-applied-ask button { font-size: 14px; padding: 0.4rem 0.8rem; }
+  .hw-cand { font-size: 17px; padding: 0.4rem 0.7rem; }
+  .hw-with button { font-size: 15px; padding: 0.4rem 0.7rem; }
+  .hw-applied-ask button { font-size: 14px; padding: 0.4rem 0.8rem; }
 }
