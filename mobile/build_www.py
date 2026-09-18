@@ -47,21 +47,45 @@ PYODIDE_CORE = ("pyodide.js", "pyodide.asm.js", "pyodide.asm.wasm", "python_stdl
 # only find it if it was vendored beside the rest.
 PYODIDE_PACKAGES = ("mpmath", "micropip")
 
-NOTICE = """Third-party components vendored in this bundle
+#: What every bundle carries in the page.  THIRD-PARTY.md, beside the LICENSE,
+#: lists all of it - these are the lines a copy must carry with it.
+NOTICE_PAGE = """Third-party components vendored in this bundle
 ================================================
-KaTeX {katex}      MIT           https://katex.org
-Pyodide {pyodide}  MPL-2.0       https://pyodide.org  (core runtime, python_stdlib.zip)
-CPython (in Pyodide)  PSF-2.0    https://www.python.org
-SymPy {sympy} (wheel from PyPI)  BSD-3  https://www.sympy.org
+KaTeX {katex} (with its fonts)   MIT   https://katex.org
+Plotly.js (the plot add-on, fetched from jsDelivr, not vendored)  MIT  https://plotly.com/javascript/
+sympy-editor and its add-ons     AGPL-3.0-or-later
+"""
+
+#: A page that carries its own Python: Pyodide and the wheels beside it.
+NOTICE_PYODIDE = """Pyodide {pyodide}  MPL-2.0   https://pyodide.org  (core runtime, python_stdlib.zip)
+CPython (in Pyodide)  PSF-2.0   https://www.python.org
+micropip (Pyodide's, for an add-on's requirements)  MPL-2.0  https://pyodide.org
+SymPy {sympy} (wheel from PyPI)  BSD-3   https://www.sympy.org
 mpmath (wheel)        BSD-3     https://mpmath.org
-sympy-editor          AGPL-3.0-or-later
+"""
+
+#: A page inside the app: the Python is Chaquopy's, and the rest is Java.
+NOTICE_NATIVE = """The Python beside this bundle, and what the app is built on:
+Chaquopy 16.1 (the Python runtime and its plugin)  MIT  https://chaquo.com/chaquopy/
+  LLVM libc++ (chaquopy-libcxx)   Apache-2.0 with LLVM Exception
+  OpenBLAS (chaquopy-openblas)    BSD-3     https://www.openblas.net
+  GCC libgfortran (chaquopy-libgfortran)  GPL-3.0 with GCC Runtime Library Exception
+SymPy {sympy}, mpmath, lark, NumPy, sympy-matching, omnimatch, multiset  BSD-3 / MIT
+ONNX Runtime for Android 1.29 (the handwriting model runs on it)  MIT  https://onnxruntime.ai
+androidx.appcompat 1.7, androidx.webkit 1.11   Apache-2.0
+The handwriting model, when the build carries one, is not part of this project:
+it comes with a NOTICE of its own, beside the app's Python, which states the
+terms it is distributed under.
 """
 
 
-def notice() -> str:
-    """The bundle's NOTICE.txt: the list above, then sympy-editor's LICENSE,
-    which carries SymPy's licence in full (a binary copy must carry it)."""
-    listed = NOTICE.format(katex=KATEX_VERSION, pyodide=PYODIDE_VERSION, sympy=SYMPY_VERSION)
+def notice(pyodide: bool = True) -> str:
+    """The bundle's NOTICE.txt: what it carries in the page, then what runs its
+    Python - Pyodide's wheels, or the app's own - and then sympy-editor's
+    LICENSE, which carries SymPy's licence in full (a binary copy must carry
+    it).  THIRD-PARTY.md has the whole list, with what each is used for."""
+    listed = NOTICE_PAGE.format(katex=KATEX_VERSION)
+    listed += (NOTICE_PYODIDE if pyodide else NOTICE_NATIVE).format(pyodide=PYODIDE_VERSION, sympy=SYMPY_VERSION)
     return listed + "\n" + (HERE.parent / "LICENSE").read_text(encoding="utf-8")
 
 
@@ -96,9 +120,7 @@ def vendor(out: Path, cache: Path, pyodide: bool = True) -> dict:
 
     if not pyodide:
         shutil.rmtree(out / "vendor" / "pyodide", ignore_errors=True)     # a leftover from an earlier build
-        (out / "vendor" / "NOTICE.txt").write_text(
-            notice()
-            .replace("Pyodide", "(not vendored here) Pyodide"), encoding="utf-8")
+        (out / "vendor" / "NOTICE.txt").write_text(notice(pyodide=False), encoding="utf-8")
         return {"katexJs": "vendor/katex/katex.min.js", "katexCss": "vendor/katex/katex.min.css"}
 
     pyodide_base = default_urls()["pyodideIndex"]

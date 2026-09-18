@@ -14,6 +14,10 @@ more details.
 Versions up to and including 0.1.1 were released under the BSD 3-Clause
 License, and copies obtained under it keep that licence.
 
+This program uses, and its builds carry, third-party components of their own:
+SymPy's licence is stacked below, and THIRD-PARTY.md beside this file lists
+every one of them, with its terms and what it is used for.
+
 ================================================================================
 
                     GNU AFFERO GENERAL PUBLIC LICENSE

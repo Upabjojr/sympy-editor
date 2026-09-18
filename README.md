@@ -604,9 +604,16 @@ Jupyter widget and the apps all follow.
 | --- | --- | --- |
 | [SymPy](https://www.sympy.org) (Copyright (c) 2006-2023 SymPy Development Team) | BSD-3 | required: it does all the mathematics; its licence follows sympy-editor's in [`LICENSE`](LICENSE) |
 | anywidget (+ ipywidgets, traitlets) | MIT / BSD-3 | optional, Jupyter widget |
-| KaTeX | MIT | loaded from a CDN by the browser (URL configurable) |
-| Pyodide | MPL-2.0 | loaded from a CDN by the browser, standalone HTML only |
+| KaTeX | MIT | loaded from a CDN by the browser (URL configurable), vendored into the apps and the web bundle |
+| Pyodide (+ CPython, micropip) | MPL-2.0 / PSF-2.0 | loaded from a CDN by the browser, standalone HTML and the web bundle only |
 | SymPy wheel (PyPI) | BSD-3 | loaded by the browser into Pyodide (the newest SymPy, ahead of Pyodide's own package) |
+| lark, sympy-matching, NumPy, onnxruntime, Plotly.js | MIT / BSD-3 | the add-ons' own: LaTeX, rewrite rules, plot, handwriting |
+| Chaquopy, ONNX Runtime for Android, androidx | MIT / Apache-2.0 | the Android app is built on them |
+
+[`THIRD-PARTY.md`](THIRD-PARTY.md) has the whole of it - every component each
+build carries, with its terms and what it is used for - and each bundle carries
+the same list in its own `vendor/NOTICE.txt`, with the editor's `LICENSE` (and
+so SymPy's) after it.
 
 sympy-editor is free software under the **GNU Affero General Public License,
 version 3 or later** (AGPL-3.0-or-later): use it, change it and share it, and
