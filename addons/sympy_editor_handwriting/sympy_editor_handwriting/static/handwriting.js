@@ -303,12 +303,12 @@ SympyEditor.registerAddon("handwriting", (function () {
       var loadBtn = toolButton(h, "load", "The editor's formula, into the pad");
       var latexRow = h("div", { class: "ink-latexrow" }, [field, typeBtn, loadBtn]);
       var readingOf = h("div", { class: "ink-reading-of" });
-      var nestRow = h("div", { class: "ink-nest", role: "group", "aria-label": "What the ink is read together with" });                 // what the reading below is of: the piece written, or the formula
+      var nestRow = h("div", { class: "ink-nest", role: "group", "aria-label": "What the ink is read together with" });
+      var nestDivide = h("hr", { class: "ink-divide", hidden: "" });    // under it: what the writing is read with is done with                 // what the reading below is of: the piece written, or the formula
       var src = h("code", { class: "ink-src", title: "What SymPy gets" });
       var ambig = h("div", { class: "ink-ambig" });
       var consts = h("div", { class: "ink-consts" });
       var parseLabel = h("div", { class: "ink-parse-label" }, ["Where this LaTeX can be read more than one way:"]);
-      var parseDivide = h("hr", { class: "ink-divide", hidden: "" });        // the LaTeX's own readings are another matter: a line between
       var parseBlock = h("div", { class: "ink-parse", hidden: "" }, [parseLabel, ambig, consts]);
       var wasFormula = h("span", { class: "ink-was" });
       var nowFormula = h("span", { class: "ink-now" });
@@ -325,7 +325,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       var sheetHead = h("button", { type: "button", class: "ink-sheet-head", "aria-expanded": "true",
         title: "Fold the readings away, or bring them back" }, [sheetChevron, sheetSummary]);
       var actions = h("div", { class: "ink-actions" }, [apply]);
-      var sheetBody = h("div", { class: "ink-sheet-body" }, [note, nestRow, cands, readingOf, src, parseDivide, parseBlock, appliedRow, actions]);
+      var sheetBody = h("div", { class: "ink-sheet-body" }, [note, nestRow, nestDivide, cands, readingOf, src, parseBlock, appliedRow, actions]);
       var sheet = h("div", { class: "ink-sheet" }, [sheetHead, sheetBody]);
       var element = h("div", { class: "ink-panel", "data-strokes": "0", "data-zoom": "1.00", "data-hole": "", "data-sel": "", "data-mode": "select" }, [bar, latexRow, stage, sheet]);
 
@@ -1324,6 +1324,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         clearTimeout(timer);
         cands.textContent = "";
         nestRow.textContent = "";
+        nestDivide.hidden = true;
         picks = { choices: {}, constants: {} };
         note.textContent = canRead ? "" : status.reason;
         note.className = "ink-note" + (canRead ? "" : " error");
@@ -1430,6 +1431,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       }
       function renderNestRow() {
         nestRow.textContent = "";
+        nestDivide.hidden = true;
         if (!hole || !hole.free || !hole.nestOptions || !hole.nestOptions.length || !strokes.length) return;
         var reading = hole.placement && hole.placement.kind === "nest" ? hole.placement.target : null;
         nestRow.appendChild(h("span", { class: "ink-nest-label" }, ["What is written is read with:"]));
@@ -1449,6 +1451,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         alone.setAttribute("aria-pressed", hole.picked === "none" ? "true" : "false");
         alone.addEventListener("click", function () { pickNest("none"); });
         nestRow.appendChild(alone);
+        nestDivide.hidden = false;        // a line under it: what follows is the reading itself
       }
       // A piece picked by hand (or "none": alone) to read the ink with: read again with it.
       function pickNest(r) {
@@ -1765,7 +1768,6 @@ SympyEditor.registerAddon("handwriting", (function () {
         ambig.textContent = "";
         consts.textContent = "";
         parseBlock.hidden = true;
-        parseDivide.hidden = true;
         if (!reading || !reading.ok) return;
         picks.choices = Object.assign({}, reading.choices || {});   // every decision, so the next pick changes only itself
         (reading.ambiguities || []).forEach(function (a) {
@@ -1786,7 +1788,6 @@ SympyEditor.registerAddon("handwriting", (function () {
           consts.appendChild(h("label", { class: "ink-const", title: c.label }, [box, " ", h("code", {}, [c.name]), " is " + c.value + " (" + c.label + ")"]));
         });
         parseBlock.hidden = !ambig.children.length && !consts.children.length;
-        parseDivide.hidden = parseBlock.hidden;
       }
 
       // Apply: nothing to put in without a reading of the text, nor when the pad shows the editor's formula as it is.
