@@ -5266,6 +5266,10 @@ var SympyEditor = (function () {
     /** KaTeX HTML for `latex` with the changed nodes marked (renderMarked). */
     _renderMarked(latex, kept, cls) { return renderMarked(latex, kept, cls); }
 
+    /** What two sets of nodes keep of each other (diffNodes): {oldKept, newKept, map},
+     *  what the history view marks its before and after with. */
+    _diffNodes(oldNodes, newNodes) { return diffNodes(oldNodes, newNodes); }
+
     /** The self-contained HTML report of this session's history.  The
      *  building is `buildHistoryReport`, which knows nothing about the
      *  editor: the same page can be made from any list of expressions

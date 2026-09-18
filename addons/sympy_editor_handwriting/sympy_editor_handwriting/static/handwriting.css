@@ -137,8 +137,28 @@
 .se-addon-handwriting .ink-src { font-family: var(--se-mono); color: var(--se-muted); word-break: break-word; min-height: 1.2em; }
 .se-addon-handwriting .ink-actions .ink-apply { border-color: rgba(var(--se-accent), 0.8); background: rgba(var(--se-accent), 0.12); }
 /* what an applying did: the formula before and after it, to keep or to take back */
-.se-addon-handwriting .ink-applied { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; padding: 0.35rem 0.55rem;
+.se-addon-handwriting .ink-applied { display: flex; flex-direction: column; gap: 0.3rem; padding: 0.45rem 0.6rem;
   border: 1px solid rgba(var(--se-accent), 0.5); border-radius: 0.4rem; background: rgba(var(--se-accent), 0.06); }
+.se-addon-handwriting .ink-applied-was, .se-addon-handwriting .ink-applied-now { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem; }
+.se-addon-handwriting .ink-applied-ask { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.15rem; }
+/* what went and what came, in the history's own colours (its report's stylesheet
+ * is its own: the page has none of it) */
+.se-addon-handwriting .ink-applied .rep-added, .se-addon-handwriting .ink-applied .rep-removed { font-weight: bold; }
+.se-addon-handwriting .ink-applied .rep-added { color: #1a7f37; }
+.se-addon-handwriting .ink-applied .rep-removed { color: #d1242f; }
+.se-addon-handwriting .ink-applied .rep-added.rep-box { background: #e8f2eb; }
+.se-addon-handwriting .ink-applied .rep-removed.rep-box { background: #fae9ea; }
+@media (prefers-color-scheme: dark) {
+  .se-addon-handwriting .ink-applied .rep-added { color: #3fb950; }
+  .se-addon-handwriting .ink-applied .rep-removed { color: #ff7b72; }
+  .se-addon-handwriting .ink-applied .rep-added.rep-box { background: #233726; }
+  .se-addon-handwriting .ink-applied .rep-removed.rep-box { background: #422d2b; }
+}
+/* the LaTeX's own readings, apart from what the writing is read with */
+.se-addon-handwriting .ink-parse { display: flex; flex-direction: column; gap: 0.3rem; padding: 0.35rem 0.5rem;
+  border: 1px solid var(--se-border); border-radius: 0.4rem; }
+.se-addon-handwriting .ink-parse[hidden] { display: none; }
+.se-addon-handwriting .ink-parse-label { color: var(--se-muted); font-size: 11px; }
 .se-addon-handwriting .ink-applied[hidden] { display: none; }
 .se-addon-handwriting .ink-applied-label { color: var(--se-muted); font-size: 11px; }
 .se-addon-handwriting .ink-applied-arrow { color: var(--se-muted); }

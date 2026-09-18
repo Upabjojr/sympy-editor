@@ -120,6 +120,9 @@ def test_the_area_grows_scrolls_undoes_and_goes_full_screen():
             assert _wait(lambda: src.inner_text() == "sin(x)*cos(y) + pi")
             assert page.locator(".se-addon-handwriting .ink-point select").count() >= 1
             assert page.locator(".se-addon-handwriting .ink-const input").count() == 1
+            # the LaTeX's own readings stand apart, under their own words
+            assert page.locator(".se-addon-handwriting .ink-parse").is_visible()
+            assert "read more than one way" in page.locator(".se-addon-handwriting .ink-parse-label").inner_text()
             assert page.locator(".se-addon-handwriting .ink-apply").inner_text() == "Apply to the formula"
             assert not page.locator(".se-addon-handwriting .ink-apply").is_disabled()
             g = page.evaluate(geometry)
@@ -237,6 +240,9 @@ def test_applying_keeps_the_view_as_it_is():
             applied = page.locator(".se-addon-handwriting .ink-applied")
             assert applied.is_visible()
             assert page.locator(".se-addon-handwriting .ink-was").get_attribute("data-latex") == "x + y"
+            # marked as the history marks a step: what went red in the one, what came green in the other
+            assert page.locator(".se-addon-handwriting .ink-was .rep-removed").count() > 0
+            assert page.locator(".se-addon-handwriting .ink-now .rep-added").count() > 0
             assert page.locator(".se-addon-handwriting .ink-now").get_attribute("data-latex") != "x + y"
             page.locator(".se-addon-handwriting .ink-undo-applied").click()      # taken back, in the editor too
             assert _wait(lambda: str(doc.expr) == "x + y")

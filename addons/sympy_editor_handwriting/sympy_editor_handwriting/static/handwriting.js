@@ -307,13 +307,16 @@ SympyEditor.registerAddon("handwriting", (function () {
       var src = h("code", { class: "ink-src", title: "What SymPy gets" });
       var ambig = h("div", { class: "ink-ambig" });
       var consts = h("div", { class: "ink-consts" });
+      var parseLabel = h("div", { class: "ink-parse-label" }, ["Where this LaTeX can be read more than one way:"]);
+      var parseBlock = h("div", { class: "ink-parse", hidden: "" }, [parseLabel, ambig, consts]);
       var wasFormula = h("span", { class: "ink-was" });
       var nowFormula = h("span", { class: "ink-now" });
       var keepBtn = h("button", { type: "button", class: "ink-keep", title: "Leave the formula as it now is" }, ["Keep"]);
       var undoApplied = h("button", { type: "button", class: "ink-undo-applied", title: "The formula as it was, in the editor too" }, ["Undo the change"]);
-      var appliedRow = h("div", { class: "ink-applied", hidden: "" },
-        [h("span", { class: "ink-applied-label" }, ["Applied:"]), wasFormula, h("span", { class: "ink-applied-arrow", "aria-hidden": "true" }, ["\u2192"]),
-         nowFormula, keepBtn, undoApplied]);
+      var appliedRow = h("div", { class: "ink-applied", hidden: "" }, [
+        h("div", { class: "ink-applied-was" }, [h("span", { class: "ink-applied-label" }, ["from (what went is red)"]), wasFormula]),
+        h("div", { class: "ink-applied-now" }, [h("span", { class: "ink-applied-label" }, ["to (what came is green)"]), nowFormula]),
+        h("div", { class: "ink-applied-ask" }, [keepBtn, undoApplied])]);
       var apply = h("button", { type: "button", class: "ink-apply", disabled: "",
         title: "The pad's formula becomes the editor's (Enter in the LaTeX line does the same)" }, ["Apply to the formula"]);
       var sheetChevron = h("span", { class: "ink-sheet-chevron", "aria-hidden": "true" });
@@ -321,7 +324,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       var sheetHead = h("button", { type: "button", class: "ink-sheet-head", "aria-expanded": "true",
         title: "Fold the readings away, or bring them back" }, [sheetChevron, sheetSummary]);
       var actions = h("div", { class: "ink-actions" }, [apply]);
-      var sheetBody = h("div", { class: "ink-sheet-body" }, [note, nestRow, cands, readingOf, src, ambig, consts, appliedRow, actions]);
+      var sheetBody = h("div", { class: "ink-sheet-body" }, [note, nestRow, cands, readingOf, src, parseBlock, appliedRow, actions]);
       var sheet = h("div", { class: "ink-sheet" }, [sheetHead, sheetBody]);
       var element = h("div", { class: "ink-panel", "data-strokes": "0", "data-zoom": "1.00", "data-hole": "", "data-sel": "", "data-mode": "select" }, [bar, latexRow, stage, sheet]);
 
@@ -1428,7 +1431,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         nestRow.textContent = "";
         if (!hole || !hole.free || !hole.nestOptions || !hole.nestOptions.length || !strokes.length) return;
         var reading = hole.placement && hole.placement.kind === "nest" ? hole.placement.target : null;
-        nestRow.appendChild(h("span", { class: "ink-nest-label" }, ["Read with:"]));
+        nestRow.appendChild(h("span", { class: "ink-nest-label" }, ["What is written is read with:"]));
         hole.nestOptions.forEach(function (r) {
           var text = hole.base.slice(r.s, r.e);
           var b = h("button", { type: "button", class: "ink-nest-option", "data-s": String(r.s), "data-e": String(r.e),
@@ -1760,6 +1763,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       function options(reading) {
         ambig.textContent = "";
         consts.textContent = "";
+        parseBlock.hidden = true;
         if (!reading || !reading.ok) return;
         picks.choices = Object.assign({}, reading.choices || {});   // every decision, so the next pick changes only itself
         (reading.ambiguities || []).forEach(function (a) {
@@ -1779,6 +1783,7 @@ SympyEditor.registerAddon("handwriting", (function () {
           box.addEventListener("change", function () { picks.constants[c.name] = box.checked; if (pieceMode()) piecePicked = true; reread(); });
           consts.appendChild(h("label", { class: "ink-const", title: c.label }, [box, " ", h("code", {}, [c.name]), " is " + c.value + " (" + c.label + ")"]));
         });
+        parseBlock.hidden = !ambig.children.length && !consts.children.length;
       }
 
       // Apply: nothing to put in without a reading of the text, nor when the pad shows the editor's formula as it is.
@@ -1795,19 +1800,35 @@ SympyEditor.registerAddon("handwriting", (function () {
       sheetHead.addEventListener("click", function () { folded = !folded; updateSummary(); });
 
       // What an applying did: the formula as it was and as it now is, to keep or to take back.
+      // As the history shows a step: the formula before and after, what went marked red in
+      // the one and what came marked green in the other (the editor's own diff and marking).
       function showApplied(was, now) {
-        wasFormula.setAttribute("data-latex", was);
-        nowFormula.setAttribute("data-latex", now);
-        typeset(wasFormula, was, was);
-        typeset(nowFormula, now, now);
+        wasFormula.setAttribute("data-latex", was.plain);
+        nowFormula.setAttribute("data-latex", now.plain);
+        var ed = api.editor, diff = null;
+        try { diff = ed && ed._diffNodes && was.nodes && now.nodes ? ed._diffNodes(was.nodes, now.nodes) : null; }
+        catch (e) { diff = null; }
+        if (ed && ed._renderMarked && was.latex && now.latex) {
+          try {
+            wasFormula.innerHTML = ed._renderMarked(was.latex, diff && diff.oldKept, "rep-removed");
+            nowFormula.innerHTML = ed._renderMarked(now.latex, diff && diff.newKept, "rep-added");
+          } catch (e) { typeset(wasFormula, was.plain, was.plain); typeset(nowFormula, now.plain, now.plain); }
+        } else {
+          typeset(wasFormula, was.plain, was.plain);
+          typeset(nowFormula, now.plain, now.plain);
+        }
         appliedRow.hidden = false;
+      }
+      function editorStep() {             // the formula as the editor has it now: to mark a change with
+        var st = api.state && api.state();
+        return { latex: st && st.latex, plain: (st && st.latex_plain) || "", nodes: st && st.nodes };
       }
       function hideApplied() { appliedRow.hidden = true; }
       keepBtn.addEventListener("click", hideApplied);
       undoApplied.addEventListener("click", function () { hideApplied(); undo(); });
       function applyToEditor() {
         if (apply.disabled) return;
-        var before = snapshot(), wasLatex = editorLatex();
+        var before = snapshot(), wasStep = editorStep();
         if (hole) { closeEditor(); commitHole(); }   // the ink's reading into the formula first: one edit with the applying
         var payload = { latex: field.value, path: "/", choices: picks.choices, constants: picks.constants };
         api.call("insert", payload).then(function () {
@@ -1822,7 +1843,7 @@ SympyEditor.registerAddon("handwriting", (function () {
           setMode("select");                       // and is back to selecting in it, not writing
           note.textContent = "Applied.";
           updateSummary();
-          showApplied(wasLatex, editorLatex());    // what it did, to keep or to take back
+          showApplied(wasStep, editorStep());      // what it did, to keep or to take back
         }, function (e) {
           note.textContent = String((e && e.message) || e);
           note.className = "ink-note error";
