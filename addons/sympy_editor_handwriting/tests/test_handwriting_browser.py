@@ -295,8 +295,8 @@ def test_the_tools_are_icons_and_the_guide_explains_them():
         srv, browser, page = _page(p, doc, pen=False)
         try:
             tools = page.locator(".se-tools .hw-tool")
-            assert tools.count() == 3
-            for i in range(3):
+            assert tools.count() == 5
+            for i in range(5):
                 assert tools.nth(i).inner_text().strip() == ""
                 icon = tools.nth(i).locator("svg")
                 assert icon.count() == 1
@@ -305,10 +305,95 @@ def test_the_tools_are_icons_and_the_guide_explains_them():
             page.locator('[data-cmd="addon:handwriting:pen"]').click()      # the strip, with its "?"
             page.locator(".hw-help").click()
             guide = page.locator(".se-help-view")
-            for word in ("Write", "Erase", "Clear ink", "Read with", "Keep", "Undo the change"):
+            for word in ("Write", "Erase", "Clear ink", "Read with", "Keep", "Undo the change",
+                         "LaTeX", "zoom"):
                 assert word in guide.inner_text(), word
             page.keyboard.press("Escape")
             assert _wait(lambda: page.locator(".se-help-view").count() == 0)
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
+def test_a_stroke_is_taken_back_and_written_again():
+    """Undo and Redo, among the tools, are of the ink: they take back the last
+    stroke written and put it again, and reading follows the ink."""
+    doc = Document(x, addons=[HandwritingAddon(MuteRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc)
+        try:
+            panel = page.locator(".hw-panel")
+            undo = page.locator('[data-cmd="addon:handwriting:undo"]')
+            redo = page.locator('[data-cmd="addon:handwriting:redo"]')
+            assert undo.is_disabled() and redo.is_disabled()
+            view = page.locator(".se-view").bounding_box()
+            _drag(page, view["x"] + 200, view["y"] + 40, view["x"] + 240, view["y"] + 70)
+            _drag(page, view["x"] + 300, view["y"] + 40, view["x"] + 340, view["y"] + 70)
+            assert _wait(lambda: panel.get_attribute("data-strokes") == "2")
+            assert not undo.is_disabled() and redo.is_disabled()
+            undo.click()
+            assert _wait(lambda: panel.get_attribute("data-strokes") == "1")
+            assert not redo.is_disabled()
+            redo.click()
+            assert _wait(lambda: panel.get_attribute("data-strokes") == "2")
+            assert redo.is_disabled()
+            # back to nothing: the ink is gone and so is what was said of it
+            undo.click()
+            undo.click()
+            assert _wait(lambda: panel.get_attribute("data-strokes") == "0")
+            assert undo.is_disabled()
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
+def test_a_reading_s_latex_can_be_corrected_by_hand():
+    """The model read a glyph wrong: the reading's own LaTeX is opened,
+    corrected, and what is typed goes into the formula like any reading -
+    and stays among them."""
+    doc = Document(x, addons=[HandwritingAddon(LetterRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc)
+        try:
+            view = page.locator(".se-view").bounding_box()
+            _drag(page, view["x"] + 200, view["y"] + 60, view["x"] + 260, view["y"] + 100)
+            assert _wait(lambda: str(doc.expr) == "x*z", 15), str(doc.expr)
+            assert page.locator(".hw-latexrow").is_hidden()
+            page.locator(".hw-edit").click()
+            field = page.locator(".hw-latex")
+            assert _wait(lambda: field.is_visible())
+            assert field.input_value() == "z"
+            field.fill(r"\frac{w}{2}")
+            field.press("Enter")
+            assert _wait(lambda: str(doc.expr) == "w*x/2", 15), str(doc.expr)
+            # it is one of the readings now, and the one picked
+            edited = page.locator(".hw-cand-edited")
+            assert _wait(lambda: edited.count() == 1)
+            assert edited.get_attribute("aria-selected") == "true"
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
+def test_the_formula_zooms_while_writing_and_the_ink_zooms_with_it():
+    """The zoom buttons work with the Pen on, and the strokes are magnified
+    with the formula they were written on."""
+    doc = Document(x, addons=[HandwritingAddon(MuteRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc)
+        try:
+            view = page.locator(".se-view").bounding_box()
+            _drag(page, view["x"] + 200, view["y"] + 40, view["x"] + 260, view["y"] + 90)
+            assert _wait(lambda: page.locator(".hw-panel").get_attribute("data-strokes") == "1")
+            ink = "() => { const c = document.querySelector('.hw-ink'); const x = c.getContext('2d');" \
+                  " const d = x.getImageData(0, 0, c.width, c.height).data;" \
+                  " let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 40) n++; return n; }"
+            was = page.evaluate(ink)
+            assert was > 0
+            zoom = lambda: page.evaluate("document.querySelector('.sympy-editor').__se ? 0 : 0")
+            page.locator('[data-cmd="zoomin"]').click()
+            page.locator('[data-cmd="zoomin"]').click()
+            assert _wait(lambda: page.evaluate(ink) > was * 1.2, 5)     # the ink grew with the formula
             assert page.errors == []
         finally:
             _close(srv, browser)

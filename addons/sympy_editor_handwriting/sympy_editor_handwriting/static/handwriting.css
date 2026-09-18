@@ -124,6 +124,44 @@
 .hw-src:empty { display: none; }
 .hw-src.error { color: var(--se-bad, #d1242f); }
 
+/* the reading's own LaTeX, and the box that corrects it */
+.hw-srcrow { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
+.hw-srcrow .hw-src { flex: 1 1 8rem; }
+.hw-edit {
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 12px;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--se-rule);
+  border-radius: 0.3rem;
+  background: var(--se-btn);
+  color: inherit;
+  cursor: pointer;
+}
+.hw-latexrow { display: flex; gap: 0.4rem; align-items: stretch; }
+.hw-latex {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--se-rule);
+  border-radius: 0.3rem;
+  background: var(--se-surface);
+  color: inherit;
+}
+.hw-latex-read {
+  font: inherit;
+  font-size: 12px;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid rgba(var(--se-accent), 0.65);
+  border-radius: 0.3rem;
+  background: var(--se-btn);
+  color: inherit;
+  cursor: pointer;
+}
+.hw-cand-edited { border-style: dashed; }
+
 /* the LaTeX parser's options */
 .hw-parse { display: flex; flex-direction: column; gap: 0.3rem; }
 .hw-parse-label { font-size: 11px; color: var(--se-muted); }
@@ -177,4 +215,6 @@
   .hw-cand { font-size: 17px; padding: 0.4rem 0.7rem; }
   .hw-with button { font-size: 15px; padding: 0.4rem 0.7rem; }
   .hw-applied-ask button { font-size: 14px; padding: 0.4rem 0.8rem; }
+  .hw-edit, .hw-latex-read { font-size: 14px; padding: 0.4rem 0.7rem; }
+  .hw-latex { font-size: 15px; }
 }

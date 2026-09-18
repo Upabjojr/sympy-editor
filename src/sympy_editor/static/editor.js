@@ -5816,6 +5816,7 @@ var SympyEditor = (function () {
       if (this.caret) this._hideCaret();
       this._applySelection();
       this._updateToolbar();
+      this._addonsNotify("onZoom", this.zoom);   // an add-on drawing on the formula follows it
       if (this.opts.rememberZoom) {
         try { localStorage.setItem(ZOOM_KEY, String(this.zoom)); } catch (e) { /* no storage */ }
       }
