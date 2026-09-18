@@ -254,6 +254,24 @@
   box-shadow: none;
   background: none;
 }
+/* The drawer's file section: the document as a whole - kept in a file, taken
+ * back from one, or written out as a script or a page. */
+.se-drawer-files { border-bottom: 1px solid var(--se-rule); padding-bottom: 0.5rem; margin-bottom: 0.2rem; }
+.se-drawer-files > summary { cursor: pointer; user-select: none; }
+.se-files { display: flex; flex-direction: column; gap: 0.3rem; padding: 0.4rem 0.2rem 0.1rem; }
+.se-file-action {
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--se-rule);
+  border-radius: 0.35rem;
+  background: var(--se-btn);
+  color: inherit;
+  cursor: pointer;
+}
+.se-file-action:hover { background: rgba(var(--se-accent), 0.1); }
+@media (any-pointer: coarse) { .se-file-action { font-size: 15px; padding: 0.55rem 0.7rem; } }
 .se-drawer-addons[hidden] { display: none; }
 .se-drawer-addons { margin: 0 0 0.75rem; padding-bottom: 0.7rem; border-bottom: 1px solid var(--se-border); }
 /* The fold's handle: a row that reads as a heading and clicks like a button,

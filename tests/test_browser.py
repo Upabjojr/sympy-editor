@@ -7,6 +7,7 @@ are unavailable.  Set ``SYMPY_EDITOR_SLOW_TESTS=1`` to also exercise the
 self-contained Pyodide page (downloads Pyodide + SymPy, ~30 s).
 """
 
+import json
 import os
 import socket
 import threading
@@ -5110,3 +5111,34 @@ def test_two_fingers_never_zoom_the_page(browser, tmp_path):
     viewport = page.evaluate("document.querySelector('meta[name=viewport]').content")
     assert "user-scalable=no" in viewport and "maximum-scale=1" in viewport, viewport
     assert page.evaluate("getComputedStyle(document.documentElement).overflowX") in ("hidden", "clip")
+
+
+def test_a_formula_is_saved_to_a_file_and_opened_from_one(browser, serve_expr, tmp_path):
+    """The drawer's File section: the formula written to a file with the whole
+    history behind it, and a file opened back into the editor - including a
+    plain line of SymPy source, which opens as a formula of one step."""
+    srv, doc = serve_expr(x**2 + sin(y))
+    page = _open(browser, srv.url)
+    page.locator('.se-toolbar [data-cmd="drawer"]').click()
+    files = page.locator(".se-drawer .se-file-action")
+    assert files.all_inner_texts() == ["Open formula\u2026", "Save formula\u2026",
+                                       "History as Python\u2026", "History as web page\u2026"]
+    # Save: a file of its own type, named after the formula
+    with page.expect_download() as dl:
+        files.nth(1).click()
+    saved = tmp_path / dl.value.suggested_filename
+    dl.value.save_as(saved)
+    assert saved.name.endswith(".sympy")
+    data = json.loads(saved.read_text(encoding="utf-8"))
+    assert data["sympy-editor"] == 1 and data["expr"] == "x**2 + sin(y)"
+    assert data["session"]["history"] and "index" in data["session"]
+
+    # Open: a formula from a file takes the editor over
+    other = tmp_path / "other.sympy"
+    other.write_text("y**3 + 2", encoding="utf-8")
+    with page.expect_file_chooser() as chooser:      # the drawer is still open behind the download
+        page.locator(".se-drawer .se-file-action").first.click()
+    chooser.value.set_files(str(other))
+    page.wait_for_function("document.querySelector('.se-source').textContent.indexOf('y**3') >= 0", timeout=15000)
+    assert doc.expr == y**3 + 2
+    assert page.errors == []

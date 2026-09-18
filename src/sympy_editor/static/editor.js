@@ -1037,6 +1037,10 @@ var SympyEditor = (function () {
   /** Offer `text` as a file: the host app, the share sheet, or a download. */
   async function saveFile(name, mime, text) {
     var app = window.SympyEditorApp;
+    if (app && app.saveFile) {            // the host keeps it where the user says (a save dialog of its own)
+      app.saveFile(name, mime, text);
+      return "ready: choose where to keep it";
+    }
     if (app && (app.shareFile || (mime === "text/html" && app.shareHtml))) {
       if (app.shareFile) app.shareFile(name, mime, text); else app.shareHtml(name, text);
       return "ready: choose where to save or share it";
@@ -1055,6 +1059,50 @@ var SympyEditor = (function () {
     setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
     return "downloaded: " + name;
   }
+
+  //: What a saved formula is called and what opens as one (Document.save_text).
+  var FORMULA_EXT = ".sympy";
+  var FORMULA_ACCEPT = ".sympy,.json,.txt,.py,application/json,text/plain";
+
+  /** A file chosen by the user, as {name, text} - or null if they chose none.
+   *  The host app picks it with its own picker when it has one (the phones
+   *  answer through openedFile below); a browser uses a file input. */
+  async function openFileText(accept) {
+    var app = window.SympyEditorApp;
+    if (app && app.openFile) {
+      return await new Promise(function (resolve) {
+        var token = "f" + Date.now() + Math.random().toString(36).slice(2, 6);
+        openFileText.waiting[token] = resolve;
+        try { app.openFile(token, accept || ""); }
+        catch (e) { delete openFileText.waiting[token]; resolve(null); }
+      });
+    }
+    return await new Promise(function (resolve) {
+      var input = h("input", { type: "file", accept: accept || "", style: "position: fixed; left: -9999px; top: 0" });
+      var done = function (value) {
+        if (input.parentNode) input.parentNode.removeChild(input);
+        resolve(value);
+      };
+      input.addEventListener("change", function () {
+        var file = input.files && input.files[0];
+        if (!file) { done(null); return; }
+        var reader = new FileReader();
+        reader.onload = function () { done({ name: file.name, text: String(reader.result) }); };
+        reader.onerror = function () { done(null); };
+        reader.readAsText(file);
+      });
+      // A picker closed with nothing chosen fires no event anywhere: the
+      // window coming back is the only sign of it, and one is enough.
+      window.addEventListener("focus", function later() {
+        window.removeEventListener("focus", later);
+        setTimeout(function () { if (input.parentNode && !(input.files && input.files.length)) done(null); }, 700);
+      });
+      document.body.appendChild(input);
+      input.click();
+    });
+  }
+  //: Where the hosts answer a picker of their own: SympyEditor.openedFile.
+  openFileText.waiting = {};
 
   /** The history viewer on its own, with no editor and no backend behind it:
    *  `cfg.history` is the payload above, from wherever.  The report is built
@@ -1119,8 +1167,13 @@ var SympyEditor = (function () {
   /* Editor                                                              */
   /* ------------------------------------------------------------------ */
 
+  //: The editor a host speaks to when it has something to say (an app's
+  //: file dialog failing): the last one made, there being one to a page.
+  var lastEditor = null;
+
   class Editor {
     constructor(host, backend, options) {
+      lastEditor = this;
       this.host = host;
       this.backend = backend;
       this.opts = Object.assign({}, DEFAULTS, options || {});
@@ -1446,6 +1499,26 @@ var SympyEditor = (function () {
         this.historyPane = h("div", { class: "se-drawer-pane", "data-pane": "history", hidden: "" }, [this.historyBody]);
       }
       if (!o.readOnly) {
+        // Files: opening a formula kept in one, keeping this one, and writing
+        // the history out.  They live in the drawer because that is where
+        // everything about the document as a whole lives.
+        this.filesBody = h("div", { class: "se-files" });
+        var fileBtn = function (label, title, run) {
+          var b = h("button", { type: "button", class: "se-file-action", title: title }, [label]);
+          b.addEventListener("click", function () { run.call(self); });
+          self.filesBody.appendChild(b);
+          return b;
+        };
+        fileBtn("Open formula\u2026", "Open a formula kept in a file, with the history behind it", this.openFormula);
+        fileBtn("Save formula\u2026", "Keep this formula in a file: the expression and its whole history",
+                this.saveFormula);
+        fileBtn("History as Python\u2026", "Write the history out as a Python script that rebuilds every step with SymPy",
+                this.exportPython);
+        fileBtn("History as web page\u2026", "Write the history out as a self-contained web page that works offline",
+                this.exportReport);
+        this.filesPane = h("details", { class: "se-drawer-files", open: "" }, [
+          h("summary", { class: "se-drawer-subhead" }, ["File"]), this.filesBody]);
+
         // The add-ons' switches ride at the top of the drawer (see the note
         // where addonsMenu is made): open in place, not a menu that drops.
         this.addonsPane = null;
@@ -1467,7 +1540,9 @@ var SympyEditor = (function () {
         var heading = o.sessions ? "Sessions" : "Add-ons";
         this.drawer = h("aside", { class: "se-drawer", hidden: "", role: "dialog", "aria-label": heading }, [
           h("div", { class: "se-drawer-head" }, [h("strong", {}, [heading]), close])
-        ].concat(this.addonsPane ? [this.addonsPane] : []).concat(this.sessionsBody ? [this.sessionsBody] : []));
+        ].concat(this.addonsPane ? [this.addonsPane] : [])
+         .concat(this.filesPane ? [this.filesPane] : [])
+         .concat(this.sessionsBody ? [this.sessionsBody] : []));
         this.backdrop = h("div", { class: "se-backdrop", hidden: "" });
         this.backdrop.addEventListener("click", function () { self.closeDrawer(); });
         this.sessions = o.sessions ? this.drawer : null;
@@ -5371,6 +5446,67 @@ var SympyEditor = (function () {
       }
     }
 
+    /** The name a saved formula takes: the session's own, or the formula. */
+    _formulaName() {
+      var sess = this._currentSession();
+      var name = (sess && sess.title && sess.name) || (this.state && this.state.src) || "formula";
+      name = String(name).slice(0, 48).replace(/[\\/:*?"<>|\n\t]+/g, " ").trim();
+      return (name || "formula").replace(/\s+/g, "-");
+    }
+
+    /** Write this formula out: the expression and the whole session behind it
+     *  (the history, its labels, the declared names, what the add-ons kept),
+     *  handed to the app's share sheet, the browser's or a download. */
+    async saveFormula() {
+      if (this.busy || this.closed || !this.backend) return;
+      this._setStatus("Saving the formula\u2026");
+      try {
+        var name = this._formulaName();
+        var snap = await this.backend.send({ action: "savefile", name: name }, function () {});
+        if (!snap || !snap.file) throw new Error("There is nothing to save");
+        var how = await saveFile(name + FORMULA_EXT, snap.file.mime, snap.file.text);
+        this._setStatus(how ? "Formula " + how : "");
+      } catch (e) {
+        this._showError("The formula could not be saved: " + ((e && e.message) || e));
+      }
+    }
+
+    /** Open a formula from a file: one written by Save (with its history), a
+     *  file holding an `expr`, or a line of SymPy source.  Where there are
+     *  sessions it opens in one of its own, so nothing already open is lost. */
+    async openFormula() {
+      if (this.busy || this.closed || !this.backend) return;
+      var picked = await openFileText(FORMULA_ACCEPT);
+      if (!picked || !picked.text) return;                    // nothing chosen
+      var name = (picked.name || "").replace(/\.[^.]*$/, "");
+      this.closeDrawer();
+      this._setStatus("Opening " + (picked.name || "the file") + "\u2026");
+      try {
+        if (this._sessionsReady) await this._sessionFor(name);
+        var snap = await this.backend.send({ action: "openfile", text: picked.text }, this._report.bind(this));
+        if (!snap) throw new Error("No answer");
+        if (snap.error) throw new Error(snap.error);
+        this._history = null;
+        this.select(null);
+        this._hideCaret();
+        await this.setState(snap);
+        this._setStatus(picked.name ? "Opened " + picked.name : "Opened");
+      } catch (e) {
+        this._showError("The file could not be opened: " + ((e && e.message) || e));
+      }
+    }
+
+    /** A session of its own for a file about to be opened: the one open is
+     *  saved and left as it is, and the new one takes the file's name. */
+    async _sessionFor(name) {
+      var store = this._sessionStore || this._loadSessions();
+      var sess = { id: "s" + Date.now(), name: name || "(opened)", title: !!name, updated: Date.now(),
+                   state: { history: ["Integer(0)"], index: 0, symbols: [] }, empty: false };
+      store.list.push(sess);
+      this._saveSessions(store);
+      await this.openSession(sess.id);
+    }
+
     _exportName(ext) {
       return "sympy-editor-history-" + new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-") + "." + ext;
     }
@@ -6599,6 +6735,20 @@ var SympyEditor = (function () {
     ensureCss: ensureCss,
     h: h,
     registerAddon: registerAddon,
+    /** A host with a picker of its own answers here: the token it was given,
+     *  the file's name and its text (or nothing at all, if none was chosen). */
+    /** Something the host could not do, in the editor's own error line. */
+    hostError: function (message) {
+      if (lastEditor && lastEditor._showError) lastEditor._showError(String(message));
+      else if (window.console) console.error("sympy-editor: " + message);
+    },
+    openedFile: function (token, name, text) {
+      var waiting = openFileText.waiting[token];
+      if (!waiting) return false;
+      delete openFileText.waiting[token];
+      waiting(text === undefined || text === null ? null : { name: name || "", text: String(text) });
+      return true;
+    },
     loadAddons: loadAddons,
     addons: addonDefs,
     toDisplay: toDisplay,

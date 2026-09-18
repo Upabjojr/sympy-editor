@@ -247,6 +247,28 @@ def test_both_bridges_offer_what_the_page_calls():
         assert callable(getattr(mod, function))
 
 
+def test_both_hosts_offer_the_files_the_page_asks_of_them():
+    """What the page asks of the app that is not Python - keeping a formula in
+    a file, opening one, sharing what it writes out - is `window.SympyEditorApp`,
+    and both hosts answer with the same names: Kotlin in MainActivity's
+    ReportBridge, Swift in FilesBridge.  The answer to an opening comes back
+    through `SympyEditor.openedFile`, which both hosts call by that name."""
+    src = (ROOT / "src" / "sympy_editor" / "static" / "editor.js").read_text(encoding="utf-8")
+    asked = set(re.findall(r"app\.(\w+)\(", src))
+    assert {"saveFile", "shareFile", "openFile"} <= asked, asked
+    hosts = {"ios": ROOT / "mobile/ios/SymPyEditor/FilesBridge.swift",
+             "android": ROOT / "mobile/android/app/src/main/java/org/sympy/editor/MainActivity.kt"}
+    for name, path in hosts.items():
+        text = path.read_text(encoding="utf-8")
+        for method in ("saveFile", "shareFile", "openFile"):
+            assert method in text, (name, method)
+        assert "SympyEditor.openedFile" in text, name
+        assert "hostError" in text, name
+    # and the page has somewhere for those answers to arrive
+    assert "openedFile: function (token, name, text)" in src
+    assert "hostError: function (message)" in src
+
+
 
 def test_the_app_interrupts_a_long_message_from_another_thread():
     """Issue #27: the apps had no Interrupt button.  Their Python runs on one

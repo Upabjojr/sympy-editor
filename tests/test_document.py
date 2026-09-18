@@ -811,6 +811,62 @@ def test_preview_renders_without_committing():
     assert "E" in noted["note"] and noted["error"] is None
 
 
+def test_a_formula_is_saved_to_a_file_and_opened_again():
+    """The file a document is saved as: JSON, holding the expression as SymPy
+    source for whoever reads the file, and the whole session behind it - the
+    history with its labels, the declared names, what the add-ons kept - which
+    opening takes back into a document that already holds something else."""
+    import json
+
+    from sympy import MatrixSymbol, symbols
+
+    x, y = symbols("x y")
+    doc = Document(x, symbols=[MatrixSymbol("M", 2, 2)])
+    doc.set("x + 1")
+    doc.set("x**2")
+    doc.undo()
+    text = doc.save_text("the working one")
+
+    data = json.loads(text)
+    assert data["sympy-editor"] == 1 and data["name"] == "the working one"
+    assert data["expr"] == "x + 1"                       # the file says what it holds
+    assert data["session"] == doc.export()
+    assert data["saved"].startswith("20")
+
+    other = Document(y)
+    other.set("y**3")
+    assert other.open_text(text) == x + 1                 # what it held is gone
+    assert other.can_undo and other.can_redo and other.declared["M"] == MatrixSymbol("M", 2, 2)
+    other.redo()
+    assert other.expr == x**2
+
+    # Simpler files open too: an expression alone, or a line of SymPy source.
+    assert Document(y).open_text('{"expr": "sin(x)"}') == sin(x)
+    assert Document(y).open_text("  x**2 + 1  ") == x**2 + 1
+
+    # and what is not a formula at all says so
+    for bad, why in [("", "empty"), ("{", "not a formula"), ('{"session": {"history": []}}', "no expression"),
+                     ('{"sympy-editor": 99, "expr": "x"}', "newer version")]:
+        with pytest.raises(ValueError) as caught:
+            Document(y).open_text(bad)
+        assert why in str(caught.value), (bad, str(caught.value))
+
+
+def test_the_messages_that_save_and_open_a_file():
+    from sympy import symbols
+
+    x, y = symbols("x y")
+    doc = Document(x**2)
+    doc.set("x**2 + 1")
+    snap = doc.handle({"action": "savefile", "name": "one"})
+    assert snap["file"]["mime"] == "application/x-sympy-editor+json"
+    assert snap["src"] == "x**2 + 1" and "history" in snap["file"]["text"]
+
+    opened = Document(y).handle({"action": "openfile", "text": snap["file"]["text"]})
+    assert opened["opened"] is True and opened["src"] == "x**2 + 1"
+    assert Document(y).handle({"action": "openfile", "text": "not { json"})["error"]
+
+
 def test_export_and_restore_history():
     from sympy import symbols, MatrixSymbol
     x = symbols("x")

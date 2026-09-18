@@ -9,12 +9,15 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.net.Uri
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.widget.FrameLayout
 import androidx.activity.addCallback
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
@@ -51,6 +54,22 @@ class MainActivity : AppCompatActivity() {
      *  block the interface, and CPython objects belong to their thread. */
     private val pythonThread = Executors.newSingleThreadExecutor()
 
+    /** The file the page asked to keep, waiting for the user to say where:
+     *  Android's own "create document" dialog answers in [saveTo]. */
+    private var pending: PendingSave? = null
+
+    /** What ``SympyEditor.openedFile`` is waiting for: the token the page
+     *  gave when it asked for a file, or null when nothing was asked. */
+    private var opening: String? = null
+
+    /** Android's create-document dialog: the page's text goes where the user
+     *  says, under the name it asked for. */
+    private lateinit var saveTo: ActivityResultLauncher<String>
+
+    /** Android's open-document dialog: what the user picks is read and given
+     *  to the page (see [answerOpen]). */
+    private lateinit var openFrom: ActivityResultLauncher<Array<String>>
+
     /** Whether the page asked for full screen.  Android brings the system
      *  bars back whenever the window loses and regains focus (the
      *  notification shade, a dialog, the recents screen), so the wish has to
@@ -66,6 +85,9 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Before anything else: the dialogs that keep and open a file must be
+        // registered while the activity is being created (AndroidX insists).
+        registerPickers()
         web = WebView(this)
         // Android 15 draws the app edge to edge: keep the page clear of the
         // status bar, the navigation bar, display cutouts and rounded corners
@@ -206,6 +228,64 @@ class MainActivity : AppCompatActivity() {
         if (hasFocus && wantsFullscreen) applyFullscreen()
     }
 
+    /** A file the page is keeping: its text and type, until the user says where. */
+    private data class PendingSave(val mime: String, val text: String)
+
+    /** Register the two dialogs.  They must be registered before the activity
+     *  is started, so this is called from [onCreate]. */
+    private fun registerPickers() {
+        saveTo = registerForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { uri: Uri? ->
+            val save = pending
+            pending = null
+            if (uri == null || save == null) return@registerForActivityResult      // nothing chosen
+            try {
+                contentResolver.openOutputStream(uri)?.use { it.write(save.text.toByteArray()) }
+            } catch (exc: Exception) {
+                report("The file could not be written: " + (exc.message ?: exc.toString()))
+            }
+        }
+        openFrom = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+            val token = opening
+            opening = null
+            if (token == null) return@registerForActivityResult
+            if (uri == null) { answerOpen(token, null, null); return@registerForActivityResult }
+            try {
+                val name = nameOf(uri)
+                val text = contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                answerOpen(token, name, text)
+            } catch (exc: Exception) {
+                answerOpen(token, null, null)
+                report("The file could not be read: " + (exc.message ?: exc.toString()))
+            }
+        }
+    }
+
+    /** What a document's own name is, as its provider gives it. */
+    private fun nameOf(uri: Uri): String {
+        contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { row ->
+            if (row.moveToFirst() && !row.isNull(0)) return row.getString(0)
+        }
+        return uri.lastPathSegment?.substringAfterLast('/') ?: "formula"
+    }
+
+    /** Hand what was opened (or nothing) back to the page that asked. */
+    private fun answerOpen(token: String, name: String?, text: String?) {
+        val js = if (text == null) {
+            "window.SympyEditor.openedFile(${JSONObject.quote(token)});"
+        } else {
+            "window.SympyEditor.openedFile(${JSONObject.quote(token)}, ${JSONObject.quote(name ?: "")}, " +
+                "${JSONObject.quote(text)});"
+        }
+        runOnUiThread { web.evaluateJavascript(js, null) }
+    }
+
+    /** Say something went wrong, in the page's own status line. */
+    private fun report(message: String) {
+        val js = "window.SympyEditor && window.SympyEditor.hostError && " +
+            "window.SympyEditor.hostError(${JSONObject.quote(message)});"
+        runOnUiThread { web.evaluateJavascript(js, null) }
+    }
+
     /** ``window.SympyEditorApp`` in the page. */
     inner class ReportBridge {
         /** Full screen for real: the page's own full-screen button asks the
@@ -248,6 +328,44 @@ class MainActivity : AppCompatActivity() {
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             runOnUiThread { startActivity(Intent.createChooser(send, getString(R.string.share_report))) }
+        }
+
+        /** Keep `text` as `name`: Android asks where, and writes it there.
+         *  This is "Save formula" - sharing is what the history exports do. */
+        @JavascriptInterface
+        fun saveFile(name: String, mime: String, text: String) {
+            pending = PendingSave(mime, text)
+            runOnUiThread {
+                try {
+                    saveTo.launch(name)
+                } catch (exc: Exception) {
+                    pending = null
+                    report("No app on this phone can keep a file: " + (exc.message ?: exc.toString()))
+                }
+            }
+        }
+
+        /** Ask for a file to open.  `accept` is what the page will take, as a
+         *  list of extensions and MIME types; Android wants MIME types, and
+         *  a saved formula is JSON.  The answer goes to
+         *  ``SympyEditor.openedFile(token, name, text)``. */
+        @JavascriptInterface
+        fun openFile(token: String, accept: String) {
+            opening = token
+            val types = if (accept.contains("json")) {
+                arrayOf("application/json", "application/x-sympy-editor+json", "text/plain", "*/*")
+            } else {
+                arrayOf("*/*")
+            }
+            runOnUiThread {
+                try {
+                    openFrom.launch(types)
+                } catch (exc: Exception) {
+                    opening = null
+                    answerOpen(token, null, null)
+                    report("No app on this phone can offer a file: " + (exc.message ?: exc.toString()))
+                }
+            }
         }
     }
 

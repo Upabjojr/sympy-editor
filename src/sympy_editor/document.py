@@ -11,7 +11,9 @@ from __future__ import annotations
 import re
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple as TypingTuple, Union
 
+import datetime
 import io
+import json
 import keyword
 import logging
 import tokenize
@@ -351,6 +353,16 @@ OPERATORS = "+-*/^=<>&|"
 
 UNEVALUATED_CONSTRUCTORS = frozenset({"cbrt", "root", "real_root", "Rational", "Mul", "Add", "Pow"})
 
+#: The version of the file a document is saved as (``Document.save_text``):
+#: a file written by a newer version than this is refused rather than read
+#: as something it is not.
+SAVE_FORMAT = 1
+
+#: What a saved document is: JSON, under a type of its own.
+SAVE_MIME = "application/x-sympy-editor+json"
+#: What its file is called.
+SAVE_EXT = ".sympy"
+
 
 class Document:
     """An editable SymPy expression with undo history.
@@ -478,6 +490,83 @@ class Document:
         for name, addon in list(self.addons.items()):
             if name in self._pending_state:
                 addon.restore_state(self, self._pending_state.pop(name))
+
+    def save_text(self, name: Optional[str] = None) -> str:
+        """This document as a file to keep: JSON holding the expression as
+        SymPy source - so that the file says what it holds to anyone reading
+        it - and the whole session behind it (:meth:`export`: the history, its
+        labels, the declared names, what the add-ons kept).  :meth:`open_text`
+        takes it back."""
+        data = {
+            "sympy-editor": SAVE_FORMAT,
+            "saved": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+            "expr": str(self.expr),
+            "session": self.export(),
+        }
+        if name:
+            data["name"] = str(name)
+        return json.dumps(data, indent=1, ensure_ascii=False) + "\n"
+
+    def open_text(self, text: str) -> Basic:
+        """Take a file back: one written by :meth:`save_text`, with its whole
+        session, or anything simpler - a JSON file with an ``expr`` alone, or a
+        line of SymPy source - which opens as a document of one step.  What
+        this document held is gone, as though it had just been opened.
+
+        Returns the expression it now holds; raises ``ValueError`` if the file
+        is not one of those things."""
+        text = (text or "").strip()
+        if not text:
+            raise ValueError("The file is empty")
+        session: Dict[str, Any] = {}
+        data: Any = None
+        if text[:1] in "{[":
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"The file is not a formula this can open: {exc}") from None
+        if isinstance(data, dict):
+            version = data.get("sympy-editor")
+            if version is not None and int(version) > SAVE_FORMAT:
+                raise ValueError(f"The file was written by a newer version (format {version}, this reads {SAVE_FORMAT})")
+            session = dict(data.get("session") or {})
+            if not session and data.get("expr"):
+                session = {"history": [str(data["expr"])]}
+        elif data is not None:
+            raise ValueError("The file is not a formula this can open")
+        else:
+            session = {"history": [text]}                    # a line of SymPy source
+        steps = [self._coerce(e) for e in session.get("history") or []]
+        if not steps:
+            raise ValueError("The file holds no expression")
+
+        declared: Dict[str, Any] = {}
+        for obj in session.get("symbols") or ():
+            if isinstance(obj, str):
+                obj = sympify(obj, locals={"Str": Str})
+            declared[self._symbol_name(obj)] = obj
+        labels = list(session.get("labels") or [])
+        steps = steps[-self.max_history:]
+        labels = labels[-len(steps):]
+        index = session.get("index")
+        self.declared = declared
+        self._history = steps
+        self._labels = [None] * (len(steps) - len(labels)) + [None if not l else str(l) for l in labels]
+        self._index = len(steps) - 1 if index is None else max(0, min(int(index), len(steps) - 1))
+        if "allow_invalid" in session:
+            self.allow_invalid = bool(session.get("allow_invalid"))
+        self.last_note = None
+        self._action_label = None
+        self._seq += 1
+        # What the file kept for the add-ons goes to the ones that are on; the
+        # rest waits, as it does for a session opened at startup.
+        self._pending_state = dict(session.get("addon_state") or {})
+        for addon_name, addon in list(self.addons.items()):
+            if addon_name in self._pending_state:
+                addon.restore_state(self, self._pending_state.pop(addon_name))
+        for listener in self._listeners:
+            listener(self.expr)
+        return self.expr
 
     def export(self) -> Dict[str, Any]:
         """The state that :class:`Document` takes back: ``{"history": [srepr,
@@ -1729,6 +1818,20 @@ class Document:
             if action == "script":
                 snap = self.snapshot()
                 snap["script"] = self.python_script(message.get("title"))
+                return snap
+            if action == "savefile":
+                # The document as a file, for the page to hand to the host:
+                # not a step of the history, and nothing here changes.
+                snap = self.snapshot()
+                snap["file"] = {"name": str(message.get("name") or ""), "mime": SAVE_MIME,
+                                "text": self.save_text(message.get("name"))}
+                return snap
+            if action == "openfile":
+                # A file taken back: whatever was here is gone, so the page
+                # gets a whole snapshot, and the history is the file's own.
+                self.open_text(str(message.get("text", "")))
+                snap = self.snapshot()
+                snap["opened"] = True
                 return snap
             if action == "goto":
                 self.goto(message.get("index", 0))

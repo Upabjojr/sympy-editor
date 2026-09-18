@@ -45,6 +45,11 @@ extension EditorView {
         config.userContentController.addUserScript(
             WKUserScript(source: PythonBridge.injectedScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         config.userContentController.add(bridge, name: PythonBridge.handlerName)
+        // The host's other half: files (see FilesBridge) - keeping a formula,
+        // opening one, and sharing what the editor writes out.
+        config.userContentController.addUserScript(
+            WKUserScript(source: FilesBridge.injectedScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        config.userContentController.add(bridge.files, name: FilesBridge.handlerName)
 
         let web = WKWebView(frame: .zero, configuration: config)
         web.allowsBackForwardNavigationGestures = false
@@ -94,7 +99,14 @@ final class PythonBridge: NSObject, WKScriptMessageHandler {
     private static let functions = ["newDoc": "new_doc", "handle": "handle", "version": "version",
                                     "interrupt": "interrupt"]
 
-    weak var webView: WKWebView?
+    weak var webView: WKWebView? {
+        didSet { files.webView = webView }
+    }
+
+    /// The other half of the host: what the page asks of the app that is not
+    /// Python (files and sharing).  Kept here because this object is the one
+    /// SwiftUI keeps alive, as the navigation delegate is.
+    let files = FilesBridge()
 
     /// Kept here because a WKWebView holds its navigation delegate weakly,
     /// and this object is the one SwiftUI keeps alive.
