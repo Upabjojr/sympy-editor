@@ -1,218 +1,146 @@
-/* SPDX-License-Identifier: AGPL-3.0-or-later
- * Copyright (c) 2026 Francesco Bonazzi */
-/* The handwriting panel, scoped under the box the editor gives the add-on. */
-.se-addon-handwriting .ink-panel { display: flex; flex-direction: column; gap: 0.4rem; font-size: 12px; }
-.se-addon-handwriting .ink-bar, .se-addon-handwriting .ink-actions, .se-addon-handwriting .ink-cands { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
-/* The LaTeX line, right above the pad it is drawn in, with its two tools */
-.se-addon-handwriting .ink-latexrow { display: flex; align-items: center; gap: 0.4rem; }
-.se-addon-handwriting .ink-latexrow .ink-latex { flex: 1 1 auto; min-width: 0; font-size: 14px; }
-.se-addon-handwriting .ink-latexrow button {
-  font: inherit; font-size: 12px; line-height: 1.2; display: inline-flex; align-items: center; justify-content: center; min-width: 2.1rem; padding: 0.25rem 0.4rem;
-  border: 1px solid var(--se-border); border-radius: 0.3rem; background: var(--se-btn); color: inherit; cursor: pointer; box-shadow: var(--se-btn-edge), var(--se-btn-shadow);
-}
-.se-addon-handwriting .ink-latexrow button:disabled { opacity: 0.4; cursor: default; box-shadow: none; background: none; }
-.se-addon-handwriting .ink-bar button, .se-addon-handwriting .ink-actions button, .se-addon-handwriting .ink-cands button {
-  font: inherit; font-size: 12px; line-height: 1.2; padding: 0.2rem 0.6rem;
-  border: 1px solid var(--se-border); border-radius: 0.3rem; background: var(--se-btn); color: inherit; cursor: pointer;
-  box-shadow: var(--se-btn-edge), var(--se-btn-shadow);
-}
-.se-addon-handwriting .ink-bar button:disabled, .se-addon-handwriting .ink-actions button:disabled { opacity: 0.4; cursor: default; box-shadow: none; background: none; }
-/* The tools are icons: square buttons, as the editor's arrows are, the name
- * in the tooltip and the guide behind the panel's "?". */
-.se-addon-handwriting .ink-bar .ink-tool { display: inline-flex; align-items: center; justify-content: center; min-width: 2.1rem; padding: 0.25rem 0.4rem; }
-.se-addon-handwriting .ink-tool .ink-icon { display: block; width: 1.15rem; height: 1.15rem; }
+/*
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ * Copyright (c) 2026 Francesco Bonazzi
+ *
+ * The handwriting add-on: the ink on the editor's own formula, and the panel
+ * under it.  With the Pen off, nothing here shows and nothing takes a
+ * pointer: the editor looks and works as it does without the add-on.
+ */
 
-/* The writing area: a box of its own size that scrolls, over a canvas that
- * grows to the right and down as the ink nears those edges. */
-.se-addon-handwriting .ink-stage { position: relative; }
-.se-addon-handwriting .ink-pad {
-  height: 170px; overflow: auto; overscroll-behavior: contain;
-  border: 1px solid var(--se-border); border-radius: 0.4rem; background: var(--se-bg);
+/* ---- the ink, over the formula on its stage ---- */
+.se-stage .hw-ink {
+  position: absolute;
+  inset: 0;
+  z-index: 3;                    /* over the formula, under the full-screen button (4) */
+  pointer-events: none;          /* the Pen gives it the pointer (handwriting.js) */
+  touch-action: none;
+  color: var(--se-fg, #1f2328);
 }
-/* none: a finger on the ink writes - it neither scrolls the page nor zooms
- * it; the edge buttons (and the wheel) scroll the area */
-.se-addon-handwriting .ink-canvas { display: block; touch-action: none; cursor: crosshair; color: var(--se-fg); }
-/* The formula in the pad, under the ink: the LaTeX in the box, at the pad's zoom.
- * Pointers go to the canvas; the pieces are found by where they are drawn. */
-.se-addon-handwriting .ink-layer { position: relative; width: max-content; }
-.se-addon-handwriting .ink-layer .ink-canvas { position: relative; z-index: 1; }
-.se-addon-handwriting .ink-formula {
-  position: absolute; left: 0; top: 0; z-index: 0; padding: 18px 24px; transform-origin: 0 0;
-  font-size: 24px; white-space: nowrap; color: var(--se-fg); pointer-events: none; user-select: none;
+/* Writing: the formula area grows to give room, and the pointer draws. */
+.sympy-editor.se-inking .hw-ink { cursor: crosshair; }
+.sympy-editor.se-inking.se-erasing .hw-ink { cursor: cell; }
+.sympy-editor.se-inking .se-view {
+  min-height: 11rem;
+  box-shadow: inset 0 0 0 1px rgba(var(--se-accent), 0.35);
+  transition: min-height 120ms ease;
 }
-.se-addon-handwriting .ink-formula [data-inkhole] .rule { border-color: transparent !important; }
-.se-addon-handwriting .ink-canvas.ink-off { cursor: not-allowed; opacity: 0.5; }
-.se-addon-handwriting .ink-canvas.ink-erasing { cursor: cell; }
-.se-addon-handwriting .ink-canvas.ink-selecting { cursor: default; }
-/* Select, Pen, Eraser: one group, the pressed one what the pad does */
-.se-addon-handwriting .ink-modes { display: inline-flex; margin-right: 0.4rem; }
-.se-addon-handwriting .ink-modes button { border-radius: 0; }
-.se-addon-handwriting .ink-modes button + button { margin-left: -1px; }
-.se-addon-handwriting .ink-modes button:first-child { border-radius: 0.3rem 0 0 0.3rem; }
-.se-addon-handwriting .ink-modes button:last-child { border-radius: 0 0.3rem 0.3rem 0; }
-.se-addon-handwriting .ink-modes button.ink-on { position: relative; z-index: 1; }
-/* the arrows, one group as the modes */
-.se-addon-handwriting .ink-arrows { display: inline-flex; margin-right: 0.4rem; }
-.se-addon-handwriting .ink-arrows button { border-radius: 0; display: inline-flex; align-items: center; justify-content: center; min-width: 2.1rem; padding: 0.25rem 0.4rem; }
-.se-addon-handwriting .ink-arrows button + button { margin-left: -1px; }
-.se-addon-handwriting .ink-arrows button:first-child { border-radius: 0.3rem 0 0 0.3rem; }
-.se-addon-handwriting .ink-arrows button:last-child { border-radius: 0 0.3rem 0.3rem 0; }
-.se-addon-handwriting .ink-arrow .ink-icon { display: block; width: 1.1rem; height: 1.1rem; }
-.se-addon-handwriting .ink-pad:focus { outline: none; }
-.se-addon-handwriting .ink-pad:focus-visible { outline: 2px solid rgba(var(--se-accent), 0.45); outline-offset: -2px; }
-/* minus, the level, plus: one group, as the editor's zoom */
-.se-addon-handwriting .ink-zooms { display: inline-flex; margin-left: auto; }
-.se-addon-handwriting .ink-zooms button { border-radius: 0; min-width: 2.1rem; font-variant-numeric: tabular-nums; }
-.se-addon-handwriting .ink-zooms button + button { margin-left: -1px; }
-.se-addon-handwriting .ink-zooms button:first-child { border-radius: 0.3rem 0 0 0.3rem; }
-.se-addon-handwriting .ink-zooms button:last-child { border-radius: 0 0.3rem 0.3rem 0; }
-.se-addon-handwriting .ink-zooms .ink-zoom-level { min-width: 3.4rem; }
-/* Erase is a switch: pressed while on */
-.se-addon-handwriting .ink-bar button.ink-on { border-color: rgba(var(--se-accent), 0.85); background: rgba(var(--se-accent), 0.18); box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.15); }
-.se-addon-handwriting .ink-busy .ink-pad { border-color: rgba(var(--se-accent), 0.6); }
+@media (prefers-reduced-motion: reduce) { .sympy-editor.se-inking .se-view { transition: none; } }
+@media (any-pointer: coarse) { .sympy-editor.se-inking .se-view { min-height: 40vh; } }
+.sympy-editor.se-full.se-inking .se-view { min-height: 0; }
+/* the tools: the Pen and the Eraser stay pressed while they are on */
+.sympy-editor .se-tools button.hw-tool { line-height: 1; }
+.sympy-editor .se-tools button.hw-on {
+  background: rgba(var(--se-accent), 0.14);
+  border-color: rgba(var(--se-accent), 0.65);
+}
 
-/* A button in the middle of each edge there is more ink beyond: a chevron
- * on a chip, a screen that way when pressed.  Only the chip is a button -
- * the rest of the edge is the writing area, and writes. */
-.se-addon-handwriting .ink-scroll {
-  position: absolute; z-index: 3; display: flex; align-items: center; justify-content: center;
-  margin: 0; padding: 0; border: 1px solid var(--se-border); border-radius: 999px; box-shadow: none;
-  background: var(--se-surface); color: var(--se-muted); opacity: 0.8;
-  cursor: pointer; -webkit-tap-highlight-color: transparent; transition: opacity 0.12s ease, color 0.12s ease;
-}
-.se-addon-handwriting .ink-scroll[hidden] { display: none; }
-.se-addon-handwriting .ink-scroll .ink-icon { width: 1.1rem; height: 1.1rem; }
-.se-addon-handwriting .ink-scroll:active { opacity: 1; color: rgb(var(--se-accent)); }
-.se-addon-handwriting .ink-scroll-left, .se-addon-handwriting .ink-scroll-right { top: 50%; transform: translateY(-50%); width: 1.6rem; height: 2.4rem; }
-.se-addon-handwriting .ink-scroll-up, .se-addon-handwriting .ink-scroll-down { left: 50%; transform: translateX(-50%); width: 2.4rem; height: 1.6rem; }
-.se-addon-handwriting .ink-scroll-left { left: 4px; }
-.se-addon-handwriting .ink-scroll-right { right: 4px; }
-.se-addon-handwriting .ink-scroll-up { top: 4px; }
-.se-addon-handwriting .ink-scroll-down { bottom: 4px; }
+/* ---- the panel: the readings and what came of them ---- */
+/* a class with a display beats the browser's own [hidden]: say it here */
+.se-addon-handwriting [hidden] { display: none !important; }
+.se-addon-handwriting .hw-panel { display: flex; flex-direction: column; gap: 0.45rem; }
+.se-addon-handwriting .hw-note { font-size: 12px; color: var(--se-muted); }
+.se-addon-handwriting .hw-note:empty { display: none; }
+.se-addon-handwriting .hw-note.error { color: var(--se-bad, #d1242f); }
+.se-addon-handwriting .hw-panel.hw-busy .hw-note { opacity: 0.7; }
 
-/* The full-screen button in the area's corner, as the formula's (.se-fullbtn). */
-.se-addon-handwriting .ink-fullbtn {
-  position: absolute; top: 4px; right: 4px; z-index: 4; display: inline-flex; align-items: center; justify-content: center;
-  padding: 2px; border: 1px solid transparent; border-radius: 0.3rem; background: none; box-shadow: none;
-  color: var(--se-muted); opacity: 0.45; cursor: pointer; transition: opacity 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+.se-addon-handwriting .hw-cands { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.se-addon-handwriting .hw-cands:empty { display: none; }
+.se-addon-handwriting .hw-cand {
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.2;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--se-rule);
+  border-radius: 0.3rem;
+  background: var(--se-btn);
+  color: inherit;
+  cursor: pointer;
 }
-.se-addon-handwriting .ink-fullbtn .ink-icon { display: block; width: 1.2em; height: 1.2em; }
-.se-addon-handwriting .ink-fullbtn:hover, .se-addon-handwriting .ink-fullbtn:focus-visible { opacity: 1; background: var(--se-btn); border-color: var(--se-border); }
-.se-addon-handwriting .ink-fullbtn:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(var(--se-accent), 0.45); }
+.se-addon-handwriting .hw-cand.hw-chosen {
+  border-color: rgba(var(--se-accent), 0.85);
+  background: rgba(var(--se-accent), 0.12);
+}
 
-/* The readings: inline under the area; in full screen, a sheet at the bottom. */
-.se-addon-handwriting .ink-sheet, .se-addon-handwriting .ink-sheet-body { display: flex; flex-direction: column; gap: 0.4rem; }
-.se-addon-handwriting .ink-sheet-head { display: none; }
-/* one line, and a row of readings however many there are (none included): what changes in them never moves what is above */
-.se-addon-handwriting .ink-note { min-height: 1.2em; color: var(--se-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.se-addon-handwriting .ink-cands { min-height: 2.2rem; }
-.se-addon-handwriting .ink-note.error, .se-addon-handwriting .ink-src.error { color: var(--se-error); }
-.se-addon-handwriting .ink-cands .ink-cand { font-size: 14px; padding: 0.3rem 0.6rem; }
-.se-addon-handwriting .ink-cands .ink-cand.ink-chosen { border-color: rgba(var(--se-accent), 0.85); background: rgba(var(--se-accent), 0.12); }
-/* the pen beside the chosen reading, and the box its LaTeX is edited in */
-.se-addon-handwriting .ink-cands .ink-cand-edit { display: inline-flex; align-items: center; padding: 0.25rem 0.35rem; margin-left: -0.2rem; }
-.se-addon-handwriting .ink-cand-edit .ink-icon { display: block; width: 1rem; height: 1rem; }
-.se-addon-handwriting .ink-cand-editor { display: flex; align-items: center; gap: 0.4rem; }
-.se-addon-handwriting .ink-cand-editor .ink-cand-input { flex: 1 1 auto; min-width: 0; font: inherit; font-family: var(--se-mono); font-size: 14px; padding: 0.3rem 0.5rem;
-  border: 1px solid rgba(var(--se-accent), 0.7); border-radius: 0.3rem; background: transparent; color: inherit; }
-.se-addon-handwriting .ink-cand-editor button { font: inherit; font-size: 12px; display: inline-flex; align-items: center; padding: 0.25rem 0.5rem;
-  border: 1px solid var(--se-border); border-radius: 0.3rem; background: var(--se-btn); color: inherit; cursor: pointer; }
-.se-addon-handwriting .ink-cand-editor .ink-icon { display: block; width: 1.1rem; height: 1.1rem; }
-/* what the reading below is of */
-.se-addon-handwriting .ink-reading-of { color: var(--se-muted); font-size: 11px; }
-.se-addon-handwriting .ink-reading-of:empty { display: none; }
-/* the pieces the ink might be read together with */
-.se-addon-handwriting .ink-nest { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }
-.se-addon-handwriting .ink-nest:empty { display: none; }
-.se-addon-handwriting .ink-nest-label { color: var(--se-muted); font-size: 11px; }
-.se-addon-handwriting .ink-nest button {
-  font: inherit; font-size: 13px; line-height: 1.2; padding: 0.2rem 0.5rem;
-  border: 1px dashed rgba(var(--se-accent), 0.6); border-radius: 0.3rem; background: var(--se-btn); color: inherit; cursor: pointer;
+/* the pieces the ink can be read together with, and the line that keeps them
+ * apart from the LaTeX parser's own options */
+.se-addon-handwriting .hw-with { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }
+.se-addon-handwriting .hw-with:empty { display: none; }
+.se-addon-handwriting .hw-with-label { color: var(--se-muted); font-size: 11px; }
+.se-addon-handwriting .hw-with button {
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.2;
+  padding: 0.2rem 0.5rem;
+  border: 1px dashed rgba(var(--se-accent), 0.6);
+  border-radius: 0.3rem;
+  background: var(--se-btn);
+  color: inherit;
+  cursor: pointer;
 }
-.se-addon-handwriting .ink-nest button.ink-chosen { border-style: solid; border-color: rgba(var(--se-accent), 0.85); background: rgba(var(--se-accent), 0.12); }
-.se-addon-handwriting .ink-latex {
-  font: inherit; font-family: var(--se-mono); font-size: 13px; padding: 0.3rem 0.5rem;
-  border: 1px solid var(--se-border); border-radius: 0.3rem; background: transparent; color: inherit;
+.se-addon-handwriting .hw-with button.hw-chosen {
+  border-style: solid;
+  border-color: rgba(var(--se-accent), 0.85);
+  background: rgba(var(--se-accent), 0.12);
 }
-.se-addon-handwriting .ink-src { font-family: var(--se-mono); color: var(--se-muted); word-break: break-word; min-height: 1.2em; }
-.se-addon-handwriting .ink-actions .ink-apply { border-color: rgba(var(--se-accent), 0.8); background: rgba(var(--se-accent), 0.12); }
-/* what an applying did: the formula before and after it, to keep or to take back */
-.se-addon-handwriting .ink-applied { display: flex; flex-direction: column; gap: 0.3rem; padding: 0.45rem 0.6rem;
-  border: 1px solid rgba(var(--se-accent), 0.5); border-radius: 0.4rem; background: rgba(var(--se-accent), 0.06); }
-.se-addon-handwriting .ink-applied-was, .se-addon-handwriting .ink-applied-now { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem; }
-.se-addon-handwriting .ink-applied-ask { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.15rem; }
-/* what went and what came, in the history's own colours (its report's stylesheet
- * is its own: the page has none of it) */
-.se-addon-handwriting .ink-applied .rep-added, .se-addon-handwriting .ink-applied .rep-removed { font-weight: bold; }
-.se-addon-handwriting .ink-applied .rep-added { color: #1a7f37; }
-.se-addon-handwriting .ink-applied .rep-removed { color: #d1242f; }
-.se-addon-handwriting .ink-applied .rep-added.rep-box { background: #e8f2eb; }
-.se-addon-handwriting .ink-applied .rep-removed.rep-box { background: #fae9ea; }
+.se-addon-handwriting .hw-divide { width: 100%; height: 0; margin: 0.1rem 0; border: 0; border-top: 1px solid var(--se-rule); }
+
+.se-addon-handwriting .hw-reading-of { font-size: 11px; color: var(--se-muted); }
+.se-addon-handwriting .hw-reading-of:empty { display: none; }
+.se-addon-handwriting .hw-src { font-size: 12px; word-break: break-word; }
+.se-addon-handwriting .hw-src:empty { display: none; }
+.se-addon-handwriting .hw-src.error { color: var(--se-bad, #d1242f); }
+
+/* the LaTeX parser's options */
+.se-addon-handwriting .hw-parse { display: flex; flex-direction: column; gap: 0.3rem; }
+.se-addon-handwriting .hw-parse-label { font-size: 11px; color: var(--se-muted); }
+.se-addon-handwriting .hw-ambig,
+.se-addon-handwriting .hw-consts { display: flex; flex-wrap: wrap; gap: 0.4rem 0.8rem; align-items: center; }
+.se-addon-handwriting .hw-point,
+.se-addon-handwriting .hw-const { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 12px; }
+.se-addon-handwriting .hw-fragment { font-size: 12px; }
+.se-addon-handwriting .hw-choice { font: inherit; font-size: 12px; max-width: 16rem; }
+
+/* what the reading did: the formula as it was, as it now is, and the ask */
+.se-addon-handwriting .hw-applied {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--se-rule);
+  border-radius: 0.4rem;
+  background: var(--se-surface);
+}
+.se-addon-handwriting .hw-applied-row { display: flex; align-items: baseline; gap: 0.45rem; flex-wrap: wrap; }
+.se-addon-handwriting .hw-applied-label { font-size: 11px; color: var(--se-muted); min-width: 2.2rem; }
+.se-addon-handwriting .hw-formula { font-size: 15px; overflow-x: auto; }
+.se-addon-handwriting .hw-applied-ask { display: flex; gap: 0.4rem; margin-top: 0.1rem; }
+.se-addon-handwriting .hw-applied-ask button {
+  font: inherit;
+  font-size: 12px;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--se-rule);
+  border-radius: 0.3rem;
+  background: var(--se-btn);
+  color: inherit;
+  cursor: pointer;
+}
+.se-addon-handwriting .hw-keep { border-color: rgba(var(--se-accent), 0.65); }
+
+/* what went and what came, marked as the history's own report marks a step
+ * (those colours live in the report's CSS: here they are, for this panel) */
+.se-addon-handwriting .hw-applied .rep-added,
+.se-addon-handwriting .hw-applied .rep-removed { font-weight: bold; }
+.se-addon-handwriting .hw-applied .rep-added { color: #1a7f37; }
+.se-addon-handwriting .hw-applied .rep-removed { color: #d1242f; }
 @media (prefers-color-scheme: dark) {
-  .se-addon-handwriting .ink-applied .rep-added { color: #3fb950; }
-  .se-addon-handwriting .ink-applied .rep-removed { color: #ff7b72; }
-  .se-addon-handwriting .ink-applied .rep-added.rep-box { background: #233726; }
-  .se-addon-handwriting .ink-applied .rep-removed.rep-box { background: #422d2b; }
+  .se-addon-handwriting .hw-applied .rep-added { color: #3fb950; }
+  .se-addon-handwriting .hw-applied .rep-removed { color: #ff7b72; }
 }
-/* the LaTeX's own readings, apart from what the writing is read with */
-.se-addon-handwriting .ink-divide { width: 100%; height: 0; margin: 0.15rem 0; border: none; border-top: 1px solid var(--se-border); }
-.se-addon-handwriting .ink-divide[hidden] { display: none; }
-.se-addon-handwriting .ink-parse { display: flex; flex-direction: column; gap: 0.3rem; padding: 0.4rem 0.55rem;
-  border: 1px solid var(--se-border); border-radius: 0.4rem; background: var(--se-surface); }
-.se-addon-handwriting .ink-parse[hidden] { display: none; }
-.se-addon-handwriting .ink-parse-label { color: var(--se-muted); font-size: 11px; }
-.se-addon-handwriting .ink-applied[hidden] { display: none; }
-.se-addon-handwriting .ink-applied-label { color: var(--se-muted); font-size: 11px; }
-.se-addon-handwriting .ink-applied-arrow { color: var(--se-muted); }
-.se-addon-handwriting .ink-was { opacity: 0.65; }
-.se-addon-handwriting .ink-applied button { font: inherit; font-size: 12px; padding: 0.2rem 0.6rem; border: 1px solid var(--se-border);
-  border-radius: 0.3rem; background: var(--se-btn); color: inherit; cursor: pointer; }
-.se-addon-handwriting .ink-applied .ink-keep { border-color: rgba(var(--se-accent), 0.8); background: rgba(var(--se-accent), 0.12); }
-/* the reading's options, as the LaTeX panel shows them */
-.se-addon-handwriting .ink-ambig, .se-addon-handwriting .ink-consts { display: flex; flex-direction: column; gap: 0.25rem; }
-.se-addon-handwriting .ink-ambig:empty, .se-addon-handwriting .ink-consts:empty { display: none; }
-.se-addon-handwriting .ink-point { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }
-.se-addon-handwriting .ink-fragment { font-family: var(--se-mono); padding: 0 0.3rem; border-radius: 0.25rem; background: rgba(var(--se-accent), 0.1); }
-.se-addon-handwriting .ink-choice { font: inherit; font-size: 12px; max-width: 100%; padding: 0.15rem 0.3rem; border: 1px solid var(--se-border); border-radius: 0.3rem; background: var(--se-btn); color: inherit; }
-.se-addon-handwriting .ink-const { display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer; }
-
-/* Full screen: the panel covers the page - the tools on top, the writing
- * area every pixel in between, the readings a sheet that folds away. */
-.se-addon-handwriting .ink-panel.ink-full {
-  position: fixed; inset: 0; z-index: 2147483001; margin: 0; padding: 0.5rem 0.5rem 0;
-  box-sizing: border-box; background: var(--se-bg); color: var(--se-fg);
-}
-.se-addon-handwriting .ink-full .ink-stage { flex: 1 1 auto; min-height: 0; display: flex; }
-.se-addon-handwriting .ink-full .ink-pad { flex: 1 1 auto; height: auto; min-height: 0; }
-.se-addon-handwriting .ink-full .ink-sheet {
-  flex: 0 0 auto; max-height: 45vh; min-height: 0; gap: 0.3rem; padding: 0 0.6rem 0.5rem;
-  border: 1px solid var(--se-border); border-bottom: none; border-radius: 0.6rem 0.6rem 0 0;
-  background: var(--se-surface); box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.12);
-}
-.se-addon-handwriting .ink-full .ink-sheet-head {
-  display: flex; align-items: center; gap: 0.4rem; width: 100%; min-height: 2rem; padding: 0.25rem 0;
-  border: none; background: none; box-shadow: none; font: inherit; color: var(--se-muted); text-align: left; cursor: pointer;
-}
-.se-addon-handwriting .ink-sheet-chevron .ink-icon { display: block; width: 1.1rem; height: 1.1rem; }
-.se-addon-handwriting .ink-sheet-summary { font-family: var(--se-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.se-addon-handwriting .ink-full .ink-sheet-body { overflow: auto; min-height: 0; }
-.se-addon-handwriting .ink-full .ink-sheet.ink-folded .ink-sheet-body { display: none; }
+.sympy-editor[data-theme="dark"] .se-addon-handwriting .hw-applied .rep-added { color: #3fb950; }
+.sympy-editor[data-theme="dark"] .se-addon-handwriting .hw-applied .rep-removed { color: #ff7b72; }
 
 @media (any-pointer: coarse) {
-  .se-addon-handwriting .ink-bar button, .se-addon-handwriting .ink-actions button { font-size: 14px; padding: 0.45rem 0.7rem; min-height: 2.2rem; }
-  .se-addon-handwriting .ink-bar .ink-tool, .se-addon-handwriting .ink-latexrow button { min-width: 2.8rem; padding: 0.4rem 0.6rem; }
-  .se-addon-handwriting .ink-zooms button { min-width: 2.6rem; }
-  .se-addon-handwriting .ink-nest button { font-size: 15px; padding: 0.4rem 0.7rem; }
-  .se-addon-handwriting .ink-arrows button { min-width: 2.8rem; padding: 0.4rem 0.6rem; }
-  .se-addon-handwriting .ink-arrow .ink-icon { width: 1.35rem; height: 1.35rem; }
-  .se-addon-handwriting .ink-zooms .ink-zoom-level { min-width: 3.8rem; }
-  .se-addon-handwriting .ink-tool .ink-icon { width: 1.35rem; height: 1.35rem; }
-  .se-addon-handwriting .ink-pad { height: 220px; }
-  .se-addon-handwriting .ink-latex, .se-addon-handwriting .ink-choice { font-size: 15px; }
-  .se-addon-handwriting .ink-fullbtn { opacity: 0.6; padding: 0; min-width: 44px; min-height: 44px; top: 2px; right: 2px; }
-  .se-addon-handwriting .ink-scroll-left, .se-addon-handwriting .ink-scroll-right { width: 2.2rem; height: 3rem; }
-  .se-addon-handwriting .ink-scroll-up, .se-addon-handwriting .ink-scroll-down { width: 3rem; height: 2.2rem; }
-  .se-addon-handwriting .ink-full .ink-sheet-head { min-height: 2.6rem; }
-  .se-addon-handwriting .ink-cands { min-height: 2.8rem; }
+  .se-addon-handwriting .hw-cand { font-size: 17px; padding: 0.4rem 0.7rem; }
+  .se-addon-handwriting .hw-with button { font-size: 15px; padding: 0.4rem 0.7rem; }
+  .se-addon-handwriting .hw-applied-ask button { font-size: 14px; padding: 0.4rem 0.8rem; }
 }
-@media (prefers-reduced-motion: reduce) { .se-addon-handwriting .ink-scroll, .se-addon-handwriting .ink-fullbtn { transition: none; } }

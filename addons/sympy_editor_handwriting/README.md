@@ -1,13 +1,28 @@
 # sympy-editor-handwriting — write a formula by hand
 
-A panel under the formula with an area to write in, with a pen, a finger or
-the mouse.  A moment after the pen lifts, the strokes go to the stroke model
-of [math-ocr](../../../math-ocr) — a 5 M-parameter recognizer of handwritten
+Writing by hand on the editor's own formula: no pad of its own, no second
+formula.  **Write**, among the editor's tools, takes the pointer and gives the
+formula area room; with it off the editor is the editor it was.  A moment
+after the pen lifts, the strokes go to the stroke model of
+[math-ocr](../../../math-ocr) — a 5 M-parameter recognizer of handwritten
 mathematics that reads the pen *trajectory*, not a picture of it — which
 answers with LaTeX and a few other readings, best first.  The LaTeX add-on's
-reader turns the chosen one into SymPy, in the document's own names; it can be
-corrected in its box, and goes in over the selection (a node or a range) or as
-the whole expression - and the page goes back up to the formula.
+reader turns the best one into SymPy, in the document's own names, and it goes
+into the formula at once.
+
+Where it goes is what the editor says: over the selected sub-expression (or
+the selected range), at the cursor, or - with neither - against the piece of
+the formula it is written by.  That piece is drawn into the strokes as a
+stand-in (a triangle, which the model reads as `\Delta`), so the ink is read
+*together with* it: a bar under it with ink under the bar is a fraction over
+it, a small letter at its top-right corner its exponent, a letter beside it a
+product; Python puts the piece's own LaTeX back in the stand-in's place.
+
+The panel under the editor holds only what came of it: the formula before and
+after, marked as the history marks a step, to **Keep** or to undo; the other
+readings, to pick another (the one before it is taken back first); the pieces
+the ink can be read with, and `alone`; and the ways the LaTeX itself can be
+read.
 
 ## What it needs
 

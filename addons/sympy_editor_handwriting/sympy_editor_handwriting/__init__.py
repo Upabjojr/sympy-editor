@@ -1,21 +1,26 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2026 Francesco Bonazzi
-"""A sympy-editor add-on: write a formula by hand.
+"""A sympy-editor add-on: write a formula by hand, on the formula itself.
 
-A panel with a writing area under the formula.  What is written there - with a
-pen, a finger or the mouse, as strokes of ``(x, y, t)`` points - goes to the
-stroke model of math-ocr (a checkout beside sympy-editor's: see
-:mod:`sympy_editor_handwriting.recognizer`), which answers with LaTeX and a few other
-readings.  The LaTeX add-on's reader turns the chosen one into SymPy, in the
-document's own names, and it goes in over the selection or as the whole
-expression.
+The editor's own formula is the writing area: the Pen (in the editor's tools)
+gives it room and takes the pointer, and what is written there - with a pen, a
+finger or the mouse, as strokes of ``(x, y, t)`` points - goes to the stroke
+model of math-ocr (a checkout beside sympy-editor's: see
+:mod:`sympy_editor_handwriting.recognizer`), which answers with LaTeX and a few
+other readings.  The LaTeX add-on's reader turns the best one into SymPy, in
+the document's own names, and it goes into the formula at once - over the
+selection, at the cursor, or together with the piece of the formula the ink
+was written by, which the strokes carry as a stand-in (``\\Delta``: see
+``write`` below).
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+import sympy
 from sympy import Basic
 
 from sympy_editor.addons import Addon
@@ -25,6 +30,24 @@ from .recognizer import StrokeRecognizer, functions_as_commands, sized_delimiter
 __all__ = ["HandwritingAddon", "ADDON", "StrokeRecognizer", "functions_as_commands", "sized_delimiters", "with_braces"]
 
 STATIC = Path(__file__).parent / "static"
+
+#: What the strokes carry where a node of the formula stands: the model reads the
+#: triangle drawn there as ``\Delta`` (see the panel's standIn).
+STAND_IN = re.compile(r"\\Delta(?![A-Za-z])")
+
+
+def _nest(tex: str, piece: str) -> str:
+    """``tex`` with the node's LaTeX in the stand-in's place: grouped where it is
+    more than one symbol, in delimiters where a script follows it."""
+    single = bool(re.fullmatch(r"[A-Za-z0-9]|\\[A-Za-z]+|\{[^{}]*\}", piece.strip()))
+
+    def put(m: "re.Match[str]") -> str:
+        after = tex[m.end():m.end() + 2].lstrip()[:1]
+        if after in ("^", "_"):
+            return piece if single else r"\left(" + piece + r"\right)"
+        return piece if single else "{" + piece + "}"
+
+    return STAND_IN.sub(put, tex, count=1)
 
 
 class HandwritingAddon(Addon):
@@ -91,6 +114,29 @@ class HandwritingAddon(Addon):
             return result
         if method == "read":
             return {"reading": self._reading(doc, str(payload.get("latex", "")), self._picks(payload))}
+        if method == "write":
+            # What is written, read: strokes in, readings out - and, with ``nest``
+            # (a node's path), read together with that node, whose LaTeX takes the
+            # place of the stand-in the strokes carry (``\Delta``).  Readings that
+            # do not carry it exactly once are of the ink alone, and say so.
+            result = self.recognizer.recognize(payload.get("strokes"), beam=payload.get("beam", 4))
+            nest = payload.get("nest")
+            piece = None
+            if nest:
+                try:
+                    piece = sympy.latex(doc.get(str(nest)))
+                except Exception:  # noqa: BLE001 - a path the document no longer has
+                    piece = None
+            out = []
+            for cand in result["candidates"]:
+                latex, display, nested = cand["latex"], cand.get("display") or cand["latex"], False
+                if piece is not None and len(STAND_IN.findall(latex)) == 1:
+                    latex, display, nested = _nest(latex, piece), _nest(display, piece), True
+                out.append({"latex": latex, "display": display, "raw": cand.get("raw"), "score": cand.get("score"),
+                            "nested": nested, "reading": self._reading(doc, latex)})
+            result["candidates"] = out
+            result["nested"] = any(c["nested"] for c in out)
+            return result
         if method == "insert":
             res = self._read(doc, str(payload.get("latex", "")), self._picks(payload))
             if not res.get("ok"):
