@@ -173,9 +173,10 @@ def test_without_the_pen_the_editor_is_the_editor_it_was():
             _close(srv, browser)
 
 
-def test_what_is_written_over_a_selection_takes_its_place_at_once():
-    """A piece selected in the editor, then written on: the reading takes that
-    piece's place as soon as it is read, and the strip shows what changed."""
+def test_what_is_written_over_a_selection_takes_its_place_when_applied():
+    """A piece selected in the editor, then written on: the reading waits to be
+    applied - the formula is not touched until then - and takes that piece's
+    place when it is, with the strip to keep the change or take it back."""
     doc = Document(x + y, addons=[HandwritingAddon(LetterRecognizer()), LATEX])
     with playwright.sync_playwright() as p:
         srv, browser, page = _page(p, doc, pen=False)
@@ -186,7 +187,13 @@ def test_what_is_written_over_a_selection_takes_its_place_at_once():
             page.locator('[data-cmd="addon:handwriting:pen"]').click()
             view = page.locator(".se-view").bounding_box()
             _drag(page, view["x"] + 40, view["y"] + 90, view["x"] + 110, view["y"] + 120)
+            apply = page.locator(".hw-apply")
+            assert _wait(lambda: apply.is_visible() and not apply.is_disabled(), 15)
+            assert str(doc.expr) == "x + y"                  # read, and nothing touched yet
+            assert page.locator(".hw-applied").is_hidden()
+            apply.click()
             assert _wait(lambda: str(doc.expr) == "x + z", 15), str(doc.expr)
+            assert _wait(lambda: apply.is_hidden())          # in: there is nothing left to apply
             said = page.locator(".hw-reading-of")
             assert _wait(lambda: "selection's place" in said.inner_text())
             # the line under the readings is the reading itself, as SymPy gets it
@@ -223,6 +230,8 @@ def test_free_ink_is_read_together_with_the_piece_it_is_written_by():
             r = page.evaluate(TEXT_RECT, "x")
             ht = r["bottom"] - r["top"]
             _drag(page, r["right"] + 3, r["top"] - 0.3 * ht, r["right"] + 13, r["top"] + 0.15 * ht)
+            assert _wait(lambda: page.locator(".hw-apply").is_visible(), 15)
+            page.locator(".hw-apply").click()
             assert _wait(lambda: str(doc.expr) == "x**2", 15), str(doc.expr)
             # the model was sent the piece as a stand-in: a stroke more than was written
             assert len(rec.last) == 2
@@ -250,6 +259,8 @@ def test_another_reading_changes_the_formula_instead_of_piling_up():
         try:
             view = page.locator(".se-view").bounding_box()
             _drag(page, view["x"] + 200, view["y"] + 60, view["x"] + 260, view["y"] + 100)
+            assert _wait(lambda: page.locator(".hw-apply").is_visible(), 15)
+            page.locator(".hw-apply").click()
             assert _wait(lambda: str(doc.expr) == "x*y", 15), str(doc.expr)
             cands = page.locator(".hw-cand")
             assert _wait(lambda: cands.count() == 2)
@@ -357,7 +368,7 @@ def test_a_reading_s_latex_can_be_corrected_by_hand():
         try:
             view = page.locator(".se-view").bounding_box()
             _drag(page, view["x"] + 200, view["y"] + 60, view["x"] + 260, view["y"] + 100)
-            assert _wait(lambda: str(doc.expr) == "x*z", 15), str(doc.expr)
+            assert _wait(lambda: page.locator(".hw-apply").is_visible(), 15)
             assert page.locator(".hw-latexrow").is_hidden()
             page.locator(".hw-edit").click()
             field = page.locator(".hw-latex")
@@ -365,6 +376,8 @@ def test_a_reading_s_latex_can_be_corrected_by_hand():
             assert field.input_value() == "z"
             field.fill(r"\frac{w}{2}")
             field.press("Enter")
+            assert _wait(lambda: page.locator(".hw-src").inner_text() == "w/2", 15)
+            page.locator(".hw-apply").click()
             assert _wait(lambda: str(doc.expr) == "w*x/2", 15), str(doc.expr)
             # it is one of the readings now, and the one picked
             edited = page.locator(".hw-cand-edited")
@@ -394,6 +407,62 @@ def test_the_formula_zooms_while_writing_and_the_ink_zooms_with_it():
             page.locator('[data-cmd="zoomin"]').click()
             page.locator('[data-cmd="zoomin"]').click()
             assert _wait(lambda: page.evaluate(ink) > was * 1.2, 5)     # the ink grew with the formula
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
+def test_the_formula_opens_a_space_to_write_in_and_widens_it():
+    """With the Pen on, the formula opens a space where what is written will
+    go - after the selection - and it widens as the ink does; it closes with
+    the Pen."""
+    doc = Document(x + y, addons=[HandwritingAddon(MuteRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc, pen=False)
+        try:
+            r = page.evaluate(TEXT_RECT, "x")
+            page.mouse.click((r["left"] + r["right"]) / 2, (r["top"] + r["bottom"]) / 2)
+            assert _wait(lambda: page.locator(".se-view .se-selected").count() == 1)
+            gap = ("(path) => parseFloat(getComputedStyle("
+                   "document.querySelector(`.se-view [data-path=\"${path}\"]`)).marginRight) || 0")
+            assert page.evaluate(gap, r["path"]) == 0
+            page.locator('[data-cmd="addon:handwriting:pen"]').click()
+            assert _wait(lambda: page.evaluate(gap, r["path"]) > 20)      # room, at once
+            was = page.evaluate(gap, r["path"])
+            # written across it: the space is as wide as the ink needs
+            view = page.locator(".se-view").bounding_box()
+            _drag(page, r["right"] + 20, view["y"] + 40, r["right"] + 20 + 3 * was, view["y"] + 90)
+            assert _wait(lambda: page.evaluate(gap, r["path"]) > was * 2)
+            # the Pen off: the formula as it was
+            page.locator('[data-cmd="addon:handwriting:clear"]').click()
+            page.locator('[data-cmd="addon:handwriting:pen"]').click()
+            assert _wait(lambda: page.evaluate(gap, r["path"]) == 0)
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
+def test_a_tap_still_selects_while_the_pen_is_on():
+    """Choosing where to write is what it always was: with nothing written
+    yet, a tap on a piece selects it (and the space opens there) - it is a
+    stroke only once there is ink."""
+    doc = Document(x + y, addons=[HandwritingAddon(MuteRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc)
+        try:
+            panel = page.locator(".hw-panel")
+            r = page.evaluate(TEXT_RECT, "y")
+            page.mouse.click((r["left"] + r["right"]) / 2, (r["top"] + r["bottom"]) / 2)
+            assert _wait(lambda: page.locator(".se-view .se-selected").count() == 1)
+            assert panel.get_attribute("data-strokes") == "0"          # a tap, not a dot
+            sel = page.evaluate("document.querySelector('.se-view .se-selected').dataset.path")
+            assert sel == r["path"], sel
+            # and with ink on the formula a tap is a dot of its own
+            view = page.locator(".se-view").bounding_box()
+            _drag(page, view["x"] + 300, view["y"] + 40, view["x"] + 340, view["y"] + 70)
+            assert _wait(lambda: panel.get_attribute("data-strokes") == "1")
+            page.mouse.click(view["x"] + 320, view["y"] + 100)
+            assert _wait(lambda: panel.get_attribute("data-strokes") == "2")
             assert page.errors == []
         finally:
             _close(srv, browser)

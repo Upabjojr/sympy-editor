@@ -7,8 +7,9 @@ after the pen lifts, the strokes go to the stroke model of
 [math-ocr](../../../math-ocr) — a 5 M-parameter recognizer of handwritten
 mathematics that reads the pen *trajectory*, not a picture of it — which
 answers with LaTeX and a few other readings, best first.  The LaTeX add-on's
-reader turns the best one into SymPy, in the document's own names, and it goes
-into the formula at once.
+reader turns them into SymPy, in the document's own names, and the one picked
+goes into the formula when **Apply to the formula** is pressed - nothing
+changes before that.
 
 Where it goes is what the editor says: over the selected sub-expression (or
 the selected range), at the cursor, or - with neither - against the piece of
@@ -18,11 +19,15 @@ stand-in (a triangle, which the model reads as `\Delta`), so the ink is read
 it, a small letter at its top-right corner its exponent, a letter beside it a
 product; Python puts the piece's own LaTeX back in the stand-in's place.
 
-The panel under the editor holds only what came of it: the formula before and
-after, marked as the history marks a step, to **Keep** or to undo; the other
-readings, to pick another (the one before it is taken back first); the pieces
-the ink can be read with, and `alone`; and the ways the LaTeX itself can be
-read.
+While the Pen is on, the formula opens a space where what is written will go,
+and it widens as you write; a tap still selects a piece or puts the cursor
+between two, so where to write is chosen as it always was.
+
+The strip under the editor holds only what came of it: the readings, to pick
+from and to correct by hand (**✎ LaTeX**); the pieces the ink can be read
+with, and `alone`; the ways the LaTeX itself can be read; **Apply to the
+formula**; and, once applied, the formula before and after, marked as the
+history marks a step, to **Keep** or to undo.
 
 ## What it needs
 

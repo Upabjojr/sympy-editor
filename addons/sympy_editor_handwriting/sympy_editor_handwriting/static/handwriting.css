@@ -27,6 +27,9 @@
 @media (prefers-reduced-motion: reduce) { .sympy-editor.se-inking .se-view { transition: none; } }
 @media (any-pointer: coarse) { .sympy-editor.se-inking .se-view { min-height: 40vh; } }
 .sympy-editor.se-full.se-inking .se-view { min-height: 0; }
+/* The bar of actions a selection brings up sits just where one would write:
+ * it steps aside while the Pen is on, and comes back with it. */
+.sympy-editor.se-inking .se-actions { display: none !important; }
 /* the tools: the Pen and the Eraser stay pressed while they are on */
 .sympy-editor .se-tools button.hw-tool { line-height: 1; }
 .sympy-editor .se-tools button.hw-tool .se-icon { display: block; width: 1.2em; height: 1.2em; }
@@ -172,6 +175,20 @@
 .hw-fragment { font-size: 12px; }
 .hw-choice { font: inherit; font-size: 12px; max-width: 16rem; }
 
+/* the ask: nothing goes into the formula until this is pressed */
+.hw-actions { display: flex; gap: 0.4rem; }
+.hw-apply {
+  font: inherit;
+  font-size: 13px;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid rgba(var(--se-accent), 0.65);
+  border-radius: 0.3rem;
+  background: rgba(var(--se-accent), 0.12);
+  color: inherit;
+  cursor: pointer;
+}
+.hw-apply:disabled { opacity: 0.5; cursor: default; }
+
 /* what the reading did: the formula as it was, as it now is, and the ask */
 .hw-applied {
   display: flex;
@@ -217,4 +234,5 @@
   .hw-applied-ask button { font-size: 14px; padding: 0.4rem 0.8rem; }
   .hw-edit, .hw-latex-read { font-size: 14px; padding: 0.4rem 0.7rem; }
   .hw-latex { font-size: 15px; }
+  .hw-apply { font-size: 15px; padding: 0.45rem 0.9rem; }
 }
