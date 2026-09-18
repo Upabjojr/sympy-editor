@@ -426,8 +426,14 @@ def test_the_formula_opens_a_space_to_write_in_and_widens_it():
             gap = ("(path) => parseFloat(getComputedStyle("
                    "document.querySelector(`.se-view [data-path=\"${path}\"]`)).marginRight) || 0")
             assert page.evaluate(gap, r["path"]) == 0
+            drawn = ("() => { const c = document.querySelector('.hw-ink');"
+                     " const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;"
+                     " let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 20) n++; return n; }")
+            assert page.evaluate(drawn) == 0
             page.locator('[data-cmd="addon:handwriting:pen"]').click()
             assert _wait(lambda: page.evaluate(gap, r["path"]) > 20)      # room, at once
+            # and the room is drawn: a box in dashes, to write inside
+            assert _wait(lambda: page.evaluate(drawn) > 0)
             was = page.evaluate(gap, r["path"])
             # written across it: the space is as wide as the ink needs
             view = page.locator(".se-view").bounding_box()
@@ -437,6 +443,7 @@ def test_the_formula_opens_a_space_to_write_in_and_widens_it():
             page.locator('[data-cmd="addon:handwriting:clear"]').click()
             page.locator('[data-cmd="addon:handwriting:pen"]').click()
             assert _wait(lambda: page.evaluate(gap, r["path"]) == 0)
+            assert _wait(lambda: page.evaluate(drawn) == 0)               # the box goes with the Pen
             assert page.errors == []
         finally:
             _close(srv, browser)

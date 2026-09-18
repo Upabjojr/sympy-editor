@@ -64,7 +64,7 @@ SympyEditor.registerAddon("handwriting", (function () {
   function HELP(status) {
     return "<section><h3>Writing on the formula</h3><ul>"
       + "<li>" + toolIcon("pen", 16) + " <b>Write</b>, among the editor's tools, takes the pointer; with it off the editor is the editor it was - the formula is tapped, selected and edited in the usual way.</li>"
-      + "<li>The formula itself makes room: the area grows, and it opens a space where what is written will go - after the selection, at the cursor, or by the piece the ink is written against - which widens as you write. Nothing is sent while it is open: it closes when the ink goes.</li>"
+      + "<li>The formula itself makes room: the area grows, and it opens a space where what is written will go - after the selection, at the cursor, or by the piece the ink is written against - drawn as a box in light dashes, which widens as you write. Nothing is sent while it is open: it closes when the ink goes.</li>"
       + "<li>A tap, with nothing written yet, still selects a piece or puts the cursor between two, the Pen on or off: choose where to write, then write there. (Once there is ink on the formula a tap is a dot.)</li>"
       + "<li>A moment after the pen lifts what is written is read, and the readings are offered under the formula, the best first. <b>Apply to the formula</b> puts the one picked in - nothing changes before that. Once one is in, picking another changes the formula to it instead (the one before is taken back, so they never pile up).</li>"
       + "<li>The choices come in the order one makes them: first the piece of the formula what is written goes with (writing freely, with nothing selected), then the reading, then the ways its LaTeX can be read - and then Apply.</li>"
@@ -207,6 +207,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.setTransform(dpr, 0, 0, dpr, -o.x * dpr, -o.y * dpr);
+        drawRoom();
         drawAim();
         ctx.lineWidth = 2.2;
         ctx.lineCap = "round";
@@ -224,6 +225,36 @@ SympyEditor.registerAddon("handwriting", (function () {
       }
       function accent() {
         return (getComputedStyle(element).getPropertyValue("--se-accent") || "").trim() || "9, 105, 218";
+      }
+      // The space the formula has opened, drawn as a box to write in: where the
+      // ink goes, and how much room there is for it.
+      function roomRect() {
+        if (!room || !room.el || !room.px) return null;
+        var c = canvas.getBoundingClientRect(), o = offset(), q = room.el.getBoundingClientRect();
+        var mid = q.top + q.height / 2 - c.top + o.y;
+        var least = 2.4 * em(), h2 = Math.max(q.height + 0.6 * em(), least);
+        var top = mid - h2 / 2, bottom = mid + h2 / 2;
+        var all = current ? strokes.concat([current]) : strokes;
+        if (all.length) {                       // written past it: the box holds the ink
+          var b = boxOf(all), pad = 0.25 * em();
+          top = Math.min(top, b.minY - pad);
+          bottom = Math.max(bottom, b.maxY + pad);
+        }
+        return { x: room.edge, y: top, w: room.px, h: bottom - top };
+      }
+      function drawRoom() {
+        var r = roomRect();
+        if (!r) return;
+        ctx.save();
+        ctx.setLineDash([6, 4]);
+        ctx.lineWidth = 1.4;
+        ctx.strokeStyle = "rgba(" + accent() + ", 0.55)";
+        ctx.fillStyle = "rgba(" + accent() + ", 0.06)";
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(r.x, r.y, r.w, r.h, 6); else ctx.rect(r.x, r.y, r.w, r.h);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
       }
       function drawAim() {          // the piece the ink is read together with, outlined
         if (!aim || !aim.node || !strokes.length) return;
