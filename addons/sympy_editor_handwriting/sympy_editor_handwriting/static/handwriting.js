@@ -110,7 +110,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         h("div", { class: "hw-applied-ask" }, [keepBtn, backBtn])]);
       var helpBtn = h("button", { type: "button", class: "hw-help", title: "How writing by hand works" }, ["?"]);
       var element = h("div", { class: "hw-panel", "data-strokes": "0", "data-pen": "off", "data-aim": "", hidden: "" },
-        [h("div", { class: "hw-head" }, [note, helpBtn]), cands, withDivide, withRow, readingOf, src, parseBlock, appliedRow]);
+        [h("div", { class: "hw-head" }, [note, helpBtn]), cands, withRow, withDivide, readingOf, src, parseBlock, appliedRow]);
       helpBtn.addEventListener("click", function () { api.showHelp(guide, "Handwriting"); });
       // The keys of a menu or a button here are the panel's own, not the formula's.
       element.addEventListener("keydown", function (ev) { ev.stopPropagation(); });
@@ -428,10 +428,14 @@ SympyEditor.registerAddon("handwriting", (function () {
         withDivide.hidden = true;
         if (!aim || !aim.options || !aim.options.length) return;
         withRow.appendChild(h("span", { class: "hw-with-label" }, ["Read with:"]));
-        aim.options.forEach(function (q) {
+        // A few pieces, as they come (the one written by, then the others there,
+        // then what holds them): more than that is a wall, not a choice.
+        aim.options.slice(0, 4).forEach(function (q) {
           var node = api.node ? api.node(q.path) : null, text = (node && node.src) || q.path;
+          text = text.replace(/\s+/g, " ").trim();
+          var short = text.length > 16 ? text.slice(0, 15) + "\u2026" : text;
           var b = h("button", { type: "button", class: "hw-with-option", "data-path": q.path,
-                                title: "Read the ink together with " + text }, [text]);
+                                title: "Read the ink together with " + text }, [short]);
           var on = aim.kind === "nest" && q.path === aim.path;
           b.classList.toggle("hw-chosen", on);
           b.setAttribute("aria-pressed", on ? "true" : "false");

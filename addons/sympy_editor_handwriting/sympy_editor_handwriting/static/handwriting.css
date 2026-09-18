@@ -105,6 +105,12 @@
   color: inherit;
   cursor: pointer;
 }
+.hw-with button {
+  max-width: 12rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .hw-with button.hw-chosen {
   border-style: solid;
   border-color: rgba(var(--se-accent), 0.85);
