@@ -308,6 +308,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       var ambig = h("div", { class: "ink-ambig" });
       var consts = h("div", { class: "ink-consts" });
       var parseLabel = h("div", { class: "ink-parse-label" }, ["Where this LaTeX can be read more than one way:"]);
+      var parseDivide = h("hr", { class: "ink-divide", hidden: "" });        // the LaTeX's own readings are another matter: a line between
       var parseBlock = h("div", { class: "ink-parse", hidden: "" }, [parseLabel, ambig, consts]);
       var wasFormula = h("span", { class: "ink-was" });
       var nowFormula = h("span", { class: "ink-now" });
@@ -324,7 +325,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       var sheetHead = h("button", { type: "button", class: "ink-sheet-head", "aria-expanded": "true",
         title: "Fold the readings away, or bring them back" }, [sheetChevron, sheetSummary]);
       var actions = h("div", { class: "ink-actions" }, [apply]);
-      var sheetBody = h("div", { class: "ink-sheet-body" }, [note, nestRow, cands, readingOf, src, parseBlock, appliedRow, actions]);
+      var sheetBody = h("div", { class: "ink-sheet-body" }, [note, nestRow, cands, readingOf, src, parseDivide, parseBlock, appliedRow, actions]);
       var sheet = h("div", { class: "ink-sheet" }, [sheetHead, sheetBody]);
       var element = h("div", { class: "ink-panel", "data-strokes": "0", "data-zoom": "1.00", "data-hole": "", "data-sel": "", "data-mode": "select" }, [bar, latexRow, stage, sheet]);
 
@@ -1764,6 +1765,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         ambig.textContent = "";
         consts.textContent = "";
         parseBlock.hidden = true;
+        parseDivide.hidden = true;
         if (!reading || !reading.ok) return;
         picks.choices = Object.assign({}, reading.choices || {});   // every decision, so the next pick changes only itself
         (reading.ambiguities || []).forEach(function (a) {
@@ -1784,6 +1786,7 @@ SympyEditor.registerAddon("handwriting", (function () {
           consts.appendChild(h("label", { class: "ink-const", title: c.label }, [box, " ", h("code", {}, [c.name]), " is " + c.value + " (" + c.label + ")"]));
         });
         parseBlock.hidden = !ambig.children.length && !consts.children.length;
+        parseDivide.hidden = parseBlock.hidden;
       }
 
       // Apply: nothing to put in without a reading of the text, nor when the pad shows the editor's formula as it is.

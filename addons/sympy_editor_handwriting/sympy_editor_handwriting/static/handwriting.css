@@ -155,8 +155,10 @@
   .se-addon-handwriting .ink-applied .rep-removed.rep-box { background: #422d2b; }
 }
 /* the LaTeX's own readings, apart from what the writing is read with */
-.se-addon-handwriting .ink-parse { display: flex; flex-direction: column; gap: 0.3rem; padding: 0.35rem 0.5rem;
-  border: 1px solid var(--se-border); border-radius: 0.4rem; }
+.se-addon-handwriting .ink-divide { width: 100%; height: 0; margin: 0.15rem 0; border: none; border-top: 1px solid var(--se-border); }
+.se-addon-handwriting .ink-divide[hidden] { display: none; }
+.se-addon-handwriting .ink-parse { display: flex; flex-direction: column; gap: 0.3rem; padding: 0.4rem 0.55rem;
+  border: 1px solid var(--se-border); border-radius: 0.4rem; background: var(--se-surface); }
 .se-addon-handwriting .ink-parse[hidden] { display: none; }
 .se-addon-handwriting .ink-parse-label { color: var(--se-muted); font-size: 11px; }
 .se-addon-handwriting .ink-applied[hidden] { display: none; }
