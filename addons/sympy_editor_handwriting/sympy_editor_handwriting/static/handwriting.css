@@ -39,6 +39,43 @@
   border-color: rgba(var(--se-accent), 0.65);
 }
 
+/* ---- the way down to the readings ----
+ * A moment after the pen rests it rises at the foot of the screen, and a press
+ * goes down to what was read; writing again sends it away. */
+.hw-down[hidden] { display: none !important; }   /* a display of its own beats [hidden] */
+.hw-down {
+  position: fixed;
+  left: 50%;
+  bottom: max(1rem, env(safe-area-inset-bottom, 0px));
+  z-index: 60;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font: inherit;
+  font-size: 13px;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid rgba(var(--se-accent), 0.5);
+  border-radius: 999px;
+  background: var(--se-surface, #fff);
+  color: inherit;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.18);
+  cursor: pointer;
+  opacity: 0;
+  transform: translate(-50%, 0.8rem);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+.hw-down.hw-down-on { opacity: 1; transform: translate(-50%, 0); animation: hw-bob 1.2s ease-in-out 220ms 2; }
+.hw-down .se-icon { width: 1.1em; height: 1.1em; }
+@keyframes hw-bob {
+  0%, 100% { transform: translate(-50%, 0); }
+  50% { transform: translate(-50%, 0.22rem); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hw-down { transition: none; }
+  .hw-down.hw-down-on { animation: none; }
+}
+@media (any-pointer: coarse) { .hw-down { font-size: 15px; padding: 0.6rem 1.1rem; } }
+
 /* ---- the strip under the formula: the readings and what came of them ----
  * It is no box and has no name of its own: it is part of the editor, and with
  * nothing written and nothing read it is not there at all. */

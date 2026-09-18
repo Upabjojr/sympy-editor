@@ -466,3 +466,56 @@ def test_a_tap_still_selects_while_the_pen_is_on():
             assert page.errors == []
         finally:
             _close(srv, browser)
+
+
+def test_the_piece_to_go_with_is_asked_before_the_readings_and_the_parser():
+    """The choices come in the order one makes them: which piece of the formula
+    what is written goes with, then which reading, then how the LaTeX is read."""
+    rec = LetterRecognizer()
+    rec.latex = r"\Delta^{2}"
+    doc = Document(x, addons=[HandwritingAddon(rec), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc)
+        try:
+            r = page.evaluate(TEXT_RECT, "x")
+            ht = r["bottom"] - r["top"]
+            _drag(page, r["right"] + 3, r["top"] - 0.3 * ht, r["right"] + 13, r["top"] + 0.15 * ht)
+            assert _wait(lambda: page.locator(".hw-with-option").count() >= 2, 15)
+            order = page.evaluate("""() => [...document.querySelector('.hw-panel').children]
+                .map(e => e.className.split(' ')[0])""")
+            assert order.index("hw-with") < order.index("hw-cands"), order
+            assert order.index("hw-cands") < order.index("hw-parse"), order
+            assert order.index("hw-parse") < order.index("hw-actions"), order
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
+def test_a_button_comes_up_to_go_down_to_what_was_read():
+    """Writing on a formula that fills the screen, the readings are out of
+    sight: a moment after the pen rests a button rises at the foot of the
+    screen, and a press goes down to them.  Writing again sends it away."""
+    doc = Document(x, addons=[HandwritingAddon(MuteRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc)
+        try:
+            page.set_viewport_size({"width": 900, "height": 430})
+            down = page.locator(".hw-down")
+            seen = """() => { const r = document.querySelector('.hw-panel').getBoundingClientRect();
+                      return r.top < innerHeight - 40 && r.bottom > 0; }"""
+            assert _wait(lambda: not page.evaluate(seen))       # the strip is below the screen
+            assert down.is_hidden()
+            view = page.locator(".se-view").bounding_box()
+            _drag(page, view["x"] + 200, view["y"] + 40, view["x"] + 260, view["y"] + 90)
+            assert _wait(lambda: down.is_visible(), 6)
+            page.wait_for_timeout(250)                          # it rises, then bobs
+            down.click()
+            assert _wait(lambda: page.evaluate(seen), 5)        # down at the readings
+            assert _wait(lambda: down.is_hidden(), 3)
+            # writing again: away it goes, and it comes back after the pen rests
+            page.evaluate("window.scrollTo(0, 0)")
+            _drag(page, view["x"] + 320, view["y"] + 40, view["x"] + 360, view["y"] + 90)
+            assert _wait(lambda: down.is_visible(), 6)
+            assert page.errors == []
+        finally:
+            _close(srv, browser)

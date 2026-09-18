@@ -47,6 +47,11 @@ SympyEditor.registerAddon("handwriting", (function () {
   function plain(text) {
     return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
+  function downIcon() {
+    return '<svg class="se-icon hw-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
+      '<path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" ' +
+      'd="M8 3v9M4.2 8.2 8 12l3.8-3.8"/></svg>';
+  }
   function reveal(el) {
     if (!el || !el.scrollIntoView) return;
     var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -62,6 +67,8 @@ SympyEditor.registerAddon("handwriting", (function () {
       + "<li>The formula itself makes room: the area grows, and it opens a space where what is written will go - after the selection, at the cursor, or by the piece the ink is written against - which widens as you write. Nothing is sent while it is open: it closes when the ink goes.</li>"
       + "<li>A tap, with nothing written yet, still selects a piece or puts the cursor between two, the Pen on or off: choose where to write, then write there. (Once there is ink on the formula a tap is a dot.)</li>"
       + "<li>A moment after the pen lifts what is written is read, and the readings are offered under the formula, the best first. <b>Apply to the formula</b> puts the one picked in - nothing changes before that. Once one is in, picking another changes the formula to it instead (the one before is taken back, so they never pile up).</li>"
+      + "<li>The choices come in the order one makes them: first the piece of the formula what is written goes with (writing freely, with nothing selected), then the reading, then the ways its LaTeX can be read - and then Apply.</li>"
+      + "<li>Writing on a formula that fills the screen leaves the readings out of sight: a moment after the pen rests a button rises at the foot of the screen, and a press goes down to them. Writing again sends it away.</li>"
       + "<li>Where it goes is what the editor says: over the selected sub-expression (or the selected range), at the cursor, and - with neither - against the piece of the formula it is written by. That piece is outlined, and it is read <i>together with</i> the ink: a bar under it with ink under the bar is a fraction over it, a small letter at its top-right corner its exponent, a letter beside it a product. <b>Read with</b> offers the other pieces it might be, and <i>alone</i>: the reading by itself, after the formula.</li>"
       + "<li>" + toolIcon("erase", 16) + " <b>Erase</b> takes away the strokes the pointer passes over (a pen turned round erases too); " + toolIcon("undo", 16) + " and " + toolIcon("redo", 16) + " take back the last stroke and write it again; " + toolIcon("clear", 16) + " <b>Clear ink</b> takes all of it. The editor's own Undo is for the formula, and takes back what a reading did.</li>"
       + "<li>Two fingers on the formula zoom it while writing, as they do at any other time, and the ink is zoomed with it; so do the \u2212/100%/+ buttons and <kbd>Ctrl</kbd>+wheel.</li>"
@@ -130,11 +137,19 @@ SympyEditor.registerAddon("handwriting", (function () {
         h("div", { class: "hw-applied-ask" }, [keepBtn, backBtn])]);
       var helpBtn = h("button", { type: "button", class: "hw-help", title: "How writing by hand works" }, ["?"]);
       var element = h("div", { class: "hw-panel", "data-strokes": "0", "data-pen": "off", "data-aim": "", hidden: "" },
-        [h("div", { class: "hw-head" }, [note, helpBtn]), cands, withRow, withDivide, readingOf,
+        [h("div", { class: "hw-head" }, [note, helpBtn]), withRow, withDivide, cands, readingOf,
          h("div", { class: "hw-srcrow" }, [src, editBtn]), latexRow, parseBlock, actions, appliedRow]);
       helpBtn.addEventListener("click", function () { api.showHelp(guide, "Handwriting"); });
       // The keys of a menu or a button here are the panel's own, not the formula's.
       element.addEventListener("keydown", function (ev) { ev.stopPropagation(); });
+
+      // The way down to the readings: it comes up a moment after the pen has
+      // rested, and only while they are out of sight.
+      var downBtn = h("button", { type: "button", class: "hw-down", hidden: "",
+                                  title: "Go to what was read", "aria-label": "Go to what was read" });
+      downBtn.innerHTML = downIcon() + '<span class="hw-down-word">the readings</span>';
+      document.body.appendChild(downBtn);
+      var downTimer = null;
 
       /* ---- the ink, on the editor's own formula ---- */
       var editor = api.editor, stage = editor && editor.stage, view = editor && editor.view;
@@ -338,6 +353,36 @@ SympyEditor.registerAddon("handwriting", (function () {
         }));
       }
 
+      /* ---- the way down to the readings ---- */
+      function panelSeen() {
+        if (element.hidden) return true;                  // nothing to go down to
+        var r = element.getBoundingClientRect();
+        var h2 = window.innerHeight || document.documentElement.clientHeight;
+        return r.top < h2 - 40 && r.bottom > 0;
+      }
+      function wantDown() { return pen && !panelSeen() && (strokes.length > 0 || readings.length > 0); }
+      function askDown(after) {
+        clearTimeout(downTimer);
+        downTimer = setTimeout(function () { if (wantDown()) showDown(); }, after === undefined ? 1200 : after);
+      }
+      function showDown() {
+        if (!downBtn.hidden) return;
+        downBtn.hidden = false;
+        requestAnimationFrame(function () { downBtn.classList.add("hw-down-on"); });
+      }
+      function hideDown() {
+        clearTimeout(downTimer);
+        downBtn.classList.remove("hw-down-on");
+        if (!downBtn.hidden) setTimeout(function () { if (!downBtn.classList.contains("hw-down-on")) downBtn.hidden = true; }, 220);
+      }
+      downBtn.addEventListener("click", function () {
+        hideDown();
+        try { element.scrollIntoView({ block: "center", behavior: "smooth" }); }
+        catch (e) { element.scrollIntoView(false); }
+      });
+      window.addEventListener("scroll", onScroll, { passive: true });
+      function onScroll() { if (!downBtn.hidden && panelSeen()) hideDown(); }
+
       /* ---- the room to write in ---------------------------------------------
        * The formula opens where what is written will go - after the selection,
        * at the cursor, or by the piece the ink is written against - so that the
@@ -502,6 +547,7 @@ SympyEditor.registerAddon("handwriting", (function () {
             renderWith();
             renderReadings();
             pick(0);
+            askDown(300);          // read: what it says is worth going down to
           }, function (e) {
             if (my !== seq) return;
             element.classList.remove("hw-busy");
@@ -522,7 +568,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         withRow.textContent = "";
         withDivide.hidden = true;
         if (!aim || !aim.options || !aim.options.length) return;
-        withRow.appendChild(h("span", { class: "hw-with-label" }, ["Read with:"]));
+        withRow.appendChild(h("span", { class: "hw-with-label" }, ["What is written goes with:"]));
         // A few pieces, as they come (the one written by, then the others there,
         // then what holds them): more than that is a wall, not a choice.
         aim.options.slice(0, 4).forEach(function (q) {
@@ -798,6 +844,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         if (editor && editor.root) editor.root.classList.toggle("se-inking", pen);
         canvas.style.pointerEvents = pen ? "auto" : "none";
         if (pen) openRoom(); else closeRoom();
+        if (!pen) hideDown();
         if (!strokes.length) say(idle(), !canRead);
         showPanel();
         updateTools();
@@ -816,6 +863,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         closeRoom();
         if (pen) openRoom();
         clearTimeout(timer);
+        hideDown();
         updateTools();
         forget();
         clearReadings();
@@ -850,6 +898,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         if (ev.pointerType === "mouse" && ev.button !== 0) return;
         ev.preventDefault();
         clearTimeout(timer);
+        hideDown();
         try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* not capturable */ }
         currentId = ev.pointerId;
         if (erasing || (ev.pointerType === "pen" && (ev.buttons & 32))) { current = null; eraseAt(point(ev)); return; }
@@ -924,6 +973,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         if (!strokes.length) return;
         clearTimeout(timer);
         timer = setTimeout(read, 700);       // a pause: what is written may be finished
+        askDown();
       }
       function tapped(ev) {
         var slop = ev.pointerType === "touch" ? 9 : 4;
@@ -980,6 +1030,9 @@ SympyEditor.registerAddon("handwriting", (function () {
         },
         destroy: function () {
           clearTimeout(timer);
+          clearTimeout(downTimer);
+          window.removeEventListener("scroll", onScroll);
+          if (downBtn.parentNode) downBtn.parentNode.removeChild(downBtn);
           closeRoom();
           setPen(false);
           if (resizer) resizer.disconnect(); else window.removeEventListener("resize", layout);
