@@ -37,7 +37,7 @@ final class FilesBridge: NSObject, WKScriptMessageHandler {
             saveFile: forward("saveFile"), shareFile: forward("shareFile"),
             shareHtml: forward("shareHtml"), openFile: forward("openFile"),
             keepRead: forward("keepRead"), keepWrite: forward("keepWrite"),
-            recognizeInk: forward("recognizeInk")
+            recognizeInk: forward("recognizeInk"), showKeyboard: forward("showKeyboard")
           };
         })();
         """
@@ -67,6 +67,8 @@ final class FilesBridge: NSObject, WKScriptMessageHandler {
             keepWrite(key: arguments[0], text: arguments[1])
         case "recognizeInk" where arguments.count >= 2:
             recognizeInk(token: arguments[0], strokes: arguments[1])
+        case "showKeyboard":
+            showKeyboard()
         default:
             break
         }
@@ -164,6 +166,21 @@ final class FilesBridge: NSObject, WKScriptMessageHandler {
         if let own = UTType("org.sympy.editor.formula") { types.insert(own, at: 0) }
         _ = accept
         return types
+    }
+
+    // MARK: - the keyboard
+
+    /// Bring the keyboard up for a field the page has just opened.  A
+    /// WKWebView shows it when a field is focused in answer to a tap; this
+    /// makes sure the web view is the responder, for a field the page put
+    /// there by script (the LaTeX add-on opens its field in the formula).
+    private func showKeyboard() {
+        #if !os(macOS)
+        DispatchQueue.main.async { [weak self] in
+            guard let view = self?.webView, !view.isFirstResponder else { return }
+            view.becomeFirstResponder()
+        }
+        #endif
     }
 
     // MARK: - what the page keeps

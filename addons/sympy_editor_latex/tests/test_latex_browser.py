@@ -27,6 +27,28 @@ x, y = symbols("x y")
 
 TOOL = '[data-cmd="addon:latex:type"]'
 
+#: A point in the space between the two terms of the formula, beside the
+#: operator glyph: the glyph itself selects the operator, the space by it
+#: gives a cursor (the same rule as tests/test_browser.py's _gap_between).
+GAP = """() => {
+    const a = document.querySelector('[data-path="/0"]').getBoundingClientRect();
+    const b = document.querySelector('[data-path="/1"]').getBoundingClientRect();
+    const [lo, hi] = a.right <= b.left ? [a.right, b.left] : [b.right, a.left];
+    const y = (a.top + a.bottom) / 2;
+    const onOp = (x) => (document.elementsFromPoint(x, y) || []).some(el => {
+        const t = (el.textContent || '').trim();
+        return t.length <= 1 && '+-\u2212\u22c5'.includes(t) && t && !el.querySelector('[data-path]');
+    });
+    let x = Math.round((lo + hi) / 2);
+    if (onOp(x)) {
+        let lx = x, rx = x;
+        while (onOp(lx) && lx - 1 > lo) lx -= 1;
+        while (onOp(rx) && rx + 1 < hi) rx += 1;
+        x = !onOp(rx) ? rx : lx;
+    }
+    return {x: x, y: y};
+}"""
+
 
 def _online(url):
     try:
@@ -232,6 +254,31 @@ def test_the_add_on_switched_off_takes_its_field_and_its_strip_away():
             switch.uncheck()
             assert _wait(lambda: page.locator(TOOL).count() == 0, 15)
             assert page.locator(".se-view .ltx-field").count() == 0 and page.locator(".ltx-panel").count() == 0
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
+def test_what_is_typed_at_a_cursor_goes_in_at_the_cursor():
+    """A cursor between two terms, then the tool: the field opens there and
+    what is read goes in there - not after the whole formula.  (Putting the
+    field in the formula is itself a change the editor answers to, and its
+    answer used to take the cursor away with it.)"""
+    doc = Document(x + y, addons=[ADDON])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc)
+        try:
+            gap = page.evaluate(GAP)
+            page.mouse.click(gap["x"], gap["y"])
+            assert _wait(lambda: page.locator(".se-caret").count() == 1), "no cursor to type at"
+            page.locator(TOOL).click()
+            page.wait_for_selector(".se-view .ltx-field", timeout=10000)
+            assert _wait(lambda: "at the cursor" in page.locator(".ltx-reading-of").inner_text(), 10)
+            assert page.locator(".se-caret").count() == 1, "the cursor must stay while one types at it"
+            page.locator(".se-view .ltx-field").fill("7")
+            assert _wait(lambda: not page.locator(".ltx-apply").is_disabled(), 15)
+            page.locator(".ltx-apply").click()
+            assert _wait(lambda: str(doc.expr) == "x + y + 7", 15), str(doc.expr)
             assert page.errors == []
         finally:
             _close(srv, browser)

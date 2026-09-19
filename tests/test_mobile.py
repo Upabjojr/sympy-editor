@@ -260,7 +260,7 @@ def test_both_hosts_offer_the_files_the_page_asks_of_them():
              "android": ROOT / "mobile/android/app/src/main/java/org/sympy/editor/MainActivity.kt"}
     for name, path in hosts.items():
         text = path.read_text(encoding="utf-8")
-        for method in ("saveFile", "shareFile", "openFile", "keepRead", "keepWrite"):
+        for method in ("saveFile", "shareFile", "openFile", "keepRead", "keepWrite", "showKeyboard"):
             assert method in text, (name, method)
         assert "SympyEditor.openedFile" in text, name
         assert "SympyEditor.keptValue" in text, name

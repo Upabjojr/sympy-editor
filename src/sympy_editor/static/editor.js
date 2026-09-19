@@ -2055,10 +2055,14 @@ var SympyEditor = (function () {
           // Back to the formula - unless the command put the focus in a field
           // (Delete on the whole expression edits in the source line: taking
           // the focus away would blur it and bring the expression back), the
-          // editor's own or one in an add-on's panel.
+          // editor's own, one in an add-on's panel, or one an add-on opened
+          // in the formula itself (the LaTeX add-on's): taking the focus from
+          // any of them would close it, and on a phone take the keyboard away
+          // with it.
           var active = document.activeElement;
           var inAddon = !!(active && active.closest && active.closest(".se-addon"));
-          if (cmd !== "edit" && cmd !== "keyboard" && active !== self.source && active !== self.input && active !== self.emptyField && !inAddon) self.view.focus({ preventScroll: true });
+          if (cmd !== "edit" && cmd !== "keyboard" && active !== self.source && active !== self.input
+              && active !== self.emptyField && !inAddon && !self._typingHere()) self.view.focus({ preventScroll: true });
         }
       });
       this.view.addEventListener("mousemove", function (ev) {
@@ -2071,8 +2075,8 @@ var SympyEditor = (function () {
       this.view.addEventListener("scroll", function () {
         self._gapCache = null;
         // Scrolling moves the glyphs under the boxes, and says nothing about
-        // the selection: the status line stands here too.
-        if (self.input) return;
+        // the selection: the status line and the caret stand here too.
+        if (self._typingHere()) return;
         if (self.caret) self._hideCaret();
         self._applySelection(true);
       });
@@ -2316,8 +2320,9 @@ var SympyEditor = (function () {
           self._gapCache = null;
           // A relayout puts the boxes back where the glyphs now are, and says
           // nothing about the selection: the status line stands (a field open
-          // in the formula spreads it, which arrives here as a resize).
-          if (self.input) return;
+          // in the formula spreads it, which arrives here as a resize).  Nor
+          // does it take the caret away - what is being typed is going there.
+          if (self._typingHere()) return;
           if (self.caret) self._hideCaret();
           self._applySelection(true);
         });
@@ -3078,6 +3083,18 @@ var SympyEditor = (function () {
      *  says.  `quiet`: the status line is left alone - what a relayout wants,
      *  since nothing about the selection has changed and the line may be
      *  saying something of its own (a field is open, something was deleted). */
+    /** Whether a field is open in the editor and has the focus: the editor's
+     *  own (an edit, an insertion) or one an add-on opened - in its panel, or
+     *  in the formula itself (the LaTeX add-on types there).  While one is,
+     *  the editor leaves the focus, the caret and the status line alone: they
+     *  are what that field is working with. */
+    _typingHere() {
+      if (this.input) return true;
+      var active = document.activeElement;
+      return !!(active && this.root.contains(active)
+                && /^(input|textarea|select)$/i.test(active.tagName || ""));
+    }
+
     _applySelection(quiet) {
       this._updateScrollArrows();
       this._addonsNotify("onSelect", this.selected, this.range);

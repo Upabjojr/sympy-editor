@@ -58,7 +58,7 @@ SympyEditor.registerAddon("latex", (function () {
                                placeholder: "\\frac{x^2}{2}" });
       //: What it will look like, beside the field: the reading typeset.
       var ghost = h("span", { class: "ltx-ghost", "aria-hidden": "true" });
-      var typing = false, room = null, aim = null;
+      var typing = false, room = null, aim = null, anchored = null;
       var choices = {}, constants = {}, last = null;
       var seq = 0, timer = null, katex = null;
       var applied = null, mine = 0, puts = 0, guide;
@@ -110,11 +110,19 @@ SympyEditor.registerAddon("latex", (function () {
       }
 
       /* ---- opening and closing the place to type ---- */
-      function openField() {
+      /** Open the field where the LaTeX will land.  `again` re-places a field
+       *  that was already open (the formula was drawn afresh, or the selection
+       *  moved): where it aims is asked of the editor only when it is opened
+       *  anew, since putting the field in the formula is itself a change the
+       *  editor answers - and the answer must not move the target. */
+      function openField(again) {
         if (!view) return;
+        var held = again && aim ? aim : null;
+        var wanted = again && anchored && anchored.el && anchored.el.isConnected ? anchored : null;
         closeField(true);
-        aim = aimNow();
-        var a = anchor();
+        aim = held || aimNow();
+        var a = wanted || anchor();
+        anchored = a;
         var holder = h("span", { class: "ltx-slot" }, [field, ghost]);
         if (!a) view.appendChild(holder);
         else if (a.side === "before" && a.el.parentNode) a.el.parentNode.insertBefore(holder, a.el);
@@ -125,8 +133,20 @@ SympyEditor.registerAddon("latex", (function () {
         element.setAttribute("data-aim", aim.kind);
         readingOf.textContent = aimWords(aim);
         showPanel();
+        focusField();
+      }
+
+      /** The field takes the focus - and, on a phone, the keyboard with it.
+       *  A WebView raises the keyboard when a field is focused in answer to a
+       *  tap; the host is asked as well, since a field put there by script is
+       *  not always taken for one (Android's MainActivity.showKeyboard). */
+      function focusField() {
         field.focus();
         field.select();
+        var app = window.SympyEditorApp;
+        if (app && app.showKeyboard) {
+          try { app.showKeyboard(); } catch (e) { /* the focus alone, then */ }
+        }
       }
       function closeField(quiet) {
         if (room && room.parentNode) room.parentNode.removeChild(room);
@@ -352,8 +372,10 @@ SympyEditor.registerAddon("latex", (function () {
           // The field belongs where the selection is: while it is open, a new
           // selection moves it (and the reading follows the new target).
           if (!typing) return;
+          var moved = aimNow();
+          var same = aim && moved.kind === aim.kind && moved.path === aim.path;
           var text = field.value;
-          openField();
+          openField(same);                       // the same target: only put the field back
           field.value = text;
           if (text.trim()) read();
         },
@@ -361,7 +383,7 @@ SympyEditor.registerAddon("latex", (function () {
           if (!mine && applied) hideApplied();     // edited in the editor itself: what we did is answered for
           if (typing) {                            // the formula was rendered again: the field went with it
             var text = field.value;
-            openField();
+            openField(true);
             field.value = text;
           }
         },

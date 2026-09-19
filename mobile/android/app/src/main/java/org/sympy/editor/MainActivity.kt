@@ -13,6 +13,7 @@ import android.net.Uri
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
+import android.view.inputmethod.InputMethodManager
 import android.webkit.WebView
 import android.widget.FrameLayout
 import androidx.activity.addCallback
@@ -350,6 +351,21 @@ class MainActivity : AppCompatActivity() {
                     pending = null
                     report("No app on this phone can keep a file: " + (exc.message ?: exc.toString()))
                 }
+            }
+        }
+
+        /** Bring the keyboard up for a field the page has just opened.
+         *
+         *  A WebView shows it by itself when a field is focused in answer to
+         *  a tap, but not always for one the page puts there by script (the
+         *  LaTeX add-on opens its field in the formula): the page asks, and
+         *  the system is told. */
+        @JavascriptInterface
+        fun showKeyboard() {
+            runOnUiThread {
+                web.requestFocus()
+                val manager = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
+                manager?.showSoftInput(web, InputMethodManager.SHOW_IMPLICIT)
             }
         }
 
