@@ -255,17 +255,19 @@ def test_both_hosts_offer_the_files_the_page_asks_of_them():
     through `SympyEditor.openedFile`, which both hosts call by that name."""
     src = (ROOT / "src" / "sympy_editor" / "static" / "editor.js").read_text(encoding="utf-8")
     asked = set(re.findall(r"app\.(\w+)\(", src))
-    assert {"saveFile", "shareFile", "openFile"} <= asked, asked
+    assert {"saveFile", "shareFile", "openFile", "keepRead", "keepWrite"} <= asked, asked
     hosts = {"ios": ROOT / "mobile/ios/SymPyEditor/FilesBridge.swift",
              "android": ROOT / "mobile/android/app/src/main/java/org/sympy/editor/MainActivity.kt"}
     for name, path in hosts.items():
         text = path.read_text(encoding="utf-8")
-        for method in ("saveFile", "shareFile", "openFile"):
+        for method in ("saveFile", "shareFile", "openFile", "keepRead", "keepWrite"):
             assert method in text, (name, method)
         assert "SympyEditor.openedFile" in text, name
+        assert "SympyEditor.keptValue" in text, name
         assert "hostError" in text, name
     # and the page has somewhere for those answers to arrive
     assert "openedFile: function (token, name, text)" in src
+    assert "keptValue: function (token, text)" in src
     assert "hostError: function (message)" in src
 
 

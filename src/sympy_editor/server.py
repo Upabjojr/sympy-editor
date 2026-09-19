@@ -7,15 +7,28 @@ presses *Done* (or Ctrl+C), and returns the edited expression.
 from __future__ import annotations
 
 import json
+import os
+import re
 import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
 from sympy import Basic
 
 from .document import Document, interrupt_thread
 from .html import build_config, new_token, render_page
+
+
+def default_store() -> Path:
+    """Where a server keeps what the page keeps, when it is not told: the
+    user's state directory (``XDG_STATE_HOME``, ``~/.local/state`` or, on
+    Windows, ``LOCALAPPDATA``), in a folder of the editor's own."""
+    base = os.environ.get("XDG_STATE_HOME") or os.environ.get("LOCALAPPDATA")
+    root = Path(base) if base else Path.home() / ".local" / "state"
+    return root / "sympy-editor"
+
 
 __all__ = ["EditorServer", "serve"]
 
@@ -55,6 +68,22 @@ class _Handler(BaseHTTPRequestHandler):
                 raise ValueError("expected a JSON object")
         except ValueError:
             self.send_error(400)
+            return
+        if message.get("action") == "keep":
+            # What the page keeps between visits - the sessions, each with its
+            # history - in a file of this server's own, not the browser's
+            # storage: it is the same work whichever browser opens the page.
+            key = str(message.get("key") or "")
+            try:
+                if "value" in message:
+                    srv.keep(key, str(message.get("value") or ""))
+                    kept = None
+                else:
+                    kept = srv.kept(key)
+            except OSError as exc:
+                self._reply(200, "application/json", json.dumps({"error": f"The store could not be used: {exc}"}).encode("utf-8"))
+                return
+            self._reply(200, "application/json", json.dumps({"keep": kept}).encode("utf-8"))
             return
         if message.get("action") == "interrupt":
             # Served on its own thread while the computing one holds the lock:
@@ -118,9 +147,14 @@ class EditorServer(ThreadingHTTPServer):
         urls: Optional[Dict[str, str]] = None,
         logo: str = "",
         verbose: bool = False,
+        store: Optional[Union[str, Path, bool]] = None,
     ):
         super().__init__((host, port), _Handler)
         self.document = document
+        #: Where what the page keeps is written (see :meth:`keep`): one file
+        #: per name.  ``store=False`` keeps nothing, and the page falls back
+        #: to the browser's own storage.
+        self.store: Optional[Path] = None if store is False else Path(store or default_store())
         self.token = new_token()
         self.lock = threading.Lock()
         #: ident of the thread running a Document message, while one does.
@@ -128,6 +162,36 @@ class EditorServer(ThreadingHTTPServer):
         self.closing = False
         self.verbose = verbose
         self._page_args = (options, urls, title, logo)
+
+    # -- what the page keeps ------------------------------------------------
+
+    def _store_file(self, key: str) -> Path:
+        """The file ``key`` is kept in.  A name from the page cannot reach out
+        of the store: everything but letters, digits and ``._-`` is replaced."""
+        assert self.store is not None
+        safe = re.sub(r"[^A-Za-z0-9._-]", "_", key) or "keep"
+        return self.store / f"{safe}.json"
+
+    def kept(self, key: str) -> Optional[str]:
+        """What the page kept under ``key``, or ``None``."""
+        if self.store is None:
+            return None
+        path = self._store_file(key)
+        try:
+            return path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return None
+
+    def keep(self, key: str, value: str) -> None:
+        """Keep ``value`` under ``key``, through a temporary file and a
+        rename, so that an interrupted write leaves what was there before."""
+        if self.store is None:
+            return
+        self.store.mkdir(parents=True, exist_ok=True)
+        path = self._store_file(key)
+        temp = path.with_suffix(path.suffix + ".new")
+        temp.write_text(value, encoding="utf-8")
+        temp.replace(path)
 
     def interrupt(self) -> bool:
         """Interrupt the message being processed, if any (see
@@ -176,6 +240,7 @@ def serve(
     title: str = "SymPy Editor",
     options: Optional[Dict[str, Any]] = None,
     urls: Optional[Dict[str, str]] = None,
+    store: Optional[Union[str, Path, bool]] = None,
     **document_kwargs,
 ):
     """Edit ``expr`` in the browser using a local server.
@@ -185,9 +250,15 @@ def serve(
     it returns the running :class:`EditorServer` (serving in a background
     thread); read ``server.document.expr`` whenever you like and call
     ``server.shutdown()`` when done.
+
+    ``store`` is where what the page keeps - its sessions, each with the
+    history behind it - is written (a folder; ``False`` keeps nothing, and
+    the browser's own storage is used instead).  It defaults to the user's
+    state directory: see :func:`default_store`.
     """
     document = expr if isinstance(expr, Document) else Document(expr, **document_kwargs)
-    server = EditorServer(document, host=host, port=port, title=title, options=options, urls=urls, verbose=verbose)
+    server = EditorServer(document, host=host, port=port, title=title, options=options, urls=urls,
+                          verbose=verbose, store=store)
     print(f"SymPy Editor running at {server.url}" + (" (press Done in the browser or Ctrl+C to finish)" if block else ""))
     if open_browser:
         webbrowser.open(server.url)

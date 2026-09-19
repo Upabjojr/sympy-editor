@@ -1,5 +1,6 @@
 import json
 import threading
+from contextlib import contextmanager
 import urllib.request
 import urllib.error
 
@@ -116,3 +117,39 @@ def test_interrupt_stops_a_long_computation():
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+@contextmanager
+def _serving(srv):
+    """Serve ``srv`` on a thread of its own for the length of the block."""
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        yield srv
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_the_server_keeps_what_the_page_keeps(tmp_path):
+    """The sessions, each with its history, are the server's to keep: a file
+    of its own, not the browser's storage, so they are there whichever
+    browser opens the page.  A name from the page cannot reach out of the
+    store, and `store=False` keeps nothing at all."""
+    srv = EditorServer(Document(x), port=0, store=tmp_path)
+    with _serving(srv):
+        assert _post(srv, {"action": "keep", "key": "sessions"}) == {"keep": None}
+        assert _post(srv, {"action": "keep", "key": "sessions", "value": '{"list": []}'}) == {"keep": None}
+        assert _post(srv, {"action": "keep", "key": "sessions"}) == {"keep": '{"list": []}'}
+        assert (tmp_path / "sessions.json").read_text(encoding="utf-8") == '{"list": []}'
+        # written again, and the document is untouched by any of it
+        _post(srv, {"action": "keep", "key": "sessions", "value": "second"})
+        assert _post(srv, {"action": "keep", "key": "sessions"})["keep"] == "second"
+        assert str(srv.document.expr) == "x"
+        # a name that tries to climb out stays in the store
+        assert srv._store_file("../../etc/passwd").parent == tmp_path
+
+    quiet = EditorServer(Document(x), port=0, store=False)
+    with _serving(quiet):
+        assert quiet.store is None
+        assert _post(quiet, {"action": "keep", "key": "sessions", "value": "x"}) == {"keep": None}
+        assert _post(quiet, {"action": "keep", "key": "sessions"}) == {"keep": None}

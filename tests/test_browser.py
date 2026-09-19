@@ -5180,3 +5180,35 @@ def test_a_formula_is_saved_to_a_file_and_opened_from_one(browser, serve_expr, t
     page.wait_for_function("document.querySelector('.se-source').textContent.indexOf('y**3') >= 0", timeout=15000)
     assert doc.expr == y**3 + 2
     assert page.errors == []
+
+
+def test_the_sessions_are_kept_by_the_server_not_the_browser(browser, tmp_path):
+    """A session and the history behind it belong to the work, not to the
+    browser that happened to show it: the server keeps them in a file of its
+    own, so a page opened afresh - with nothing in its storage - has them."""
+    doc = Document(x + y)
+    srv = EditorServer(doc, port=0, options={"sessions": True}, store=tmp_path)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        page = _open(browser, srv.url)
+        page.evaluate("""async () => await SympyEditor.backends.http({apiUrl: '/api', token: %r}).keep(
+            'sessions', JSON.stringify({current: 'a', list: [
+                {id: 'a', name: 'kept by the server', updated: 2},
+                {id: 'b', name: 'and this one too', updated: 1}]}))""" % srv.token)
+        assert (tmp_path / "sessions.json").is_file()
+        page.close()
+
+        # a page of its own, with an empty storage: the sessions are still there
+        context = browser.new_context()
+        fresh = context.new_page()
+        fresh.goto(srv.url)
+        fresh.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+        assert fresh.evaluate("localStorage.getItem('sympy-editor:sessions')") is None
+        fresh.locator('[data-cmd="drawer"]').click()
+        fresh.wait_for_selector(".se-session-add", state="visible", timeout=10000)
+        names = fresh.locator(".se-sessions > .se-session code").all_inner_texts()
+        assert "kept by the server" in names and "and this one too" in names, names
+        context.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()

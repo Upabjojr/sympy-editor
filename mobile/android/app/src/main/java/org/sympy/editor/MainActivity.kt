@@ -260,6 +260,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** Where the page's own things are kept: the app's files directory,
+     *  one file per name.  A name from the page cannot reach out of it. */
+    private fun keepFile(key: String): File {
+        val safe = key.replace(Regex("[^A-Za-z0-9._-]"), "_").ifEmpty { "keep" }
+        val dir = File(filesDir, "keep").apply { mkdirs() }
+        return File(dir, "$safe.json")
+    }
+
     /** What a document's own name is, as its provider gives it. */
     private fun nameOf(uri: Uri): String {
         contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { row ->
@@ -342,6 +350,45 @@ class MainActivity : AppCompatActivity() {
                     pending = null
                     report("No app on this phone can keep a file: " + (exc.message ?: exc.toString()))
                 }
+            }
+        }
+
+        /** What the page has kept under `key` (the sessions, with the history
+         *  behind each), answered through ``SympyEditor.keptValue``.
+         *
+         *  The app's own directory, not the WebView's localStorage: that is
+         *  web data, which the system clears without asking and a backup does
+         *  not carry.  A session is a piece of the user's work. */
+        @JavascriptInterface
+        fun keepRead(token: String, key: String) {
+            val text = try {
+                keepFile(key).takeIf { it.isFile }?.readText()
+            } catch (exc: Exception) {
+                report("What was kept could not be read: " + (exc.message ?: exc.toString()))
+                null
+            }
+            val js = if (text == null) {
+                "window.SympyEditor.keptValue(${JSONObject.quote(token)});"
+            } else {
+                "window.SympyEditor.keptValue(${JSONObject.quote(token)}, ${JSONObject.quote(text)});"
+            }
+            runOnUiThread { web.evaluateJavascript(js, null) }
+        }
+
+        /** Keep `text` under `key`, through a temporary file and a rename, so
+         *  that an interrupted write leaves what was there before. */
+        @JavascriptInterface
+        fun keepWrite(key: String, text: String) {
+            try {
+                val file = keepFile(key)
+                val temp = File(file.parentFile, file.name + ".new")
+                temp.writeText(text)
+                if (!temp.renameTo(file)) {
+                    file.writeText(text)
+                    temp.delete()
+                }
+            } catch (exc: Exception) {
+                report("What the editor keeps could not be written: " + (exc.message ?: exc.toString()))
             }
         }
 

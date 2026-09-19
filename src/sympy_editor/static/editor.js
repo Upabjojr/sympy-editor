@@ -46,7 +46,7 @@ var SympyEditor = (function () {
     animate: true,       // animate a change: the old parts in red turn into the new ones in green
     animateDuration: 1600 // ms: a quarter to show what goes (red), the rest to move it and fade the new in (green)
   };
-  var SESSIONS_KEY = "sympy-editor:sessions";
+  var SESSIONS_KEY = "sympy-editor:sessions";   // what Keep calls "sessions", where a browser keeps it
   var ADDONS_KEY = "sympy-editor:addons";     // the add-ons switched on, when rememberAddons is set
 
   // The history report: a self-contained page (KaTeX pre-rendered, its CSS
@@ -1064,6 +1064,87 @@ var SympyEditor = (function () {
   //: What a saved formula is called and what opens as one (Document.save_text).
   var FORMULA_EXT = ".sympy";
   var FORMULA_ACCEPT = ".sympy,.json,.txt,.py,application/json,text/plain";
+
+  /** Where what should outlive the page is kept: the sessions, each with the
+   *  history behind it.
+   *
+   *  One interface, three ways under it.  In a compiled app it is the
+   *  platform's own storage, through the host (`SympyEditorApp.keepRead` and
+   *  `keepWrite`): a file in the app's own directory, which survives what a
+   *  WebView's localStorage does not - the system clearing web data, an
+   *  upgrade, a backup and restore.  With a server holding the document it is
+   *  Python's, through the backend (the "keep" message), so a session is
+   *  there again when the page is opened afresh.  Otherwise - a browser, the
+   *  Pyodide page - it is localStorage, which is all there is.
+   *
+   *  Reading answers a Promise; writing is told and not waited for. */
+  var Keep = {
+    backend: null,                 // set by mount, for the server's own store
+    //: Whether the backend keeps things: null until asked, false once one has
+    //: said it does not - a write must not be handed to something that drops
+    //: it, or the sessions would quietly stop being kept.
+    backendKeeps: null,
+
+    /** The host's storage, when the page is running inside an app. */
+    host: function () {
+      var app = window.SympyEditorApp;
+      return app && app.keepRead && app.keepWrite ? app : null;
+    },
+
+    read: async function (key) {
+      var app = Keep.host();
+      if (app) {
+        var kept = await new Promise(function (resolve) {
+          var token = "k" + Date.now() + Math.random().toString(36).slice(2, 6);
+          Keep.waiting[token] = resolve;
+          try { app.keepRead(token, key); }
+          catch (e) { delete Keep.waiting[token]; resolve(null); }
+        });
+        if (kept !== null && kept !== undefined) return kept;
+        return Keep.local(key);          // nothing kept yet: what the page kept before it had a host
+      }
+      if (Keep.backend && Keep.backend.keep && Keep.backendKeeps !== false) {
+        try {
+          var answer = await Keep.backend.keep(key);
+          Keep.backendKeeps = true;
+          if (answer !== null && answer !== undefined) return answer;
+          return Keep.local(key);        // it keeps, but nothing yet: what the page kept before
+        } catch (e) { Keep.backendKeeps = false; }   // it does not keep: the browser's, then
+      }
+      return Keep.local(key);
+    },
+
+    write: function (key, text) {
+      var app = Keep.host();
+      if (app) {
+        try { app.keepWrite(key, text); return true; }
+        catch (e) { /* the host could not: fall through to the browser's */ }
+      }
+      if (Keep.backend && Keep.backend.keep && Keep.backendKeeps) {
+        try {
+          Keep.backend.keep(key, text).catch(function () {
+            Keep.backendKeeps = false;                 // it stopped keeping: the browser takes over
+            Keep.setLocal(key, text);
+          });
+          return true;
+        } catch (e) { /* likewise */ }
+      }
+      return Keep.setLocal(key, text);
+    },
+
+    local: function (key) {
+      try { return localStorage.getItem("sympy-editor:" + key); }
+      catch (e) { return null; }
+    },
+
+    setLocal: function (key, text) {
+      try { localStorage.setItem("sympy-editor:" + key, text); return true; }
+      catch (e) { return false; }        // no storage, or full: the caller says so
+    },
+
+    //: Where a host answers a read of its own (SympyEditor.keptValue).
+    waiting: {}
+  };
 
   /** A file chosen by the user, as {name, text} - or null if they chose none.
    *  The host app picks it with its own picker when it has one (the phones
@@ -5119,27 +5200,35 @@ var SympyEditor = (function () {
 
     /* ---- sessions ---- */
 
+    /** What was read at startup (_readSessions): the store as it stands. */
     _loadSessions() {
-      try {
-        var store = JSON.parse(localStorage.getItem(SESSIONS_KEY) || "null");
-        if (store && Array.isArray(store.list)) return store;
-      } catch (e) { /* no storage, or garbage */ }
-      return { current: null, list: [] };
+      var store = this._sessionStore;
+      return store && Array.isArray(store.list) ? store : { current: null, list: [] };
+    }
+
+    /** The sessions as the keeper has them - the app's own storage, the
+     *  server's, or the browser's (see Keep).  Read once, at startup. */
+    async _readSessions() {
+      var text = null;
+      try { text = await Keep.read("sessions"); }
+      catch (e) { text = null; }
+      var store = null;
+      try { store = JSON.parse(text || "null"); }
+      catch (e) { store = null; }                       // garbage: start afresh
+      this._sessionStore = store && Array.isArray(store.list) ? store : { current: null, list: [] };
+      return this._sessionStore;
     }
 
     _saveSessions(store) {
       this._sessionStore = store;
-      try {
-        localStorage.setItem(SESSIONS_KEY, JSON.stringify(store));
-        this._storageFull = false;
-      } catch (e) {
-        // No storage at all (a private window, say) is nothing to report; a
-        // full one is: the sessions silently stopping being kept is worse
-        // than a word about it.
-        if (!this._storageFull && e && /quota|exceeded/i.test(String(e.name) + " " + String(e.message))) {
-          this._storageFull = true;
-          this._setStatus("The sessions could not be saved: the browser's storage is full (delete a session or two)");
-        }
+      var kept = Keep.write("sessions", JSON.stringify(store));
+      if (kept) { this._storageFull = false; return; }
+      // Nothing took it.  No storage at all (a private window, say) is
+      // nothing to report; a full one is: the sessions silently stopping
+      // being kept is worse than a word about it.
+      if (!this._storageFull) {
+        this._storageFull = true;
+        this._setStatus("The sessions could not be saved: there is no room left to keep them (delete a session or two)");
       }
     }
 
@@ -5150,8 +5239,12 @@ var SympyEditor = (function () {
 
     /** Open the current session (or start one from the expression shown). */
     async _initSessions() {
-      if (!this.sessions || !this.backend || !this.backend.openDocument) return;
-      var store = this._loadSessions();
+      if (!this.sessions) return;
+      // What is kept is read whatever the backend can do with it: a backend
+      // that cannot open a document (the plain server) still shows the list.
+      var store = await this._readSessions();
+      this._fillSessions();
+      if (!this.backend || !this.backend.openDocument) return;
       var cur = store.list.filter(function (s) { return s.id === store.current; })[0];
       if (cur && cur.state) {
         try {
@@ -6201,9 +6294,23 @@ var SympyEditor = (function () {
   /* ------------------------------------------------------------------ */
 
   /** POST JSON messages to a local sympy_editor.serve() server. */
+  /** The "keep" message: what a Python behind the page keeps for it, by
+   *  name.  Given a value it stores it and answers nothing; without one it
+   *  answers what it has (or null).  A Python that does not know the message
+   *  answers without a `keep` field, and the caller falls back. */
+  function keepThrough(send) {
+    return async function (key, value) {
+      var msg = { action: "keep", key: String(key) };
+      if (value !== undefined) msg.value = String(value);
+      var answer = await send(msg);
+      if (!answer || !("keep" in answer)) throw new Error("This backend keeps nothing");
+      return answer.keep;
+    };
+  }
+
   function httpBackend(cfg) {
     var url = cfg.apiUrl || "/api";
-    return {
+    var backend = {
       send: async function (msg) {
         var r = await fetch(url, {
           method: "POST",
@@ -6223,6 +6330,10 @@ var SympyEditor = (function () {
         return r.ok ? (await r.json()).interrupted : false;
       }
     };
+    // What the server keeps for this page: the sessions, in a file of its own
+    // (see EditorServer's store).  The message goes the way every other does.
+    backend.keep = keepThrough(backend.send);
+    return backend;
   }
 
   var PYODIDE_BOOT = [
@@ -6719,6 +6830,7 @@ var SympyEditor = (function () {
     if (cfg.examples) options.examples = cfg.examples;     // what a new session can start from
     if (cfg.addons) options.addons = cfg.addons;           // their front ends (loaded by the Editor)
     var backend = make(cfg);
+    Keep.backend = backend;        // what keeps the sessions, when the backend does (see Keep)
     var editor = new Editor(host, backend, options);
     editor.mountConfig = cfg;      // what a fresh one is mounted from (a tour played again)
     editor.setState(cfg.snapshot).then(function () {
@@ -6757,6 +6869,15 @@ var SympyEditor = (function () {
     hostError: function (message) {
       if (lastEditor && lastEditor._showError) lastEditor._showError(String(message));
       else if (window.console) console.error("sympy-editor: " + message);
+    },
+    /** A host with storage of its own answers a read here: the token it was
+     *  given, and what it had kept under that name (nothing, if it had none). */
+    keptValue: function (token, text) {
+      var waiting = Keep.waiting[token];
+      if (!waiting) return false;
+      delete Keep.waiting[token];
+      waiting(text === undefined ? null : text);
+      return true;
     },
     openedFile: function (token, name, text) {
       var waiting = openFileText.waiting[token];

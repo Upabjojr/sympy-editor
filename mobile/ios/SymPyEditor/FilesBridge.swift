@@ -35,7 +35,8 @@ final class FilesBridge: NSObject, WKScriptMessageHandler {
           }
           window.SympyEditorApp = {
             saveFile: forward("saveFile"), shareFile: forward("shareFile"),
-            shareHtml: forward("shareHtml"), openFile: forward("openFile")
+            shareHtml: forward("shareHtml"), openFile: forward("openFile"),
+            keepRead: forward("keepRead"), keepWrite: forward("keepWrite")
           };
         })();
         """
@@ -59,6 +60,10 @@ final class FilesBridge: NSObject, WKScriptMessageHandler {
             save(name: arguments[0], mime: "text/html", text: arguments[1], share: true)
         case "openFile" where arguments.count >= 1:
             open(token: arguments[0], accept: arguments.count > 1 ? arguments[1] : "")
+        case "keepRead" where arguments.count >= 2:
+            keepRead(token: arguments[0], key: arguments[1])
+        case "keepWrite" where arguments.count >= 2:
+            keepWrite(key: arguments[0], text: arguments[1])
         default:
             break
         }
@@ -156,6 +161,51 @@ final class FilesBridge: NSObject, WKScriptMessageHandler {
         if let own = UTType("org.sympy.editor.formula") { types.insert(own, at: 0) }
         _ = accept
         return types
+    }
+
+    // MARK: - what the page keeps
+
+    /// Where the page's own things live: Application Support, which is the
+    /// app's to keep and a backup carries - not the WebView's localStorage,
+    /// which the system may clear at any time.  A session is the user's work.
+    private func keepURL(for key: String) throws -> URL {
+        let safe = key.components(separatedBy: CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-")).inverted)
+            .joined(separator: "_")
+        let manager = FileManager.default
+        let support = try manager.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                                      appropriateFor: nil, create: true)
+        let directory = support.appendingPathComponent("SymPyEditor/keep", isDirectory: true)
+        try manager.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory.appendingPathComponent((safe.isEmpty ? "keep" : safe) + ".json")
+    }
+
+    /// What was kept under `key`, back to the page that asked for it.
+    private func keepRead(token: String, key: String) {
+        var text: String?
+        do {
+            let url = try keepURL(for: key)
+            text = FileManager.default.fileExists(atPath: url.path) ? try String(contentsOf: url, encoding: .utf8) : nil
+        } catch {
+            report("What was kept could not be read: \(error.localizedDescription)")
+            text = nil
+        }
+        let call: String
+        if let text = text {
+            call = "window.SympyEditor.keptValue(\(quote(token)), \(quote(text)));"
+        } else {
+            call = "window.SympyEditor.keptValue(\(quote(token)));"
+        }
+        DispatchQueue.main.async { [weak self] in self?.webView?.evaluateJavaScript(call, completionHandler: nil) }
+    }
+
+    /// Keep `text` under `key`, written atomically so that an interruption
+    /// leaves what was there before.
+    private func keepWrite(key: String, text: String) {
+        do {
+            try text.write(to: try keepURL(for: key), atomically: true, encoding: .utf8)
+        } catch {
+            report("What the editor keeps could not be written: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - talking back to the page
