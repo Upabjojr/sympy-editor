@@ -54,7 +54,7 @@ import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from typing import Union as TUnion
 
-from sympy import Integer, Mul, Rational, S, Symbol, sympify
+from sympy import Integer, Mul, Pow, Rational, S, Symbol, exp as sympy_exp, sympify
 from sympy.core.basic import Basic
 from sympy.core.containers import Tuple as SymTuple
 from sympy.core.numbers import Number
@@ -383,7 +383,11 @@ def delete_range(expr: Basic, path: Path, indices, settings: Settings = None) ->
 def delete_at(expr: Basic, path: Path, settings: Settings = None) -> Basic:
     """Return ``expr`` with the node at ``path`` removed from its parent's
     args.  Removing a numerator or denominator leaves ``1`` in its place;
-    removing the product after a minus sign removes the signed product."""
+    removing the product after a minus sign removes the signed product;
+    removing one side of a power leaves the other alone (deleting the
+    exponent of ``x**2`` leaves ``x``, and the square root sign of
+    ``sqrt(x)`` is its exponent too), and ``e`` is what is left of
+    ``exp(x)`` when its exponent goes."""
     if not path:
         raise ValueError("Cannot delete the root expression")
     last = path[-1]
@@ -395,6 +399,12 @@ def delete_at(expr: Basic, path: Path, settings: Settings = None) -> Basic:
     parent = get_at(expr, path[:-1], settings)
     args = list(parent.args)
     del args[last]
+    if isinstance(parent, Pow) and len(args) == 1:
+        # A power cannot be built from one side; what is left is what stays.
+        return replace_at(expr, path[:-1], args[0], settings)
+    if isinstance(parent, sympy_exp) and not args:
+        # e to the x, its exponent gone, is the base it was drawn with.
+        return replace_at(expr, path[:-1], S.Exp1, settings)
     return replace_at(expr, path[:-1], rebuild(parent, args), settings)
 
 

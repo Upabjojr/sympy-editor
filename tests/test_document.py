@@ -811,6 +811,23 @@ def test_preview_renders_without_committing():
     assert "E" in noted["note"] and noted["error"] is None
 
 
+def test_deleting_one_side_of_a_power_leaves_the_other():
+    """A power cannot be built from one side alone.  Deleting the exponent of
+    x**2 leaves the base - the power is unwrapped, not refused - and the same
+    goes for a root (its exponent is the sign) and for e to the x, which
+    leaves the e it was drawn with."""
+    from sympy import E, exp, sin, sqrt, symbols
+
+    x, y = symbols("x y")
+    doc = Document(x**2 + 1)
+    assert doc.delete("/1/1") == x + 1                    # the exponent goes, the base stays
+    assert Document(x**2 + 1).delete("/1/0") == 2 + 1     # and the other way round, what is left
+    assert Document(sqrt(x) * y).delete("/1/1") == x * y  # the root sign is an exponent too
+    assert Document(exp(x) + 1).delete("/1/0") == 1 + E   # e to the x, its exponent gone
+    with pytest.raises(Exception):                        # a function of one argument still needs it
+        Document(sin(x) + 1).delete("/1/0")
+
+
 def test_a_formula_is_saved_to_a_file_and_opened_again():
     """The file a document is saved as: JSON, holding the expression as SymPy
     source for whoever reads the file, and the whole session behind it - the

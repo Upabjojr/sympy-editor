@@ -526,3 +526,84 @@ def test_a_button_comes_up_to_go_down_to_what_was_read():
             assert page.errors == []
         finally:
             _close(srv, browser)
+
+
+def test_switching_the_add_on_off_takes_its_strip_and_its_ink_away():
+    """The strip under the editor is the add-on's, not a panel the editor puts
+    away for it: switching the add-on off has to take it, and the ink layer
+    over the formula, off the page."""
+    doc = Document(x, addons=[HandwritingAddon(FakeRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc)
+        try:
+            assert page.locator(".hw-panel").count() == 1 and page.locator(".hw-ink").count() == 1
+            assert page.locator('[data-cmd="addon:handwriting:pen"]').count() == 1
+            page.locator('.se-toolbar [data-cmd="drawer"]').click()
+            switch = page.locator('.se-drawer .se-addon-row input[id*="handwriting"]')
+            assert _wait(lambda: switch.count() == 1)
+            switch.uncheck()
+            assert _wait(lambda: page.locator(".hw-panel").count() == 0, 15)
+            assert page.locator(".hw-ink").count() == 0
+            assert page.locator('[data-cmd="addon:handwriting:pen"]').count() == 0
+            assert page.locator(".sympy-editor.se-inking").count() == 0
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
+def test_applying_over_a_selection_lets_the_selection_go():
+    """What was written is in the formula: the piece it replaced is not the
+    selection any more, and the space it was written in has closed - the pen
+    is not left standing on a piece that has gone."""
+    doc = Document(x + y, addons=[HandwritingAddon(LetterRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc, pen=False)
+        try:
+            r = page.evaluate(TEXT_RECT, "y")
+            page.mouse.click((r["left"] + r["right"]) / 2, (r["top"] + r["bottom"]) / 2)
+            assert _wait(lambda: page.locator(".se-view .se-selected").count() == 1)
+            page.locator('[data-cmd="addon:handwriting:pen"]').click()
+            view = page.locator(".se-view").bounding_box()
+            _drag(page, view["x"] + 40, view["y"] + 90, view["x"] + 110, view["y"] + 120)
+            assert _wait(lambda: page.locator(".hw-apply").is_visible(), 15)
+            page.locator(".hw-apply").click()
+            assert _wait(lambda: str(doc.expr) == "x + z", 15), str(doc.expr)
+            assert _wait(lambda: page.locator(".se-view .se-selected").count() == 0)
+            gap = ("() => { const el = document.querySelector('.se-view [data-path]');"
+                   " return parseFloat(getComputedStyle(el).marginRight) || 0; }")
+            assert _wait(lambda: page.evaluate(gap) == 0)
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
+def test_the_space_to_write_in_follows_the_formula():
+    """The box is drawn where the piece is, not where it was: scrolling the
+    formula sideways carries it along, and so does zooming."""
+    doc = Document(x + y, addons=[HandwritingAddon(MuteRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc, pen=False)
+        try:
+            page.set_viewport_size({"width": 420, "height": 700})
+            r = page.evaluate(TEXT_RECT, "x")
+            page.mouse.click((r["left"] + r["right"]) / 2, (r["top"] + r["bottom"]) / 2)
+            assert _wait(lambda: page.locator(".se-view .se-selected").count() == 1)
+            page.locator('[data-cmd="addon:handwriting:pen"]').click()
+            # the leftmost column of the canvas that has anything drawn on it
+            left = """() => { const c = document.querySelector('.hw-ink');
+                const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+                for (let x = 0; x < c.width; x++)
+                  for (let y = 0; y < c.height; y++)
+                    if (d[(y * c.width + x) * 4 + 3] > 20) return x;
+                return -1; }"""
+            assert _wait(lambda: page.evaluate(left) >= 0, 5)
+            was = page.evaluate(left)
+            # make the formula overflow, then scroll it: the box goes with it
+            page.evaluate("""() => { const v = document.querySelector('.se-view');
+                v.style.maxWidth = '120px'; v.scrollLeft = 40; v.dispatchEvent(new Event('scroll')); }""")
+            page.wait_for_timeout(300)
+            moved = page.evaluate(left)
+            assert moved < was, (was, moved)             # it went left with the formula
+            assert page.errors == []
+        finally:
+            _close(srv, browser)

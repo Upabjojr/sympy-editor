@@ -184,7 +184,9 @@ SympyEditor.registerAddon("handwriting", (function () {
         if (editor.zoom && editor.zoom !== zoomWas) {   // zoomed: the ink grows with the formula
           var k = editor.zoom / zoomWas;
           strokes.forEach(function (s) { s.forEach(function (p) { p[0] *= k; p[1] *= k; }); });
+          if (current) current.forEach(function (p) { p[0] *= k; p[1] *= k; });
           zoomWas = editor.zoom;
+          sizeRoom();                       // and the space it is written in grows too
         }
         var w = stage.clientWidth, ht = stage.clientHeight;
         dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -240,7 +242,7 @@ SympyEditor.registerAddon("handwriting", (function () {
           top = Math.min(top, b.minY - pad);
           bottom = Math.max(bottom, b.maxY + pad);
         }
-        return { x: room.edge, y: top, w: room.px, h: bottom - top };
+        return { x: roomEdge(), y: top, w: room.px, h: bottom - top };
       }
       function drawRoom() {
         var r = roomRect();
@@ -454,18 +456,29 @@ SympyEditor.registerAddon("handwriting", (function () {
         if (room || !view) return;
         var a = anchor();
         if (!a) return;
-        var c = canvas.getBoundingClientRect(), o = offset(), q = a.el.getBoundingClientRect();
-        room = { el: a.el, side: a.side, edge: (a.side === "right" ? q.right : q.left) - c.left + o.x, px: 0 };
+        room = { el: a.el, side: a.side, px: 0 };
         sizeRoom();
+      }
+      // Where the space begins, in the formula's own pixels, asked of the
+      // piece itself every time: it moves with the formula as it is scrolled,
+      // and grows with it as it is zoomed.  (A margin on the right does not
+      // move the piece; one on the left moves it by its own width.)
+      function roomEdge() {
+        if (!room || !room.el) return 0;
+        var c = canvas.getBoundingClientRect(), o = offset(), q = room.el.getBoundingClientRect();
+        if (!q.width && !q.height) return room.edge || 0;         // rendered again: the old value
+        var edge = (room.side === "right" ? q.right : q.left - room.px) - c.left + o.x;
+        room.edge = edge;
+        return edge;
       }
       // As wide as what is written needs, never less than a few letters' worth.
       function sizeRoom() {
         if (!room) return;
-        var least = 3.5 * em(), want = least;
+        var least = 3.5 * em(), want = least, edge = roomEdge();
         var all = current ? strokes.concat([current]) : strokes;
         if (all.length) {
           var b = boxOf(all);
-          want = Math.max(least, (room.side === "right" ? b.maxX - room.edge : b.maxX - room.edge) + 0.6 * em());
+          want = Math.max(least, b.maxX - edge + 0.6 * em());
         }
         want = Math.round(Math.max(0, want));
         if (want === room.px) return;
@@ -675,6 +688,12 @@ SympyEditor.registerAddon("handwriting", (function () {
           if (my !== puts) return;            // answered for since: Keep, Undo, or fresh ink
           applied = { before: was, latex: c.latex };
           showApplied(was, step());
+          // What was written is in: the piece it replaced is not the
+          // selection any more, so nothing is left to write over.
+          if (aim && (aim.kind === "selection" || aim.kind === "range")) {
+            closeRoom();
+            if (api.select) api.select(null);
+          }
           strokes = [];
           taken = [];
           current = null;
@@ -1069,6 +1088,7 @@ SympyEditor.registerAddon("handwriting", (function () {
           if (resizer) resizer.disconnect(); else window.removeEventListener("resize", layout);
           if (view) view.removeEventListener("scroll", redraw);
           if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
+          if (element.parentNode) element.parentNode.removeChild(element);
         }
       };
     }

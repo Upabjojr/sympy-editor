@@ -133,7 +133,7 @@ var SympyEditor = (function () {
     "</ul></section>",
     "<section><h3>Editing</h3><ul>",
     "<li>Just type over a selection to replace it; <kbd>Enter</kbd> or a double-click edits its existing text in place.</li>",
-    "<li><b>Delete</b> removes the selection. Deleting the whole expression empties the view: type the new one right there.</li>",
+    "<li><b>Delete</b> removes the selection. Deleting the whole expression empties the view: type the new one right there. Deleting one side of a power leaves the other alone, the power unwrapped: the exponent of <i>x</i>\u00b2 gone leaves <i>x</i>, a root sign gone leaves what was under it, and e<sup><i>x</i></sup> without its exponent is e.</li>",
     "<li><b>Unwrap</b> (<kbd>Backspace</kbd>) removes the node but keeps an argument: cos(\u03b8) \u2192 \u03b8; it asks which one when there is a choice.</li>",
     "<li><b>Isolate</b> keeps only the selection; <b>Copy</b>/<b>Paste</b> and <kbd>Ctrl</kbd>+<kbd>C</kbd>/<kbd>X</kbd>/<kbd>V</kbd> work on selections and carets.</li>",
     "<li><kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> redoes.</li>",
