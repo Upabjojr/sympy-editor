@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,13 +22,36 @@ from .document import Document, interrupt_thread
 from .html import build_config, new_token, render_page
 
 
+#: Names Windows keeps for devices, whatever the extension: ``con.json`` is
+#: not a file there.  A key that is one of them is written with a mark.
+_WINDOWS_DEVICES = frozenset(
+    ["con", "prn", "aux", "nul"]
+    + [f"{name}{digit}" for name in ("com", "lpt") for digit in "123456789"]
+)
+
+
 def default_store() -> Path:
     """Where a server keeps what the page keeps, when it is not told: the
-    user's state directory (``XDG_STATE_HOME``, ``~/.local/state`` or, on
-    Windows, ``LOCALAPPDATA``), in a folder of the editor's own."""
-    base = os.environ.get("XDG_STATE_HOME") or os.environ.get("LOCALAPPDATA")
-    root = Path(base) if base else Path.home() / ".local" / "state"
-    return root / "sympy-editor"
+    place each platform keeps such things.
+
+    * Windows: ``%LOCALAPPDATA%\\sympy-editor`` (``~\\AppData\\Local`` when
+      the variable is not set).
+    * macOS: ``~/Library/Application Support/sympy-editor``.
+    * Elsewhere: ``$XDG_STATE_HOME/sympy-editor``, or ``~/.local/state`` as
+      the XDG specification says when the variable is not set.
+
+    ``XDG_STATE_HOME`` is honoured wherever it is set, for whoever has laid
+    their home out that way.
+    """
+    xdg = os.environ.get("XDG_STATE_HOME")
+    if xdg:
+        return Path(xdg) / "sympy-editor"
+    if sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA")
+        return (Path(local) if local else Path.home() / "AppData" / "Local") / "sympy-editor"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "sympy-editor"
+    return Path.home() / ".local" / "state" / "sympy-editor"
 
 
 __all__ = ["EditorServer", "serve"]
@@ -167,9 +191,13 @@ class EditorServer(ThreadingHTTPServer):
 
     def _store_file(self, key: str) -> Path:
         """The file ``key`` is kept in.  A name from the page cannot reach out
-        of the store: everything but letters, digits and ``._-`` is replaced."""
+        of the store: everything but letters, digits and ``._-`` is replaced,
+        and a name Windows keeps for a device is marked so that it is a file
+        there too."""
         assert self.store is not None
         safe = re.sub(r"[^A-Za-z0-9._-]", "_", key) or "keep"
+        if safe.split(".")[0].lower() in _WINDOWS_DEVICES:
+            safe = "_" + safe
         return self.store / f"{safe}.json"
 
     def kept(self, key: str) -> Optional[str]:

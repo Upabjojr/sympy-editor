@@ -1,5 +1,6 @@
 import json
 import threading
+from pathlib import Path
 from contextlib import contextmanager
 import urllib.request
 import urllib.error
@@ -153,3 +154,37 @@ def test_the_server_keeps_what_the_page_keeps(tmp_path):
         assert quiet.store is None
         assert _post(quiet, {"action": "keep", "key": "sessions", "value": "x"}) == {"keep": None}
         assert _post(quiet, {"action": "keep", "key": "sessions"}) == {"keep": None}
+
+
+def test_the_store_goes_where_each_platform_keeps_such_things(tmp_path, monkeypatch):
+    """Windows keeps it in LOCALAPPDATA, macOS in Application Support, the
+    rest under XDG_STATE_HOME (~/.local/state by default); and a name
+    Windows keeps for a device (con, nul, com1...) is still a file."""
+    import sys
+
+    from sympy_editor.server import default_store
+
+    home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert default_store() == home / ".local" / "state" / "sympy-editor"
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert default_store() == home / "Library" / "Application Support" / "sympy-editor"
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert default_store() == home / "AppData" / "Local" / "sympy-editor"
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "Local"))
+    assert default_store() == tmp_path / "Local" / "sympy-editor"
+    # and a home laid out the XDG way is honoured wherever it is
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    assert default_store() == tmp_path / "state" / "sympy-editor"
+
+    srv = EditorServer(Document(x), port=0, store=tmp_path)
+    try:
+        assert srv._store_file("con").name == "_con.json"       # a file on Windows too
+        assert srv._store_file("COM1").name == "_COM1.json"
+        assert srv._store_file("sessions").name == "sessions.json"
+    finally:
+        srv.server_close()
