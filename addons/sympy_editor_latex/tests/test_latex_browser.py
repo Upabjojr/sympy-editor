@@ -124,7 +124,11 @@ def test_the_field_opens_in_the_formula_and_reads_as_it_is_typed():
 
             page.locator(".se-view .ltx-field").fill(r"\frac{x^2}{2}")
             assert _wait(lambda: page.locator(".ltx-src").inner_text() == "x**2/2", 15)
-            assert page.locator(".se-view .ltx-ghost .katex").count() == 1     # as it will look, beside the field
+            # what it reads as is shown once, under the editor - not in the
+            # formula beside the LaTeX it is the reading of
+            assert page.locator(".ltx-preview .katex").count() == 1
+            assert page.locator(".se-view .katex").count() == 1                # the formula's own, and no copy
+            assert page.locator(".se-view .ltx-slot").count() == 1             # the field alone stands in it
             assert doc.expr == x + y                                          # and nothing has changed yet
 
             # a text that stops in the middle of an expression: not finished

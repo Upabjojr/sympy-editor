@@ -30,6 +30,10 @@ SympyEditor.registerAddon("latex", (function () {
       var note = h("div", { class: "ltx-note", "aria-live": "polite" });
       var helpBtn = h("button", { type: "button", class: "ltx-help", title: "How typing LaTeX works" }, ["?"]);
       var readingOf = h("div", { class: "ltx-reading-of" });
+      //: What is typed, as it will look.  It is shown here and not beside the
+      //: field: in the formula the two stood side by side, the LaTeX and the
+      //: expression it reads as, and the same thing twice reads as two.
+      var preview = h("div", { class: "ltx-preview", "aria-live": "polite" });
       var src = h("code", { class: "ltx-src", title: "What SymPy gets of it" });
       var ambig = h("div", { class: "ltx-ambig" });
       var consts = h("div", { class: "ltx-consts" });
@@ -46,7 +50,7 @@ SympyEditor.registerAddon("latex", (function () {
         h("div", { class: "ltx-applied-row" }, [h("span", { class: "ltx-applied-label" }, ["to"]), nowFormula]),
         h("div", { class: "ltx-applied-ask" }, [keepBtn, backBtn])]);
       var element = h("div", { class: "ltx-panel", hidden: "" },
-        [h("div", { class: "ltx-head" }, [note, helpBtn]), readingOf, src, parseBlock, actions, appliedRow]);
+        [h("div", { class: "ltx-head" }, [note, helpBtn]), readingOf, preview, src, parseBlock, actions, appliedRow]);
       if (editor && editor.addonHost && editor.addonHost.parentNode) {
         editor.addonHost.parentNode.insertBefore(element, editor.addonHost);
       }
@@ -56,8 +60,6 @@ SympyEditor.registerAddon("latex", (function () {
       var field = h("input", { type: "text", class: "ltx-field", spellcheck: "false", autocomplete: "off",
                                autocapitalize: "off", "aria-label": "LaTeX to put into the formula",
                                placeholder: "\\frac{x^2}{2}" });
-      //: What it will look like, beside the field: the reading typeset.
-      var ghost = h("span", { class: "ltx-ghost", "aria-hidden": "true" });
       var typing = false, room = null, aim = null, anchored = null;
       //: The pieces the field stands in the place of, hidden while it does.
       var covered = [];
@@ -159,7 +161,7 @@ SympyEditor.registerAddon("latex", (function () {
         // its place; adding at a cursor or at the end leaves the formula whole.
         var goes = replaced();
         if (goes.length) a = { el: goes[0], side: "before" };
-        var holder = h("span", { class: "ltx-slot" }, [field, ghost]);
+        var holder = h("span", { class: "ltx-slot" }, [field]);
         if (!a) view.appendChild(holder);
         else if (a.side === "before" && a.el.parentNode) a.el.parentNode.insertBefore(holder, a.el);
         else if (a.el.parentNode) a.el.parentNode.insertBefore(holder, a.el.nextSibling);
@@ -260,17 +262,20 @@ SympyEditor.registerAddon("latex", (function () {
         drawGhost("");
         showPanel();
       }
+      /** The reading, typeset, under the editor - where the SymPy source of
+       *  it is: one showing of it, said twice over (as mathematics, and as
+       *  what SymPy will get). */
       function drawGhost(tex) {
-        ghost.textContent = "";
-        if (!tex) { ghost.hidden = true; return; }
-        ghost.hidden = false;
+        preview.textContent = "";
+        if (!tex) { preview.hidden = true; return; }
+        preview.hidden = false;
         if (katex) {
           try {
-            ghost.innerHTML = katex.renderToString(tex, { throwOnError: false, displayMode: false, output: "html" });
+            preview.innerHTML = katex.renderToString(tex, { throwOnError: false, displayMode: false, output: "html" });
             return;
-          } catch (e) { /* the source in the strip stands for it */ }
+          } catch (e) { /* the source under it stands for it */ }
         }
-        ghost.textContent = tex;
+        preview.textContent = tex;
       }
       function render(res) {
         if (!res.ok && res.incomplete) {
@@ -408,9 +413,9 @@ SympyEditor.registerAddon("latex", (function () {
       });
 
       guide = "<section><h3>LaTeX into the formula</h3><ul>"
-        + "<li><b>LaTeX</b>, among the editor's tools, opens a field <i>in the formula</i>: over the selection, at the cursor, or after the whole expression - wherever what you type will go. Beside it you see the LaTeX as it will look.</li>"
+        + "<li><b>LaTeX</b>, among the editor's tools, opens a field <i>in the formula</i>: over the selection, at the cursor, or after the whole expression - wherever what you type will go. It is drawn as what it is - in dashes, on tinted paper - because it is not part of the formula yet.</li>"
         + "<li>Opened on a selection, the field stands <i>in that piece's place</i> and the piece is taken off the screen until the field goes: what is typed replaces it. At a cursor the formula is left whole and what is typed is added there - the line under the editor says which it will be.</li>"
-        + "<li>What is typed is read as you type. Under the editor: what SymPy gets of it, the parts that can be read more than one way - <code>f(x)</code> applied or multiplied, how far <code>\\sin x \\cos y</code> reaches - each a menu, and a switch for each name that usually means a constant (<code>\\pi</code>, <code>e</code>, <code>i</code>, <code>\\gamma</code>).</li>"
+        + "<li>What is typed is read as you type. Under the editor: the reading as it will look and what SymPy gets of it, the parts that can be read more than one way - <code>f(x)</code> applied or multiplied, how far <code>\\sin x \\cos y</code> reaches - each a menu, and a switch for each name that usually means a constant (<code>\\pi</code>, <code>e</code>, <code>i</code>, <code>\\gamma</code>).</li>"
         + "<li>A text that stops in the middle of an expression (<code>\\frac{x</code>, <code>x +</code>) or of a command (<code>\\fr</code>) is <i>not finished yet</i>, not wrong: the last reading stays, dimmed, until it reads again.</li>"
         + "<li><b>Apply to the formula</b> (or <kbd>Enter</kbd>) puts it in - nothing changes before that - and then the formula before and after is shown, what went in red and what came in green, to <b>Keep</b> or to <b>Undo the change</b>. <kbd>Esc</kbd> closes the field and leaves the formula alone.</li>"
         + "</ul></section>";

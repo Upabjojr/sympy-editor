@@ -6,7 +6,10 @@ in, with its ambiguities laid open.
 The LaTeX is typed **into the formula**: the **LaTeX** tool opens a field
 where what is typed will land - in the selected piece's place (the piece
 steps off the screen until the field goes, so that a replacement looks like
-one), at the cursor, or after the whole expression.  Beside the field the reading is shown as it will look; under the
+one), at the cursor, or after the whole expression.  The field is drawn as
+what it is, in dashes on tinted paper: it is not part of the formula yet.
+What it reads as is shown once, under the editor - as mathematics and as
+SymPy source - rather than beside the LaTeX it is the reading of.  Beside the field the reading is shown as it will look; under the
 editor, as SymPy would get it.  Two things about LaTeX make a silent
 conversion a bad idea, and both are in the user's hands there:
 

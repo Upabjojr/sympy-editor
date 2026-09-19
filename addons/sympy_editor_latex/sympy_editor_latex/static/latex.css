@@ -2,16 +2,19 @@
  * The add-on has no box of its own - what it shows is part of the editor -
  * so the rules are scoped to its own classes, not to a panel. */
 
-/* ---- the field, where the LaTeX will land ---- */
+/* ---- the field, where the LaTeX will land ----
+ * It is the one thing in the formula while it is open (what it reads as is
+ * shown under the editor), and it is drawn as something not yet part of the
+ * formula: dashes around it, and the paper behind it tinted. */
 .se-view .ltx-slot {
   display: inline-flex;
   align-items: baseline;
-  gap: 0.35em;
   margin: 0 0.15em;
-  padding: 0 0.15em;
+  padding: 0.05em 0.15em;
   border-radius: 0.25em;
-  background: rgba(var(--se-accent), 0.06);
-  outline: 1px dashed rgba(var(--se-accent), 0.55);
+  background: rgba(var(--se-accent), 0.08);
+  outline: 1px dashed rgba(var(--se-accent), 0.65);
+  outline-offset: 1px;
 }
 .se-view .ltx-field {
   font-family: var(--se-mono);
@@ -27,8 +30,11 @@
   color: inherit;
 }
 .se-view .ltx-field:focus { outline: 2px solid rgba(var(--se-accent), 0.6); outline-offset: -1px; }
-.se-view .ltx-ghost { color: inherit; opacity: 0.75; }
-.se-view .ltx-ghost[hidden] { display: none; }
+/* what it will read as, under the editor: shown once, and not in the
+   formula beside the LaTeX it is the reading of */
+.ltx-preview { font-size: 1.3em; min-height: 1.4em; padding: 0.1rem 0.2rem; }
+.ltx-preview[hidden] { display: none; }
+.ltx-busy .ltx-preview, .ltx-stale .ltx-preview { opacity: 0.5; }
 /* The bar of actions a selection brings up is drawn just under the formula,
  * which is where the field is: it steps aside while one types there. */
 .sympy-editor.se-typing-latex .se-actions { display: none !important; }
