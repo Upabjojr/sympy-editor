@@ -19,7 +19,11 @@ SympyEditor.registerAddon("matching", {
     // The set's name and the library of saved sets: kept in Python (a
     // session carries them) and mirrored to the browser's storage, so they
     // are there again after a reload.
-    var STORE = "sympy-editor:matching";
+    //: The name this add-on's rule sets are kept under.  Where they are kept
+    //: is the editor's business (SympyEditor.keep): the app's own storage on
+    //: a phone, the server's when Python serves the page, the browser's on a
+    //: page that is nothing but itself.
+    var STORE = "matching";
     var nameField = h("input", { type: "text", class: "mt-name", placeholder: "rule set name", title: "Type a name and the set is kept under it from then on, every change saved; clear it to leave the set unnamed", spellcheck: "false", autocomplete: "off" });
     var libSel = h("select", { class: "mt-lib", title: "The saved rule sets: pick one to load it" });
     var del = h("button", { type: "button", class: "mt-lib-del", title: "Delete the saved set of this name" }, ["Delete"]);
@@ -39,11 +43,12 @@ SympyEditor.registerAddon("matching", {
     var editing = null;      // the index of the rule opened in the formula editor, until it is saved or dropped
     var library = [], setName = null, dirty = false, canRestore = false;
 
-    function readStore() {
-      try { return JSON.parse(localStorage.getItem(STORE) || "null"); } catch (e) { return null; }
+    async function readStore() {
+      try { return JSON.parse((await SympyEditor.keep.read(STORE)) || "null"); }
+      catch (e) { return null; }
     }
     function writeStore(state) {
-      try { localStorage.setItem(STORE, JSON.stringify(state)); } catch (e) { /* storage may be off */ }
+      SympyEditor.keep.write(STORE, JSON.stringify(state));
     }
     function renderSets() {
       nameField.value = setName || "";
@@ -222,8 +227,13 @@ SympyEditor.registerAddon("matching", {
     // At mount: what the browser kept - the library, and the last current
     // set for an empty document - goes to Python, which answers with the
     // rules as they stand.
-    var stored = readStore();
-    if (stored) query("restore", { state: stored }); else query("rules");
+    readStore().then(function (stored) {
+      // The keeper answers a moment later (it may be the app's own storage or
+      // the server's): a rule typed meanwhile is the user's, and what was kept
+      // must not wipe it.
+      if (rules.length || field.value.trim()) { query("rules"); return; }
+      if (stored) query("restore", { state: stored }); else query("rules");
+    }, function () { query("rules"); });
 
     var HELP = [
       "<section><h3>Rules and wildcards</h3><ul>",

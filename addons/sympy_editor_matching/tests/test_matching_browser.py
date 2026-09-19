@@ -1,8 +1,10 @@
 """The rules panel in a real browser: a rule is added, edited in place,
 opened in the formula editor and saved back.  Needs Playwright with
 Chromium, the KaTeX CDN and sympy-matching (skipped otherwise)."""
+import json
 import sys
 import threading
+import time
 import urllib.request
 from contextlib import closing
 from pathlib import Path
@@ -129,9 +131,25 @@ def test_rewrite_is_one_pass_and_rewrite_all_is_refused_when_it_never_settles():
     srv.server_close()
 
 
-def test_rule_sets_are_saved_in_the_browser_and_come_back_after_a_reload():
+def _wait(check, timeout=5.0):
+    """True once ``check`` is - a file the server writes, say."""
+    end = time.time() + timeout
+    while time.time() < end:
+        try:
+            if check():
+                return True
+        except Exception:
+            pass
+        time.sleep(0.05)
+    return False
+
+
+def test_rule_sets_are_kept_and_come_back_after_a_reload(tmp_path):
+    """The sets are kept where the page is run from - the server's own store
+    here, the app's storage on a phone, the browser only on a page that is
+    nothing but itself (SympyEditor.keep)."""
     doc = Document(sin(x) ** 2, addons=[ADDON])
-    srv = EditorServer(doc, port=0)
+    srv = EditorServer(doc, port=0, store=tmp_path)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     with playwright.sync_playwright() as p:
         try:
@@ -151,11 +169,14 @@ def test_rule_sets_are_saved_in_the_browser_and_come_back_after_a_reload():
         assert page.locator(".se-addon-matching .mt-sets button", has_text="Save").count() == 0
         page.wait_for_function("document.querySelector('.mt-lib').options.length === 2")
         assert doc.addon_state["matching"]["name"] == "trig"
-        stored = page.evaluate("JSON.parse(localStorage.getItem('sympy-editor:matching'))")
+        kept = tmp_path / "addon_matching.json"
+        assert _wait(lambda: kept.is_file())
+        stored = json.loads(kept.read_text(encoding="utf-8"))
         assert stored["name"] == "trig" and stored["library"] == {"trig": ["sin(a_)**2 -> 1 - cos(a_)**2"]}
+        assert page.evaluate("localStorage.getItem('sympy-editor:addon:matching')") is None
         # the document forgets everything (a kernel restarted, say); the page is
-        # loaded again in the same browser: the library is there, and so is the
-        # last current set - the browser's storage is per origin, hence the same server
+        # loaded again: the library is there, and so is the last current set -
+        # the server kept them, so another browser would find them too
         doc.addon_state["matching"] = {}
         page.goto(srv.url)
         page.wait_for_selector(".se-addon-matching .mt-field", timeout=30000)
@@ -168,17 +189,18 @@ def test_rule_sets_are_saved_in_the_browser_and_come_back_after_a_reload():
         page.locator(".mt-field").fill("x -> x**2")
         page.locator(".mt-field").press("Enter")
         page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 2")
-        assert page.evaluate("JSON.parse(localStorage.getItem('sympy-editor:matching')).library.trig.length") == 2
+        assert _wait(lambda: json.loads(kept.read_text(encoding="utf-8"))["library"]["trig"] and
+                 len(json.loads(kept.read_text(encoding="utf-8"))["library"]["trig"]) == 2)
         page.locator(".mt-revert").click()
         page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1")
-        assert page.evaluate("JSON.parse(localStorage.getItem('sympy-editor:matching')).library.trig.length") == 1
+        assert _wait(lambda: len(json.loads(kept.read_text(encoding="utf-8"))["library"]["trig"]) == 1)
         page.locator(".mt-restore").click()
         page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 2")
         page.locator(".mt-revert").click()
         page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1")
         page.locator(".mt-lib-del").click()                            # delete it: gone from the store too
         page.wait_for_function("document.querySelector('.mt-lib').options.length === 1")
-        assert page.evaluate("JSON.parse(localStorage.getItem('sympy-editor:matching')).library") == {}
+        assert _wait(lambda: json.loads(kept.read_text(encoding="utf-8"))["library"] == {})
         assert errors == []
         browser.close()
     srv.shutdown()

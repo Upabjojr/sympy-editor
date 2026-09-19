@@ -32,7 +32,7 @@ var SympyEditor = (function () {
     zoom: 1,             // initial magnification of the formula (1 = the CSS size)
     minZoom: 0.25,
     maxZoom: 4,
-    rememberZoom: false, // keep the zoom in localStorage across page loads (the mobile app does)
+    rememberZoom: false, // keep the zoom between page loads (the mobile app does; see Keep)
     actions: null,       // {expr: [op names], matrix: [...], integral: [...]...}: what the two action menus offer, in
                          // that order (a name may be {name, label}); a key left out means every registered op
     longPress: 450,      // ms a finger must rest on the formula before it starts a range selection (touch screens)
@@ -40,14 +40,15 @@ var SympyEditor = (function () {
     previewDelay: 250,   // ms after the last keystroke in the source line before it is previewed
     workingAfter: 400,   // ms a request may take before the spinner overlay appears
     interruptAfter: 2000, // ms after which the overlay offers to interrupt the computation
-    sessions: false,     // a list of sessions (expressions with their own history) kept in localStorage
+    sessions: false,     // a list of sessions (expressions with their own history), kept (see Keep)
     unevaluated: false,  // the "unevaluated" toggle starts on: transformations build Determinant(M), Integral(f, x)... rather than computing
-    rememberAddons: false, // keep which add-ons are on in localStorage across page loads (the apps do)
+    rememberAddons: false, // keep which add-ons are on between page loads (the apps do; see Keep)
     animate: true,       // animate a change: the old parts in red turn into the new ones in green
     animateDuration: 1600 // ms: a quarter to show what goes (red), the rest to move it and fade the new in (green)
   };
-  var SESSIONS_KEY = "sympy-editor:sessions";   // what Keep calls "sessions", where a browser keeps it
-  var ADDONS_KEY = "sympy-editor:addons";     // the add-ons switched on, when rememberAddons is set
+  // What the editor keeps between visits, by the names Keep knows them by:
+  // "sessions" (each with its history), "addons" (which are switched on) and
+  // "zoom".  Where they are kept depends on what is running the page - see Keep.
 
   // The history report: a self-contained page (KaTeX pre-rendered, its CSS
   // and fonts inlined), see Editor.buildReport.
@@ -184,7 +185,6 @@ var SympyEditor = (function () {
     "</ul></section>",
     "</div>"
   ].join("");
-  var ZOOM_KEY = "sympy-editor:zoom";
   var ZOOM_STEP = 1.2;
 
   /* ------------------------------------------------------------------ */
@@ -1876,7 +1876,7 @@ var SympyEditor = (function () {
       for (var c = 0; c < clients.length; c++) this._addonClients[clients[c].name] = clients[c];
       var on = snap.addons || [];
       if (this.opts.rememberAddons && !snap.preview && this._addonsRestored) {
-        try { localStorage.setItem(ADDONS_KEY, JSON.stringify(on)); } catch (e) { /* storage may be off */ }
+        Keep.write("addons", JSON.stringify(on));
       }
       var mounted = this._addons.slice();
       for (var i = 0; i < mounted.length; i++) if (on.indexOf(mounted[i].name) < 0) this._unmountAddon(mounted[i].name);
@@ -1889,13 +1889,21 @@ var SympyEditor = (function () {
     /** With rememberAddons: switch on what was on last time (and off what
      *  was not), once, when the editor is ready - the page's own choice of
      *  add-ons is the fallback for a first visit. */
-    _restoreAddons() {
+    async _restoreAddons() {
       if (this._addonsRestored) return Promise.resolve();
       this._addonsRestored = true;
       if (!this.opts.rememberAddons || !this.state) return Promise.resolve();
-      var wanted = null;
-      try { wanted = JSON.parse(localStorage.getItem(ADDONS_KEY) || "null"); } catch (e) { wanted = null; }
-      if (!Array.isArray(wanted)) return Promise.resolve();
+      var self = this;
+      return Keep.read("addons").then(function (text) {
+        var wanted = null;
+        try { wanted = JSON.parse(text || "null"); } catch (e) { wanted = null; }
+        return Array.isArray(wanted) ? self._wantAddons(wanted) : undefined;
+      }, function () { /* nothing kept: the page's own choice stands */ });
+    }
+
+    /** Switch on what was kept and off what was not (see _restoreAddons). */
+    _wantAddons(wanted) {
+      if (!this.state) return Promise.resolve();
       var known = (this.state.addons_available || []).filter(function (a) { return !a.error; }).map(function (a) { return a.name; });
       var on = this.state.addons || [];
       var enable = wanted.filter(function (n) { return known.indexOf(n) >= 0 && on.indexOf(n) < 0; });
@@ -6033,7 +6041,13 @@ var SympyEditor = (function () {
     _initialZoom() {
       var z = this.opts.zoom;
       if (this.opts.rememberZoom) {
-        try { var saved = parseFloat(localStorage.getItem(ZOOM_KEY)); if (saved > 0) z = saved; } catch (e) { /* no storage */ }
+        var here = parseFloat(Keep.local("zoom"));
+        if (here > 0) z = here;                     // at once, before the keeper answers
+        var self = this;
+        Keep.read("zoom").then(function (text) {
+          var kept = parseFloat(text);
+          if (kept > 0 && Math.abs(kept - self.zoom) > 0.001) self.setZoom(kept);
+        }, function () { /* nothing kept */ });
       }
       return z;
     }
@@ -6062,7 +6076,7 @@ var SympyEditor = (function () {
       this._updateToolbar();
       this._addonsNotify("onZoom", this.zoom);   // an add-on drawing on the formula follows it
       if (this.opts.rememberZoom) {
-        try { localStorage.setItem(ZOOM_KEY, String(this.zoom)); } catch (e) { /* no storage */ }
+        Keep.write("zoom", String(this.zoom));
       }
     }
 
@@ -6863,6 +6877,13 @@ var SympyEditor = (function () {
     ensureCss: ensureCss,
     h: h,
     registerAddon: registerAddon,
+    /** Where an add-on keeps what should outlive the page - its rule sets,
+     *  its choices - by name: the same keeper the editor uses for its own
+     *  (the app's storage, the server's store, or the browser's). */
+    keep: {
+      read: function (key) { return Keep.read("addon:" + key); },
+      write: function (key, text) { return Keep.write("addon:" + key, String(text)); }
+    },
     /** A host with a picker of its own answers here: the token it was given,
      *  the file's name and its text (or nothing at all, if none was chosen). */
     /** Something the host could not do, in the editor's own error line. */

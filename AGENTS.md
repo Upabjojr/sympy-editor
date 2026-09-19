@@ -2,7 +2,12 @@
 
 The behaviour of the cursor and the selection - every state, every key, and
 what differs on a touch screen - is written down in
-`docs/cursor-and-selection.md`.  Change that file with the behaviour.
+`docs/cursor-and-selection.md`.  What each edit does to the expression - and
+what it leaves behind in the awkward cases, such as deleting the exponent of
+a power, which unwraps it and leaves the base - is in
+`docs/editing-rules.md`; what a saved formula holds is in
+`docs/file-format.md`.  Change those files with the behaviour: they are the
+description, and the code is meant to match them.
 
 ## What this project is
 

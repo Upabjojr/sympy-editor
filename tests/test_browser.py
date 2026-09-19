@@ -4747,12 +4747,27 @@ def test_the_drawer_button_shows_only_with_something_to_hold(browser, tmp_path):
     assert ro.locator('[data-cmd="drawer"]').count() == 0 and ro.locator(".se-drawer").count() == 0
 
 
-def test_remembered_addons_come_back_after_a_reload(browser):
-    """With rememberAddons, the add-ons switched on are kept in the browser's
-    storage and switched on again when the page loads - what the apps do."""
+def _wait_for(check, timeout=5.0):
+    """True once ``check`` is (a file written by the server, say)."""
+    end = time.time() + timeout
+    while time.time() < end:
+        try:
+            if check():
+                return True
+        except Exception:
+            pass
+        time.sleep(0.05)
+    return False
+
+
+def test_remembered_addons_come_back_after_a_reload(browser, tmp_path):
+    """With rememberAddons, which add-ons are on is kept - and kept where the
+    page is being run from: the server's own store here, as it would be the
+    app's own storage on a phone, and the browser's only on a page that is
+    nothing but itself."""
     addon, Boxed = _demo_addon()
     doc = Document(x + y, available=[addon])
-    srv = EditorServer(doc, port=0, options={"rememberAddons": True})
+    srv = EditorServer(doc, port=0, options={"rememberAddons": True}, store=tmp_path)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
         page = _open(browser, srv.url)
@@ -4760,7 +4775,9 @@ def test_remembered_addons_come_back_after_a_reload(browser):
         page.locator('.se-toolbar [data-cmd="drawer"]').click()
         page.locator(".se-drawer-addons input").check()
         page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)
-        assert page.evaluate("JSON.parse(localStorage.getItem('sympy-editor:addons'))") == ["demo"]
+        assert _wait_for(lambda: (tmp_path / "addons.json").is_file())
+        assert json.loads((tmp_path / "addons.json").read_text(encoding="utf-8")) == ["demo"]
+        assert page.evaluate("localStorage.getItem('sympy-editor:addons')") is None
         doc.disable("demo")                                     # the server forgets (an app restarted)
         page.goto(srv.url)
         page.wait_for_selector(".se-addon-demo .demo-panel", timeout=15000)     # switched on again from the storage
@@ -4768,7 +4785,7 @@ def test_remembered_addons_come_back_after_a_reload(browser):
         page.locator('.se-toolbar [data-cmd="drawer"]').click()
         page.locator(".se-drawer-addons input").uncheck()
         page.wait_for_function("!document.querySelector('.se-addon-demo')", timeout=10000)
-        assert page.evaluate("JSON.parse(localStorage.getItem('sympy-editor:addons'))") == []
+        assert _wait_for(lambda: json.loads((tmp_path / "addons.json").read_text(encoding="utf-8")) == [])
         assert page.errors == []
     finally:
         srv.shutdown()

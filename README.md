@@ -593,10 +593,13 @@ KaTeX turns that into `<span data-path="/1/0">`, so the DOM knows which node
 of the expression tree each glyph belongs to.  Editing operations
 (`Document.replace/delete/insert/operator/apply/call/undo/redo`) rebuild the
 tree and re-render.
-See `AGENTS.md` for the architecture and design notes, and
+See `AGENTS.md` for the architecture and design notes,
 [`docs/cursor-and-selection.md`](docs/cursor-and-selection.md) for what the
-cursor and the selection do - the one description the page, the server, the
-Jupyter widget and the apps all follow.
+cursor and the selection do, [`docs/editing-rules.md`](docs/editing-rules.md)
+for what each edit does to the expression, and
+[`docs/file-format.md`](docs/file-format.md) for what a saved formula holds -
+the one description the page, the server, the Jupyter widget and the apps all
+follow.
 
 ## Dependencies and licences
 
