@@ -62,7 +62,7 @@ SYMPY_WHEEL = ("https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135
 
 #: Python modules embedded in Pyodide-backed pages (order matters for nothing,
 #: but keep this list in sync with the imports of document.py).
-EMBEDDED_MODULES = ("printer.py", "ops.py", "addons.py", "document.py")
+EMBEDDED_MODULES = ("printer.py", "invalid.py", "ops.py", "addons.py", "document.py")
 
 
 def default_urls() -> Dict[str, str]:

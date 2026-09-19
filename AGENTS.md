@@ -61,6 +61,10 @@ src/sympy_editor/
     widget.js   anywidget entry point; widget.py concatenates editor.js + this.
   addons.py     The add-on contract (Addon) and loader: node types, ops, data
                 and methods from a package outside this one; see addons/.
+  invalid.py    Expressions SymPy refuses to build (InvalidExpr, printed
+                Invalid(MatMul, A, B)): the per-node validity check every
+                commit goes through, and the tolerant rebuild/parse/srepr
+                reading used when a document allows them.
 tests/          pytest suite (printer round-trips, document ops, HTML, server).
 examples/       demo.py generates demo.html / runs the server.
 addons/         Add-on drafts, each a package of its own (tree, plot, matching, latex).
@@ -870,6 +874,31 @@ not.
 
 ## Key design decisions
 
+- **Invalid expressions: checked at every commit, kept only when allowed.**
+  The editor builds with the constructors (`rebuild`, `Add(a, b)` for an
+  operator, anything under `evaluate(False)`), and those let through what
+  SymPy's operators refuse: `Add(2, M)`, `Pow(M, 1/2)` of a non-square `M`,
+  `conjugate(Eq(...))`.  Such a step used to be committed, and a saved
+  session holding one could not be reopened (its `srepr` raised on reading
+  back) - the formula flickered red and the history never showed.
+  `Document._commit` now checks the tree node by node (`invalid.first_problem`:
+  the node's constructor run unevaluated, and evaluated too when an argument
+  is a matrix or not a scalar - cheap there, unlike `factorial(10**6)`).
+  With `allow_invalid` off the edit is refused; on (`Document(allow_invalid=True)`,
+  `{"action": "settings"}`, the *allow invalid* check box, exported with a
+  session) the offending node becomes an `InvalidExpr` subclass per head
+  (`invalid("MatMul")(A, B)`), whose args are the children in the view tree.
+  Operators and calls that raise are caught where they happen: `rebuild`
+  consults `printer.rebuild_fallback` (set by `allowing_invalid` around the
+  tree helpers), `Document.parse` retries with `tolerant_parse` (the Python
+  AST of the input with operators and SymPy calls routed through helpers),
+  and `operator`/`call`/`wrap` catch their constructor.  Rebuilding an
+  invalid node tries its head again (`build`), so an edit that fixes an
+  argument heals it.  Reading `srepr` (`_coerce`) is always tolerant, and
+  so is the expression a document is created with: saved data always opens.
+  A named object (`MatrixSymbol` given an expression for its shape) is never
+  kept invalid.
+
 - **Tree paths, not LaTeX positions.**  Paths are `args` indices
   (`"/"` = root, `"/1/0"` = `expr.args[1].args[0]`).  Editing rebuilds
   ancestors with `node.func(*args)`, so SymPy auto-evaluation applies.
@@ -921,9 +950,9 @@ not.
   and top-level `const`/`let` (it is inlined into classic `<script>` tags,
   possibly several times per page, and concatenated into an ES module for
   anywidget).  Use `var SympyEditor = (function () { ... })();`.
-- Pyodide-backed pages embed the *source* of `printer.py`, `ops.py`,
-  `addons.py`, `document.py`; those four modules must import nothing but
-  SymPy, the standard library and each other.
+- Pyodide-backed pages embed the *source* of `printer.py`, `invalid.py`,
+  `ops.py`, `addons.py`, `document.py` (`html.EMBEDDED_MODULES`); those
+  modules must import nothing but SymPy, the standard library and each other.
 
 ## Mobile apps (`mobile/`)
 

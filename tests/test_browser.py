@@ -1504,6 +1504,44 @@ def test_long_formula_scrolls_sideways_and_fits_a_phone(browser, serve_expr):
     assert errors == []
 
 
+def test_allow_invalid_toggle(browser, serve_expr):
+    """Off, a product of matrices whose shapes do not match is refused; on,
+    it is kept as an invalid node drawn in red, and fixing an argument
+    gives back the product."""
+    from sympy import MatrixSymbol
+    from sympy_editor.invalid import invalid
+    A, B, C, D = (MatrixSymbol(n, *s) for n, s in (("A", (3, 3)), ("B", (2, 2)), ("C", (3, 3)), ("D", (3, 3))))
+    srv, doc = serve_expr(A*D)
+    doc.declare("B", "MatrixSymbol", 2, 2)
+    doc.declare("C", "MatrixSymbol", 3, 3)
+    page = _open(browser, srv.url)
+    box = page.locator(".se-allow-invalid-box")
+    assert not box.is_checked()
+    src = page.locator(".se-source")
+
+    def commit(text):
+        src.click()
+        page.keyboard.press("Control+a")
+        page.keyboard.type(text)
+        _next_state(page, lambda: page.keyboard.press("Enter"))
+
+    commit("A*B")
+    assert doc.expr == A*D
+    assert "not aligned" in page.locator(".se-error").inner_text()
+    _next_state(page, lambda: box.check())
+    assert doc.allow_invalid
+    commit("A*B")
+    assert doc.expr == invalid("MatMul")(A, B)
+    assert page.locator(".se-error").is_hidden()
+    assert src.inner_text() == "Invalid(MatMul, A, B)"
+    assert "MatMul" in page.locator('.se-view [data-path="/"]').inner_text()
+    commit("Invalid(MatMul, A, C)")
+    assert doc.expr == A*C
+    _next_state(page, lambda: box.uncheck())
+    assert not doc.allow_invalid
+    assert page.errors == []
+
+
 def test_source_line_previews_while_typing(browser, serve_expr):
     srv, doc = serve_expr(x**2 + sin(y))
     page = _open(browser, srv.url)

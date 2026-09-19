@@ -49,6 +49,7 @@ still located relative to the enclosing frame.
 
 from __future__ import annotations
 
+import contextvars
 import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from typing import Union as TUnion
@@ -262,11 +263,26 @@ def register_rebuild(cls: type, func: Callable[[Basic, List[Basic]], Basic]) -> 
     REBUILDERS[cls] = func
 
 
+#: While set (``invalid.allowing_invalid``): ``fallback(expr, args, exc)``
+#: gives the node :func:`rebuild` makes when SymPy refuses to rebuild one.
+rebuild_fallback: contextvars.ContextVar = contextvars.ContextVar("rebuild_fallback", default=None)
+
+
 def rebuild(expr: Basic, args) -> Basic:
     """``expr`` reconstructed with new ``args`` (``expr.func(*args)``, with
     special cases for classes whose constructor does not accept their own
     ``args``)."""
     args = list(args)
+    try:
+        return _rebuild(expr, args)
+    except Exception as exc:
+        fallback = rebuild_fallback.get()
+        if fallback is None:
+            raise
+        return fallback(expr, args, exc)
+
+
+def _rebuild(expr: Basic, args: List[Basic]) -> Basic:
     for cls, func in REBUILDERS.items():
         if isinstance(expr, cls):
             return func(expr, args)

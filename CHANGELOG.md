@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+* **Invalid expressions.** An edit SymPy would not build is no longer
+  committed behind its back: an operator between a scalar and a matrix, a
+  power or a function built unevaluated around a non-square matrix used to
+  slip in, and a session holding such a step could not be reopened - the
+  formula flickered red and the history never showed. Such sessions open
+  now, and a new **allow invalid** switch keeps what SymPy refuses (``A*B``
+  of mismatched shapes, ``sin(x, y)``) as a node of its own, drawn in red
+  and written ``Invalid(MatMul, A, B)``, until an edit inside it makes it
+  valid again.
+
 ## 0.1.1 — September 2026
 
 The first release with add-ons, and a great deal of work on how the editor

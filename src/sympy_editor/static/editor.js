@@ -148,6 +148,7 @@ var SympyEditor = (function () {
     "<li>With a caret shown and nothing selected, a function from the box is <i>added</i> at the caret \u2014 sin gives sin(\u25a1), the box selected for you to fill \u2014 instead of being applied to the whole expression.</li>",
     "<li>Templates: \\int, \\sum, \\prod, \\lim, \\diff, \\frac, \\binom, \\matrix typed in a field put the whole construction in, with faint empty boxes where its parts go. The first box is selected: type to fill it, <kbd>Tab</kbd> moves to the next box (<kbd>Shift</kbd>+<kbd>Tab</kbd> back). The boxes are the symbols _1, _2\u2026 in the source line.</li>",
     "<li>An edit that cannot be read as an expression is refused: the message shows under the formula, and the formula flickers red for half a second.</li>",
+    "<li>So is an edit SymPy refuses to build — a product of matrices whose shapes do not match, sin(x, y). Tick <b>allow invalid</b> to keep it instead: it is shown as its constructor in red with its arguments in brackets (Invalid(MatMul, A, B) in the source line), and it becomes the ordinary expression again as soon as an edit inside it makes it valid.</li>",
     "</ul></section>",
     "<section><h3>Operators</h3><ul>",
     "<li>Click an operator itself (<b>+</b>, <b>\u2212</b>, <b>\u22c5</b>, <b>=</b>\u2026) to select it; a small palette appears.</li>",
@@ -1375,6 +1376,19 @@ var SympyEditor = (function () {
                                                : "Transformations and functions compute their result");
         });
         current.appendChild(lazyLabel);
+        // Invalid expressions: an edit SymPy refuses to build (A*B of
+        // matrices whose shapes do not match, sin(x, y)) is kept as a node
+        // of its own, drawn in red, instead of being refused.  A switch of
+        // the document (Python holds it, snapshots report it).
+        this.invalidBox = h("input", { type: "checkbox", class: "se-allow-invalid-box" });
+        var invalidLabel = h("label", { class: "se-lazy", title: "Keep what SymPy refuses to build (a product of matrices whose shapes do not match, a function given the wrong number of arguments) as an invalid node, shown in red, instead of refusing the edit" },
+          [this.invalidBox, "allow invalid"]);
+        this.invalidBox.addEventListener("change", function () {
+          self.send({ action: "settings", allow_invalid: self.invalidBox.checked });
+          self._setStatus(self.invalidBox.checked ? "Invalid expressions allowed: what SymPy refuses to build is kept, in red, until it is fixed"
+                                                  : "Invalid expressions refused: an edit SymPy refuses to build is not applied");
+        });
+        current.appendChild(invalidLabel);
         this.fnForm = h("div", { class: "se-fn-form", hidden: "" });
         this._fnNames = [];
         this._fnSigs = {};
@@ -2282,6 +2296,7 @@ var SympyEditor = (function () {
       // whole expression.
       var unchanged = same || (!!previous && !snap.preview && !!snap.srepr && previous.srepr === snap.srepr);
       this.state = snap;
+      if (this.invalidBox && "allow_invalid" in snap) this.invalidBox.checked = !!snap.allow_invalid;
       this._hideKeep();
       this.tree = buildTree(snap.nodes || {});
       if (!unchanged) { this.range = null; this._cameFrom = {}; }
@@ -6477,6 +6492,7 @@ var SympyEditor = (function () {
       var snap = JSON.parse(json);
       var d = rt.docs[id];
       if (!snap.preview && snap.srepr) { d.srepr = snap.srepr; d.declared = snap.declared || null; d.last = snap; }
+      if ("allow_invalid" in snap) d.settings.allow_invalid = !!snap.allow_invalid;   // the switch survives a new worker
       return snap;
     };
     return rt;
