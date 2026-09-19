@@ -1015,22 +1015,34 @@ SympyEditor.registerAddon("handwriting", (function () {
         });
         updateTools();
       }
+      /** A tool off, and kept off: the editor's toolbar sets every add-on's
+       *  buttons as it updates itself (a tap that changes the selection does),
+       *  and leaves alone the ones marked this way. */
+      function toolOff(button, off) {
+        if (!button) return;
+        if (off) button.setAttribute("data-addon-off", "1");
+        else button.removeAttribute("data-addon-off");
+        button.disabled = !!off;
+      }
+
       function updateTools() {
         var p = toolButton("pen"), e = toolButton("erase"), c = toolButton("clear");
         var u = toolButton("undo"), r = toolButton("redo");
-        if (u) u.disabled = !strokes.length;
-        if (r) r.disabled = !taken.length;
+        // Everything but the Pen is for writing: with the Pen off there is
+        // nothing for them to do, whatever ink is still on the formula.
+        toolOff(u, !pen || !strokes.length);
+        toolOff(r, !pen || !taken.length);
+        toolOff(c, !pen || !strokes.length);
+        toolOff(e, !pen);
+        toolOff(p, !canRead);
         if (p) {
           p.setAttribute("aria-pressed", pen ? "true" : "false");
           p.classList.toggle("hw-on", pen);
-          p.disabled = !canRead;
         }
         if (e) {
           e.setAttribute("aria-pressed", erasing ? "true" : "false");
           e.classList.toggle("hw-on", erasing);
-          e.disabled = !pen;
         }
-        if (c) c.disabled = !strokes.length;
         element.setAttribute("data-pen", pen ? "on" : "off");
         element.setAttribute("data-strokes", String(strokes.length));
       }

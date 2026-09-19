@@ -814,9 +814,13 @@ carries it unchanged.  The front end part is a plain script (`Addon.js`,
 `loadAddons` puts the CSS in the page and runs the script once,
 `Editor._mountAddons` gives each a box under the source line (`.se-addons`,
 `.se-addon-<name>`) and a toolbar block (`data-block="addon:<name>"`), and
-`onState`/`onSelect`/`destroy` follow the editor; a `help` (HTML) on the
-definition or the instance puts a "?" in the box's summary that opens it in
-the editor's help overlay (`showHelp(html, title)`, the same page as the
+`onState`/`onSelect`/`onZoom`/`destroy` follow the editor; a tool button of
+an add-on's own is the add-on's to enable - `_updateToolbar` only takes them
+away when there is nothing to work on (closed, no state), and leaves alone any
+marked `data-addon-off="1"` (the handwriting add-on's eraser, with no pen:
+without this a tap that changes the selection woke every one of them); a
+`help` (HTML) on the definition or the instance puts a "?" in the box's
+summary that opens it in the editor's help overlay (`showHelp(html, title)`, the same page as the
 toolbar's "?") - every add-on with a panel should have one.  `api.call(method, payload)`
 is the promise of a query's result or the new snapshot.  A Pyodide page
 carries the add-ons' packages (`cfg["packages"]`, written under

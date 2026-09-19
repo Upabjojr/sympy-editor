@@ -6286,8 +6286,16 @@ var SympyEditor = (function () {
       if (this.opsSelect) this.opsSelect.disabled = dis;
       if (this.typeMenu) this.typeMenu.disabled = dis;
       if (this.methodsMenu) this.methodsMenu.disabled = dis;
+      // An add-on's tools are the add-on's to enable: the editor only takes
+      // them away when there is nothing to work on (closed, no state).  One
+      // that wants a tool of its own kept off - the handwriting add-on's
+      // eraser, with no pen - says so with data-addon-off="1" on the button,
+      // and the toolbar leaves it off.
       for (var a = 0; a < this._addons.length; a++) {
-        for (var t = 0; t < this._addons[a].tools.length; t++) this._addons[a].tools[t].button.disabled = dis;
+        for (var at = 0; at < this._addons[a].tools.length; at++) {
+          var tool = this._addons[a].tools[at].button;
+          tool.disabled = dis || tool.getAttribute("data-addon-off") === "1";
+        }
       }
     }
 

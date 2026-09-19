@@ -652,3 +652,44 @@ def test_the_device_s_own_reader_can_be_asked_instead_of_the_model():
             assert page.errors == []
         finally:
             _close(srv, browser)
+
+
+def test_the_writing_tools_stay_off_while_the_pen_is():
+    """Everything but the Pen is for writing, so with the Pen off they are all
+    off - and they stay off through what the editor does to its toolbar: a tap
+    that selects a piece, and a tap on nothing that lets it go, both update
+    every button on the strip."""
+    doc = Document(x + y, addons=[HandwritingAddon(MuteRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc, pen=False)
+        try:
+            tools = {name: page.locator('[data-cmd="addon:handwriting:%s"]' % name)
+                     for name in ("pen", "erase", "undo", "redo", "clear")}
+            off = lambda: all(tools[n].is_disabled() for n in ("erase", "undo", "redo", "clear"))
+            assert off() and not tools["pen"].is_disabled()
+
+            r = page.evaluate(TEXT_RECT, "x")
+            page.mouse.click((r["left"] + r["right"]) / 2, (r["top"] + r["bottom"]) / 2)
+            assert _wait(lambda: page.locator(".se-view .se-selected").count() == 1)
+            assert off(), "a tap that selects must not wake the writing tools"
+
+            view = page.locator(".se-view").bounding_box()
+            page.mouse.click(view["x"] + 10, view["y"] + view["height"] / 2)   # empty space: the selection goes
+            assert _wait(lambda: page.locator(".se-view .se-selected").count() == 0)
+            assert off(), "nor a tap that lets the selection go"
+
+            # with the Pen on they wake as they should: the eraser at once,
+            # the rest once there is ink
+            tools["pen"].click()
+            assert _wait(lambda: not tools["erase"].is_disabled())
+            assert tools["undo"].is_disabled() and tools["clear"].is_disabled()
+            _drag(page, view["x"] + 200, view["y"] + 40, view["x"] + 250, view["y"] + 80)
+            assert _wait(lambda: not tools["clear"].is_disabled() and not tools["undo"].is_disabled())
+
+            # and the Pen off again puts them all away, ink or no ink
+            tools["pen"].click()
+            assert _wait(off)
+            assert page.locator(".hw-panel").get_attribute("data-strokes") == "1"
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
