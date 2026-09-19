@@ -325,6 +325,11 @@ def test_the_piece_being_replaced_makes_way_for_the_field():
             page.locator(".se-view .ltx-field").fill(r"\cos p")
             assert _wait(lambda: not page.locator(".ltx-apply").is_disabled(), 15)
             page.locator(".se-view .ltx-field").press("Enter")
+            # while the change goes in, the piece it replaces stays off the
+            # screen: showing it again for that moment is a flicker of
+            # something already spent
+            while doc.expr == b ** i + 1:
+                assert page.evaluate(shown, path) is not True, "the old exponent came back mid-change"
             assert _wait(lambda: doc.expr == b ** cos(p_) + 1, 15), str(doc.expr)
             assert page.locator(".se-view .ltx-field").count() == 0
             assert page.errors == []

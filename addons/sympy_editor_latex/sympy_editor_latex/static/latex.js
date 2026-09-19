@@ -61,6 +61,10 @@ SympyEditor.registerAddon("latex", (function () {
       var typing = false, room = null, aim = null, anchored = null;
       //: The pieces the field stands in the place of, hidden while it does.
       var covered = [];
+      //: While a reading is going in, what it replaces stays hidden: it is
+      //: about to go, and showing it again for the moment the change takes
+      //: would be a flicker of something already spent.
+      var applying = false;
       var choices = {}, constants = {}, last = null;
       var seq = 0, timer = null, katex = null;
       var applied = null, mine = 0, puts = 0, guide;
@@ -186,7 +190,7 @@ SympyEditor.registerAddon("latex", (function () {
         // up for as long as something is focused, so the formula takes the
         // focus back (which is where the editor's own keys belong anyway).
         var had = document.activeElement === field;
-        uncover();
+        if (!applying) uncover();
         if (room && room.parentNode) room.parentNode.removeChild(room);
         room = null;
         if (had) {
@@ -331,17 +335,22 @@ SympyEditor.registerAddon("latex", (function () {
       function apply() {
         if (!last || !last.ok || !aim) return;
         var was = applied ? applied.before : step(), my = ++puts;
+        applying = true;           // what it replaces stays off the screen: it is going
         setTyping(false);          // first: onState and onSelect follow the change, and would open it again
         mine++;
         var back = applied ? api.send({ action: "undo" }) : Promise.resolve();
         back.then(function () { return api.call("insert", payload()); }).then(function () {
           mine = Math.max(0, mine - 1);
+          applying = false;
+          covered = [];            // the formula was drawn afresh: what was hidden went with it
           if (my !== puts) return;
           applied = { before: was };
           showApplied(was, step());
           say("In the formula.");
         }, function (e) {
           mine = Math.max(0, mine - 1);
+          applying = false;
+          uncover();               // it did not go in: what it would have replaced comes back
           if (my !== puts) return;
           say(String((e && e.message) || e), true);
         });
