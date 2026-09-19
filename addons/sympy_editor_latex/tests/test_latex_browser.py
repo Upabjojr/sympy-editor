@@ -312,6 +312,14 @@ def test_the_piece_being_replaced_makes_way_for_the_field():
             assert _wait(lambda: page.evaluate(shown, path) is False), "the piece must make way for the field"
             assert "selection's place" in page.locator(".ltx-reading-of").inner_text()
 
+            # it stays away for as long as the field is there - even when the
+            # selection itself goes (the field has the focus, and the editor
+            # lets a selection go for all sorts of reasons)
+            page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.select(null)")
+            page.wait_for_timeout(400)
+            assert page.evaluate(shown, path) is False, "the piece came back while the field was still open"
+            assert "selection's place" in page.locator(".ltx-reading-of").inner_text()
+
             # Escape: the piece comes back and the formula is as it was
             page.locator(".se-view .ltx-field").press("Escape")
             assert _wait(lambda: page.evaluate(shown, path) is True)

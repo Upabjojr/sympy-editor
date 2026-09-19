@@ -78,8 +78,12 @@ SympyEditor.registerAddon("latex", (function () {
       /* ---- where the LaTeX will go ---- */
       function aimNow() {
         var r = api.range && api.range(), sel = api.selected && api.selected();
-        if (r) return { kind: "range", path: r.parent, children: editor._rangeIndices() };
-        if (sel) return { kind: "selection", path: sel };
+        // `paths`: what the reading will replace, by path - kept with the aim
+        // so that it is still known once the selection itself has gone (the
+        // field takes the focus, and the editor lets the selection go).
+        if (r) return { kind: "range", path: r.parent, children: editor._rangeIndices(),
+                        paths: editor._rangePaths ? editor._rangePaths() : [] };
+        if (sel) return { kind: "selection", path: sel, paths: [sel] };
         var caret = api.insertion && api.insertion();
         if (caret) return { kind: "caret", caret: caret };
         return { kind: "end" };
@@ -97,15 +101,11 @@ SympyEditor.registerAddon("latex", (function () {
         for (var i = 0; i < els.length; i++) if (els[i].getAttribute("data-path") === path) return els[i];
         return null;
       }
-      /** The pieces a reading would replace: the selection, or the range. */
+      /** The pieces this reading will replace, as they are drawn now: the
+       *  ones the aim named when the field was opened. */
       function replaced() {
-        var r = api.range && api.range();
-        if (r && editor._rangePaths) {
-          return editor._rangePaths().map(elementFor).filter(function (el) { return !!el; });
-        }
-        var sel = api.selected && api.selected();
-        var el = sel ? elementFor(sel) : null;
-        return el ? [el] : [];
+        if (!aim || !aim.paths) return [];
+        return aim.paths.map(elementFor).filter(function (el) { return !!el; });
       }
       /** Take them off the screen: the field stands where they were, so what
        *  will happen is plain - this is a replacement, not an insertion. */
@@ -157,7 +157,7 @@ SympyEditor.registerAddon("latex", (function () {
         anchored = a;
         // Replacing something: it goes off the screen and the field stands in
         // its place; adding at a cursor or at the end leaves the formula whole.
-        var goes = aim.kind === "selection" || aim.kind === "range" ? replaced() : [];
+        var goes = replaced();
         if (goes.length) a = { el: goes[0], side: "before" };
         var holder = h("span", { class: "ltx-slot" }, [field, ghost]);
         if (!a) view.appendChild(holder);
