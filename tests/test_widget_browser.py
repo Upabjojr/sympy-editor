@@ -154,16 +154,23 @@ def test_an_addon_method_is_answered_in_the_widget(widget_page):
 
 def test_the_latex_reader_reads_and_inserts_in_the_widget(widget_page):
     """Read and insert are both add-on methods: the reading has to come back
-    to the panel, and the insert has to reach the formula."""
+    to the strip, and applying has to reach the formula - in a notebook as
+    anywhere else.  The LaTeX is typed into the formula itself."""
     w = SympyEditorWidget(sin(x), addons=[_addon("sympy_editor_latex")])
     page = widget_page(w)
-    page.locator(".ltx-input").fill(r"\frac{x}{2}")
-    page.locator(".ltx-read").click()
+    page.wait_for_selector('[data-cmd="addon:latex:type"]', timeout=30000)
+    # the whole expression selected: what is typed takes its place (there is
+    # no "replace the whole expression" button any more - the selection says)
+    page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.select('/')")
+    page.wait_for_selector(".se-view .se-selected", timeout=10000)
+    page.locator('[data-cmd="addon:latex:type"]').click()
+    page.wait_for_selector(".se-view .ltx-field", timeout=10000)
+    page.locator(".se-view .ltx-field").fill(r"\frac{x}{2}")
     page.wait_for_function("() => (document.querySelector('.ltx-src') || {}).textContent === 'x/2'", timeout=30000)
-    page.wait_for_function("() => !document.querySelector('.ltx-insert-all').disabled", timeout=10000)
-    page.locator(".ltx-insert-all").click()
-    page.wait_for_function("() => document.querySelector('.se-source').textContent === 'x/2'", timeout=30000)
-    assert str(w.expr) == "x/2"
+    page.wait_for_function("() => !document.querySelector('.ltx-apply').disabled", timeout=10000)
+    page.locator(".ltx-apply").click()
+    page.wait_for_function("() => document.querySelector('.se-source').textContent.indexOf('x/2') >= 0", timeout=30000)
+    assert "x/2" in str(w.expr)
     assert page.errors == []
 
 

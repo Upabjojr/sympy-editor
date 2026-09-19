@@ -140,7 +140,17 @@ arguments are its children, so they can be edited like any others. Every
 rebuild tries the head again, so the node becomes the expression SymPy builds
 as soon as it builds one.
 
-## 9. History
+## 9. What the add-ons put in
+
+An add-on that puts an expression into the formula — LaTeX typed in,
+handwriting read — goes through the same door and obeys the same rules: the
+reading takes the selection's place, the selected range's place, goes in at
+the cursor, or after the whole formula as if typed there (§4). Neither
+changes anything until it is applied, and what it did is shown as the history
+shows a step, to keep or to take back. To replace the whole expression, select
+it first.
+
+## 10. History
 
 Undo and redo walk the steps; going to a step in the history view makes it the
 current expression (and drops what was after it on the next edit). An edit

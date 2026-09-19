@@ -1,36 +1,156 @@
-/* The LaTeX panel, scoped under the box the editor gives the add-on. */
-.se-addon-latex .ltx-panel { display: flex; flex-direction: column; gap: 0.4rem; font-size: 12px; }
-.se-addon-latex .ltx-row { display: flex; gap: 0.4rem; align-items: stretch; }
-.se-addon-latex .ltx-input {
-  flex: 1 1 auto; min-width: 0; resize: vertical;
-  font: inherit; font-family: var(--se-mono); font-size: 13px; line-height: 1.35;
-  padding: 0.3rem 0.5rem; border: 1px solid var(--se-border); border-radius: 0.3rem;
-  background: var(--se-field); color: inherit;
+/* The LaTeX add-on: a field in the formula, and a strip under the editor.
+ * The add-on has no box of its own - what it shows is part of the editor -
+ * so the rules are scoped to its own classes, not to a panel. */
+
+/* ---- the field, where the LaTeX will land ---- */
+.se-view .ltx-slot {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35em;
+  margin: 0 0.15em;
+  padding: 0 0.15em;
+  border-radius: 0.25em;
+  background: rgba(var(--se-accent), 0.06);
+  outline: 1px dashed rgba(var(--se-accent), 0.55);
 }
-.se-addon-latex .ltx-input:focus { outline: 2px solid rgba(var(--se-accent), 0.6); outline-offset: -1px; }
-.se-addon-latex button {
-  font: inherit; font-size: 12px; line-height: 1.2; padding: 0.2rem 0.6rem;
-  border: 1px solid var(--se-border); border-radius: 0.3rem; background: var(--se-btn); color: inherit; cursor: pointer;
-  box-shadow: var(--se-btn-edge), var(--se-btn-shadow);
+.se-view .ltx-field {
+  font-family: var(--se-mono);
+  font-size: 0.62em;              /* the formula's size is a display size: a field at it is enormous */
+  line-height: 1.3;
+  min-width: 7em;
+  width: 9em;
+  max-width: 60vw;
+  padding: 0.15em 0.35em;
+  border: 1px solid rgba(var(--se-accent), 0.5);
+  border-radius: 0.25em;
+  background: var(--se-field);
+  color: inherit;
 }
-.se-addon-latex button:disabled { opacity: 0.4; cursor: default; box-shadow: none; background: none; }
-.se-addon-latex .ltx-preview { font-size: 1.25em; min-height: 1.4em; padding: 0.2rem 0.3rem; }
-.se-addon-latex .ltx-busy .ltx-preview { opacity: 0.6; }
-.se-addon-latex .ltx-src { font-family: var(--se-mono); color: var(--se-muted); word-break: break-word; }
-.se-addon-latex .ltx-note { min-height: 1.2em; color: var(--se-muted); }
-.se-addon-latex .ltx-note.error { color: var(--se-error); }
+.se-view .ltx-field:focus { outline: 2px solid rgba(var(--se-accent), 0.6); outline-offset: -1px; }
+.se-view .ltx-ghost { color: inherit; opacity: 0.75; }
+.se-view .ltx-ghost[hidden] { display: none; }
+/* The bar of actions a selection brings up is drawn just under the formula,
+ * which is where the field is: it steps aside while one types there. */
+.sympy-editor.se-typing-latex .se-actions { display: none !important; }
+/* the tool stays pressed while the field is open */
+.sympy-editor .se-tools button.ltx-on {
+  background: rgba(var(--se-accent), 0.14);
+  border-color: rgba(var(--se-accent), 0.65);
+}
+
+/* ---- the strip: what it reads as, and the ask ---- */
+.ltx-panel[hidden], .ltx-panel [hidden] { display: none !important; }
+.ltx-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--se-rule);
+  border-left: 3px solid rgba(var(--se-accent), 0.6);
+  border-radius: 0.4rem;
+  background: var(--se-surface);
+  font-size: 12px;
+}
+.ltx-head { display: flex; align-items: baseline; gap: 0.5rem; }
+.ltx-head .ltx-note { flex: 1 1 auto; }
+.ltx-help {
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--se-rule);
+  border-radius: 0.3rem;
+  background: var(--se-btn);
+  color: var(--se-muted);
+  cursor: pointer;
+}
+.ltx-note { min-height: 1.2em; color: var(--se-muted); }
+.ltx-note.error { color: var(--se-error); }
 /* a text that stops mid-expression is being typed: a quiet note, and the last
    reading dimmed (it is not this text's) */
-.se-addon-latex .ltx-note.pending { color: var(--se-muted); font-style: italic; }
-.se-addon-latex .ltx-stale .ltx-preview, .se-addon-latex .ltx-stale .ltx-src { opacity: 0.4; }
-.se-addon-latex .ltx-ambig, .se-addon-latex .ltx-consts { display: flex; flex-direction: column; gap: 0.25rem; }
-.se-addon-latex .ltx-point { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }
-.se-addon-latex .ltx-fragment { font-family: var(--se-mono); padding: 0 0.3rem; border-radius: 0.25rem; background: rgba(var(--se-accent), 0.1); }
-.se-addon-latex .ltx-choice { font: inherit; font-size: 12px; max-width: 100%; padding: 0.15rem 0.3rem; border: 1px solid var(--se-border); border-radius: 0.3rem; background: var(--se-btn); color: inherit; }
-.se-addon-latex .ltx-const { display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer; }
-.se-addon-latex .ltx-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-.se-addon-latex .ltx-insert-all { border-color: rgba(var(--se-accent), 0.8); background: rgba(var(--se-accent), 0.12); }
+.ltx-note.pending { color: var(--se-muted); font-style: italic; }
+.ltx-stale .ltx-src { opacity: 0.4; }
+.ltx-reading-of { font-size: 11px; color: var(--se-muted); }
+.ltx-reading-of:empty { display: none; }
+.ltx-src { font-family: var(--se-mono); color: var(--se-muted); word-break: break-word; }
+.ltx-src:empty { display: none; }
+.ltx-busy .ltx-src { opacity: 0.6; }
+
+.ltx-parse { display: flex; flex-direction: column; gap: 0.3rem; }
+.ltx-ambig, .ltx-consts { display: flex; flex-direction: column; gap: 0.25rem; }
+.ltx-point { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }
+.ltx-fragment {
+  font-family: var(--se-mono);
+  padding: 0 0.3rem;
+  border-radius: 0.25rem;
+  background: rgba(var(--se-accent), 0.1);
+}
+.ltx-choice {
+  font: inherit;
+  font-size: 12px;
+  max-width: 100%;
+  padding: 0.15rem 0.3rem;
+  border: 1px solid var(--se-rule);
+  border-radius: 0.3rem;
+  background: var(--se-btn);
+  color: inherit;
+}
+.ltx-const { display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer; }
+
+.ltx-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.ltx-apply {
+  font: inherit;
+  font-size: 13px;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid rgba(var(--se-accent), 0.65);
+  border-radius: 0.3rem;
+  background: rgba(var(--se-accent), 0.12);
+  color: inherit;
+  cursor: pointer;
+}
+.ltx-apply:disabled { opacity: 0.5; cursor: default; }
+
+/* what it did: the formula as it was, as it now is, and the ask */
+.ltx-applied {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--se-rule);
+  border-radius: 0.4rem;
+  background: var(--se-surface);
+}
+.ltx-applied-row { display: flex; align-items: baseline; gap: 0.45rem; flex-wrap: wrap; }
+.ltx-applied-label { font-size: 11px; color: var(--se-muted); min-width: 2.2rem; }
+.ltx-formula { font-size: 15px; overflow-x: auto; }
+.ltx-applied-ask { display: flex; gap: 0.4rem; margin-top: 0.1rem; }
+.ltx-applied-ask button {
+  font: inherit;
+  font-size: 12px;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--se-rule);
+  border-radius: 0.3rem;
+  background: var(--se-btn);
+  color: inherit;
+  cursor: pointer;
+}
+.ltx-keep { border-color: rgba(var(--se-accent), 0.65); }
+
+/* what went and what came, marked as the history's own report marks a step */
+.ltx-applied .rep-added, .ltx-applied .rep-removed { font-weight: bold; }
+.ltx-applied .rep-added { color: #1a7f37; }
+.ltx-applied .rep-removed { color: #d1242f; }
+@media (prefers-color-scheme: dark) {
+  .ltx-applied .rep-added { color: #3fb950; }
+  .ltx-applied .rep-removed { color: #ff7b72; }
+}
+.sympy-editor[data-theme="dark"] .ltx-applied .rep-added { color: #3fb950; }
+.sympy-editor[data-theme="dark"] .ltx-applied .rep-removed { color: #ff7b72; }
+
 @media (any-pointer: coarse) {
-  .se-addon-latex button, .se-addon-latex .ltx-choice { font-size: 14px; padding: 0.45rem 0.7rem; min-height: 2.2rem; }
-  .se-addon-latex .ltx-input { font-size: 15px; }
+  .ltx-choice, .ltx-applied-ask button { font-size: 14px; padding: 0.45rem 0.7rem; }
+  .ltx-apply { font-size: 15px; padding: 0.45rem 0.9rem; }
+  .se-view .ltx-field { font-size: 0.55em; }
 }

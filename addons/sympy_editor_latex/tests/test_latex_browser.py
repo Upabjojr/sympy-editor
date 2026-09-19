@@ -1,8 +1,11 @@
-"""The LaTeX panel in a real browser: a reading, an ambiguity picked, a
-constant switched, the reading inserted.  Needs Playwright with Chromium and
-the KaTeX CDN (skipped otherwise)."""
+"""The LaTeX add-on in a real browser, typing into the formula itself: the
+field where the reading will land, what it reads as you type, the ambiguities
+and the constants, and applying - with the formula before and after to keep or
+to take back.  Needs Playwright with Chromium and the KaTeX CDN (skipped
+otherwise)."""
 import sys
 import threading
+import time
 import urllib.request
 from contextlib import closing
 from pathlib import Path
@@ -22,6 +25,8 @@ from sympy_editor_latex import ADDON, LatexAddon  # noqa: E402
 
 x, y = symbols("x y")
 
+TOOL = '[data-cmd="addon:latex:type"]'
+
 
 def _online(url):
     try:
@@ -34,256 +39,199 @@ def _online(url):
 pytestmark = pytest.mark.skipif(not _online(default_urls()["katexJs"]), reason="KaTeX CDN not reachable")
 
 
-def test_the_panel_reads_offers_choices_and_inserts():
-    doc = Document(x + y, addons=[ADDON])
-    srv = EditorServer(doc, port=0)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    with playwright.sync_playwright() as p:
+def _wait(check, timeout=10.0):
+    end = time.time() + timeout
+    while time.time() < end:
         try:
-            browser = p.chromium.launch()
-        except Exception as exc:
-            pytest.skip(f"chromium not available: {exc}")
-        page = browser.new_page()
-        errors = []
-        page.on("pageerror", lambda e: errors.append(str(e)))
-        page.goto(srv.url)
-        page.wait_for_selector(".se-addon-latex .ltx-input", timeout=30000)
-        box = page.locator(".ltx-input")
-        box.fill(r"\sin x \cos y + \pi")
-        usual, other = str(sin(x) * cos(y) + pi), str(sin(x * cos(y)) + pi)
-        page.wait_for_function("s => document.querySelector('.ltx-src').textContent === s", arg=usual, timeout=15000)
-        assert page.locator(".ltx-preview .katex").count() == 1                          # rendered
-        # the reading shows once, typeset and as source - not a second time
-        # beside the menu of each ambiguity (issue #27)
-        assert page.locator(".ltx-panel .katex").count() == 1 and page.locator(".ltx-ambig .katex").count() == 0
-        # the ambiguities: a menu per point with the whole under each reading, the conventional one chosen
-        rows = page.locator(".ltx-point")
-        assert rows.count() == 2
-        row = rows.filter(has=page.locator(".ltx-fragment", has_text=r"\sin x \cos y").filter(has_not_text=r"\pi"))
-        assert row.count() == 1
-        choice = row.locator(".ltx-choice")
-        options = choice.locator("option").all_inner_texts()
-        assert usual in options and other in options
-        assert choice.input_value() == str(options.index(usual))
-        choice.select_option(str(options.index(other)))
-        page.wait_for_function("s => document.querySelector('.ltx-src').textContent === s", arg=other)
-        # the constant: pi switched off is a symbol
-        const = page.locator(".ltx-const input")
-        assert const.count() == 1 and const.is_checked() and "pi" in page.locator(".ltx-const").inner_text()
-        const.uncheck()
-        as_symbol = str(Symbol("pi") + sin(x * cos(y)))                                   # another pi, printed elsewhere
-        page.wait_for_function("s => document.querySelector('.ltx-src').textContent === s", arg=as_symbol)
-        assert not page.locator(".ltx-const input").is_checked()
-        # nothing selected and no cursor: the first button adds after the formula
-        assert page.locator(".ltx-insert").inner_text() == "Add to end"
-        assert not page.locator(".ltx-insert").is_disabled() and not page.locator(".ltx-insert-all").is_disabled()
-        page.locator(".ltx-insert-all").click()
-        page.wait_for_function("s => document.querySelector('.se-source').textContent === s", arg=as_symbol)
-        assert doc.expr == Symbol("pi") + sin(x * cos(y)) and pi not in doc.expr.atoms()
-        assert doc.history_labels()["actions"][-1] == r"LaTeX: \sin x \cos y + \pi"
-        # a selection: the reading replaces it; new text drops the old picks
-        pi_path = next(p for p, n in doc.snapshot()["nodes"].items() if p != "/" and n["src"] == "pi")   # the pi term
-        page.evaluate("p => document.querySelector('.sympy-editor').__sympyEditor.select(p)", pi_path)
-        assert not page.locator(".ltx-insert").is_disabled()
-        box.fill(r"\frac{d}{dx} x^2")
-        page.wait_for_function("document.querySelector('.ltx-src').textContent === 'Derivative(x**2, x)'")
-        assert page.locator(".ltx-choice").count() == 0
-        page.locator(".ltx-insert").click()
-        page.wait_for_function("document.querySelector('.se-source').textContent.includes('Derivative(x**2, x)')")
-        assert Symbol("pi") not in doc.expr.free_symbols
-        # \sinh is one command: one reading, one menu over it (issue #27)
-        box.fill(r"\sinh xy")
-        page.wait_for_function("document.querySelector('.ltx-src').textContent === 'sinh(x*y)'")
-        assert page.locator(".ltx-point").count() == 1 and page.locator(".ltx-panel .katex").count() == 1
-        # an error is a message in the panel, not the editor's
-        box.fill(r"x^2 +* y")
-        page.wait_for_function("document.querySelector('.ltx-note').classList.contains('error')")
-        assert "could not be read" in page.locator(".ltx-note").inner_text()
-        assert not page.locator(".se-error").is_visible()
-        # the toolbar tool focuses the box; the guide opens
-        page.locator('.se-toolbar [data-cmd="addon:latex:focus"]').click()
-        assert page.evaluate("document.activeElement.className") == "ltx-input"
-        # its "?" is the toolbar's "?", not one of the panel's own buttons (issue #27)
-        page.mouse.move(0, 0)
-        look = ("b => { const s = getComputedStyle(b), r = b.getBoundingClientRect(); return [s.fontSize, s.fontWeight,"
-                " s.padding, s.border, s.borderRadius, s.backgroundImage, s.boxShadow, s.color, Math.round(r.width),"
-                " Math.round(r.height)]; }")
-        assert (page.locator(".se-addon-latex .se-addon-help").evaluate(look)
-                == page.locator('.se-toolbar [data-cmd="help"]').evaluate(look))
-        page.locator(".se-addon-latex .se-addon-help").click()
-        assert "several ways" in page.locator(".se-help-view").inner_text().lower()
-        page.keyboard.press("Escape")
-        assert errors == []
-        browser.close()
+            if check():
+                return True
+        except Exception:
+            pass
+        time.sleep(0.05)
+    return check()
+
+
+def _page(p, doc, tool=True, **kwargs):
+    """The editor served with the add-on, and a page showing it.  `tool`: wait
+    for the add-on's own tool, which a page that has it off has not got."""
+    srv = EditorServer(doc, port=0, **kwargs)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        browser = p.chromium.launch()
+    except Exception as exc:
+        srv.shutdown()
+        pytest.skip(f"chromium not available: {exc}")
+    page = browser.new_page(viewport={"width": 900, "height": 900})
+    page.errors = []
+    page.on("pageerror", lambda e: page.errors.append(str(e)))
+    page.goto(srv.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    if tool:
+        page.wait_for_selector(TOOL, timeout=15000)
+    return srv, browser, page
+
+
+def _close(srv, browser):
+    browser.close()
     srv.shutdown()
     srv.server_close()
 
 
+def _type(page, text):
+    """Open the field if it is closed, and type `text` into it."""
+    if page.locator(".se-view .ltx-field").count() == 0:
+        page.locator(TOOL).click()
+        page.wait_for_selector(".se-view .ltx-field", timeout=10000)
+    page.locator(".se-view .ltx-field").fill(text)
 
-def test_the_first_button_adds_at_the_cursor_or_at_the_end():
-    """With a selection it replaces the selection; with a cursor in the
-    formula it is "Add to cursor", and with neither "Add to end" - the
-    reading going in as if typed there."""
-    z = Symbol("z")
+
+def test_the_field_opens_in_the_formula_and_reads_as_it_is_typed():
+    """The tool opens a field inside the formula - there is no box under the
+    editor to type in - and what is typed is read as it is typed: the reading
+    beside the field, what SymPy gets of it under the editor.  A text that
+    stops mid-expression is unfinished, not wrong, and Escape leaves."""
     doc = Document(x + y, addons=[ADDON])
-    srv = EditorServer(doc, port=0)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    try:
-        with playwright.sync_playwright() as p:
-            try:
-                browser = p.chromium.launch()
-            except Exception as exc:
-                pytest.skip(f"chromium not available: {exc}")
-            page = browser.new_page()
-            errors = []
-            page.on("pageerror", lambda e: errors.append(str(e)))
-            page.goto(srv.url)
-            page.wait_for_selector(".se-addon-latex .ltx-input", timeout=30000)
-            ed = "document.querySelector('.sympy-editor').__sympyEditor"
-            first = page.locator(".se-addon-latex .ltx-insert")
-            source = "document.querySelector('.se-source').textContent"
-            page.locator(".ltx-input").fill("z")
-            page.wait_for_function("document.querySelector('.ltx-src').textContent === 'z'")
-            assert first.inner_text() == "Add to end" and not first.is_disabled()
-            first.click()
-            page.wait_for_function(source + " === 'z*(x + y)'")
-            assert doc.expr == z * (x + y)
-            page.evaluate(ed + ".send({action: 'undo'})")
-            page.wait_for_function(source + " === 'x + y'")
-            # a cursor between the two terms: "Add to cursor", a new term there
-            page.evaluate("() => { const e = %s; const pos = e._caretPositions().find(q => !q.gap.extend && q.gap.path === '/' "
-                          "&& q.gap.leftEl && q.gap.rightEl); e._showCaret(pos.gap, pos.x); }" % ed)
-            page.wait_for_function("document.querySelector('.se-addon-latex .ltx-insert').textContent === 'Add to cursor'")
-            first.click()
-            page.wait_for_function(source + " === 'x + y + z'")
-            assert doc.expr == x + y + z
-            # a selection: replaced
-            xp = next(path for path, n in doc.snapshot()["nodes"].items() if n["src"] == "x")
-            page.evaluate("p => %s.select(p)" % ed, xp)
-            page.wait_for_function("document.querySelector('.se-addon-latex .ltx-insert').textContent === 'Replace the selection'")
-            # nothing selected and no cursor: the end again
-            page.evaluate(ed + ".select(null)")
-            page.wait_for_function("document.querySelector('.se-addon-latex .ltx-insert').textContent === 'Add to end'")
-            assert errors == []
-            browser.close()
-    finally:
-        srv.shutdown()
-        srv.server_close()
-
-
-def test_typing_goes_on_through_a_slow_reading_and_unfinished_text_is_no_error():
-    """The first reading built the grammar - long enough for the editor's
-    overlay, which covered the box and took its focus mid-word; the
-    half-typed text then came back as an error.  Readings are quiet now (the
-    panel shows its own progress), and a text that stops too early is only
-    not finished: the last reading stays, dimmed, and cannot be inserted."""
-    import time
-
-    class Slow(LatexAddon):                 # every reading as slow as the first used to be on a phone
-        def read(self, doc, payload):
-            time.sleep(1.2)
-            return super().read(doc, payload)
-
-    doc = Document(x + y, addons=[Slow()])
-    srv = EditorServer(doc, port=0, options={"workingAfter": 100})
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
     with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc)
         try:
-            browser = p.chromium.launch()
-        except Exception as exc:
-            pytest.skip(f"chromium not available: {exc}")
-        page = browser.new_page()
-        errors = []
-        page.on("pageerror", lambda e: errors.append(str(e)))
-        page.goto(srv.url)
-        page.wait_for_selector(".se-addon-latex .ltx-input", timeout=30000)
-        page.locator(".ltx-input").click()
-        page.keyboard.type(r"\frac{x", delay=30)
-        page.wait_for_function("document.querySelector('.ltx-panel').classList.contains('ltx-busy')", timeout=5000)
-        page.wait_for_timeout(400)                                               # well past workingAfter
-        assert not page.locator(".se-loading").is_visible()                      # nothing over the box
-        assert page.evaluate("document.activeElement.className") == "ltx-input"  # still typing there
-        page.wait_for_function("document.querySelector('.ltx-note').textContent.startsWith('Not finished')", timeout=10000)
-        assert "error" not in page.locator(".ltx-note").get_attribute("class")
-        # typing on ends in a reading
-        page.keyboard.type("}{2}", delay=30)
-        page.wait_for_function("document.querySelector('.ltx-src').textContent === 'x/2'", timeout=15000)
-        assert page.locator(".ltx-note").inner_text() == "" and not page.locator(".ltx-insert-all").is_disabled()
-        # unfinished again: x/2 stays, dimmed, and is not inserted for this text
-        page.keyboard.type(" +", delay=30)
-        page.wait_for_function("document.querySelector('.ltx-panel').classList.contains('ltx-stale')", timeout=15000)
-        assert page.locator(".ltx-src").inner_text() == "x/2" and page.locator(".ltx-insert-all").is_disabled()
-        assert "error" not in page.locator(".ltx-note").get_attribute("class")
-        assert not page.locator(".se-loading").is_visible() and doc.expr == x + y
-        assert errors == []
-        browser.close()
-    srv.shutdown()
-    srv.server_close()
+            assert page.locator(".ltx-panel").is_hidden()          # nothing said before anything is typed
+            page.locator(TOOL).click()
+            page.wait_for_selector(".se-view .ltx-field", timeout=10000)
+            assert page.evaluate("document.activeElement.className") == "ltx-field"
+            assert page.locator(TOOL).get_attribute("aria-pressed") == "true"
+
+            page.locator(".se-view .ltx-field").fill(r"\frac{x^2}{2}")
+            assert _wait(lambda: page.locator(".ltx-src").inner_text() == "x**2/2", 15)
+            assert page.locator(".se-view .ltx-ghost .katex").count() == 1     # as it will look, beside the field
+            assert doc.expr == x + y                                          # and nothing has changed yet
+
+            # a text that stops in the middle of an expression: not finished
+            page.locator(".se-view .ltx-field").fill(r"\frac{x")
+            assert _wait(lambda: "ltx-note pending" in (page.locator(".ltx-note").get_attribute("class") or ""), 15)
+            assert page.locator(".ltx-apply").is_disabled()
+
+            page.locator(".se-view .ltx-field").press("Escape")
+            assert _wait(lambda: page.locator(".se-view .ltx-field").count() == 0)
+            assert page.locator(TOOL).get_attribute("aria-pressed") == "false"
+            assert doc.expr == x + y
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
 
 
-def test_inserting_brings_the_formula_back_into_sight():
-    """The panel sits below the editor: after each way in - over the
-    selection, at the end, the whole expression, Ctrl+Enter - the page is
-    back at the top of the editor, wherever it had been scrolled to."""
-    z = Symbol("z")
+def test_the_reading_goes_where_the_editor_says():
+    """Over the selection, at the cursor, or after the whole formula when
+    there is neither: the editor decides, as it does for handwriting."""
     doc = Document(x + y, addons=[ADDON])
-    srv = EditorServer(doc, port=0)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    try:
-        with playwright.sync_playwright() as p:
-            try:
-                browser = p.chromium.launch()
-            except Exception as exc:
-                pytest.skip(f"chromium not available: {exc}")
-            page = browser.new_page(viewport={"width": 760, "height": 420}, reduced_motion="reduce")
-            errors = []
-            page.on("pageerror", lambda e: errors.append(str(e)))
-            page.goto(srv.url)
-            page.wait_for_selector(".se-addon-latex .ltx-input", timeout=30000)
-            # room below the panel, so the page can be scrolled away from the formula
-            page.evaluate("document.body.appendChild(Object.assign(document.createElement('div'), {style: 'height: 3000px'}))")
-            ed = "document.querySelector('.sympy-editor').__sympyEditor"
-            source = "document.querySelector('.se-source').textContent"
-            top = "Math.round(document.querySelector('.sympy-editor').getBoundingClientRect().top)"
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc)
+        try:
+            # nothing selected: after the formula, as if typed there
+            _type(page, "z")
+            assert _wait(lambda: page.locator(".ltx-src").inner_text() == "z", 15)
+            assert "after the formula" in page.locator(".ltx-reading-of").inner_text()
+            page.locator(".ltx-apply").click()
+            assert _wait(lambda: str(doc.expr) == "z*(x + y)", 15), str(doc.expr)
 
-            def scrolled_away():
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                page.wait_for_function(top + " < -100")
+            # a selection: the reading takes its place
+            page.locator(".ltx-keep").click()
+            path = next(p for p, n in doc.snapshot()["nodes"].items() if n["src"] == "z")
+            page.evaluate("p => document.querySelector('.sympy-editor').__sympyEditor.select(p)", path)
+            assert _wait(lambda: page.locator(".se-view .se-selected").count() == 1)
+            _type(page, r"\sqrt{5}")
+            assert _wait(lambda: "selection's place" in page.locator(".ltx-reading-of").inner_text(), 15)
+            assert _wait(lambda: not page.locator(".ltx-apply").is_disabled(), 15)
+            page.locator(".ltx-apply").click()
+            assert _wait(lambda: str(doc.expr) == "sqrt(5)*(x + y)", 15), str(doc.expr)
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
 
-            def back_at_the_formula():
-                page.wait_for_function(top + " >= -1 && " + top + " <= 1", timeout=5000)
 
-            box = page.locator(".ltx-input")
-            box.fill("z")
-            page.wait_for_function("document.querySelector('.ltx-src').textContent === 'z'")
+def test_the_ambiguities_and_the_constants_are_offered_under_the_editor():
+    """Where the text can be read several ways, a menu per point with the whole
+    expression under each reading; every name that usually means a constant is
+    a switch.  Both live in the strip, and the reading follows a pick."""
+    doc = Document(x + y, addons=[ADDON])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc)
+        try:
+            _type(page, r"\sin x \cos y + \pi")
+            usual, other = str(sin(x) * cos(y) + pi), str(sin(x * cos(y)) + pi)
+            assert _wait(lambda: page.locator(".ltx-src").inner_text() == usual, 15)
+            rows = page.locator(".ltx-point")
+            assert rows.count() == 2
+            row = rows.filter(has=page.locator(".ltx-fragment", has_text=r"\sin x \cos y").filter(has_not_text=r"\pi"))
+            choice = row.locator(".ltx-choice")
+            options = choice.locator("option").all_inner_texts()
+            assert usual in options and other in options and choice.input_value() == str(options.index(usual))
+            choice.select_option(str(options.index(other)))
+            assert _wait(lambda: page.locator(".ltx-src").inner_text() == other, 15)
 
-            scrolled_away()                                              # Add to end
-            page.locator(".se-addon-latex .ltx-insert").click()
-            page.wait_for_function(source + " === 'z*(x + y)'")
-            back_at_the_formula()
+            const = page.locator(".ltx-const input")
+            assert const.count() == 1 and const.is_checked() and "pi" in page.locator(".ltx-const").inner_text()
+            const.uncheck()
+            as_symbol = str(Symbol("pi") + sin(x * cos(y)))
+            assert _wait(lambda: page.locator(".ltx-src").inner_text() == as_symbol, 15)
 
-            xp = next(path for path, n in doc.snapshot()["nodes"].items() if n["src"] == "x")
-            page.evaluate("p => %s.select(p)" % ed, xp)
-            page.wait_for_function("document.querySelector('.se-addon-latex .ltx-insert').textContent === 'Replace the selection'")
-            scrolled_away()                                              # over the selection
-            page.locator(".se-addon-latex .ltx-insert").click()
-            page.wait_for_function("() => %s.includes('z**2') || %s === 'z*(y + z)'" % (source, source))
-            back_at_the_formula()
+            page.locator(".ltx-apply").click()
+            assert _wait(lambda: Symbol("pi") in doc.expr.free_symbols, 15), str(doc.expr)
+            assert pi not in doc.expr.atoms()
+            assert doc.history_labels()["actions"][-1] == r"LaTeX: \sin x \cos y + \pi"
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
 
-            scrolled_away()                                              # the whole expression
-            page.locator(".se-addon-latex .ltx-insert-all").click()
-            page.wait_for_function(source + " === 'z'")
-            back_at_the_formula()
-            assert doc.expr == z
 
-            box.fill("y")
-            page.wait_for_function("document.querySelector('.ltx-src').textContent === 'y'")
-            scrolled_away()                                              # Ctrl+Enter in the box
-            box.press("Control+Enter")
-            page.wait_for_function(source + " !== 'z'")
-            back_at_the_formula()
-            assert errors == []
-            browser.close()
-    finally:
-        srv.shutdown()
-        srv.server_close()
+def test_what_it_did_is_shown_and_can_be_taken_back():
+    """Applying shows the formula before and after, marked as the history marks
+    a step, to keep or to undo; the field closes, the tool comes up."""
+    doc = Document(x + y, addons=[ADDON])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc)
+        try:
+            _type(page, "7")
+            assert _wait(lambda: not page.locator(".ltx-apply").is_disabled(), 15)
+            page.locator(".ltx-apply").click()
+            assert _wait(lambda: str(doc.expr) == "7*x + 7*y", 15), str(doc.expr)
+            strip = page.locator(".ltx-applied")
+            # the document changed before the page did: the strip is drawn
+            # when the new state arrives in it
+            assert _wait(lambda: not strip.is_hidden(), 10)
+            assert strip.locator(".ltx-was").get_attribute("data-latex") == "x + y"
+            assert strip.locator(".ltx-now").get_attribute("data-latex") == "7 x + 7 y"
+            assert strip.locator(".ltx-was .rep-removed").count() >= 1
+            assert strip.locator(".ltx-now .rep-added").count() >= 1
+            assert page.locator(".se-view .ltx-field").count() == 0      # the field has done its work
+            assert page.locator(TOOL).get_attribute("aria-pressed") == "false"
+
+            page.locator(".ltx-back").click()
+            assert _wait(lambda: str(doc.expr) == "x + y", 15), str(doc.expr)
+            assert _wait(lambda: strip.is_hidden())
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
+def test_the_add_on_switched_off_takes_its_field_and_its_strip_away():
+    doc = Document(x + y, available=[LatexAddon()])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc, tool=False)      # off to start with
+        try:
+            page.locator('.se-toolbar [data-cmd="drawer"]').click()
+            switch = page.locator('.se-drawer .se-addon-row input[id*="latex"]')
+            assert _wait(lambda: switch.count() == 1)
+            switch.check()                                   # on: the tool appears
+            assert _wait(lambda: page.locator(TOOL).count() == 1, 15)
+            page.locator(".se-drawer-close").click()          # the drawer is over the formula
+            assert _wait(lambda: page.locator(".se-backdrop").is_hidden())
+            page.locator(TOOL).click()
+            assert _wait(lambda: page.locator(".se-view .ltx-field").count() == 1)
+            page.locator('.se-toolbar [data-cmd="drawer"]').click()
+            assert _wait(lambda: switch.is_visible())
+            switch.uncheck()
+            assert _wait(lambda: page.locator(TOOL).count() == 0, 15)
+            assert page.locator(".se-view .ltx-field").count() == 0 and page.locator(".ltx-panel").count() == 0
+            assert page.errors == []
+        finally:
+            _close(srv, browser)

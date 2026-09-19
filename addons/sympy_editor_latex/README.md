@@ -3,9 +3,12 @@
 An add-on for [sympy-editor](https://github.com/Upabjojr/sympy-editor): LaTeX
 in, with its ambiguities laid open.
 
-A panel under the formula takes LaTeX, typed or pasted, and shows a first
-reading of it, rendered and as SymPy source.  Two things about LaTeX make a
-silent conversion a bad idea, and the panel puts both in the user's hands:
+The LaTeX is typed **into the formula**: the **LaTeX** tool opens a field
+where what is typed will land - over the selection, at the cursor, or after
+the whole expression - and the formula makes room for it, as it does for
+handwriting.  Beside the field the reading is shown as it will look; under the
+editor, as SymPy would get it.  Two things about LaTeX make a silent
+conversion a bad idea, and both are in the user's hands there:
 
 - **Ambiguity.**  `f(x)` is a function applied or a product; `\sin x \cos y`
   is `sin(x) cos(y)` or `sin(x cos(y))`; `a/bc` divides by `b` or by `bc`.
@@ -22,10 +25,15 @@ silent conversion a bad idea, and the panel puts both in the user's hands:
   unit...) or a plain symbol of that name.  `\pi`, `e` and `i` start as
   constants, the others as symbols.
 
-**Replace the selection** puts the reading over what is selected in the
-editor, **Replace the whole expression** (or Ctrl+Enter in the box) makes it
-the formula.  Either way the page goes back up to the formula.  Names the
-document already uses are reused with their assumptions or matrix shapes.
+Nothing changes in the document until **Apply to the formula** (or
+<kbd>Enter</kbd>) says so - and then the strip shows the formula before and
+after, what went in red and what came in green, to **Keep** or to **Undo the
+change**; <kbd>Esc</kbd> closes the field and leaves the formula alone.  Where
+the reading goes is the editor's own answer: the selected sub-expression, the
+selected range, the cursor, or the end of the formula (where it goes in as if
+typed there - multiplied, or added when it begins with + or -).  To replace
+the whole expression, select it first.  Names the document already uses are
+reused with their assumptions or matrix shapes.
 
 ## Install
 
