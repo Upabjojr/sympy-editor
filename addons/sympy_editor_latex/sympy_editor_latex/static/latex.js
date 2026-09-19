@@ -143,6 +143,16 @@ SympyEditor.registerAddon("latex", (function () {
         return all.length ? { el: all[0], side: "end" } : null;
       }
 
+    //: What the field keeps to itself.  It sits inside the formula, where the
+    //: editor watches for taps, drags, long presses and keys of its own: while
+    //: it is open it is what the user is working in, so none of that is the
+    //: editor's - a tap in the field must not select the piece behind it, nor
+    //: a double tap open the editor's own box over it.
+    var OWN_EVENTS = ["pointerdown", "pointerup", "pointermove", "pointercancel",
+                      "mousedown", "mouseup", "mousemove", "click", "dblclick", "contextmenu",
+                      "touchstart", "touchend", "touchmove",
+                      "keydown", "keyup", "keypress"];
+
       /* ---- opening and closing the place to type ---- */
       /** Open the field where the LaTeX will land.  `again` re-places a field
        *  that was already open (the formula was drawn afresh, or the selection
@@ -162,6 +172,11 @@ SympyEditor.registerAddon("latex", (function () {
         var goes = replaced();
         if (goes.length) a = { el: goes[0], side: "before" };
         var holder = h("span", { class: "ltx-slot" }, [field]);
+        OWN_EVENTS.forEach(function (type) {
+          // stopped, not prevented: the field still takes the tap, the caret
+          // still moves in the text, the keyboard still comes up
+          holder.addEventListener(type, function (ev) { ev.stopPropagation(); });
+        });
         if (!a) view.appendChild(holder);
         else if (a.side === "before" && a.el.parentNode) a.el.parentNode.insertBefore(holder, a.el);
         else if (a.el.parentNode) a.el.parentNode.insertBefore(holder, a.el.nextSibling);

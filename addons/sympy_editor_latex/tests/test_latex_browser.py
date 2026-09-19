@@ -347,3 +347,45 @@ def test_the_piece_being_replaced_makes_way_for_the_field():
             assert page.errors == []
         finally:
             _close(srv, browser)
+
+
+def test_the_field_keeps_its_taps_and_keys_to_itself():
+    """The field sits inside the formula, where the editor watches for taps,
+    drags and keys of its own.  While it is open it is what the user is
+    working in: a tap in it must not select the piece behind it, a double tap
+    must not open the editor's own box over it, and the editor's keys are not
+    for it."""
+    doc = Document(x + y, addons=[ADDON])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc)
+        try:
+            page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.select('/1')")
+            assert _wait(lambda: page.locator(".se-view .se-selected").count() == 1)
+            page.locator(TOOL).click()
+            page.wait_for_selector(".se-view .ltx-field", timeout=10000)
+            page.locator(".se-view .ltx-field").fill(r"\sqrt{2}")
+            assert _wait(lambda: page.locator(".ltx-src").inner_text() == "sqrt(2)", 15)
+
+            box = page.locator(".se-view .ltx-field").bounding_box()
+            middle = (box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+            page.mouse.click(*middle)
+            page.wait_for_timeout(300)
+            assert page.evaluate("document.activeElement.className") == "ltx-field"
+            assert page.locator(".se-view .se-inline").count() == 0
+            assert page.locator(".se-caret").count() == 0          # no cursor put in the formula behind it
+
+            page.mouse.dblclick(*middle)                            # would open the editor's own box
+            page.wait_for_timeout(400)
+            assert page.locator(".se-view .se-inline").count() == 0
+            assert page.locator(".se-view .ltx-field").count() == 1
+            assert page.evaluate("document.activeElement.className") == "ltx-field"
+
+            # the editor's keys are the field's while it is open: Delete types
+            # a character, it does not delete the selection
+            page.locator(".se-view .ltx-field").press("End")
+            page.locator(".se-view .ltx-field").type("+1")
+            assert _wait(lambda: page.locator(".ltx-src").inner_text() == "1 + sqrt(2)", 15)
+            assert str(doc.expr) == "x + y"                         # and nothing has happened to the formula
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
