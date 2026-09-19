@@ -29,6 +29,37 @@ with, and `alone`; the ways the LaTeX itself can be read; **Apply to the
 formula**; and, once applied, the formula before and after, marked as the
 history marks a step, to **Keep** or to undo.
 
+## What reads the strokes
+
+The add-on has more than one engine, and the strip's menu picks between the
+ones this page has:
+
+| Engine | Where it reads | What it reads |
+| --- | --- | --- |
+| `math-ocr` | here, in Python | **mathematics**: fractions, exponents, roots, the layout as written. This is what the add-on is for |
+| `host` | in the page, by the device | **text**, a line at a time: Apple's Vision in the iOS and macOS apps, or a browser that has the Handwriting Recognition API. It knows nothing of two-dimensional layout, so `x²` comes back as `x2` and a fraction as two lines |
+
+The host engine is there for a device that carries no model — an App Store
+build without one, a browser on a phone — and for a line of ordinary algebra,
+which it reads well enough for the LaTeX reader to turn into SymPy. It is not
+a replacement for the stroke model.
+
+An engine is anything with `status()`, `warm(background)` and
+`recognize(strokes, beam, limit)`; pass your own:
+
+```python
+from sympy_editor_handwriting import Engine, HandwritingAddon
+
+addon = HandwritingAddon(engines=[Engine("mine", "My recognizer", MyRecognizer()),
+                                  Engine("host", "This device", where="host")])
+```
+
+A `where="host"` engine reads in the page: the panel asks
+`window.SympyEditorApp.recognizeInk(token, strokes)` (the apps) or the
+browser's `navigator.createHandwritingRecognizer()`, and the host answers
+`SympyEditor.inkRead(token, '{"candidates": [{"latex": "…"}]}')`. What comes
+back is read as SymPy here, like any other reading.
+
 ## What it needs
 
 * **A math-ocr checkout**, found as `SYMPY_EDITOR_MATHOCR`, or else as a

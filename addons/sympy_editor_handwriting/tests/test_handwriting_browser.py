@@ -607,3 +607,48 @@ def test_the_space_to_write_in_follows_the_formula():
             assert page.errors == []
         finally:
             _close(srv, browser)
+
+
+def test_the_device_s_own_reader_can_be_asked_instead_of_the_model():
+    """The add-on offers more than one engine: math-ocr's stroke model, which
+    reads mathematics, and whatever the device reads handwriting with - the
+    app's own reader (Apple's Vision) or the browser's.  A host engine reads
+    in the page and only the reading comes back here, to be read as SymPy."""
+    doc = Document(x, addons=[HandwritingAddon(LetterRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc, pen=False)
+        try:
+            # a host that reads ink, as an app offers one: in place before the
+            # page loads, which is when the add-on looks for it
+            page.add_init_script("""
+                window.SympyEditorApp = Object.assign(window.SympyEditorApp || {}, {
+                    recognizeInk: function (token, json) {
+                        window.__askedWith = JSON.parse(json);
+                        setTimeout(function () {
+                            window.SympyEditor.inkRead(token, JSON.stringify(
+                                {candidates: [{latex: "w + 2"}, {latex: "w+2"}]}));
+                        }, 10);
+                    }
+                });
+            """)
+            page.reload()
+            page.wait_for_selector(".se-stage .hw-ink", timeout=30000)
+            page.wait_for_selector(".se-view [data-path]")
+            menu = page.locator(".hw-engine")
+            page.locator('[data-cmd="addon:handwriting:pen"]').click()    # the strip, with the chooser in it
+            assert _wait(lambda: menu.count() == 1 and menu.is_visible())
+            assert [o.strip() for o in menu.locator("option").all_inner_texts()][0].startswith("math-ocr")
+            menu.select_option("host")
+            assert _wait(lambda: "own reader" in page.locator(".hw-note").inner_text(), 5)
+
+            view = page.locator(".se-view").bounding_box()
+            _drag(page, view["x"] + 200, view["y"] + 60, view["x"] + 260, view["y"] + 100)
+            assert _wait(lambda: page.locator(".hw-cand").count() == 2, 15)
+            # the strokes went to the host, and no stand-in was drawn into them
+            assert page.evaluate("window.__askedWith.length") == 1
+            assert page.locator(".hw-src").inner_text() == "w + 2"
+            page.locator(".hw-apply").click()
+            assert _wait(lambda: str(doc.expr) == "x*(w + 2)", 15), str(doc.expr)
+            assert page.errors == []
+        finally:
+            _close(srv, browser)

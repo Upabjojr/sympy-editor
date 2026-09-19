@@ -52,6 +52,72 @@ SympyEditor.registerAddon("handwriting", (function () {
       '<path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" ' +
       'd="M8 3v9M4.2 8.2 8 12l3.8-3.8"/></svg>';
   }
+  /** What can read strokes in the page itself, when the add-on's Python
+   *  cannot or is not the one asked: the app's own reader (the host bridge,
+   *  Apple's Vision behind it) or the browser's Handwriting Recognition API.
+   *  Both read *text*, a line at a time - they know nothing of fractions or
+   *  exponents - so what comes back is the reading of what was written, for
+   *  the LaTeX reader to turn into SymPy.
+   *
+   *  Answers `{label, read(strokes) -> Promise<[{latex, raw}]>}`, or null. */
+  function hostReader() {
+    var app = window.SympyEditorApp;
+    if (app && app.recognizeInk) {
+      return {
+        label: "this device's own reader",
+        read: function (strokes) {
+          return new Promise(function (resolve, reject) {
+            var token = "i" + Date.now() + Math.random().toString(36).slice(2, 6);
+            hostReader.waiting[token] = { resolve: resolve, reject: reject };
+            try { app.recognizeInk(token, JSON.stringify(strokes)); }
+            catch (e) { delete hostReader.waiting[token]; reject(e); }
+          });
+        }
+      };
+    }
+    if (typeof navigator.createHandwritingRecognizer === "function") {
+      return {
+        label: "the browser's own reader",
+        read: async function (strokes) {
+          var recognizer = hostReader.browser;
+          if (!recognizer) {
+            recognizer = hostReader.browser = await navigator.createHandwritingRecognizer({
+              languages: ["en"], recognitionType: "text", inputType: "mouse", alternatives: 4
+            });
+          }
+          var drawing = recognizer.startDrawing({ recognitionType: "text", inputType: "mouse", alternatives: 4 });
+          strokes.forEach(function (points) {
+            var stroke = new window.HandwritingStroke();
+            points.forEach(function (p) { stroke.addPoint({ x: p[0], y: p[1], t: Math.round(p[2]) }); });
+            drawing.addStroke(stroke);
+          });
+          var said = await drawing.getPrediction();
+          return (said || []).map(function (p) { return { latex: p.text, raw: p.text }; });
+        }
+      };
+    }
+    return null;
+  }
+  //: Where a host answers a reading of its own (SympyEditor.inkRead below).
+  hostReader.waiting = {};
+  hostReader.browser = null;
+
+  /** A host that read the ink answers here - `SympyEditor.inkRead(token,
+   *  json)`, beside the editor's own openedFile and keptValue: the token it
+   *  was given, and what it made of the strokes ({"candidates": [{"latex"}]}
+   *  as JSON, or {"error": "..."} when it could not read them). */
+  function inkRead(token, json) {
+    var waiting = hostReader.waiting[token];
+    if (!waiting) return false;
+    delete hostReader.waiting[token];
+    var said = null;
+    try { said = JSON.parse(json || "null"); } catch (e) { said = null; }
+    if (!said || said.error) waiting.reject(new Error((said && said.error) || "The reader said nothing"));
+    else waiting.resolve(said.candidates || []);
+    return true;
+  }
+  if (window.SympyEditor && !window.SympyEditor.inkRead) window.SympyEditor.inkRead = inkRead;
+
   function reveal(el) {
     if (!el || !el.scrollIntoView) return;
     var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -75,6 +141,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       + "<li>What the reading did is shown under the editor - the formula as it was and as it now is, what went marked red and what came marked green - to <b>Keep</b> or to <b>Undo the change</b>; the editor's own Undo takes it back too.</li>"
       + "<li>Under the readings: what SymPy gets of the one in the formula, with a menu for each part of the LaTeX that can be read more than one way and a switch for each constant name. <b>\u270e LaTeX</b> opens the reading's own LaTeX to correct where a glyph was read wrong: what is typed there is read and goes into the formula like any other reading, and stays among them to pick again.</li>"
       + "<li>The reading is done by math-ocr's stroke model. It reads one formula at a time, and mixes up look-alike glyphs most (<code>1</code> and <code>|</code>, <code>V</code> and <code>v</code>).</li>"
+      + "<li>Where this device has a reader of its own - the app's (Apple's Vision) or the browser's - it is offered beside the model, in the menu at the top of the strip. It reads <i>text</i>, a line at a time: it knows nothing of fractions, exponents or roots, and what it reads is taken as typed. It is there for a device that carries no model, and for a line of ordinary algebra; the model is what reads mathematics.</li>"
       + "</ul></section>"
       + (status.notice ? '<section><h3>About the model</h3><p style="white-space: pre-wrap">' + plain(status.notice) + "</p></section>" : "");
   }
@@ -101,7 +168,33 @@ SympyEditor.registerAddon("handwriting", (function () {
       var h = api.h;
       var status = (api.options && api.options.status) ||
         { available: false, reason: "The add-on's Python said nothing about its model" };
-      var canRead = !!status.available;
+      //: What can read strokes, as the add-on's Python lists them, and which
+      //: of them is asked.  A "host" engine reads in the page (hostReader).
+      var engines = (api.options && api.options.engines) || [];
+      var engine = (api.options && api.options.engine) || (engines[0] && engines[0].name) || "math-ocr";
+      var host = hostReader();
+      var canRead = false;
+
+      function engineNamed(name) {
+        for (var i = 0; i < engines.length; i++) if (engines[i].name === name) return engines[i];
+        return null;
+      }
+      /** Whether the engine named can read here, and what to say when it cannot. */
+      function engineState(name) {
+        var e = engineNamed(name);
+        if (!e) return { ok: !!status.available, why: status.reason || "" };
+        if (e.where === "host") {
+          return host ? { ok: true, why: "" }
+                      : { ok: false, why: "This device offers no reader of its own to the page" };
+        }
+        return { ok: !!(e.status && e.status.available),
+                 why: (e.status && e.status.reason) || status.reason || "" };
+      }
+      /** The engines worth offering: the ones that can read, and the chosen
+       *  one even when it cannot (so that it says why). */
+      function usableEngines() {
+        return engines.filter(function (e) { return e.name === engine || engineState(e.name).ok; });
+      }
 
       var guide;                     // the add-on's own page of the help overlay, below
 
@@ -136,8 +229,11 @@ SympyEditor.registerAddon("handwriting", (function () {
         h("div", { class: "hw-applied-row" }, [h("span", { class: "hw-applied-label" }, ["to"]), nowFormula]),
         h("div", { class: "hw-applied-ask" }, [keepBtn, backBtn])]);
       var helpBtn = h("button", { type: "button", class: "hw-help", title: "How writing by hand works" }, ["?"]);
+      //: Which reader is asked, when this page has more than one (renderEngines).
+      var engineMenu = h("select", { class: "hw-engine", hidden: "", title: "What reads what you write" });
+      engineMenu.addEventListener("change", function () { pickEngine(engineMenu.value); });
       var element = h("div", { class: "hw-panel", "data-strokes": "0", "data-pen": "off", "data-aim": "", hidden: "" },
-        [h("div", { class: "hw-head" }, [note, helpBtn]), withRow, withDivide, cands, readingOf,
+        [h("div", { class: "hw-head" }, [note, engineMenu, helpBtn]), withRow, withDivide, cands, readingOf,
          h("div", { class: "hw-srcrow" }, [src, editBtn]), latexRow, parseBlock, actions, appliedRow]);
       helpBtn.addEventListener("click", function () { api.showHelp(guide, "Handwriting"); });
       // The keys of a menu or a button here are the panel's own, not the formula's.
@@ -540,8 +636,35 @@ SympyEditor.registerAddon("handwriting", (function () {
         say(idle(), !canRead);
       }
       // With nothing read yet, the panel says how to write - it is all it holds.
+      /** The chooser: the readers this page has, the chosen one showing. */
+      function renderEngines() {
+        var offered = usableEngines();
+        engineMenu.hidden = offered.length < 2;
+        engineMenu.textContent = "";
+        offered.forEach(function (e) {
+          var label = e.label + (e.where === "host" && host ? " \u2014 " + host.label : "");
+          var opt = h("option", { value: e.name, title: e.note || "" }, [label]);
+          if (e.name === engine) opt.selected = true;
+          engineMenu.appendChild(opt);
+        });
+        canRead = engineState(engine).ok;
+        updateTools();
+      }
+
+      /** Ask another reader from now on. */
+      function pickEngine(name) {
+        if (!engineNamed(name) || name === engine) return;
+        engine = name;
+        renderEngines();
+        var e = engineNamed(engine), state = engineState(engine);
+        say(state.ok ? "Read from now on by " + (e.where === "host" && host ? host.label : e.label) +
+                       (e.note ? " \u2014 " + e.note : "")
+                     : state.why, !state.ok);
+        api.call("engine", { name: name }, { quiet: true }).then(function () {}, function () {});
+      }
+
       function idle() {
-        if (!canRead) return status.reason;
+        if (!canRead) return engineState(engine).why || status.reason;
         return pen ? "Write on the formula \u2014 a tap still selects a piece, or puts the cursor between two."
                    : "Press Write in the tools, and write on the formula.";
       }
@@ -575,12 +698,23 @@ SympyEditor.registerAddon("handwriting", (function () {
         if (!aim || aim.free) aim = aimNow();
         element.setAttribute("data-aim", aim.kind);
         redraw();
+        var chosen = engineNamed(engine), byHost = chosen && chosen.where === "host";
         var ink = held.strokes;
-        if (aim.kind === "nest" && aim.node) ink = standIn(aim.node.rect, aim.read || held.strokes);
+        // The stand-in is for a reader that reads mathematics: a triangle drawn
+        // over a piece means \Delta to the stroke model and nothing at all to a
+        // reader of text, so a host reading is of the ink alone.
+        if (!byHost && aim.kind === "nest" && aim.node) ink = standIn(aim.node.rect, aim.read || held.strokes);
+        var nest = !byHost && aim.kind === "nest" ? aim.path : null;
         say("Reading…");
         element.classList.add("hw-busy");
         // quiet: the editor's overlay would cover the formula while one writes on
-        api.call("write", { strokes: ink, nest: aim.kind === "nest" ? aim.path : null }, { quiet: true })
+        var asked = byHost
+          ? hostRead(ink).then(function (found) {
+              return api.call("write", { candidates: found.candidates, ms: found.ms, engine: engine },
+                              { quiet: true });
+            })
+          : api.call("write", { strokes: ink, nest: nest, engine: engine }, { quiet: true });
+        asked
           .then(function (res) {
             if (my !== seq) return;
             element.classList.remove("hw-busy");
@@ -598,6 +732,18 @@ SympyEditor.registerAddon("handwriting", (function () {
             say(String((e && e.message) || e), true);
           });
       }
+      /** The host's own reading of the ink, timed here: it is the page's work. */
+      function hostRead(ink) {
+        if (!host) return Promise.reject(new Error("This device offers no reader of its own"));
+        var t0 = (window.performance && performance.now()) || Date.now();
+        return host.read(ink).then(function (found) {
+          var ms = Math.round(((window.performance && performance.now()) || Date.now()) - t0);
+          var out = (found || []).filter(function (c) { return c && String(c.latex || "").trim(); })
+            .map(function (c) { return { latex: String(c.latex).trim(), raw: String(c.raw || c.latex).trim() }; });
+          return { candidates: out, ms: ms };
+        });
+      }
+
       function renderReadings() {
         cands.textContent = "";
         readings.forEach(function (c, i) {
@@ -1051,6 +1197,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       var resizer = window.ResizeObserver ? new ResizeObserver(function () { layout(); }) : null;
       if (resizer && stage) resizer.observe(stage); else window.addEventListener("resize", layout);
 
+      renderEngines();
       setPen(false);
       setTimeout(dressTools, 0);
       setTimeout(layout, 0);

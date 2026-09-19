@@ -36,7 +36,8 @@ final class FilesBridge: NSObject, WKScriptMessageHandler {
           window.SympyEditorApp = {
             saveFile: forward("saveFile"), shareFile: forward("shareFile"),
             shareHtml: forward("shareHtml"), openFile: forward("openFile"),
-            keepRead: forward("keepRead"), keepWrite: forward("keepWrite")
+            keepRead: forward("keepRead"), keepWrite: forward("keepWrite"),
+            recognizeInk: forward("recognizeInk")
           };
         })();
         """
@@ -64,6 +65,8 @@ final class FilesBridge: NSObject, WKScriptMessageHandler {
             keepRead(token: arguments[0], key: arguments[1])
         case "keepWrite" where arguments.count >= 2:
             keepWrite(key: arguments[0], text: arguments[1])
+        case "recognizeInk" where arguments.count >= 2:
+            recognizeInk(token: arguments[0], strokes: arguments[1])
         default:
             break
         }
@@ -205,6 +208,28 @@ final class FilesBridge: NSObject, WKScriptMessageHandler {
             try text.write(to: try keepURL(for: key), atomically: true, encoding: .utf8)
         } catch {
             report("What the editor keeps could not be written: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - reading handwriting with this device's own reader
+
+    /// What the handwriting add-on's "host" engine asks for: the strokes read
+    /// by Apple's Vision (see InkReader), answered through
+    /// `SympyEditor.inkRead`.  It reads text, not mathematical layout - the
+    /// add-on says as much beside the engine's name.
+    private func recognizeInk(token: String, strokes: String) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var answer: [String: Any]
+            do {
+                answer = ["candidates": try InkReader.candidates(from: strokes)]
+            } catch {
+                answer = ["error": error.localizedDescription]
+            }
+            let json = (try? JSONSerialization.data(withJSONObject: answer))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "{\"error\": \"the reading could not be sent\"}"
+            guard let self = self else { return }
+            let call = "window.SympyEditor.inkRead(\(self.quote(token)), \(self.quote(json)));"
+            DispatchQueue.main.async { self.webView?.evaluateJavaScript(call, completionHandler: nil) }
         }
     }
 

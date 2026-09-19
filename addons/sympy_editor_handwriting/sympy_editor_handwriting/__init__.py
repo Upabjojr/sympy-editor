@@ -18,7 +18,8 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any, Dict, Optional
+from collections import OrderedDict
+from typing import Any, Dict, Iterable, List, Optional
 
 import sympy
 from sympy import Basic
@@ -27,7 +28,8 @@ from sympy_editor.addons import Addon
 
 from .recognizer import StrokeRecognizer, functions_as_commands, sized_delimiters, with_braces
 
-__all__ = ["HandwritingAddon", "ADDON", "StrokeRecognizer", "functions_as_commands", "sized_delimiters", "with_braces"]
+__all__ = ["HandwritingAddon", "Engine", "ADDON", "StrokeRecognizer", "functions_as_commands",
+           "sized_delimiters", "with_braces"]
 
 STATIC = Path(__file__).parent / "static"
 
@@ -50,6 +52,44 @@ def _nest(tex: str, piece: str) -> str:
     return STAND_IN.sub(put, tex, count=1)
 
 
+class Engine:
+    """One way of reading pen strokes, and where the reading happens.
+
+    A *Python* engine has a recognizer of its own - anything with
+    ``status()``, ``warm(background)`` and ``recognize(strokes, beam, limit)``
+    as :class:`~sympy_editor_handwriting.recognizer.StrokeRecognizer` has
+    them - and the strokes go to it.  A *host* engine reads in the page's
+    host instead: the app's own recognizer (Apple's Vision, say) or the
+    browser's Handwriting Recognition API, which the panel asks directly; its
+    readings then come back here to be read as SymPy, like any others.
+    """
+
+    def __init__(self, name: str, label: str, recognizer=None, *, where: str = "python",
+                 note: str = "") -> None:
+        if where not in ("python", "host"):
+            raise ValueError("where must be 'python' or 'host'")
+        if where == "python" and recognizer is None:
+            raise ValueError(f"the {name!r} engine reads here, so it needs a recognizer")
+        self.name = name
+        self.label = label
+        self.recognizer = recognizer
+        self.where = where
+        #: What the panel says about this engine under its name - what it is
+        #: good for, and what it is not.
+        self.note = note
+
+    def status(self) -> Dict[str, Any]:
+        """Whether this engine can read here, and if not, why.  A host engine
+        can only be asked in the page: the panel decides, and says so."""
+        if self.where == "host":
+            return {"available": None, "reason": "the page says whether its host can read strokes"}
+        return self.recognizer.status()
+
+    def describe(self) -> Dict[str, Any]:
+        return {"name": self.name, "label": self.label, "where": self.where,
+                "note": self.note, "status": self.status()}
+
+
 class HandwritingAddon(Addon):
     name = "handwriting"
     label = "Handwriting"
@@ -58,17 +98,54 @@ class HandwritingAddon(Addon):
     js = (STATIC / "handwriting.js").read_text(encoding="utf-8")
     css = (STATIC / "handwriting.css").read_text(encoding="utf-8")
 
-    def __init__(self, recognizer: Optional[StrokeRecognizer] = None) -> None:
-        self.recognizer = recognizer or StrokeRecognizer()
+    def __init__(self, recognizer: Optional[StrokeRecognizer] = None,
+                 engines: Optional[Iterable[Engine]] = None, engine: Optional[str] = None) -> None:
+        #: What can read strokes here, by name.  math-ocr's stroke model is
+        #: the one that reads mathematics; the host's own reader is offered
+        #: beside it (see :class:`Engine`), and a page in an app or in a
+        #: browser that has one says so.
+        self.engines: "OrderedDict[str, Engine]" = OrderedDict()
+        for eng in engines or self._default_engines(recognizer):
+            self.engines[eng.name] = eng
+        #: Which of them is asked.  A host engine the page cannot offer falls
+        #: back to the first that reads here (see :meth:`_engine`).
+        self.engine = engine or next(iter(self.engines))
+        first = self.engines[self.engine]
+        #: What ``recognizer`` used to be: the model, for whoever asks.
+        self.recognizer = first.recognizer or next(
+            (e.recognizer for e in self.engines.values() if e.recognizer is not None), None)
+
+    @staticmethod
+    def _default_engines(recognizer: Optional[StrokeRecognizer]) -> List[Engine]:
+        return [
+            Engine("math-ocr", "math-ocr's stroke model", recognizer or StrokeRecognizer(),
+                   note="reads mathematics: fractions, exponents, roots, the layout as written"),
+            Engine("host", "what this device reads handwriting with", where="host",
+                   note="the app's or the browser's own reader: text, a line at a time - "
+                        "it knows nothing of fractions or exponents, and needs no model here"),
+        ]
 
     def activate(self) -> None:
         super().activate()
         # The model loaded as the add-on is switched on, off to one side - not
         # at the first formula, which would wait for it.
-        self.recognizer.warm(background=True)
+        for eng in self.engines.values():
+            if eng.recognizer is not None:
+                eng.recognizer.warm(background=True)
+
+    def _engine(self, name: Optional[str] = None) -> Engine:
+        """The engine to ask: the one named, or the one chosen."""
+        eng = self.engines.get(str(name or self.engine))
+        if eng is None:
+            raise ValueError(f"No handwriting engine called {name or self.engine!r}")
+        return eng
 
     def client_options(self) -> Dict[str, Any]:
-        return {"status": self.recognizer.status()}
+        chosen = self._engine()
+        return {"status": chosen.status() if chosen.where == "python" else self.engines["math-ocr"].status()
+                if "math-ocr" in self.engines else chosen.status(),
+                "engine": self.engine,
+                "engines": [eng.describe() for eng in self.engines.values()]}
 
     @staticmethod
     def _latex():
@@ -106,7 +183,17 @@ class HandwritingAddon(Addon):
 
     def handle(self, doc, method: str, payload: Dict[str, Any]):
         if method == "status":
-            return self.recognizer.status()
+            return self._engine().status()
+        if method == "engines":
+            return {"engine": self.engine, "engines": [eng.describe() for eng in self.engines.values()]}
+        if method == "engine":
+            # Which engine reads from now on.  A host engine is the page's to
+            # run: nothing is loaded here, and "write" takes its readings in.
+            eng = self._engine(payload.get("name"))
+            self.engine = eng.name
+            if eng.recognizer is not None:
+                eng.recognizer.warm(background=True)
+            return {"engine": self.engine, "where": eng.where, "status": eng.status()}
         if method == "recognize":
             result = self.recognizer.recognize(payload.get("strokes"), beam=payload.get("beam", 4))
             for cand in result["candidates"]:
@@ -119,7 +206,18 @@ class HandwritingAddon(Addon):
             # (a node's path), read together with that node, whose LaTeX takes the
             # place of the stand-in the strokes carry (``\Delta``).  Readings that
             # do not carry it exactly once are of the ink alone, and say so.
-            result = self.recognizer.recognize(payload.get("strokes"), beam=payload.get("beam", 4))
+            #
+            # The strokes may have been read already, by the host's own reader
+            # (a host engine, see Engine): then the readings come in as
+            # ``candidates`` and only the nesting and the SymPy are done here.
+            given = payload.get("candidates")
+            if given is not None:
+                result = {"candidates": [dict(c) for c in given], "ms": payload.get("ms", 0),
+                          "strokes": len(payload.get("strokes") or []), "engine": payload.get("engine") or self.engine}
+            else:
+                result = self._engine(payload.get("engine")).recognizer.recognize(
+                    payload.get("strokes"), beam=payload.get("beam", 4))
+                result["engine"] = self._engine(payload.get("engine")).name
             nest = payload.get("nest")
             piece = None
             if nest:

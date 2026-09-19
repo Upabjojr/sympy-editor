@@ -94,6 +94,9 @@
 }
 .hw-head { display: flex; align-items: baseline; gap: 0.5rem; }
 .hw-head .hw-note { flex: 1 1 auto; }
+.hw-engine { font: inherit; font-size: 12px; max-width: 14rem; }
+.hw-engine[hidden] { display: none !important; }
+@media (any-pointer: coarse) { .hw-engine { font-size: 14px; } }
 .hw-help {
   flex: 0 0 auto;
   font: inherit;
