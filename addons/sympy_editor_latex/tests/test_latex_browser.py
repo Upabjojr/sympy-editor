@@ -286,3 +286,47 @@ def test_what_is_typed_at_a_cursor_goes_in_at_the_cursor():
             assert page.errors == []
         finally:
             _close(srv, browser)
+
+
+def test_the_piece_being_replaced_makes_way_for_the_field():
+    """Opening the field on a selection puts it where that piece is, and takes
+    the piece off the screen while it is there: what will happen is plain -
+    this is a replacement, not something added beside it.  Escape puts the
+    piece back, and what is applied takes its place."""
+    from sympy import symbols as _symbols
+
+    b, i, p_ = _symbols("b i p")
+    doc = Document(b ** i + 1, addons=[ADDON])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc)
+        try:
+            path = next(k for k, n in doc.snapshot()["nodes"].items() if n["src"] == "i")
+            page.evaluate("p => document.querySelector('.sympy-editor').__sympyEditor.select(p)", path)
+            assert _wait(lambda: page.locator(".se-view .se-selected").count() == 1)
+            shown = "p => { const el = document.querySelector(`.se-view [data-path=\"${p}\"]`);" \
+                    " return el ? getComputedStyle(el).display !== 'none' : null; }"
+            assert page.evaluate(shown, path) is True
+
+            page.locator(TOOL).click()
+            page.wait_for_selector(".se-view .ltx-field", timeout=10000)
+            assert _wait(lambda: page.evaluate(shown, path) is False), "the piece must make way for the field"
+            assert "selection's place" in page.locator(".ltx-reading-of").inner_text()
+
+            # Escape: the piece comes back and the formula is as it was
+            page.locator(".se-view .ltx-field").press("Escape")
+            assert _wait(lambda: page.evaluate(shown, path) is True)
+            assert doc.expr == b ** i + 1
+
+            # and again, this time applied: the exponent is what was typed
+            page.evaluate("p => document.querySelector('.sympy-editor').__sympyEditor.select(p)", path)
+            assert _wait(lambda: page.locator(".se-view .se-selected").count() == 1)
+            page.locator(TOOL).click()
+            page.wait_for_selector(".se-view .ltx-field", timeout=10000)
+            page.locator(".se-view .ltx-field").fill(r"\cos p")
+            assert _wait(lambda: not page.locator(".ltx-apply").is_disabled(), 15)
+            page.locator(".se-view .ltx-field").press("Enter")
+            assert _wait(lambda: doc.expr == b ** cos(p_) + 1, 15), str(doc.expr)
+            assert page.locator(".se-view .ltx-field").count() == 0
+            assert page.errors == []
+        finally:
+            _close(srv, browser)

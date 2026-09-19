@@ -59,6 +59,8 @@ SympyEditor.registerAddon("latex", (function () {
       //: What it will look like, beside the field: the reading typeset.
       var ghost = h("span", { class: "ltx-ghost", "aria-hidden": "true" });
       var typing = false, room = null, aim = null, anchored = null;
+      //: The pieces the field stands in the place of, hidden while it does.
+      var covered = [];
       var choices = {}, constants = {}, last = null;
       var seq = 0, timer = null, katex = null;
       var applied = null, mine = 0, puts = 0, guide;
@@ -91,6 +93,32 @@ SympyEditor.registerAddon("latex", (function () {
         for (var i = 0; i < els.length; i++) if (els[i].getAttribute("data-path") === path) return els[i];
         return null;
       }
+      /** The pieces a reading would replace: the selection, or the range. */
+      function replaced() {
+        var r = api.range && api.range();
+        if (r && editor._rangePaths) {
+          return editor._rangePaths().map(elementFor).filter(function (el) { return !!el; });
+        }
+        var sel = api.selected && api.selected();
+        var el = sel ? elementFor(sel) : null;
+        return el ? [el] : [];
+      }
+      /** Take them off the screen: the field stands where they were, so what
+       *  will happen is plain - this is a replacement, not an insertion. */
+      function cover(els) {
+        uncover();
+        els.forEach(function (el) {
+          covered.push({ el: el, display: el.style.display });
+          el.style.display = "none";
+        });
+      }
+      function uncover() {
+        covered.forEach(function (was) {
+          try { was.el.style.display = was.display || ""; } catch (e) { /* rendered again */ }
+        });
+        covered = [];
+      }
+
       /** The piece the field is put beside, and on which side of it. */
       function anchor() {
         var c = api.caret && api.caret();
@@ -123,12 +151,17 @@ SympyEditor.registerAddon("latex", (function () {
         aim = held || aimNow();
         var a = wanted || anchor();
         anchored = a;
+        // Replacing something: it goes off the screen and the field stands in
+        // its place; adding at a cursor or at the end leaves the formula whole.
+        var goes = aim.kind === "selection" || aim.kind === "range" ? replaced() : [];
+        if (goes.length) a = { el: goes[0], side: "before" };
         var holder = h("span", { class: "ltx-slot" }, [field, ghost]);
         if (!a) view.appendChild(holder);
         else if (a.side === "before" && a.el.parentNode) a.el.parentNode.insertBefore(holder, a.el);
         else if (a.el.parentNode) a.el.parentNode.insertBefore(holder, a.el.nextSibling);
         else view.appendChild(holder);
         room = holder;
+        if (goes.length) cover(goes);
         if (editor && editor.root) editor.root.classList.add("se-typing-latex");
         element.setAttribute("data-aim", aim.kind);
         readingOf.textContent = aimWords(aim);
@@ -153,6 +186,7 @@ SympyEditor.registerAddon("latex", (function () {
         // up for as long as something is focused, so the formula takes the
         // focus back (which is where the editor's own keys belong anyway).
         var had = document.activeElement === field;
+        uncover();
         if (room && room.parentNode) room.parentNode.removeChild(room);
         room = null;
         if (had) {
@@ -365,7 +399,8 @@ SympyEditor.registerAddon("latex", (function () {
       });
 
       guide = "<section><h3>LaTeX into the formula</h3><ul>"
-        + "<li><b>LaTeX</b>, among the editor's tools, opens a field <i>in the formula</i>: over the selection, at the cursor, or after the whole expression - wherever what you type will go. The formula makes room for it, and beside it you see the LaTeX as it will look.</li>"
+        + "<li><b>LaTeX</b>, among the editor's tools, opens a field <i>in the formula</i>: over the selection, at the cursor, or after the whole expression - wherever what you type will go. Beside it you see the LaTeX as it will look.</li>"
+        + "<li>Opened on a selection, the field stands <i>in that piece's place</i> and the piece is taken off the screen until the field goes: what is typed replaces it. At a cursor the formula is left whole and what is typed is added there - the line under the editor says which it will be.</li>"
         + "<li>What is typed is read as you type. Under the editor: what SymPy gets of it, the parts that can be read more than one way - <code>f(x)</code> applied or multiplied, how far <code>\\sin x \\cos y</code> reaches - each a menu, and a switch for each name that usually means a constant (<code>\\pi</code>, <code>e</code>, <code>i</code>, <code>\\gamma</code>).</li>"
         + "<li>A text that stops in the middle of an expression (<code>\\frac{x</code>, <code>x +</code>) or of a command (<code>\\fr</code>) is <i>not finished yet</i>, not wrong: the last reading stays, dimmed, until it reads again.</li>"
         + "<li><b>Apply to the formula</b> (or <kbd>Enter</kbd>) puts it in - nothing changes before that - and then the formula before and after is shown, what went in red and what came in green, to <b>Keep</b> or to <b>Undo the change</b>. <kbd>Esc</kbd> closes the field and leaves the formula alone.</li>"
@@ -380,10 +415,8 @@ SympyEditor.registerAddon("latex", (function () {
           // The field belongs where the selection is: while it is open, a new
           // selection moves it (and the reading follows the new target).
           if (!typing) return;
-          var moved = aimNow();
-          var same = aim && moved.kind === aim.kind && moved.path === aim.path;
           var text = field.value;
-          openField(same);                       // the same target: only put the field back
+          openField(true);                       // where it aims was settled when it opened
           field.value = text;
           if (text.trim()) read();
         },
