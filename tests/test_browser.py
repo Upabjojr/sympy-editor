@@ -83,8 +83,8 @@ def serve_expr():
     """Factory: serve_expr(expr) -> (server, document); servers stop at teardown."""
     servers = []
 
-    def _serve(expr, **kwargs):
-        doc = Document(expr)
+    def _serve(expr, *, available=None, **kwargs):
+        doc = Document(expr) if available is None else Document(expr, available=available)
         srv = EditorServer(doc, port=0, **kwargs)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         servers.append(srv)
@@ -2729,7 +2729,10 @@ def test_the_tools_are_laid_out_in_columns(browser, serve_expr):
     starts at the left edge, the right one ends at the right edge, the middle
     one is centred.  One long strip of buttons, or rows each ending wherever
     their content happens to stop, read as a mess."""
-    srv, doc = serve_expr(x + y)
+    # Nothing else installed in this Python may join the strip: with an add-on
+    # available the drawer's button takes a column of its own, and the layout
+    # under test is the one a page without add-ons has.
+    srv, doc = serve_expr(x + y, available=[])
     page = browser.new_page(viewport={"width": 1100, "height": 800})
     page.goto(srv.url)
     page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)

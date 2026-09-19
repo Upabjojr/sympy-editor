@@ -101,7 +101,10 @@ def test_move_a_subtree():
 
 
 def test_the_page_carries_the_addon():
-    doc = Document(x + y, addons=["sympy_editor_tree"])
+    # `available=[]`: this page carries the tree add-on and nothing else,
+    # whatever else happens to be installed beside it in this Python - the
+    # list micropip is given is the page's, not the machine's.
+    doc = Document(x + y, addons=["sympy_editor_tree"], available=[])
     cfg = build_config(doc)
     assert [a["name"] for a in cfg["addons"]] == ["tree"]
     assert "registerAddon(\"tree\"" in cfg["addons"][0]["js"]

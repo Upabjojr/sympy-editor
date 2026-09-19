@@ -2068,7 +2068,14 @@ var SympyEditor = (function () {
         self._setHover(gap ? null : leaf);
         self.view.classList.toggle("se-gap", !!gap);
       });
-      this.view.addEventListener("scroll", function () { self._gapCache = null; if (self.caret) self._hideCaret(); self._applySelection(); });
+      this.view.addEventListener("scroll", function () {
+        self._gapCache = null;
+        // Scrolling moves the glyphs under the boxes, and says nothing about
+        // the selection: the status line stands here too.
+        if (self.input) return;
+        if (self.caret) self._hideCaret();
+        self._applySelection(true);
+      });
       // A long press must not bring up the browser's own menu (Android
       // offers one over anything held, and cancels the touch when it shows).
       this.view.addEventListener("contextmenu", function (ev) { if (self._pointerType === "touch") ev.preventDefault(); });
@@ -2307,8 +2314,12 @@ var SympyEditor = (function () {
         requestAnimationFrame(function () {
           self._relayoutPending = false;
           self._gapCache = null;
+          // A relayout puts the boxes back where the glyphs now are, and says
+          // nothing about the selection: the status line stands (a field open
+          // in the formula spreads it, which arrives here as a resize).
+          if (self.input) return;
           if (self.caret) self._hideCaret();
-          self._applySelection();
+          self._applySelection(true);
         });
       };
       if (typeof ResizeObserver === "function") {
@@ -3063,7 +3074,11 @@ var SympyEditor = (function () {
       this._updateToolbar();
     }
 
-    _applySelection() {
+    /** Put the selection's boxes, arrows and status line back as the state
+     *  says.  `quiet`: the status line is left alone - what a relayout wants,
+     *  since nothing about the selection has changed and the line may be
+     *  saying something of its own (a field is open, something was deleted). */
+    _applySelection(quiet) {
       this._updateScrollArrows();
       this._addonsNotify("onSelect", this.selected, this.range);
       this._placeMatrixHandle();
@@ -3078,7 +3093,7 @@ var SympyEditor = (function () {
         var jr = this._visualRect(j.el);
         this._drawBoxes("select", [jr]);
         var jn = this.state.nodes[j.path];
-        this._setStatus("Operator " + j.text + " in " + jn.type + " " + jn.src
+        if (!quiet) this._setStatus("Operator " + j.text + " in " + jn.type + " " + jn.src
                         + " (type + - * / ^ = to change it; Delete removes it, the two then multiply)");
         this._markSource([]);
         this._placeActions(null);
@@ -3094,7 +3109,7 @@ var SympyEditor = (function () {
         }
         var u = this._unionRect(rects);
         this._drawBoxes("select", u ? [u] : []);
-        this._setStatus(this.state.nodes[this.range.parent].type + " range: " + this._rangeSource(rangePaths));
+        if (!quiet) this._setStatus(this.state.nodes[this.range.parent].type + " range: " + this._rangeSource(rangePaths));
         this._markSource(rangePaths);
         this._placeActions(u);
         return;
@@ -3105,7 +3120,7 @@ var SympyEditor = (function () {
         var srects = [];
         for (var j = 0; j < els.length; j++) { els[j].classList.add("se-selected"); srects.push(this._visualRect(els[j])); }
         this._drawBoxes("select", els.length && !els[0].classList.contains("se-editing") ? srects : []);
-        this._setStatus(node.type + ": " + node.src);
+        if (!quiet) this._setStatus(node.type + ": " + node.src);
         this._markSource([this.selected]);
         this._placeActions(els.length && !els[0].classList.contains("se-editing") ? this._unionRect(srects) : null);
       } else {
@@ -3114,7 +3129,7 @@ var SympyEditor = (function () {
         this._placeActions(null);
       }
       if (!node && !this.closed) {
-        this._setStatus(this.annotated ? (this.opts.readOnly ? "" : "Click to select; click between terms to insert")
+        if (!quiet) this._setStatus(this.annotated ? (this.opts.readOnly ? "" : "Click to select; click between terms to insert")
                                        : "Structure unavailable (plain rendering)");
       }
     }
