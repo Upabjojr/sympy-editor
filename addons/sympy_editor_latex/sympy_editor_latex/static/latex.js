@@ -149,8 +149,16 @@ SympyEditor.registerAddon("latex", (function () {
         }
       }
       function closeField(quiet) {
+        // The field goes, and the keyboard with it: a phone keeps the keyboard
+        // up for as long as something is focused, so the formula takes the
+        // focus back (which is where the editor's own keys belong anyway).
+        var had = document.activeElement === field;
         if (room && room.parentNode) room.parentNode.removeChild(room);
         room = null;
+        if (had) {
+          try { field.blur(); } catch (e) { /* gone already */ }
+          if (view && view.focus) view.focus({ preventScroll: true });
+        }
         if (editor && editor.root) editor.root.classList.remove("se-typing-latex");
         if (!quiet) showPanel();
       }

@@ -277,8 +277,12 @@ def test_what_is_typed_at_a_cursor_goes_in_at_the_cursor():
             assert page.locator(".se-caret").count() == 1, "the cursor must stay while one types at it"
             page.locator(".se-view .ltx-field").fill("7")
             assert _wait(lambda: not page.locator(".ltx-apply").is_disabled(), 15)
-            page.locator(".ltx-apply").click()
+            page.locator(".se-view .ltx-field").press("Enter")      # as one finishes typing
             assert _wait(lambda: str(doc.expr) == "x + y + 7", 15), str(doc.expr)
+            # the field has done its work: it goes, and the focus goes back to
+            # the formula (on a phone, that is what puts the keyboard away)
+            assert _wait(lambda: page.locator(".se-view .ltx-field").count() == 0)
+            assert "se-view" in page.evaluate("document.activeElement.className")
             assert page.errors == []
         finally:
             _close(srv, browser)
