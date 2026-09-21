@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+* **Handwriting around a formula.** Ink written around a piece of the formula
+  - a bar and an ``x`` under ``sin(x)`` for ``sin(x)/x`` - is read by a new
+  model, math-ocr's ``stroke_b_ctx``, trained on ink written around printed
+  pieces. It is given the piece's box rather than a triangle drawn in its
+  place, and reads such ink right about twice as often as before (71.8 %
+  against 39.8 % for short additions; 49 % against 27 % in general), losing
+  the piece almost never (0.1 % against 20.6 %). Plain handwriting is read a
+  little better too (42.2 % against 38.9 %).
+
 * **Invalid expressions.** An edit SymPy would not build is no longer
   committed behind its back: an operator between a scalar and a matrix, a
   power or a function built unevaluated around a non-square matrix used to
