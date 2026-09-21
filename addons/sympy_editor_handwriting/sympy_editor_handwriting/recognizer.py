@@ -372,11 +372,17 @@ def stand_in(box, strokes) -> list:
 
 
 def _beam_search(enc, dec, feats, bos: int, eos: int, beam: int = 4, max_tokens: int = MAX_TOKENS,
-                 alpha: float = 0.7) -> List[Tuple[float, List[int]]]:
+                 alpha: float = 0.7, once: Optional[int] = None,
+                 never: Optional[int] = None) -> List[Tuple[float, List[int]]]:
     """math-ocr's beam search (``mathocr/infer.py``) over the exported graphs.
     The decoder step has no cache, so each step feeds the whole prefix - cheap
     for formulas a dozen tokens long.  Finished readings are length-normalised
-    as GNMT does, ``((5 + n) / 6) ** alpha``; best first."""
+    as GNMT does, ``((5 + n) / 6) ** alpha``; best first.
+
+    ``once``: a token every reading carries exactly once - the piece the ink
+    is written around, which the model's best reading nearly always holds
+    once but its alternatives, left to themselves, now and then twice or
+    not at all.  ``never``: a token no reading carries."""
     import numpy as np
     mem, mask = enc.run(None, {"src": feats[None].astype(np.float32),
                                "src_len": np.array([len(feats)], dtype=np.int64)})
@@ -389,6 +395,12 @@ def _beam_search(enc, dec, feats, bos: int, eos: int, beam: int = 4, max_tokens:
         logits = dec.run(None, {"tokens": tokens, "memory": mem, "mem_mask": mask})[0].astype(np.float64)
         logits -= logits.max(axis=1, keepdims=True)
         logp = logits - np.log(np.exp(logits).sum(axis=1, keepdims=True))
+        if never is not None:
+            logp[:, never] = -np.inf
+        if once is not None:
+            has = (tokens == once).any(axis=1)
+            logp[has, once] = -np.inf           # not a second time
+            logp[~has, eos] = -np.inf           # nor the end before it
         cand = (scores[:, None] + logp).ravel()
         top = np.argpartition(-cand, beam - 1)[:beam]
         top = top[np.argsort(-cand[top])]
@@ -549,8 +561,12 @@ class StrokeRecognizer:
         # a context-aware model takes a seventh channel, with or without a box
         feats = inkml.ink_to_features(ink, with_context=True) if boxed else inkml.ink_to_features(ink)
         t0 = time.perf_counter()
+        # the box's token: in every reading exactly once with a box, in none without
+        ctx_id = tok.stoi.get(token) if token else None
         found = _beam_search(enc, dec, feats, int(meta.get("bos_id", tokenizer.BOS_ID)),
-                             int(meta.get("eos_id", tokenizer.EOS_ID)), beam=max(1, min(int(beam), 8)))
+                             int(meta.get("eos_id", tokenizer.EOS_ID)), beam=max(1, min(int(beam), 8)),
+                             once=ctx_id if context is not None else None,
+                             never=ctx_id if context is None else None)
         ms = (time.perf_counter() - t0) * 1000
         specials = {tokenizer.PAD_ID, tokenizer.BOS_ID, tokenizer.EOS_ID}
         out, seen = [], set()
