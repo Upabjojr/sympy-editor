@@ -74,13 +74,16 @@ back is read as SymPy here, like any other reading.
   an exported model with onnxruntime.
 * **The model**: `SYMPY_EDITOR_MATHOCR_MODEL`, a folder with `encoder.onnx`,
   `decoder_step.onnx`, `vocab.json` and `meta.json`; by default the checkout's
-  `export/stroke_b_ctx_int8` (the larger stroke model, int8: 5.9 MB, 42.2 % exact
+  `export/stroke_b_sib_int8` (the larger stroke model, int8: 5.9 MB, 46.6 % exact
   match on math-ocr's held-out test split, some 40 ms a formula on one CPU thread).
-  It is trained to write around a printed piece: given the piece's box, it
-  writes `\ctx` where the piece stands (71.8 % exact on short ink written
-  around a piece, which keeps the piece 99.9 % of the time).  An older model,
-  such as `export/stroke_b_int8`, still works: it is shown a triangle in the
-  box instead, and writes `\Delta` for it.
+  It is trained to write around printed pieces: given a piece's box, it
+  writes `\ctx` where the piece stands (72.2 % exact on short ink written
+  around a piece); given the boxes of a product's factors or a sum's terms,
+  one token each (`\ctx`, `\ctxb`, ...), it says which the ink goes with -
+  `\frac{\ctxb}{\theta}` for a bar and a theta under the second (75.3 % exact,
+  the right pieces 89.4 % of the time).  An older model still works: one with
+  a single token is given the one piece's box, and one without any, such as
+  `export/stroke_b_int8`, a triangle in it, for which it writes `\Delta`.
 * **Python packages**: `onnxruntime`, `numpy`, and the LaTeX add-on
   (`sympy-editor-latex`).
 

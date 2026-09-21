@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+* **Handwriting among siblings.** Ink written by one factor of a product
+  or one term of a sum - a bar and a theta under ``cos(y)`` in
+  ``sin(x) cos(y) tan(z)`` - is read with every factor or term as a box of
+  its own, and the model says which the ink goes with, or which run of
+  them under one longer bar: the page's guess no longer decides it. The
+  default model is math-ocr's ``stroke_b_sib``, trained for it (75 % of
+  such readings right, the right pieces 89 % of the time), and better at
+  ink around a single piece too.
+
 * **Handwriting around a formula.** Ink written around a piece of the formula
   - a bar and an ``x`` under ``sin(x)`` for ``sin(x)/x`` - is read by a new
   model, math-ocr's ``stroke_b_ctx``, trained on ink written around printed
