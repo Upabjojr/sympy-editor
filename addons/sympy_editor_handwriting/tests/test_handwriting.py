@@ -200,6 +200,65 @@ def test_a_recognizer_that_does_not_gets_the_triangle():
     assert best["nested"] and best["reading"]["src"] == "sin(x)/x"
 
 
+z = symbols("z")
+
+
+class _SiblingReader(_BoxReader):
+    """A model with a token per printed sibling."""
+    def box_tokens(self):
+        return ["\\ctx", "\\ctxb", "\\ctxc", "\\ctxd", "\\ctxe", "\\ctxf"]
+
+    def recognize(self, strokes, beam=4, limit=5, context=None):
+        self.got = (strokes, context)
+        return {"candidates": [{"latex": t} for t in self.latex.split("|")], "ms": 1.0, "stand_in": "\\ctx"}
+
+
+def _among_siblings(latex, nest):
+    """sin(x) cos(y) tan(z), ink written by the factor at ``nest``, read as
+    ``latex`` (candidates split by |), the best one put in."""
+    from sympy import cos, sin, tan
+    rec = _SiblingReader(latex)
+    doc = Document(sin(x) * cos(y) * tan(z), addons=[HandwritingAddon(rec)])
+    sibs = []
+    for k in range(3):   # printed left to right: sin, cos, tan - whatever their order in args
+        arg = [sin(x), cos(y), tan(z)][k]
+        sibs.append({"path": str(doc.expr.args.index(arg)), "box": [30 * k, 0, 30 * k + 25, 20]})
+    nest_path = str(doc.expr.args.index(nest))
+    snap = doc.handle({"action": "addon", "addon": "handwriting", "method": "write",
+                       "strokes": [[[30, 25, 0], [55, 25, 5]]], "context": [0, 0, 1, 1], "nest": nest_path,
+                       "siblings": sibs, "beam": 1})
+    cands = snap["query"]["result"]["candidates"]
+    best = cands[0]
+    if best["nested"]:
+        doc.handle({"action": "addon", "addon": "handwriting", "method": "insert", "latex": best["latex"],
+                    "path": best["nest"], "children": best["children"], "nest": best["nest"],
+                    "display": best["display"]})
+    return rec, doc, cands
+
+
+def test_ink_among_siblings_goes_with_the_one_it_names():
+    from sympy import cos, sin, tan
+    rec, doc, cands = _among_siblings(r"\frac{\ctxb}{\theta}", cos(y))
+    assert len(rec.got[1]) == 3 and rec.got[1][1] == [30, 0, 55, 20]      # every sibling's box, in order
+    assert cands[0]["nested"] and cands[0]["reading"]["ok"]
+    assert doc.expr == sin(x) * cos(y) / __import__("sympy").Symbol("theta") * tan(z)
+    assert r"\cos" in cands[0]["display"]
+
+
+def test_the_model_may_name_another_sibling_than_the_guess():
+    from sympy import Symbol, cos, sin, tan
+    _, doc, _ = _among_siblings(r"\ctxc^{2}", cos(y))                    # guessed cos, written by tan
+    assert doc.expr == sin(x) * cos(y) * tan(z) ** 2
+    _, doc, _ = _among_siblings(r"\frac{\ctxb\ctxc}{t}", sin(x))       # one bar under two of them
+    assert doc.expr == sin(x) * cos(y) * tan(z) / Symbol("t")
+
+
+def test_a_reading_that_names_no_run_is_the_ink_alone():
+    from sympy import cos
+    _, _, cands = _among_siblings(r"\ctx+\ctxc|x", cos(y))
+    assert not cands[0]["nested"] and not cands[1]["nested"]
+
+
 def _nest_and_insert(expr, latex, reader=_BoxReader):
     """Ink written by the whole of ``expr``, read as ``latex``, put in."""
     doc = Document(expr, addons=[HandwritingAddon(reader(latex))])

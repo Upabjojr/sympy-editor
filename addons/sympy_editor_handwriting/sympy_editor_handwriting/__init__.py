@@ -199,29 +199,37 @@ class HandwritingAddon(Addon):
                 "constants": dict(constants) if isinstance(constants, dict) else {}}
 
     @staticmethod
-    def _piece(doc, nest) -> Optional[Basic]:
-        """The node at ``nest`` ("" and "/" are the whole formula), or None."""
+    def _piece(doc, nest, children=None) -> Optional[Basic]:
+        """The node at ``nest`` ("" and "/" are the whole formula) - or, with
+        ``children``, those of its arguments, as the product or sum they
+        form - or None."""
         if nest is None:
             return None
         try:
-            return doc.get(str(nest))
+            node = doc.get(str(nest))
+            if not children:
+                return node
+            args = [node.args[int(i)] for i in children]
+            return args[0] if len(args) == 1 else node.func(*args)
         except Exception:  # noqa: BLE001 - a path the document no longer has
             return None
 
-    def _read(self, doc, latex: str, picks: Optional[Dict[str, Any]] = None, nest=None) -> Dict[str, Any]:
+    def _read(self, doc, latex: str, picks: Optional[Dict[str, Any]] = None, nest=None,
+              children=None) -> Dict[str, Any]:
         payload = dict(picks or {}, latex=latex)
-        piece = self._piece(doc, nest) if PIECE_TEX in latex else None
+        piece = self._piece(doc, nest, children) if PIECE_TEX in latex else None
         if piece is not None:
             payload["pieces"] = {PIECE_NAME: piece}
         return self._latex().read(doc, payload)
 
-    def _reading(self, doc, latex: str, picks: Optional[Dict[str, Any]] = None, nest=None) -> Dict[str, Any]:
+    def _reading(self, doc, latex: str, picks: Optional[Dict[str, Any]] = None, nest=None,
+                 children=None) -> Dict[str, Any]:
         """The LaTeX as SymPy would get it - read as the LaTeX panel reads, in
         the document's names, with the options picked - and the options
         themselves: each ambiguity with the whole expression under each of its
         alternatives, each constant name with its switch, and every decision
         taken (``choices``, so that the next pick changes only itself)."""
-        res = self._read(doc, latex, picks, nest)
+        res = self._read(doc, latex, picks, nest, children)
         out = {k: res.get(k) for k in ("ok", "src", "latex", "error", "incomplete")}
         out["ambiguities"] = res.get("ambiguities") or []
         out["constants"] = res.get("constants") or []
@@ -250,7 +258,7 @@ class HandwritingAddon(Addon):
             return result
         if method == "read":
             return {"reading": self._reading(doc, str(payload.get("latex", "")), self._picks(payload),
-                                             payload.get("nest"))}
+                                             payload.get("nest"), payload.get("children"))}
         if method == "write":
             # What is written, read: strokes in, readings out - and, with ``nest``
             # (a node's path), read together with that node, whose LaTeX takes the
@@ -273,6 +281,11 @@ class HandwritingAddon(Addon):
                 rec = reader.recognizer
                 strokes, box = payload.get("strokes"), payload.get("context")
                 nesting = box is not None and payload.get("nest") is not None
+                family = self._siblings(doc, rec, payload) if nesting else None
+                if family is not None:
+                    result = rec.recognize(strokes, beam=payload.get("beam", 4), context=family["boxes"])
+                    result["engine"] = reader.name
+                    return self._with_siblings(doc, result, family)
                 if nesting and _takes_context(rec):
                     result = rec.recognize(strokes, beam=payload.get("beam", 4), context=box)
                 else:
@@ -301,13 +314,88 @@ class HandwritingAddon(Addon):
             result["nested"] = any(c["nested"] for c in out)
             return result
         if method == "insert":
-            res = self._read(doc, str(payload.get("latex", "")), self._picks(payload), payload.get("nest"))
+            # a reading nested among siblings replaces the run it names: its
+            # ``children`` are the piece's, and where it goes
+            res = self._read(doc, str(payload.get("latex", "")), self._picks(payload), payload.get("nest"),
+                             payload.get("children") if payload.get("nest") is not None else None)
             if not res.get("ok"):
                 raise ValueError(res.get("error") or "This could not be read")
             # where the LaTeX panel would put it: the selection, the caret, the end
             self._latex().put(doc, res["expr"], payload, str(payload.get("latex", "")))
             return None
         raise ValueError(f"The handwriting add-on has no method {method!r}")
+
+    @staticmethod
+    def _siblings(doc, rec, payload) -> Optional[Dict[str, Any]]:
+        """The printed siblings to read the ink with, when the piece is one of
+        the factors of a product or the terms of a sum and the model reads
+        several boxes: ``{"parent", "index" (argument per box), "boxes",
+        "tokens"}``, the boxes left to right and at most as many as the model
+        has tokens for, around the piece.  None otherwise."""
+        sibs = payload.get("siblings") or []
+        tokens = rec.box_tokens() if hasattr(rec, "box_tokens") else []
+        if len(sibs) < 2 or len(tokens) < 2:
+            return None
+        parent = None
+        index = []
+        for s_ in sibs:
+            path = str(s_.get("path", ""))
+            head, _, last = path.rpartition("/")
+            if not last.isdigit() or (parent is not None and head != parent):
+                return None
+            parent = head
+            index.append(int(last))
+        try:
+            node = doc.get(parent)
+        except Exception:  # noqa: BLE001 - a path the document no longer has
+            return None
+        if not isinstance(node, (sympy.Add, sympy.Mul)) or not node.is_commutative:
+            return None
+        if sorted(index) != list(range(len(node.args))):
+            return None                       # not every argument is printed as a box of its own
+        nest = str(payload.get("nest"))
+        at = next((k for k, s_ in enumerate(sibs) if str(s_.get("path")) == nest), None)
+        if at is None:
+            return None
+        lo = min(max(0, at - len(tokens) // 2), max(0, len(sibs) - len(tokens)))
+        window = list(range(lo, min(len(sibs), lo + len(tokens))))
+        return {"parent": parent, "index": [index[k] for k in window],
+                "boxes": [list(sibs[k]["box"]) for k in window], "tokens": tokens[:len(window)]}
+
+    def _with_siblings(self, doc, result, family) -> Dict[str, Any]:
+        """Readings of ink written among siblings: each names a run of the
+        boxes, side by side, once each; that run of the parent's arguments is
+        what it replaces (``nest`` the parent, ``children`` the run), the run
+        itself in its place.  Readings that name no such run are of the ink
+        alone."""
+        node = doc.get(family["parent"])
+        find = re.compile("|".join(re.escape(t) + r"(?![A-Za-z])" for t in
+                                   sorted(family["tokens"], key=len, reverse=True)))
+        out = []
+        for cand in result["candidates"]:
+            latex, display = cand["latex"], cand.get("display") or cand["latex"]
+            c = {"latex": latex, "display": display, "raw": cand.get("raw"), "score": cand.get("score"),
+                 "nested": False}
+            hits = list(find.finditer(latex))
+            named = [family["tokens"].index(m.group(0)) for m in hits]
+            run = named == list(range(named[0], named[0] + len(named))) if named else False
+            joined = run and all(not latex[a.end():b.start()].strip() for a, b in zip(hits, hits[1:]))
+            if joined:
+                children = [family["index"][k] for k in named]
+                piece = self._piece(doc, family["parent"], children)
+                a, b = hits[0].start(), hits[-1].end()
+                latex = latex[:a] + PIECE_TEX + latex[b:]
+                shown = list(find.finditer(display))
+                if len(shown) == len(hits):
+                    one = _stand_in(shown[0].group(0))
+                    display = _nest(display[:shown[0].start()] + shown[0].group(0) + display[shown[-1].end():],
+                                    sympy.latex(piece), one)
+                c.update(latex=latex, display=display, nested=True, nest=family["parent"], children=children)
+            c["reading"] = self._reading(doc, c["latex"], nest=c.get("nest"), children=c.get("children"))
+            out.append(c)
+        result["candidates"] = out
+        result["nested"] = any(c["nested"] for c in out)
+        return result
 
     def describe(self, method: str, payload: Dict[str, Any]):
         if method == "insert":

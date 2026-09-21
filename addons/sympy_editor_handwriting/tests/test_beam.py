@@ -39,10 +39,10 @@ def test_unconstrained_the_stand_in_repeats():
 
 
 def test_with_a_box_every_reading_holds_the_stand_in_once():
-    found = _search(once=CTX)
+    found = _search(once=[CTX])
     assert found and all(ids.count(CTX) == 1 for _, ids in found)
 
 
 def test_without_a_box_no_reading_holds_it():
-    found = _search(never=CTX)
+    found = _search(never=[CTX])
     assert found and all(CTX not in ids for _, ids in found)

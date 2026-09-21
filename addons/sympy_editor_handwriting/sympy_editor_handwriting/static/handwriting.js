@@ -465,6 +465,17 @@ SympyEditor.registerAddon("handwriting", (function () {
       // boxes, or drawn into the ink as a triangle (\Delta) - and puts the
       // piece's own LaTeX in its place.
       function contextBox(r) { return [r.x, r.y, r.x + r.w, r.y + r.h]; }
+      // The piece's siblings - the other factors of its product, the other
+      // terms of its sum - with it, left to right, as boxes: Python may give
+      // them all to the model, which then says which the ink goes with.
+      function siblingsOf(node) {
+        var cut = node.path.lastIndexOf("/"), parent = cut < 0 ? "" : node.path.slice(0, cut);
+        var out = nodes().filter(function (q) {
+          var c = q.path.lastIndexOf("/");
+          return (c < 0 ? "" : q.path.slice(0, c)) === parent && /^\d+$/.test(q.path.slice(c + 1));
+        }).sort(function (a, b) { return a.rect.x - b.rect.x; });
+        return out.length > 1 ? out.map(function (q) { return { path: q.path, box: contextBox(q.rect) }; }) : null;
+      }
 
       /* ---- the way down to the readings ---- */
       function panelSeen() {
@@ -683,10 +694,14 @@ SympyEditor.registerAddon("handwriting", (function () {
         element.setAttribute("data-aim", aim.kind);
         redraw();
         var chosen = engineNamed(engine), byHost = chosen && chosen.where === "host";
-        var ink = held.strokes, box = null;
+        var ink = held.strokes, box = null, sibs = null;
         // The piece is for a reader that reads mathematics: a box means nothing
         // at all to a reader of text, so a host reading is of the ink alone.
-        if (!byHost && aim.kind === "nest" && aim.node) { ink = aim.read || held.strokes; box = contextBox(aim.node.rect); }
+        if (!byHost && aim.kind === "nest" && aim.node) {
+          ink = aim.read || held.strokes;
+          box = contextBox(aim.node.rect);
+          sibs = siblingsOf(aim.node);
+        }
         var nest = !byHost && aim.kind === "nest" ? aim.path : null;
         say("Reading…");
         element.classList.add("hw-busy");
@@ -696,7 +711,8 @@ SympyEditor.registerAddon("handwriting", (function () {
               return api.call("write", { candidates: found.candidates, ms: found.ms, engine: engine },
                               { quiet: true });
             })
-          : api.call("write", { strokes: ink, context: box, nest: nest, engine: engine }, { quiet: true });
+          : api.call("write", { strokes: ink, context: box, nest: nest, siblings: sibs, engine: engine },
+                     { quiet: true });
         asked
           .then(function (res) {
             if (my !== seq) return;
@@ -801,6 +817,8 @@ SympyEditor.registerAddon("handwriting", (function () {
         // A nested reading holds a placeholder where the piece goes: Python
         // puts the piece itself there (by its path), not its LaTeX read back.
         if (nests(c) && c.nest != null) { p.nest = c.nest; p.display = c.display; }
+        // read among its siblings: it replaces the run of them it names
+        if (nests(c) && c.children) { p.path = c.nest; p.children = c.children; return p; }
         if (aim.kind === "range") { p.path = aim.path; p.children = aim.children; }
         else if (aim.kind === "selection" || nests(c)) p.path = aim.path;
         else if (aim.kind === "caret") p.caret = aim.caret;
@@ -882,14 +900,14 @@ SympyEditor.registerAddon("handwriting", (function () {
       function again() {          // the same reading, with the options picked
         var c = readings[chosen];
         if (!c) return;
-        api.call("read", { latex: c.latex, choices: picks.choices, constants: picks.constants, nest: c.nest },
-                 { quiet: true })
+        api.call("read", { latex: c.latex, choices: picks.choices, constants: picks.constants, nest: c.nest,
+                           children: c.children }, { quiet: true })
           .then(function (res) {
             var reading = res.reading;
             src.textContent = reading && reading.ok ? reading.src : ((reading && reading.error) || "");
             src.className = "hw-src" + (reading && reading.ok ? "" : " error");
             readings[chosen] = { latex: c.latex, display: c.display, nested: c.nested, nest: c.nest,
-                                 reading: reading, edited: c.edited };
+                                 children: c.children, reading: reading, edited: c.edited };
             if (applied) putIn(readings[chosen], false);
             else updateApply();
           }, function (e) { say(String((e && e.message) || e), true); });
@@ -937,9 +955,11 @@ SympyEditor.registerAddon("handwriting", (function () {
         var tex = latexField.value.trim(), c = readings[chosen];
         if (!tex || !aim) return;
         var nested = c ? c.nested !== false : true, nest = c && nested ? c.nest : undefined;
+        var children = c && nested ? c.children : undefined;
         say("Reading\u2026");
-        api.call("read", { latex: tex, nest: nest }, { quiet: true }).then(function (res) {
-          var edited = { latex: tex, display: tex, nested: nested, nest: nest, reading: res.reading, edited: true };
+        api.call("read", { latex: tex, nest: nest, children: children }, { quiet: true }).then(function (res) {
+          var edited = { latex: tex, display: tex, nested: nested, nest: nest, children: children,
+                         reading: res.reading, edited: true };
           var at = readings.length;
           for (var i = 0; i < readings.length; i++) if (readings[i].edited) { at = i; break; }
           readings[at] = edited;

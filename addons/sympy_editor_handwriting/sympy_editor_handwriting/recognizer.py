@@ -372,17 +372,18 @@ def stand_in(box, strokes) -> list:
 
 
 def _beam_search(enc, dec, feats, bos: int, eos: int, beam: int = 4, max_tokens: int = MAX_TOKENS,
-                 alpha: float = 0.7, once: Optional[int] = None,
-                 never: Optional[int] = None) -> List[Tuple[float, List[int]]]:
+                 alpha: float = 0.7, once: Sequence[int] = (),
+                 never: Sequence[int] = ()) -> List[Tuple[float, List[int]]]:
     """math-ocr's beam search (``mathocr/infer.py``) over the exported graphs.
     The decoder step has no cache, so each step feeds the whole prefix - cheap
     for formulas a dozen tokens long.  Finished readings are length-normalised
     as GNMT does, ``((5 + n) / 6) ** alpha``; best first.
 
-    ``once``: a token every reading carries exactly once - the piece the ink
-    is written around, which the model's best reading nearly always holds
-    once but its alternatives, left to themselves, now and then twice or
-    not at all.  ``never``: a token no reading carries."""
+    ``once``: tokens no reading carries twice, and every reading carries one
+    of - the printed pieces the ink is written with (one box, or one per
+    sibling), which the model's best reading nearly always names once but
+    its alternatives, left to themselves, now and then twice or not at all.
+    ``never``: tokens no reading carries."""
     import numpy as np
     mem, mask = enc.run(None, {"src": feats[None].astype(np.float32),
                                "src_len": np.array([len(feats)], dtype=np.int64)})
@@ -395,12 +396,15 @@ def _beam_search(enc, dec, feats, bos: int, eos: int, beam: int = 4, max_tokens:
         logits = dec.run(None, {"tokens": tokens, "memory": mem, "mem_mask": mask})[0].astype(np.float64)
         logits -= logits.max(axis=1, keepdims=True)
         logp = logits - np.log(np.exp(logits).sum(axis=1, keepdims=True))
-        if never is not None:
-            logp[:, never] = -np.inf
-        if once is not None:
-            has = (tokens == once).any(axis=1)
-            logp[has, once] = -np.inf           # not a second time
-            logp[~has, eos] = -np.inf           # nor the end before it
+        if len(never):
+            logp[:, list(never)] = -np.inf
+        if len(once):
+            some = np.zeros(len(tokens), dtype=bool)
+            for t in once:
+                has = (tokens == t).any(axis=1)
+                logp[has, t] = -np.inf          # not a second time
+                some |= has
+            logp[~some, eos] = -np.inf          # nor the end before one
         cand = (scores[:, None] + logp).ravel()
         top = np.argpartition(-cand, beam - 1)[:beam]
         top = top[np.argsort(-cand[top])]
@@ -547,26 +551,38 @@ class StrokeRecognizer:
         is written around.  A model trained with context boxes (its meta names
         a ``context_token``) is given the box itself and writes that token
         where the piece stands; any other is given :func:`stand_in`'s
-        triangle and writes ``\\Delta``.  ``stand_in`` in the answer says which."""
+        triangle and writes ``\\Delta``.  ``stand_in`` in the answer says which.
+
+        ``context`` may also be a list of boxes, left to right: printed
+        siblings (the factors of a product, the terms of a sum), for a model
+        with a token for each (:meth:`box_tokens`).  Every reading names the
+        boxes the ink goes with, each once: ``boxes`` in the answer lists the
+        tokens, box by box."""
         enc, dec, tok, inkml, tokenizer, meta = self.load()
         token = meta.get("context_token")
         boxed = int(meta.get("in_dim", 6)) == 7
-        if context is not None and not token:
-            strokes = stand_in(context, strokes)
+        boxes = None
+        if context is not None:
+            many = len(context) and isinstance(context[0], (list, tuple))
+            boxes = [tuple(float(v) for v in b) for b in (context if many else [context])]
+            if len(boxes) > len(self.box_tokens()):
+                raise ValueError(f"This model reads ink with at most {len(self.box_tokens())} printed pieces")
+        if boxes is not None and not token:
+            strokes = stand_in(boxes[0], strokes)
         ink = inkml.Ink(strokes=_strokes(strokes), label="")
-        if context is not None and token:
-            ink.context = [tuple(float(v) for v in context)]
+        if boxes is not None and token:
+            ink.context = boxes
         if not ink.strokes:
             raise ValueError("Nothing is written yet")
         # a context-aware model takes a seventh channel, with or without a box
         feats = inkml.ink_to_features(ink, with_context=True) if boxed else inkml.ink_to_features(ink)
         t0 = time.perf_counter()
-        # the box's token: in every reading exactly once with a box, in none without
-        ctx_id = tok.stoi.get(token) if token else None
+        # the boxes' tokens: each at most once and one at least with boxes, none for boxes not there
+        ids = [tok.stoi[t] for t in self.box_tokens() if t in tok.stoi] if token else []
+        given = len(boxes) if boxes is not None else 0
         found = _beam_search(enc, dec, feats, int(meta.get("bos_id", tokenizer.BOS_ID)),
                              int(meta.get("eos_id", tokenizer.EOS_ID)), beam=max(1, min(int(beam), 8)),
-                             once=ctx_id if context is not None else None,
-                             never=ctx_id if context is None else None)
+                             once=ids[:given], never=ids[given:])
         ms = (time.perf_counter() - t0) * 1000
         specials = {tokenizer.PAD_ID, tokenizer.BOS_ID, tokenizer.EOS_ID}
         out, seen = [], set()
@@ -583,4 +599,13 @@ class StrokeRecognizer:
                 break
         return {"candidates": out, "ms": round(ms, 1), "strokes": len(ink.strokes),
                 "points": int(sum(len(s) for s in ink.strokes)),
-                "stand_in": token if (context is not None and token) else TRIANGLE_TOKEN}
+                "stand_in": token if (context is not None and token) else TRIANGLE_TOKEN,
+                "boxes": self.box_tokens()[:len(boxes)] if (boxes is not None and token) else []}
+
+    def box_tokens(self) -> List[str]:
+        """The tokens the model writes for printed boxes, box by box: none for
+        a model without boxes, ``\\ctx`` alone for one box, more for siblings."""
+        meta = self.load()[5]
+        if not meta.get("context_token"):
+            return [TRIANGLE_TOKEN]
+        return list(meta.get("context_tokens") or [meta["context_token"]])
