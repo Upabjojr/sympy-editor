@@ -355,10 +355,94 @@ OPERATORS = "+-*/^=<>&|"
 
 UNEVALUATED_CONSTRUCTORS = frozenset({"cbrt", "root", "real_root", "Rational", "Mul", "Add", "Pow"})
 
-#: The version of the file a document is saved as (``Document.save_text``):
-#: a file written by a newer version than this is refused rather than read
-#: as something it is not.
+#: The version of the format a document is saved in (``Document.save_text``,
+#: the ``"sympy-editor"`` field of a file; ``"format"`` in a session's
+#: export).  See docs/file-format.md, "Versions", for the rules: every
+#: format this one replaced opens through MIGRATIONS, and a file of a newer
+#: format opens too when it says an older reader can read it.
 SAVE_FORMAT = 1
+
+#: The oldest format whose reader can read a file written in SAVE_FORMAT
+#: (the ``"min-reader"`` field).  It stays where it is for a change an older
+#: reader can live with - a field added, which it ignores - and moves up to
+#: SAVE_FORMAT for a breaking one: a field renamed, moved or read otherwise.
+SAVE_MIN_READER = 1
+
+#: Upgrades between formats: ``MIGRATIONS[n]`` takes a file (a dict) of
+#: format ``n`` and returns it in format ``n + 1``; ``upgrade_file`` chains
+#: them.  One is added with every format and none is ever removed - they are
+#: what keeps a file saved years ago opening.  Each reads ``data["session"]``
+#: (the session as ``Document.export`` gives it) and whatever else the file
+#: holds; see ``@migration``.
+MIGRATIONS: Dict[int, Callable[[Dict[str, Any]], Dict[str, Any]]] = {}
+
+
+def migration(version: int):
+    """Register the upgrade from format ``version`` to ``version + 1``:
+
+    >>> @migration(1)                                    # doctest: +SKIP
+    ... def _labels_became_steps(data):
+    ...     session = data.get("session") or {}
+    ...     session["steps"] = [{"label": l} for l in session.pop("labels", [])]
+    ...     return data
+    """
+    def register(fn: Callable[[Dict[str, Any]], Dict[str, Any]]):
+        if version in MIGRATIONS:
+            raise ValueError(f"format {version} already has its upgrade ({MIGRATIONS[version].__name__})")
+        MIGRATIONS[version] = fn
+        return fn
+    return register
+
+
+def _format_number(value: Any, what: str) -> int:
+    if isinstance(value, str) and value.strip().isdigit():
+        value = int(value)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"The file's {what} is not a format number: {value!r}")
+    return value
+
+
+def upgrade_file(data: Dict[str, Any]) -> Dict[str, Any]:
+    """A saved file's data in the format this version writes (SAVE_FORMAT).
+
+    * No ``"sympy-editor"`` field: a file written by hand or by another
+      program (``{"expr": "sin(x)"}``) - taken as it is.
+    * An older format: brought up one format at a time through MIGRATIONS.
+    * A newer format whose ``"min-reader"`` is this format or older: read as
+      it is - what was added since is ignored, and what is kept is what this
+      version knows.
+    * A newer format that needs a newer reader: refused, with the version
+      that can read it, rather than read as something it is not.
+    """
+    if "sympy-editor" not in data:
+        return data
+    version = _format_number(data["sympy-editor"], "format")
+    if version > SAVE_FORMAT:
+        needs = _format_number(data.get("min-reader", version), "min-reader")
+        if needs > SAVE_FORMAT:
+            raise ValueError(f"The file was written by a newer version (format {version}), "
+                             f"which a reader of format {needs} or later can open; this one reads format {SAVE_FORMAT}")
+        return data
+    data = dict(data)
+    if isinstance(data.get("session"), dict):
+        data["session"] = dict(data["session"])       # the migrations may change it in place
+    while version < SAVE_FORMAT:
+        step = MIGRATIONS.get(version)
+        if step is None:
+            raise ValueError(f"No way to read format {version}: its upgrade to format {version + 1} is missing")
+        data = step(data)
+        version += 1
+        data["sympy-editor"] = version
+    data["min-reader"] = SAVE_MIN_READER
+    return data
+
+
+def upgrade_session(session: Dict[str, Any], version: Any) -> Dict[str, Any]:
+    """A session (``Document.export``'s payload) kept in format ``version`` -
+    the sessions a page keeps, whose ``"format"`` says which - in the format
+    this version reads: the same MIGRATIONS as a file's."""
+    upgraded = upgrade_file({"sympy-editor": version, "session": dict(session)})
+    return dict(upgraded.get("session") or {})
 
 #: What a saved document is: JSON, under a type of its own.
 SAVE_MIME = "application/x-sympy-editor+json"
@@ -412,6 +496,10 @@ class Document:
         ``{name: data}`` from :meth:`export`: what each add-on kept about the
         document it was exported from, given back to it (``restore_state``)
         once it is on.
+    format
+        The format :meth:`export` wrote the session in (its ``"format"``):
+        a session kept by an older version is upgraded (see
+        :func:`upgrade_session`) before it is read.
     """
 
     def __init__(
@@ -430,7 +518,16 @@ class Document:
         available=None,
         addon_state=None,
         allow_invalid: bool = False,
+        format: Optional[int] = None,
     ):
+        if format is not None and history:
+            # A session a page kept in an older format: upgraded as a file is.
+            session = upgrade_session({"history": list(history), "index": index, "labels": labels,
+                                       "symbols": list(symbols or ()), "addon_state": addon_state,
+                                       "allow_invalid": allow_invalid}, format)
+            history, index, labels = session.get("history"), session.get("index"), session.get("labels")
+            symbols, addon_state = session.get("symbols") or (), session.get("addon_state")
+            allow_invalid = bool(session.get("allow_invalid", allow_invalid))
         if parser not in ("strict", "implicit"):
             raise ValueError("parser must be 'strict' or 'implicit'")
         self.printer_settings = dict(printer_settings or {})
@@ -516,6 +613,7 @@ class Document:
         takes it back."""
         data = {
             "sympy-editor": SAVE_FORMAT,
+            "min-reader": SAVE_MIN_READER,
             "saved": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
             "expr": str(self.expr),
             "session": self.export(),
@@ -543,9 +641,7 @@ class Document:
             except json.JSONDecodeError as exc:
                 raise ValueError(f"The file is not a formula this can open: {exc}") from None
         if isinstance(data, dict):
-            version = data.get("sympy-editor")
-            if version is not None and int(version) > SAVE_FORMAT:
-                raise ValueError(f"The file was written by a newer version (format {version}, this reads {SAVE_FORMAT})")
+            data = upgrade_file(data)            # an older format brought up to this one; a newer one checked
             session = dict(data.get("session") or {})
             if not session and data.get("expr"):
                 session = {"history": [str(data["expr"])]}
@@ -590,7 +686,8 @@ class Document:
         ...], "index", "symbols": [srepr of the declared names][,
         "addon_state": {name: data}]}`` (a session's editing history, kept
         by the front end)."""
-        out = {"history": [srepr(e) for e in self._history], "index": self._index, "labels": list(self._labels),
+        out = {"format": SAVE_FORMAT,
+               "history": [srepr(e) for e in self._history], "index": self._index, "labels": list(self._labels),
                "symbols": [srepr(obj) for obj in self.declared.values()], "allow_invalid": self.allow_invalid}
         # What the add-ons that are on keep about this document (a rule set),
         # by name: given back through restore_state when the session is opened.

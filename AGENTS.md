@@ -629,6 +629,17 @@ Two conventions between printer, document and front end:
   when they are missing (the manifest points at `@mipmap/ic_launcher`, so a
   build without them stops).  The workflows install librsvg for that.  If a
   size or a shape needs changing, change the script, never a PNG.
+- **Saved-file versions.**  A `.sympy` file carries `"sympy-editor"` (its
+  format, `SAVE_FORMAT`) and `"min-reader"` (`SAVE_MIN_READER`, the oldest
+  reader that can take it); a session's export carries `"format"`.
+  `upgrade_file` brings an older format up through `MIGRATIONS` (one
+  `@migration(n)` per format, never removed), reads a newer one only when
+  its `min-reader` allows, and refuses the rest by name; `Document(format=)`
+  does the same for a kept session (`sessionState` in editor.js marks the
+  ones kept before sessions had a format as format 1).  Changing the
+  format means: bump `SAVE_FORMAT`, bump `SAVE_MIN_READER` too if the change
+  breaks older readers, add the migration, and freeze a file of the new
+  format in `tests/formats/` with a test - docs/file-format.md, "Versions".
 - **Full screen.**  `.se-view` lives on a `.se-stage` (`position:
   relative`) beside `.se-fullbtn`, not inside it: within the view a wide
   formula would scroll the button out of sight.  `Editor.setFullscreen`

@@ -8,10 +8,12 @@ same text travels through the `savefile` and `openfile` messages.
 ```json
 {
   "sympy-editor": 1,
+  "min-reader": 1,
   "saved": "2026-09-19T08:30:00+00:00",
   "name": "the working one",
   "expr": "x**2 + 3",
   "session": {
+    "format": 1,
     "history": ["Add(Integer(1), Pow(Symbol('x'), Integer(2)))",
                 "Add(Integer(3), Pow(Symbol('x'), Integer(2)))"],
     "index": 1,
@@ -25,7 +27,8 @@ same text travels through the `savefile` and `openfile` messages.
 
 | Field | What it is |
 | --- | --- |
-| `sympy-editor` | the format's version. A file written by a newer one is refused rather than read as something it is not |
+| `sympy-editor` | the format's version (see [Versions](#versions)) |
+| `min-reader` | the oldest format whose reader can read this file: a newer file whose `min-reader` is old enough opens in an older version |
 | `saved` | when it was written, UTC |
 | `name` | what the session was called, when it had a name of its own |
 | `expr` | the current expression as SymPy source — so the file says what it holds to whoever opens it in an editor |
@@ -35,12 +38,44 @@ same text travels through the `savefile` and `openfile` messages.
 
 | Field | What it is |
 | --- | --- |
+| `format` | the format the session was written in — the same number as the file's; sessions the editor keeps by itself carry it too |
 | `history` | every step, as `srepr` — the derivation, not just the answer |
 | `index` | which step is the current one (undo/redo stand either side of it) |
 | `labels` | what produced each step (`Transform: Factor`), `null` for the first |
 | `symbols` | the declared names, as `srepr`, with their assumptions and shapes |
 | `allow_invalid` | whether the document keeps what SymPy refuses to build |
 | `addon_state` | what each add-on kept about this document, by add-on name |
+
+## Versions
+
+A file says which format it is in (`sympy-editor`), and every version of the
+editor opens every format older than its own. The rules, for whoever changes
+the format (`SAVE_FORMAT`, `SAVE_MIN_READER` and `MIGRATIONS` in
+`sympy_editor/document.py`):
+
+* **An addition** — a new field an older version can ignore: the format goes
+  up by one, `min-reader` stays where it was, so files of the new format
+  still open in the older versions (which ignore what they do not know).
+* **A breaking change** — a field renamed, moved, or read differently: the
+  format goes up by one and `min-reader` goes up to it, so an older version
+  refuses such a file with a message naming the version that can read it,
+  instead of misreading it.
+* **Either way**, an upgrade is registered from the format before
+  (`@migration(n)`, from format *n* to *n + 1*). Opening a file of format *n*
+  runs every upgrade from *n* to the current format in turn, so the oldest
+  file opens in the newest version. Upgrades are never removed, and a gap in
+  the chain is refused, not skipped.
+* **And** a file of the new format, saved the day it is current, goes into
+  `tests/formats/format-<n>.sympy` with a test that it opens as saved. The
+  old files stay: they are what proves a formula saved years ago still
+  opens.
+
+The same upgrades apply to the sessions the editor keeps by itself: a
+session carries its `format` (one kept before sessions carried it is read as
+format 1), and `Document(format=…, history=…)` upgrades it as a file would be.
+
+A file with no `sympy-editor` field at all is not a saved file but one
+written by hand or by another program, and opens as described next.
 
 ## Opening something simpler
 

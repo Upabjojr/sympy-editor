@@ -1121,6 +1121,15 @@ var SympyEditor = (function () {
     return "sent to the printer";
   }
 
+  /** A kept session's state as a Document takes it: one kept before
+   *  sessions carried their format ("format", from Document.export) is of
+   *  format 1, and says so - Python upgrades an older format as it upgrades
+   *  a saved file (upgrade_session). */
+  function sessionState(state) {
+    if (!state || typeof state !== "object" || state.format) return state;
+    return Object.assign({ format: 1 }, state);
+  }
+
   /** Where what should outlive the page is kept: the sessions, each with the
    *  history behind it.
    *
@@ -5369,7 +5378,7 @@ var SympyEditor = (function () {
       var cur = store.list.filter(function (s) { return s.id === store.current; })[0];
       if (cur && cur.state) {
         try {
-          await this.setState(await this.backend.openDocument(cur.state, this._report.bind(this)));
+          await this.setState(await this.backend.openDocument(sessionState(cur.state), this._report.bind(this)));
           if (cur.empty) this.editSource("");
         } catch (e) {
           this._showError("The session could not be opened: " + ((e && e.message) || e));
@@ -5972,7 +5981,7 @@ var SympyEditor = (function () {
         var saved = await this.backend.send({ action: "export" }, function () {});   // the one we leave, up to date
         if (saved) this._storeSession(saved);
         var state = sess.state || { history: [this.state.srepr], index: 0, symbols: this.state.declared || [] };
-        var snap = await this.backend.openDocument(state, this._report.bind(this));
+        var snap = await this.backend.openDocument(sessionState(state), this._report.bind(this));
         if (snap && snap.error) throw new Error(snap.error);
         store.current = id;                 // only once the document is open: a failure leaves the pointer alone
         this._saveSessions(store);

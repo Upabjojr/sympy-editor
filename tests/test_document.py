@@ -1424,3 +1424,113 @@ def test_matrix_reshape_keeps_every_entry():
     assert doc.history_labels()["actions"][-1] == "Matrix: reshape to 1×4"
     snap = doc.handle({"action": "matrix", "op": "reshape", "path": mpath, "rows": 3, "cols": 3})
     assert "keeps every entry" in snap["error"] and doc.expr.shape == (1, 4)
+
+
+# -- versions of the saved format ------------------------------------------
+
+import json  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+FORMATS = Path(__file__).parent / "formats"
+
+
+def _open_format(n):
+    return Document(0).open_text((FORMATS / f"format-{n}.sympy").read_text(encoding="utf-8"))
+
+
+def test_the_format_1_file_opens_as_it_was_saved():
+    """tests/formats holds a file of every format this project has written,
+    frozen the day it was current, and each must open for good: a formula
+    saved years ago is still someone's work.  A new format adds its own file
+    there (saved with the new version) and a test like this one - never
+    replaces an old file."""
+    from sympy import MatrixSymbol, symbols
+    from sympy_editor.document import SAVE_FORMAT
+
+    x = symbols("x")
+    for n in range(1, SAVE_FORMAT + 1):
+        assert (FORMATS / f"format-{n}.sympy").is_file(), f"no frozen file of format {n} in tests/formats"
+    doc = Document(0)
+    assert doc.open_text((FORMATS / "format-1.sympy").read_text(encoding="utf-8")) == x**2 + 1
+    assert [str(e) for e in doc._history] == ["x**2", "x**2 + 1", "x**2 + 1"]
+    assert doc._index == 1 and doc._labels == [None, "Edit: x**2 → x**2 + 1", "Transform: Factor"]
+    assert doc.declared["M"] == MatrixSymbol("M", 2, 2) and doc.declared["t"].is_positive
+
+
+def test_an_older_format_is_upgraded_one_format_at_a_time(monkeypatch):
+    """A breaking change is a new format and an upgrade from the one before
+    (@migration): a file of any older format goes through every upgrade in
+    turn, and one whose upgrade is missing says so."""
+    from sympy import symbols
+
+    from sympy_editor import document
+
+    x = symbols("x")
+    monkeypatch.setattr(document, "SAVE_FORMAT", 3)
+    monkeypatch.setattr(document, "SAVE_MIN_READER", 3)
+    monkeypatch.setattr(document, "MIGRATIONS", {})
+    ran = []
+
+    @document.migration(1)
+    def labels_to_notes(data):              # format 2 calls them notes
+        ran.append(1)
+        data["session"]["notes"] = data["session"].pop("labels")
+        return data
+
+    @document.migration(2)
+    def notes_back_to_labels(data):         # ... and format 3 thinks better of it
+        ran.append(2)
+        data["session"]["labels"] = [n.upper() if n else n for n in data["session"].pop("notes")]
+        return data
+
+    with pytest.raises(ValueError, match="already has its upgrade"):
+        document.migration(1)(labels_to_notes)
+    doc = Document(0)
+    assert doc.open_text((FORMATS / "format-1.sympy").read_text(encoding="utf-8")) == x**2 + 1
+    assert ran == [1, 2] and doc._labels[1] == "EDIT: X**2 → X**2 + 1"
+    # the file on disk is untouched, and what is saved now is format 3
+    assert json.loads((FORMATS / "format-1.sympy").read_text(encoding="utf-8"))["sympy-editor"] == 1
+    assert json.loads(doc.save_text())["sympy-editor"] == 3
+    # a session a page kept in format 1 is upgraded the same way
+    ran.clear()
+    kept = json.loads((FORMATS / "format-1.sympy").read_text(encoding="utf-8"))["session"]
+    assert Document(0, **kept)._labels[1] == "EDIT: X**2 → X**2 + 1" and ran == [1, 2]
+    # a gap in the chain is refused, not skipped
+    del document.MIGRATIONS[2]
+    with pytest.raises(ValueError, match="format 2: its upgrade to format 3 is missing"):
+        _open_format(1)
+
+
+def test_a_newer_format_opens_when_it_says_this_reader_can():
+    """A newer version that only added to the format says so ("min-reader"):
+    its files open here, what was added is ignored.  One that changed what
+    this version reads needs a newer reader, and is refused by name."""
+    from sympy import symbols
+
+    from sympy_editor.document import SAVE_FORMAT
+
+    x = symbols("x")
+    newer = {"sympy-editor": SAVE_FORMAT + 1, "min-reader": SAVE_FORMAT, "expr": "x + 1",
+             "session": {"history": ["x + 1"], "index": 0, "something new": {"a": 1}}, "also new": True}
+    assert Document(0).open_text(json.dumps(newer)) == x + 1
+    newer["min-reader"] = SAVE_FORMAT + 1
+    with pytest.raises(ValueError, match=f"newer version \\(format {SAVE_FORMAT + 1}\\), which a reader of format "
+                                         f"{SAVE_FORMAT + 1} or later can open"):
+        Document(0).open_text(json.dumps(newer))
+    del newer["min-reader"]                          # no min-reader: it needs its own version's reader
+    with pytest.raises(ValueError, match="newer version"):
+        Document(0).open_text(json.dumps(newer))
+    for bad in ("two", 0, -1, 1.5, True, None, [1]):
+        with pytest.raises(ValueError, match="not a format number"):
+            Document(0).open_text(json.dumps({"sympy-editor": bad, "expr": "x"}))
+    assert Document(0).open_text(json.dumps({"sympy-editor": "1", "expr": "x"})) == x   # as text, too
+
+
+def test_what_is_saved_says_its_format_and_who_can_read_it():
+    from sympy_editor.document import SAVE_FORMAT, SAVE_MIN_READER
+
+    doc = Document("x + 1")
+    data = json.loads(doc.save_text())
+    assert data["sympy-editor"] == SAVE_FORMAT and data["min-reader"] == SAVE_MIN_READER
+    assert data["session"]["format"] == SAVE_FORMAT and doc.export()["format"] == SAVE_FORMAT
+    assert Document(0, **doc.export()).expr == doc.expr          # a session's export goes back in as it is
