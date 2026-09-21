@@ -17,7 +17,12 @@ the formula it is written by.  That piece is drawn into the strokes as a
 stand-in (a triangle, which the model reads as `\Delta`), so the ink is read
 *together with* it: a bar under it with ink under the bar is a fraction over
 it, a small letter at its top-right corner its exponent, a letter beside it a
-product; Python puts the piece's own LaTeX back in the stand-in's place.
+product.  Python puts the piece itself back in the stand-in's place: the
+reading carries a placeholder symbol there (`\mathit{nestedpiece}`, with the
+piece's path as `nest`), and the SymPy read from it has the placeholder
+replaced by the node - never the piece's LaTeX read back, which would make
+`f(x)` a product, `x_1` a symbol `x_{1}` and `e` Euler's number.  The
+readings show the piece's LaTeX (`display`).
 
 While the Pen is on, the formula opens a space where what is written will go,
 and it widens as you write; a tap still selects a piece or puts the cursor

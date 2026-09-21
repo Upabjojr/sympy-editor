@@ -36,6 +36,10 @@ def test_cdn_build_has_the_pwa_files(tmp_path):
     sw = (out / "sw.js").read_text()
     files = json.loads(re.search(r"var FILES = (\[.*?\]);", sw).group(1))
     assert "./index.html" in files and "./manifest.webmanifest" in files and "./sw.js" not in files
+    assert "./" in files                        # the bare URL opens offline too
+    # filled from the network, never from the HTTP cache: a new cache holding
+    # the previous build's files would never be replaced
+    assert 'new Request(u, { cache: "reload" })' in sw and "cache.addAll(FILES)" not in sw
     assert re.search(r'var CACHE = "sympy-editor-[0-9a-f]{12}"', sw)
     # a rebuilt, identical bundle keeps its cache name; a different page changes it
     assert mod.build(tmp_path / "dist2", cdn=True) and (tmp_path / "dist2" / "sw.js").read_text() == sw
@@ -63,6 +67,8 @@ def test_service_worker_installs_and_caches(tmp_path):
             assert any(k.startswith("sympy-editor-") for k in keys), keys
             cached = page.evaluate("caches.keys().then(ks => caches.open(ks.find(k => k.startsWith('sympy-editor-'))).then(c => c.keys())).then(rs => rs.map(r => r.url))")
             assert any(u.endswith("/index.html") for u in cached) and any(u.endswith("/manifest.webmanifest") for u in cached)
+            root = f"http://127.0.0.1:{httpd.server_address[1]}/"
+            assert root in cached, cached                    # the bare URL, for opening it offline
             assert page.evaluate("fetch('manifest.webmanifest').then(r => r.json()).then(m => m.name)") == "SymPy Editor"
             browser.close()
     finally:

@@ -171,10 +171,14 @@ def test_the_widget_passes_the_front_end():
     from sympy_editor.widget import SympyEditorWidget
     w = SympyEditorWidget(x + y, addons=[ADDON])
     assert w.options["addons"][0]["name"] == "demo"
+    sent = []                                  # a query's answer is a message of its own, not the trait
+    w.send = lambda content, buffers=None: sent.append(content)
+    before = w.snapshot
     w._on_msg(w, {"action": "addon", "addon": "demo", "method": "count", "_req": 7}, [])
     w.wait(5)
-    snap = json.loads(w.snapshot)
+    snap = sent[-1]
     assert snap["query"]["result"] == {"n": 2} and snap["_req"] == 7
+    assert w.snapshot == before
 
 
 def test_installed_lists_entry_points_and_specs_name_objects(tmp_path, monkeypatch):

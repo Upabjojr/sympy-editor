@@ -89,6 +89,16 @@ program:
 Anything else is refused with a message saying why (empty, not JSON, no
 expression in it, a format from the future).
 
+Nothing in a file is ever run: `history` and `symbols` are read by walking
+their syntax tree — only SymPy's constructors (and the add-ons' node types)
+with literal arguments — and a line of source only with operators, numbers,
+names and such calls; the add-ons' saved state (the rewrite rules) is read
+the same way. Steps come back unevaluated, exactly as saved. A step that
+cannot be shown refuses the whole file, and nothing already open changes.
+`allow_invalid` accepts `"true"`/`"false"`; extra `labels` are trimmed; the
+`addon_state` of add-ons that are off, or not installed, is kept and saved
+again.
+
 ## Where the editor keeps things by itself
 
 The file above is what the user asks for. Everything the editor keeps without
@@ -119,6 +129,14 @@ A page that has a keeper but has kept nothing yet reads the browser's storage
 once, so what a page kept before it had one moves across on the first save —
 and the browser's copy is then dropped, so that it cannot come back stale the
 day the keeper's is lost.
+
+A Python store with no folder (`store=False`) answers with an error, and
+the page keeps its own copy. Each write goes through a temporary file of its
+own and a rename, one at a time; the page sends the writes of each name one
+after another (latest wins) and drops the browser's copy only once the keeper
+has confirmed. With `serve()` and the Jupyter widget, sessions work as they
+do in the apps: each one is kept in the store and opened with the `load`
+message.
 
 ## Where a saved file goes, and where one comes from
 

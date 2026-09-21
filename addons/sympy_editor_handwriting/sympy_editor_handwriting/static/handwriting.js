@@ -798,6 +798,9 @@ SympyEditor.registerAddon("handwriting", (function () {
       function nests(c) { return aim.kind === "nest" && c.nested !== false; }
       function payloadFor(c) {
         var p = { latex: c.latex, path: "/", choices: picks.choices, constants: picks.constants };
+        // A nested reading holds a placeholder where the piece goes: Python
+        // puts the piece itself there (by its path), not its LaTeX read back.
+        if (nests(c) && c.nest != null) { p.nest = c.nest; p.display = c.display; }
         if (aim.kind === "range") { p.path = aim.path; p.children = aim.children; }
         else if (aim.kind === "selection" || nests(c)) p.path = aim.path;
         else if (aim.kind === "caret") p.caret = aim.caret;
@@ -879,12 +882,13 @@ SympyEditor.registerAddon("handwriting", (function () {
       function again() {          // the same reading, with the options picked
         var c = readings[chosen];
         if (!c) return;
-        api.call("read", { latex: c.latex, choices: picks.choices, constants: picks.constants }, { quiet: true })
+        api.call("read", { latex: c.latex, choices: picks.choices, constants: picks.constants, nest: c.nest },
+                 { quiet: true })
           .then(function (res) {
             var reading = res.reading;
             src.textContent = reading && reading.ok ? reading.src : ((reading && reading.error) || "");
             src.className = "hw-src" + (reading && reading.ok ? "" : " error");
-            readings[chosen] = { latex: c.latex, display: c.display, nested: c.nested,
+            readings[chosen] = { latex: c.latex, display: c.display, nested: c.nested, nest: c.nest,
                                  reading: reading, edited: c.edited };
             if (applied) putIn(readings[chosen], false);
             else updateApply();
@@ -932,10 +936,10 @@ SympyEditor.registerAddon("handwriting", (function () {
       function readEdited() {
         var tex = latexField.value.trim(), c = readings[chosen];
         if (!tex || !aim) return;
-        var nested = c ? c.nested !== false : true;
+        var nested = c ? c.nested !== false : true, nest = c && nested ? c.nest : undefined;
         say("Reading\u2026");
-        api.call("read", { latex: tex }, { quiet: true }).then(function (res) {
-          var edited = { latex: tex, display: tex, nested: nested, reading: res.reading, edited: true };
+        api.call("read", { latex: tex, nest: nest }, { quiet: true }).then(function (res) {
+          var edited = { latex: tex, display: tex, nested: nested, nest: nest, reading: res.reading, edited: true };
           var at = readings.length;
           for (var i = 0; i < readings.length; i++) if (readings[i].edited) { at = i; break; }
           readings[at] = edited;

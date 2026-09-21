@@ -45,6 +45,15 @@ Instead of tracking the tree while printing, the printer keeps a stack of
 an unclaimed node structurally equal to the object being printed.  Synthesised
 objects that are not found are printed unannotated, but their children are
 still located relative to the enclosing frame.
+
+The search follows the order in which the printer *draws* a node's pieces,
+and lists only the pieces it draws (``_child_order``): by default the
+arguments in order, the contents of a transparent container (``Tuple``,
+``ExprCondPair``) in its place; a printer that draws in another order says
+so per class (an integral draws its limits, the outer one first, and its
+``dx`` before the integrand), and what is never drawn - a matrix's shape, a
+sparse matrix's keys - is never a candidate.  Otherwise an object drawn
+first would take the path of an equal piece drawn later.
 """
 
 from __future__ import annotations
@@ -55,8 +64,9 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from typing import Union as TUnion
 
 from sympy import Integer, Mul, Pow, Rational, S, Symbol, exp as sympy_exp, sympify
+from sympy import Derivative, Integral, Limit, Product, Subs, Sum
 from sympy.core.basic import Basic
-from sympy.core.containers import Tuple as SymTuple
+from sympy.core.containers import Dict as SymDict, Tuple as SymTuple
 from sympy.core.numbers import Number
 from sympy.core.power import Pow
 from sympy.simplify.radsimp import fraction
@@ -64,6 +74,9 @@ from sympy.functions.elementary.piecewise import ExprCondPair
 from sympy.matrices.expressions.blockmatrix import BlockMatrix
 from sympy.matrices.expressions.matadd import MatAdd
 from sympy.matrices.expressions.matmul import MatMul
+from sympy.matrices.matrixbase import MatrixBase
+from sympy.tensor.array.ndim_array import NDimArray
+from sympy.tensor.array.sparse_ndim_array import ImmutableSparseNDimArray
 from sympy.core.function import AppliedUndef
 from sympy.core.operations import AssocOp, LatticeOp
 from sympy.sets.sets import FiniteSet, Intersection, Union
@@ -149,6 +162,23 @@ def _pow_as_fraction(node: Pow, settings: Dict[str, Any]) -> bool:
     if b == 1 or (b.is_Rational and b.p * b.q == abs(b.q)):
         return False                                    # printed literally
     return True
+
+
+def _is_sparse_matrix(node) -> bool:
+    return (isinstance(node, MatrixBase) and isinstance(node, Basic) and len(node.args) == 3
+            and isinstance(node.args[2], SymDict))
+
+
+def _sparse_values(node: Basic, at: int) -> List[Tuple[Path, bool]]:
+    """The stored values of a sparse matrix or array - ``node.args[at]`` is
+    its ``Dict`` of ``(position, value)`` items - as paths to the values, in
+    reading order (the order they are drawn in).  The positions are never
+    drawn; nor is anything for an empty cell, which is drawn as a ``0`` of
+    no node's."""
+    items = node.args[at].args
+    key = lambda i: tuple(int(k) for k in (items[i].args[0].args if isinstance(items[i].args[0], SymTuple)
+                                          else (items[i].args[0],)))
+    return [((at, i, 1), True) for i in sorted(range(len(items)), key=key)]
 
 
 def view_parts(node: Basic, settings: Settings = None) -> Optional[List[Tuple[str, Basic]]]:
@@ -387,7 +417,9 @@ def delete_at(expr: Basic, path: Path, settings: Settings = None) -> Basic:
     removing one side of a power leaves the other alone (deleting the
     exponent of ``x**2`` leaves ``x``, and the square root sign of
     ``sqrt(x)`` is its exponent too), and ``e`` is what is left of
-    ``exp(x)`` when its exponent goes."""
+    ``exp(x)`` when its exponent goes.  Removing an entry of a sparse matrix
+    or array (the value of an item of its ``Dict``) removes the item: the
+    cell is empty, ``0``."""
     if not path:
         raise ValueError("Cannot delete the root expression")
     last = path[-1]
@@ -397,6 +429,10 @@ def delete_at(expr: Basic, path: Path, settings: Settings = None) -> Basic:
     if isinstance(last, str):
         return replace_at(expr, path, S.One, settings)
     parent = get_at(expr, path[:-1], settings)
+    if isinstance(parent, SymTuple) and len(path) >= 2 and isinstance(path[-2], int) \
+            and isinstance(get_at(expr, path[:-2], settings), SymDict):
+        # a (key, value) item of a Dict is removed whole: half of it is no item
+        return delete_at(expr, path[:-1], settings)
     args = list(parent.args)
     del args[last]
     if isinstance(parent, Pow) and len(args) == 1:
@@ -438,8 +474,33 @@ _patch_number_separator()
 
 #: Containers whose children the SymPy printer accesses directly (integration
 #: limits, matrix elements, piecewise branches...).  They do not count towards
-#: the search depth and their children are searched before ordinary siblings.
+#: the search depth: their children are searched in their place, at the level
+#: of the container itself.
 TRANSPARENT = (SymTuple, ExprCondPair)
+
+#: ``node -> [(relative path, expand), ...]`` or None: the children of a node
+#: in the order the printer draws them (see :meth:`_AnnotatingMixin._child_order`).
+ChildOrder = Callable[[Basic], Optional[List[Tuple[Path, bool]]]]
+
+
+def _in_place(node: Basic, prefix: Path = ()) -> List[Tuple[Path, bool]]:
+    """The default drawing order: the arguments as they are stored, the
+    contents of a transparent container listed right after it (in its place,
+    at its level - ``expand`` False for the container)."""
+    out: List[Tuple[Path, bool]] = []
+    for i, arg in enumerate(getattr(node, "args", ())):
+        if isinstance(arg, TRANSPARENT):
+            out.append((prefix + (i,), False))
+            out.extend(_in_place(arg, prefix + (i,)))
+        else:
+            out.append((prefix + (i,), True))
+    return out
+
+
+def _child(node: Basic, rel: Path) -> Basic:
+    for i in rel:
+        node = node.args[i]
+    return node
 
 
 class _Frame:
@@ -448,15 +509,17 @@ class _Frame:
     entry listing ``(path, node)`` pairs in search order.  ``parts`` gives
     the virtual parts of a node (:func:`view_parts` with the printer's
     settings); they and their contents are searched before the node's real
-    arguments, at the same level."""
+    arguments, at the same level.  ``order`` gives the real children in the
+    order they are drawn (None: in place)."""
 
-    __slots__ = ("expr", "path", "is_root", "parts", "_index")
+    __slots__ = ("expr", "path", "is_root", "parts", "order", "_index")
 
     def __init__(self, expr: Basic, path: Path, parts: Callable[[Basic], Optional[List[Tuple[str, Basic]]]],
-                 is_root: bool = False):
+                 is_root: bool = False, order: Optional[ChildOrder] = None):
         self.expr = expr
         self.path = path
         self.parts = parts
+        self.order = order
         self.is_root = is_root
         self._index: Optional[Dict[Basic, List[Tuple[Path, Basic]]]] = None
 
@@ -467,13 +530,16 @@ class _Frame:
         for name, value in self.parts(node) or ():
             out.append((path + (name,), value, False))
             self._expand(path + (name,), value, out)
-        transparent, plain = [], []
-        for i, arg in enumerate(getattr(node, "args", ())):
-            (transparent if isinstance(arg, TRANSPARENT) else plain).append((path + (i,), arg))
-        for p, arg in transparent:
-            out.append((p, arg, False))
-            self._expand(p, arg, out)
-        out.extend((p, arg, True) for p, arg in plain)
+        if not isinstance(node, Basic):
+            return
+        order = self.order(node) if self.order is not None else None
+        if order is None:
+            order = _in_place(node)
+        for rel, expand in order:
+            try:
+                out.append((path + rel, _child(node, rel), expand))
+            except (IndexError, AttributeError):
+                continue
 
     def candidates(self, expr: Basic, max_depth: int) -> List[Tuple[Path, Basic]]:
         if self._index is None:
@@ -523,7 +589,7 @@ class _AnnotatingMixin:
     def annotate(self, expr: Basic) -> Tuple[str, Dict[Path, Basic]]:
         """Return ``(latex, nodes)`` where ``nodes`` maps each annotated path
         to the corresponding sub-expression."""
-        self._stack = [_Frame(expr, (), self._view_parts, is_root=True)]
+        self._stack = [self._frame(expr, (), is_root=True)]
         self._claimed = set()
         self._nodes = {}
         try:
@@ -538,6 +604,31 @@ class _AnnotatingMixin:
 
     def _view_parts(self, node: Basic) -> Optional[List[Tuple[str, Basic]]]:
         return view_parts(node, self._settings)
+
+    def _frame(self, node: Basic, path: Path, is_root: bool = False) -> _Frame:
+        return _Frame(node, path, self._view_parts, is_root=is_root, order=self._child_order)
+
+    def _child_order(self, node: Basic) -> Optional[List[Tuple[Path, bool]]]:
+        """The children of ``node`` this printer draws, in the order it draws
+        them, as ``[(relative path, expand), ...]`` (``expand`` False for a
+        container whose contents are listed after it, at its level); None
+        for the default, :func:`_in_place`.  Only what is drawn is listed,
+        so that nothing drawn can take the path of a piece that is not."""
+        if isinstance(node, MatrixBase) and not isinstance(node, BlockMatrix):
+            if _is_sparse_matrix(node):
+                return _sparse_values(node, 2)          # (rows, cols, {(i, j): value})
+            args = node.args
+            if len(args) == 3 and isinstance(args[2], SymTuple):
+                # (rows, cols, entries): the shape is not drawn
+                return [((2,), False)] + [((2, k), True) for k in range(len(args[2].args))]
+        if isinstance(node, NDimArray):
+            if isinstance(node, ImmutableSparseNDimArray):
+                return _sparse_values(node, 0)          # ({k: value}, shape)
+            args = node.args
+            if len(args) == 2 and isinstance(args[0], SymTuple):
+                # (entries, shape): the shape is not drawn
+                return [((0,), False)] + [((0, k), True) for k in range(len(args[0].args))]
+        return None
 
     def _locate(self, expr: Basic) -> Optional[Tuple[Path, Basic]]:
         """The ``(path, node)`` of the unclaimed view-tree node that ``expr``
@@ -578,7 +669,7 @@ class _AnnotatingMixin:
         if found is None:
             return super()._print(expr, **kwargs)
         path, node = found
-        self._stack.append(_Frame(node, path, self._view_parts))
+        self._stack.append(self._frame(node, path))
         try:
             tex = super()._print(expr, **kwargs)
         finally:
@@ -593,6 +684,51 @@ def _is_block_matrix(mat) -> bool:
 class AnnotatedLatexPrinter(_AnnotatingMixin, LatexPrinter):
     """LaTeX printer that annotates every printed sub-expression with its
     path (KaTeX ``\\htmlData``)."""
+
+    def _child_order(self, node):
+        # The order in which LatexPrinter draws the pieces of the nodes that
+        # do not draw their arguments as they are stored.  Each list follows
+        # the corresponding _print_* method of SymPy's LatexPrinter (or the
+        # override below); a piece left out is one that is not drawn.
+        if isinstance(node, Integral):
+            limits = node.limits
+            if len(limits) <= 4 and all(len(lim) == 1 for lim in limits):
+                # \iint f \, dx \, dy: the variables are printed first
+                order = [((i, 0), True) for i in range(1, len(limits) + 1)]
+            else:
+                # one \int per limit, the outer (last) one first: its bounds,
+                # then its variable (collected for the end)
+                order = []
+                for i in range(len(limits), 0, -1):
+                    lim = limits[i - 1]
+                    order += [((i, j), True) for j in range(1, len(lim))]
+                    order.append(((i, 0), True))
+            return order + [((0,), True)]
+        if isinstance(node, (Sum, Product)):
+            limits = node.limits
+            if len(limits) == 1:
+                order = [((1, j), True) for j in range(len(limits[0]))]
+            else:
+                # \substack{a \leq i \leq b \\ ...}: bound, variable, bound
+                order = [((i, j), True) for i in range(1, len(limits) + 1) for j in (1, 0, 2)]
+            return order + [((0,), True)]
+        if isinstance(node, Derivative):
+            # \partial y^{2} \partial x^{2}: the last variable first, its
+            # count only when it is not 1; then the expression
+            order = []
+            for i in range(len(node.args) - 1, 0, -1):
+                order.append(((i, 0), True))
+                if node.args[i].args[1] != 1:
+                    order.append(((i, 1), True))
+            return order + [((0,), True)]
+        if isinstance(node, Subs):
+            # f |_{x=a \\ y=b}: the expression, then variable and value in turn
+            expr, old, new = node.args
+            return [((0,), True)] + [((k, i), True) for i in range(len(old)) for k in (1, 2)]
+        if isinstance(node, Limit):
+            # \lim_{z \to z0^{dir}} e (see _print_Limit)
+            return [((1,), True), ((2,), True), ((3,), True), ((0,), True)]
+        return super()._child_order(node)
 
     def _print_Limit(self, expr):
         # LatexPrinter writes the direction of a one-sided limit as "0^+",
@@ -643,7 +779,7 @@ class AnnotatedLatexPrinter(_AnnotatingMixin, LatexPrinter):
                     tex += " - " + self._print_add_term(-term)
                 else:
                     path, node = found
-                    self._stack.append(_Frame(node, path, self._view_parts))
+                    self._stack.append(self._frame(node, path))
                     try:
                         inner = self._print_add_term(-term)
                     finally:
@@ -731,13 +867,23 @@ class AnnotatedStrPrinter(_AnnotatingMixin, StrPrinter):
 
     wrap = staticmethod(lambda path, text: MARK_START + path + MARK_SEP + text + MARK_END)
 
+    def _child_order(self, node):
+        # StrPrinter._print_Sum and _print_Integral join the limits before
+        # they print the function: "Sum(k, (k, 1, n))" is drawn from the end.
+        if isinstance(node, (Sum, Integral)):
+            order = [((i, j), True) for i in range(1, len(node.args)) for j in range(len(node.args[i]))]
+            return order + [((0,), True)]
+        return super()._child_order(node)
+
     def _print_Rational(self, expr):
         node, path = self._rational_parts(expr)
         if node is None or self._settings.get("sympy_integers", False):
             return super()._print_Rational(expr)
-        num = self._annotated(Integer(abs(node.p)), path + ("n",), str(expr.p))
+        # the part n is |p|: the sign is printed outside it, as in the LaTeX
+        sign = "-" if expr.p < 0 else ""
+        num = self._annotated(Integer(abs(node.p)), path + ("n",), str(abs(expr.p)))
         den = self._annotated(Integer(node.q), path + ("d",), str(expr.q))
-        return num + "/" + den
+        return sign + num + "/" + den
 
     @staticmethod
     def _strip_minus(text: str):

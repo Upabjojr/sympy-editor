@@ -175,8 +175,10 @@ as artifacts; with the secrets `ANDROID_KEYSTORE_BASE64` + passwords and
     `build.py` - with the standard library installed into the app and each
     extension module turned into the framework iOS insists on, by the script
     that travels with it.  `PythonRuntime.m` starts an isolated interpreter
-    (no environment, no bytecode written beside a signed bundle) and
-    `EditorView.swift` bridges it; a debug build sets `isInspectable`, so
+    (no environment, no bytecode written beside a signed bundle) - one per
+    process, `PythonRuntime.shared`, which every window of the Mac app uses
+    on one queue (`PythonHost`), each window's bridge naming its documents
+    `w<n>/<page's id>` - and `EditorView.swift` bridges it; a debug build sets `isInspectable`, so
     Safari's *Develop > Simulator* menu opens the Web Inspector on the page.
 - **Pyodide is not what the apps use, and iOS could not use it anyway.**  The
   bundle can still be built with it (`build_www.py` without `--native`, which

@@ -40,6 +40,14 @@ STATIC = Path(__file__).parent / "static"
 STAND_IN = re.compile(r"\\Delta(?![A-Za-z])")
 
 
+#: What a nested reading carries where the piece goes: a symbol whose name no
+#: formula uses, read by the LaTeX add-on and then replaced by the piece itself
+#: (``xreplace``).  The piece's own LaTeX, read back, would not be the piece:
+#: ``f(x)`` would be ``f*x``, ``x_1`` a symbol ``x_{1}``, ``lamda`` ``lambda``.
+PIECE_NAME = "nestedpiece"
+PIECE_TEX = r"\mathit{%s}" % PIECE_NAME
+
+
 def _stand_in(token: str):
     return re.compile(re.escape(token) + r"(?![A-Za-z])")
 
@@ -154,6 +162,18 @@ class HandwritingAddon(Addon):
             raise ValueError(f"No handwriting engine called {name or self.engine!r}")
         return eng
 
+    def _reader(self, name: Optional[str] = None) -> Engine:
+        """The engine to hand strokes to here: the one named or chosen when it
+        reads here, else the first that does - a host engine reads in the
+        page, and strokes that reach Python are for one of these."""
+        eng = self._engine(name)
+        if eng.recognizer is not None:
+            return eng
+        for other in self.engines.values():
+            if other.recognizer is not None:
+                return other
+        raise ValueError("No handwriting engine reads strokes here")
+
     def client_options(self) -> Dict[str, Any]:
         chosen = self._engine()
         return {"status": chosen.status() if chosen.where == "python" else self.engines["math-ocr"].status()
@@ -178,16 +198,30 @@ class HandwritingAddon(Addon):
         return {"choices": dict(choices) if isinstance(choices, dict) else {},
                 "constants": dict(constants) if isinstance(constants, dict) else {}}
 
-    def _read(self, doc, latex: str, picks: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        return self._latex().read(doc, dict(picks or {}, latex=latex))
+    @staticmethod
+    def _piece(doc, nest) -> Optional[Basic]:
+        """The node at ``nest`` ("" and "/" are the whole formula), or None."""
+        if nest is None:
+            return None
+        try:
+            return doc.get(str(nest))
+        except Exception:  # noqa: BLE001 - a path the document no longer has
+            return None
 
-    def _reading(self, doc, latex: str, picks: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _read(self, doc, latex: str, picks: Optional[Dict[str, Any]] = None, nest=None) -> Dict[str, Any]:
+        payload = dict(picks or {}, latex=latex)
+        piece = self._piece(doc, nest) if PIECE_TEX in latex else None
+        if piece is not None:
+            payload["pieces"] = {PIECE_NAME: piece}
+        return self._latex().read(doc, payload)
+
+    def _reading(self, doc, latex: str, picks: Optional[Dict[str, Any]] = None, nest=None) -> Dict[str, Any]:
         """The LaTeX as SymPy would get it - read as the LaTeX panel reads, in
         the document's names, with the options picked - and the options
         themselves: each ambiguity with the whole expression under each of its
         alternatives, each constant name with its switch, and every decision
         taken (``choices``, so that the next pick changes only itself)."""
-        res = self._read(doc, latex, picks)
+        res = self._read(doc, latex, picks, nest)
         out = {k: res.get(k) for k in ("ok", "src", "latex", "error", "incomplete")}
         out["ambiguities"] = res.get("ambiguities") or []
         out["constants"] = res.get("constants") or []
@@ -209,12 +243,14 @@ class HandwritingAddon(Addon):
                 eng.recognizer.warm(background=True)
             return {"engine": self.engine, "where": eng.where, "status": eng.status()}
         if method == "recognize":
-            result = self.recognizer.recognize(payload.get("strokes"), beam=payload.get("beam", 4))
+            result = self._reader(payload.get("engine")).recognizer.recognize(payload.get("strokes"),
+                                                                              beam=payload.get("beam", 4))
             for cand in result["candidates"]:
                 cand["reading"] = self._reading(doc, cand["latex"])
             return result
         if method == "read":
-            return {"reading": self._reading(doc, str(payload.get("latex", "")), self._picks(payload))}
+            return {"reading": self._reading(doc, str(payload.get("latex", "")), self._picks(payload),
+                                             payload.get("nest"))}
         if method == "write":
             # What is written, read: strokes in, readings out - and, with ``nest``
             # (a node's path), read together with that node, whose LaTeX takes the
@@ -233,7 +269,8 @@ class HandwritingAddon(Addon):
                 # A piece to read with (``context``, its box): given to a
                 # recognizer that takes it as such, drawn into the strokes as
                 # the triangle for one that does not.
-                rec = self._engine(payload.get("engine")).recognizer
+                reader = self._reader(payload.get("engine"))
+                rec = reader.recognizer
                 strokes, box = payload.get("strokes"), payload.get("context")
                 nesting = box is not None and payload.get("nest") is not None
                 if nesting and _takes_context(rec):
@@ -242,27 +279,29 @@ class HandwritingAddon(Addon):
                     if nesting:
                         strokes = stand_in(box, strokes)
                     result = rec.recognize(strokes, beam=payload.get("beam", 4))
-                result["engine"] = self._engine(payload.get("engine")).name
+                result["engine"] = reader.name
             stand = _stand_in(result.get("stand_in") or r"\Delta")
-            nest = payload.get("nest")
-            piece = None
-            if nest is not None:              # "" is the whole formula, a piece like any other
-                try:
-                    piece = sympy.latex(doc.get(str(nest)))
-                except Exception:  # noqa: BLE001 - a path the document no longer has
-                    piece = None
+            nest = payload.get("nest")        # "" is the whole formula, a piece like any other
+            node = self._piece(doc, nest)
+            piece = sympy.latex(node) if node is not None else None
             out = []
             for cand in result["candidates"]:
                 latex, display, nested = cand["latex"], cand.get("display") or cand["latex"], False
                 if piece is not None and len(stand.findall(latex)) == 1:
-                    latex, display, nested = _nest(latex, piece, stand), _nest(display, piece, stand), True
-                out.append({"latex": latex, "display": display, "raw": cand.get("raw"), "score": cand.get("score"),
-                            "nested": nested, "reading": self._reading(doc, latex)})
+                    # the piece goes in as itself: a placeholder in the text,
+                    # the piece in the SymPy (see PIECE_TEX); its LaTeX is shown
+                    latex = stand.sub(lambda m: PIECE_TEX, latex, count=1)
+                    display, nested = _nest(display, piece, stand), True
+                c = {"latex": latex, "display": display, "raw": cand.get("raw"), "score": cand.get("score"),
+                     "nested": nested, "reading": self._reading(doc, latex, nest=nest if nested else None)}
+                if nested:
+                    c["nest"] = str(nest)
+                out.append(c)
             result["candidates"] = out
             result["nested"] = any(c["nested"] for c in out)
             return result
         if method == "insert":
-            res = self._read(doc, str(payload.get("latex", "")), self._picks(payload))
+            res = self._read(doc, str(payload.get("latex", "")), self._picks(payload), payload.get("nest"))
             if not res.get("ok"):
                 raise ValueError(res.get("error") or "This could not be read")
             # where the LaTeX panel would put it: the selection, the caret, the end
@@ -272,7 +311,7 @@ class HandwritingAddon(Addon):
 
     def describe(self, method: str, payload: Dict[str, Any]):
         if method == "insert":
-            text = str(payload.get("latex", "")).replace("\n", " ").strip()
+            text = str(payload.get("display") or payload.get("latex", "")).replace("\n", " ").strip()
             return "Handwriting: " + (text if len(text) <= 48 else text[:47] + "…")
         return None
 

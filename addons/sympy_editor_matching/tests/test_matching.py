@@ -79,6 +79,16 @@ def test_rules_are_matched_all_at_once_and_applied_where_pointed():
     assert doc.expr == sin(x) ** 2 + y
 
 
+def test_a_rule_index_given_as_text_is_described_too():
+    # handle() takes "0" as rule 0 (int()); the history label must as well
+    doc = Document(sin(x) ** 2 + y, addons=[MatchingAddon()])
+    _q(doc, "add_rule", src="sin(a_)**2 -> 1 - cos(a_)**2")
+    path = [p for p, n in doc.snapshot()["nodes"].items() if n["src"] == "sin(x)**2"][0]
+    _q(doc, "rewrite", path=path, index="0")
+    assert doc.expr == 1 - cos(x) ** 2 + y
+    assert doc.history_labels()["actions"][-1] == "Rewrite: rule 1"
+
+
 def test_the_guard_is_honoured_and_the_transform_menu_rewrites_inside():
     addon = MatchingAddon(rules=[(x ** WildSymbol("m_"), x ** (WildSymbol("m_") + 1) / (WildSymbol("m_") + 1), Ne(WildSymbol("m_"), -1))])
     doc = Document(1 / x + x ** 3, addons=[addon])
@@ -279,3 +289,22 @@ def test_the_name_field_is_the_saving():
     assert res["name"] is None and res["library"] == ["trig"]
     _q(doc, "add_rule", src="y -> y**3")                          # no longer saved into trig
     assert len(doc.addon_state["matching"]["library"]["trig"]) == 2
+
+
+def test_saved_rules_are_read_never_run(tmp_path):
+    """A rule set comes back from a file or a kept session (addon_state):
+    it is read like the rest of the file - never run - and a rule that
+    would run code is dropped, not executed."""
+    from sympy import symbols
+
+    from sympy_editor import Document
+    from sympy_editor_matching import MatchingAddon
+
+    x = symbols("x")
+    marker = tmp_path / "ran"
+    evil = f"__import__('pathlib').Path({str(marker)!r}).write_text('x') -> 1"
+    doc = Document(x, addons=[MatchingAddon()],
+                   addon_state={"matching": {"rules": ["sin(a_)**2 -> 1 - cos(a_)**2", evil]}})
+    rules = doc.addons["matching"].rules(doc)
+    assert not marker.exists()
+    assert [str(r.pattern) for r in rules] == ["sin(a_)**2"]

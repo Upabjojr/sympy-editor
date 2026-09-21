@@ -1,9 +1,12 @@
 import pytest
+import re
+
 from sympy import (
     Pow,
-    Abs, Derivative, Eq, Function, ImmutableMatrix, Integral, Lambda, Limit, Matrix,
-    Piecewise, Rational, Subs, Sum, cos, exp, latex, log, oo, pi, sin, sqrt, symbols, sympify,
+    Abs, Derivative, Eq, Function, ImmutableMatrix, ImmutableSparseMatrix, Integral, Lambda, Limit, Matrix,
+    Piecewise, Product, Rational, Subs, Sum, Tuple, cos, exp, latex, log, oo, pi, sin, sqrt, symbols, sympify,
 )
+from sympy.tensor.array import ImmutableSparseNDimArray
 
 from sympy_editor.printer import (
     annotate, delete_at, format_path, get_at, parse_path, replace_at, strip_annotations,
@@ -42,7 +45,30 @@ EXPRS = [
     Lambda((x, y), x + y),
     Subs(f(x), x, 0),
     Limit(sin(x) / x, x, 0),
+    # pieces drawn in another order than the arguments hold them
+    Integral(x * y, (x, 0, y), (y, 0, 1)),
+    Integral(x * y, (x, 0, x)),
+    Integral(x * y, x, y),
+    Sum(x * y, (x, 1, y), (y, 1, z)),
+    Product(z, (z, 1, y)),
+    Derivative(f(x, y), (x, 2), (y, 2)),
+    Derivative(x, x),
+    Subs(f(x, y), (x, y), (y, x)),
+    Subs(x, x, 1),
+    Limit(x, x, 0),
+    Tuple(1, Tuple(2, 1)),
+    ImmutableSparseMatrix([[x, 0], [0, 1]]),
+    ImmutableSparseMatrix([[0, x], [x, 0]]),
+    ImmutableSparseNDimArray([[0, 1], [2, 0]]),
+    Rational(-3, 4),
+    Rational(-1, 2) ** x,
 ]
+
+
+def drawn(tex):
+    """The annotated paths of ``tex`` in the order they are drawn (their
+    spans open), the root left out."""
+    return [p for p in re.findall(r"\\htmlData\{path=([^}]*)\}", tex) if p != "/"]
 
 
 @pytest.mark.parametrize("expr", EXPRS, ids=str)
@@ -331,3 +357,89 @@ def test_editing_a_rebuilt_matrix_sum_changes_the_term_that_was_asked_for():
     assert doc.snapshot()["nodes"][path]["src"] == "A*B"    # same path, same term
     doc.replace(path, "A*B + B*A")
     assert str(doc.expr) == "A*B + B*A + 2*A.T"
+
+
+def test_integral_limits_carry_their_own_paths():
+    """LatexPrinter draws the limits of a multiple integral outer first and
+    the dx after the integrand; a drawn piece took the path of the first
+    equal piece in argument order, so editing the outer 0 changed the
+    inner one."""
+    e = Integral(x * y, (x, 0, y), (y, 0, 1))
+    tex, nodes = annotate(e)
+    assert drawn(tex) == ["/2/1", "/2/2", "/1/1", "/1/2", "/0", "/0/0", "/0/1", "/1/0", "/2/0"]
+    # the outer lower limit is the first 0 drawn: editing it changes the outer limit
+    assert replace_at(e, parse_path(drawn(tex)[0]), 5) == Integral(x * y, (x, 0, y), (y, 5, 1))
+    # the upper limit x is not the variable x
+    tex, _ = annotate(Integral(x * y, (x, 0, x)))
+    assert drawn(tex) == ["/1/1", "/1/2", "/0", "/0/0", "/0/1", "/1/0"]
+    tex, _ = annotate(Integral(x * y, x, y))                  # \iint: the variables are printed first
+    assert drawn(tex) == ["/0", "/0/0", "/0/1", "/1/0", "/2/0"]
+    tex, _ = annotate(Sum(x * y, (x, 1, y), (y, 1, z)))       # 1 <= x <= y, bound first
+    assert drawn(tex)[:6] == ["/1/1", "/1/0", "/1/2", "/2/1", "/2/0", "/2/2"]
+    tex, _ = annotate(Limit(x, x, 0))                           # \lim_{x \to 0} x
+    assert drawn(tex) == ["/1", "/2", "/3", "/0"]
+
+
+def test_sparse_matrix_draws_values_never_keys():
+    """A sparse matrix holds a Dict of ((row, col), value) items: the drawn
+    values (and the zeros of the empty cells) were matched to the numbers
+    of the keys, so editing a zero moved an entry or broke the matrix."""
+    from sympy_editor import Document
+    m = ImmutableSparseMatrix([[x, 0], [0, 1]])
+    tex, nodes = annotate(m)
+    assert drawn(tex) == ["/2/0/1", "/2/1/1"]                   # the stored values; empty cells are no node's
+    assert nodes[(2, 0, 1)] == x and nodes[(2, 1, 1)] == 1
+    assert replace_at(m, (2, 1, 1), y) == ImmutableSparseMatrix([[x, 0], [0, y]])
+    assert delete_at(m, (2, 0, 1)) == ImmutableSparseMatrix([[0, 0], [0, 1]])      # the cell is emptied
+    assert isinstance(delete_at(m, (2, 0, 1)), ImmutableSparseMatrix)
+    tex, _ = annotate(ImmutableSparseMatrix([[0, x], [x, 0]]))  # equal values, in reading order
+    assert drawn(tex) == ["/2/0/1", "/2/1/1"]
+    doc = Document(m)
+    doc.replace("/2/1/1", "y")
+    assert doc.expr == ImmutableSparseMatrix([[x, 0], [0, y]])
+    # a sparse array: ({flat index: value}, shape) - neither index nor shape is drawn
+    a = ImmutableSparseNDimArray([[0, 1], [2, 0]])
+    tex, nodes = annotate(a)
+    assert drawn(tex) == ["/0/0/1", "/0/1/1"] and nodes[(0, 0, 1)] == 1 and nodes[(0, 1, 1)] == 2
+    assert replace_at(a, (0, 1, 1), y) == ImmutableSparseNDimArray([[0, 1], [y, 0]])
+    assert delete_at(a, (0, 0, 1)) == ImmutableSparseNDimArray([[0, 0], [2, 0]])
+
+
+def test_derivative_and_subs_pieces_carry_their_own_paths():
+    """LatexPrinter draws a derivative's variables last first, and a Subs's
+    variables and values in turn."""
+    tex, _ = annotate(Derivative(f(x, y), (x, 2), (y, 2)))
+    assert drawn(tex) == ["/2/0", "/2/1", "/1/0", "/1/1", "/0", "/0/0", "/0/1"]
+    tex, _ = annotate(Subs(f(x, y), (x, y), (y, x)))
+    assert drawn(tex) == ["/0", "/0/0", "/0/1", "/1/0", "/2/0", "/1/1", "/2/1"]
+
+
+def test_nested_tuples_keep_their_places():
+    tex, nodes = annotate(Tuple(1, Tuple(2, 1)))
+    assert drawn(tex) == ["/0", "/1", "/1/0", "/1/1"]
+
+
+def test_source_spans_follow_the_str_printer():
+    """The str printer draws Sum and Integral limits first but other nodes
+    in argument order: every piece of the source line must carry its own
+    path."""
+    from sympy_editor.printer import annotate_str
+    def pieces(e):
+        text, spans = annotate_str(e)
+        return [(p, text[a:b]) for p, (a, b) in sorted(spans.items(), key=lambda kv: (kv[1][0], -kv[1][1])) if p != "/"]
+    assert pieces(Product(z, (z, 1, y))) == [("/0", "z"), ("/1", "(z, 1, y)"), ("/1/0", "z"), ("/1/1", "1"), ("/1/2", "y")]
+    assert pieces(Derivative(x, x)) == [("/0", "x"), ("/1/0", "x")]
+    assert pieces(Subs(x, x, 1)) == [("/0", "x"), ("/1/0", "x"), ("/2/0", "1")]
+    assert pieces(Sum(z, (z, 1, y))) == [("/0", "z"), ("/1/0", "z"), ("/1/1", "1"), ("/1/2", "y")]
+    assert pieces(Integral(x, (x, 0, x))) == [("/0", "x"), ("/1/0", "x"), ("/1/1", "0"), ("/1/2", "x")]
+
+
+def test_source_span_of_a_numerator_leaves_the_sign_out():
+    """The part n of a rational is |p|: its span must not cover the minus."""
+    from sympy_editor.printer import annotate_str
+    text, spans = annotate_str(Rational(-3, 4))
+    assert text == "-3/4" and text[slice(*spans["/n"])] == "3" and text[slice(*spans["/d"])] == "4"
+    text, spans = annotate_str(Rational(-1, 2) ** x)
+    assert text[slice(*spans["/0"])] == "-1/2" and text[slice(*spans["/0/n"])] == "1"
+    text, spans = annotate_str(x - Rational(3, 4))
+    assert text[slice(*spans["/0"])] == "- 3/4" and text[slice(*spans["/0/n"])] == "3"

@@ -252,7 +252,8 @@ class MatchingAddon(Addon):
         out = []
         for text in texts:
             try:
-                out.append(parse_rule_text(str(text), doc.parse))
+                # saved rules come from a file or a kept session: read, never run
+                out.append(parse_rule_text(str(text), getattr(doc, "parse_saved", doc.parse)))
             except Exception:
                 continue                       # a rule that no longer parses is dropped, not the set
         return out
@@ -353,7 +354,7 @@ class MatchingAddon(Addon):
 
     def describe(self, method: str, payload: Dict[str, Any]) -> Optional[str]:
         if method == "rewrite":
-            which = f"rule {payload['index'] + 1}" if payload.get("index") is not None else ("until nothing matches" if payload.get("all") else "one pass")
+            which = f"rule {int(payload['index']) + 1}" if payload.get("index") is not None else ("until nothing matches" if payload.get("all") else "one pass")
             return f"Rewrite: {which}"
         if method == "open_rule":
             return f"Rules: open rule {int(payload.get('index', 0)) + 1} in the editor"

@@ -312,10 +312,13 @@ SympyEditor.registerAddon("tree", {
         if (items[next]) items[next].focus({ preventScroll: true });
       }
     });
-    document.addEventListener("pointerdown", function (ev) {
+    // On the page, not the panel: taken off again in destroy, or every time
+    // the add-on is switched off and on would leave one more behind.
+    function onDocPointerDown(ev) {
       if (!menu.hidden && !menu.contains(ev.target) && ev.target !== nodeBtn) hideMenu();
       if (!quick.hidden && !quick.contains(ev.target) && !svg.contains(ev.target)) hideQuick();
-    });
+    }
+    document.addEventListener("pointerdown", onDocPointerDown);
     nodeBtn.addEventListener("click", function () {
       var n = selectedNode();
       if (!n) return;
@@ -751,7 +754,10 @@ SympyEditor.registerAddon("tree", {
         draw();
       },
       onSelect: function () { markSelection(); },
-      destroy: function () { drag = null; hideMenu(); }
+      destroy: function () {
+        drag = null; hideMenu();
+        document.removeEventListener("pointerdown", onDocPointerDown);
+      }
     };
   }
 });

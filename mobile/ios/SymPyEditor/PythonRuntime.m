@@ -55,8 +55,20 @@ static NSString *drainError(void) {
     return text.length ? text : @"unknown Python error";
 }
 
-@implementation PythonRuntime {
-    PyObject *_app;        // the sympy_editor_app module
+/// The sympy_editor_app module, once imported: process-wide, as the
+/// interpreter is.
+static PyObject *sympyEditorApp = NULL;
+/// Whether the two directories are on sys.path already (a failed import
+/// retried must not add them twice).
+static BOOL packagesAdded = NO;
+
+@implementation PythonRuntime
+
++ (PythonRuntime *)shared {
+    static PythonRuntime *runtime = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ runtime = [[PythonRuntime alloc] init]; });
+    return runtime;
 }
 
 - (void)dealloc {
@@ -83,9 +95,39 @@ static NSString *drainError(void) {
 }
 
 - (BOOL)startAndReturnError:(NSError **)error {
-    if (_app != NULL) return YES;
+    // One interpreter per process, whichever window asks first: the lock and
+    // Py_IsInitialized() make sure it is initialized once, and a failed
+    // import is retried without initializing again.
+    @synchronized ([PythonRuntime class]) {
+        if (sympyEditorApp != NULL) return YES;
 
-    NSString *resources = [NSBundle mainBundle].resourcePath;
+        NSString *resources = [NSBundle mainBundle].resourcePath;
+        if (!Py_IsInitialized() && ![self initializeWithResources:resources error:error]) return NO;
+
+        PyGILState_STATE gil = PyGILState_Ensure();
+        BOOL ready = packagesAdded;
+        if (!ready) {
+            ready = [self addPackages:[resources stringByAppendingPathComponent:@"app_packages"]
+                                  app:[resources stringByAppendingPathComponent:@"app"]
+                                error:error];
+            packagesAdded = ready;
+        }
+        if (ready) {
+            sympyEditorApp = PyImport_ImportModule("sympy_editor_app");
+            if (sympyEditorApp == NULL) {
+                if (error) *error = pythonError(drainError());
+                ready = NO;
+            }
+        }
+        PyGILState_Release(gil);
+        return ready;
+    }
+}
+
+/// Py_PreInitialize and Py_InitializeFromConfig, once in the process; the GIL
+/// is handed back before returning, so that every call from here on takes it
+/// the same way (PyGILState_Ensure).
+- (BOOL)initializeWithResources:(NSString *)resources error:(NSError **)error {
     PyStatus status;
 
     // An isolated interpreter: it must read nothing of the environment, and
@@ -125,31 +167,22 @@ static NSString *drainError(void) {
         if (error) *error = pythonError([NSString stringWithFormat:@"cannot start Python: %s", status.err_msg]);
         return NO;
     }
-
-    // Py_InitializeFromConfig left the GIL held by this thread; whether the
-    // rest works or not, hand it back before returning, so that every call
-    // from here on takes it the same way (-call:arguments:error:).
-    BOOL ready = [self addPackages:[resources stringByAppendingPathComponent:@"app_packages"]
-                               app:[resources stringByAppendingPathComponent:@"app"]
-                             error:error];
-    if (ready) {
-        _app = PyImport_ImportModule("sympy_editor_app");
-        if (_app == NULL) {
-            if (error) *error = pythonError(drainError());
-            ready = NO;
-        }
-    }
+    // Py_InitializeFromConfig left the GIL held by this thread: hand it back.
     PyEval_SaveThread();
-    return ready;
+    return YES;
 }
 
 - (NSString *)call:(NSString *)function
          arguments:(NSArray<NSString *> *)arguments
              error:(NSError **)error {
+    if (sympyEditorApp == NULL) {
+        if (error) *error = pythonError(@"Python has not started");
+        return nil;
+    }
     PyGILState_STATE gil = PyGILState_Ensure();
     NSString *answer = nil;
 
-    PyObject *callable = PyObject_GetAttrString(_app, function.UTF8String);
+    PyObject *callable = PyObject_GetAttrString(sympyEditorApp, function.UTF8String);
     PyObject *argv = callable ? PyTuple_New((Py_ssize_t)arguments.count) : NULL;
     if (argv != NULL) {
         for (NSUInteger i = 0; i < arguments.count; i++) {

@@ -452,3 +452,28 @@ def test_the_mouse_drags_the_tree_from_empty_space():
             assert page.errors == []
         finally:
             browser.close(); srv.shutdown(); srv.server_close()
+
+
+def test_switching_the_tree_off_takes_its_page_listener_away(page_and_doc):
+    """The panel listens for pointerdown on the whole page (to close its
+    menus); switched off, it must stop - or every off/on cycle leaves one more
+    listener, and a dead panel's, behind."""
+    page, doc = page_and_doc
+    page.add_init_script("""(() => {
+      const add = document.addEventListener.bind(document), rem = document.removeEventListener.bind(document);
+      const live = new Set();
+      window.__pointerdowns = () => live.size;
+      document.addEventListener = (t, f, o) => { if (t === 'pointerdown') live.add(f); return add(t, f, o); };
+      document.removeEventListener = (t, f, o) => { if (t === 'pointerdown') live.delete(f); return rem(t, f, o); };
+    })()""")
+    page.reload()
+    page.wait_for_selector(".se-addon-tree .tree-node", timeout=30000)
+    before = page.evaluate("window.__pointerdowns()")
+    ed = "document.querySelector('.sympy-editor').__sympyEditor"
+    for _ in range(3):
+        page.evaluate(ed + ".send({action: 'addons', disable: ['tree']})")
+        page.wait_for_selector(".se-addon-tree", state="detached", timeout=10000)
+        page.evaluate(ed + ".send({action: 'addons', enable: ['tree']})")
+        page.wait_for_selector(".se-addon-tree .tree-node", timeout=10000)
+    assert page.evaluate("window.__pointerdowns()") == before
+    assert page.errors == []

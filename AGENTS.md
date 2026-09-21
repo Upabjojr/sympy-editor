@@ -180,7 +180,8 @@ Two conventions between printer, document and front end:
   focus}` indexes the parent's display-ordered children (`_displayChildren`).
   Messages carry `children: [arg indices]` with `replace`/`delete`/`apply`
   (`printer.extract_range/replace_range/delete_range`); the range's source is
-  built in the front end from the children's sources.  Drags use pointer
+  built in the front end from the children's sources (`_rangeSource`
+  parenthesizes the operands of `&`/`|`).  Drags use pointer
   events (mouse, touch, pen alike): a mouse or pen drag selects at once; a
   finger selects only after a *long press* (`_hold`, `opts.longPress` ms
   with the finger still - `_beginHold` selects the node under it, marks the
@@ -444,7 +445,8 @@ Two conventions between printer, document and front end:
   cannot be kept.  The front end then opens the `.se-keep` chooser instead of
   deciding (`_askKeep`): the child ↑ came from (`_cameFrom`) is the focused
   button, so ↑, Backspace, Enter keeps it and any other argument can be picked
-  instead; Escape cancels, ←/→ move between the choices.  A node with a single
+  instead; Escape cancels, ←/→ move between the choices (↑ and Backspace are
+  handled in the chooser's own keydown, not left to bubble).  A node with a single
   candidate is unwrapped straight away.  Backspace/Unwrap button.  Delete
   removes.
 - **Matrices and arrays.**  The "array" kind covers explicit `NDimArray`s *and*
@@ -716,6 +718,28 @@ Two conventions between printer, document and front end:
   `save_dir`.  `test_both_hosts_answer_every_native_call_the_page_makes`
   checks both hosts have every method the page calls; add one in Kotlin,
   Swift and editor.js together.
+- **Sessions that fail, and backends that hold one document.**  A backend
+  moves to a new document only after it exists, and closes the one it leaves
+  (`SympyEditorPy.close`, bridged by both apps; the Pyodide runtime's
+  `close`).  `openSession` resolves true/false; `openText` waits for the
+  editor to be idle (`_whenIdle`), and `newSession`/`deleteSession` refuse
+  while busy (deleting the current session opens another first).  A stored
+  session that cannot be opened stays in the list flagged `broken`
+  (`.se-session-broken`) and the editor starts afresh.  `http` and the widget
+  hold one document: their `openDocument` sends `{"action": "load", "state"}`,
+  which swaps in `server.load_session(doc, state)` (settings, add-on catalogue
+  and `on_change` listeners kept; a state it cannot read is refused and the
+  document stays as it was); handed an expression of their own
+  (`givenDocument`), they give it a session rather than reopening the last.
+  Each editor keeps through its own backend (`Keep.of(editor)`;
+  `SympyEditor.setKeeper` only sets a fallback); writes of one name go one
+  after another, latest wins, a failed write is retried once and then kept in
+  the browser for that write only.  The widget puts only committed snapshots
+  in its trait: previews, queries and errors come back as custom messages,
+  paired by per-view `_req` ids.  `server._Running` sets, clears and
+  delivers an interrupt under one lock and cancels a late delivery, so an
+  answer always goes out; the same holds in `sympy_editor_app`
+  (`interrupt(doc_id=None)` names the document it is for).
 - **Backends.**  `Editor` only needs `{send(msg, report) -> snapshot}`, plus
   the optional `warmup`, `openDocument`, `interrupt`/`canInterrupt`, `keep`
   (the storage seam, see file-format.md) and `saveFile` (the widget: a file
@@ -958,6 +982,27 @@ not.
 - **Tree paths, not LaTeX positions.**  Paths are `args` indices
   (`"/"` = root, `"/1/0"` = `expr.args[1].args[0]`).  Editing rebuilds
   ancestors with `node.func(*args)`, so SymPy auto-evaluation applies.
+- **Draw order.**  The search follows the order in which the printer *draws*
+  a node's pieces and lists only what it draws (`_child_order`, per printer):
+  by default the arguments in order with a transparent container's contents
+  in its place; `AnnotatedLatexPrinter` overrides Integral (limits outer
+  first, `dx` before the integrand), Sum/Product, Derivative (variables last
+  first), Subs and Limit; `AnnotatedStrPrinter` overrides Sum/Integral
+  (limits first).  A matrix's shape and a sparse matrix's or array's keys are
+  never candidates: a sparse entry is `/2/i/1` (the value of its Dict item)
+  and an empty cell is drawn unannotated (clicking it selects the matrix).
+  When adding a printer that draws out of argument order, add its order there.
+- **Saved text is read, never run.**  `invalid.read_srepr` / `read_source`
+  read history steps, declared names, files and add-on state (the rewrite
+  rules: `Document.parse_saved`) by walking the syntax tree - SymPy's
+  constructors, the editor's and the add-ons' names, literals - never
+  `sympify`/`parse_expr`; steps come back unevaluated, exactly as saved
+  (`_SaveReprPrinter` writes a product's factors as stored).  Text typed in
+  the editor, and a string given to `Document(...)` by the Python using it,
+  keep `parse_expr`/`sympify`: that is the user's own code.  The Python
+  script export writes a step as constructors under `evaluate(False)` when
+  source would not rebuild it.  Each history step carries its declared names
+  (`_decls`), so undo undoes a retype.
 - **Locating nodes while printing.**  SymPy's printer does not print the tree
   verbatim (`x - y` prints a negated term; `x/y**2` synthesises `Pow(y, 2)`;
   matrix/limit containers are traversed directly).  `AnnotatedLatexPrinter`
@@ -1050,6 +1095,19 @@ pip package.  The rule is minimal wrapping and maximal sharing:
   `editor.js`/Python so that desktop, Android and iOS stay identical.
   `tests/test_mobile.py` builds the bundle and, with
   `SYMPY_EDITOR_SLOW_TESTS=1`, edits in it with all external requests blocked.
+
+- **One interpreter per process.**  `PythonRuntime.shared` (dispatch_once)
+  and `PythonHost.shared` (one queue) serve every Mac window; each window's
+  `PythonBridge` prefixes the page's document ids with its name (`w2/doc1`),
+  asks `interrupt(<window>)`, and closes its documents when it goes.  A dead
+  page process reloads the page (`webViewWebContentProcessDidTerminate`;
+  Android `onRenderProcessGone` → `recreate()`).  Android keeps a pending save
+  (its text in a cache file) and the `opening` token in the saved instance
+  state, and its Python executor is per process.  The Mac app quits
+  `.terminateLater`, after every window's flush has reached `keepWrite` - at
+  once when `SympyEditor.flush()` says nothing was waiting - or 1.5 s;
+  closing a window flushes too.  The web app's worker precaches `./` and
+  fetches with `cache: "reload"`.
 
 ## Web app (`webapp/`)
 

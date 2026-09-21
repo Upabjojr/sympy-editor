@@ -1,5 +1,6 @@
 """Tests for the anywidget integration (skipped when anywidget is missing)."""
 import json
+import threading
 
 import pytest
 from sympy import cos, sin, symbols
@@ -25,6 +26,7 @@ def test_widget_initial_snapshot_and_js_bundle():
 
 def test_widget_roundtrip_messages():
     w = SympyEditorWidget(sin(x))
+    sent = _answers(w)
     seen = []
     w.on_change(seen.append)
     w._on_msg(w, {"action": "replace", "path": "/", "src": "cos(x)"}, [])
@@ -35,10 +37,10 @@ def test_widget_roundtrip_messages():
     w._on_msg(w, {"action": "undo"}, [])
     w.wait(5)
     assert w.expr == sin(x)
-    # errors are reported in the snapshot, state untouched
+    # errors are reported to the view that asked (not the trait), state untouched
     w._on_msg(w, {"action": "replace", "path": "/", "src": "sin("}, [])
     w.wait(5)
-    assert json.loads(w.snapshot)["error"]
+    assert sent[-1]["error"] and json.loads(w.snapshot)["error"] is None
     assert w.expr == sin(x)
     # unrelated messages are ignored
     w._on_msg(w, {"hello": 1}, [])
@@ -54,16 +56,21 @@ def test_widget_interrupts_a_long_computation():
             time.sleep(0.001)
 
     w = SympyEditorWidget(Document(x, ops={"forever": Op("forever", "Forever", forever)}))
+    sent = _answers(w)
     w._on_msg(w, {"action": "apply", "path": "/", "op": "forever"}, [])
     assert w._worker.is_alive()
+    deadline = time.time() + 5
+    while w._running is None and time.time() < deadline:
+        time.sleep(0.01)
     w._on_msg(w, {"action": "interrupt"}, [])
     w.wait(5)
     assert not w._worker.is_alive()
-    assert json.loads(w.snapshot)["error"].startswith("Interrupted") and w.expr == x
+    assert sent[-1]["error"].startswith("Interrupted") and w.expr == x
     w._on_msg(w, {"action": "interrupt"}, [])       # nothing running: harmless
     w._on_msg(w, {"action": "preview", "src": "x + 1"}, [])
     w.wait(5)
-    assert json.loads(w.snapshot)["preview"] is True and w.expr == x
+    assert sent[-1]["preview"] is True and w.expr == x
+    assert "preview" not in json.loads(w.snapshot)  # a preview is the asking view's, not every display's
 
 
 def test_widget_expr_setter_and_document_input():
@@ -102,9 +109,10 @@ def test_widget_answers_every_message_by_its_request_id():
     message that got no answer (a worker dying on an unprintable result)
     left its promise hanging and the editor busy for good."""
     w = SympyEditorWidget(x**2 + x)
+    sent = _answers(w)
     w._on_msg(w, {"action": "call", "path": "/", "func": "Tuple(1, [x])", "_req": 7}, [])
     w.wait(5)
-    snap = json.loads(w.snapshot)
+    snap = sent[-1]
     assert snap["_req"] == 7 and "cannot be shown" in snap["error"] and w.expr == x**2 + x
     w.expr = x                                       # a push from the kernel answers nothing
     assert "_req" not in json.loads(w.snapshot)
@@ -113,7 +121,7 @@ def test_widget_answers_every_message_by_its_request_id():
     w.document.handle = lambda message: (_ for _ in ()).throw(RuntimeError("boom"))
     w._on_msg(w, {"action": "snapshot", "_req": 8}, [])
     w.wait(5)
-    snap = json.loads(w.snapshot)
+    snap = sent[-1]
     assert snap["_req"] == 8 and "boom" in snap["error"] and snap["seq"] > seq and snap["src"] == "x"
 
 
@@ -129,8 +137,7 @@ def test_widget_interrupts_the_message_that_is_running():
             time.sleep(0.001)
 
     w = SympyEditorWidget(Document(x, ops={"forever": Op("forever", "Forever", forever)}))
-    seen = []
-    w.observe(lambda change: seen.append(json.loads(change.new)), names="snapshot")
+    seen = _answers(w)          # an error and a session to keep: answers for the view, not the trait
     w._on_msg(w, {"action": "apply", "path": "/", "op": "forever", "_req": 1}, [])
     deadline = time.time() + 5
     while w._running is None and time.time() < deadline:
@@ -196,7 +203,7 @@ def test_the_widget_keeps_what_the_page_keeps_in_the_kernel(tmp_path):
     quiet = SympyEditorWidget(x, store=False)
     got = _answers(quiet)
     quiet._on_msg(quiet, {"action": "keep", "key": "zoom", "value": "2", "_req": 1}, [])
-    assert got == [{"keep": None, "_req": 1}] and not any(tmp_path.glob("*.new"))
+    assert "keep" not in got[0] and "keeps nothing" in got[0]["error"] and not any(tmp_path.glob("*.new"))
 
 
 def test_the_widget_saves_files_next_to_the_notebook(tmp_path):
@@ -220,3 +227,106 @@ def test_the_widget_saves_files_next_to_the_notebook(tmp_path):
     assert data["expr"] == "y + sin(x)"
     w.expr = cos(x)
     assert w.open_formula(path) == sin(x) + y and json.loads(w.snapshot)["src"] == "y + sin(x)"
+
+
+def test_what_is_for_one_view_never_goes_in_the_trait():
+    """The trait is what every display of the widget draws: a preview, the
+    function list, a signature, the session to keep, the Python script held
+    there were drawn by a second display, and an error fallback built from
+    the last pushed snapshot could bring a stale preview back.  They go to
+    the view that asked, as messages of their own; edits still go in the trait."""
+    w = SympyEditorWidget(sin(x))
+    sent = _answers(w)
+    before = w.snapshot
+    for req, message in enumerate([{"action": "preview", "src": "x + 1"},
+                                   {"action": "functions"},
+                                   {"action": "methods", "path": "/"},
+                                   {"action": "signature", "name": "diff"},
+                                   {"action": "export"},
+                                   {"action": "script"},
+                                   {"action": "savefile", "name": "f"}], start=1):
+        w._on_msg(w, dict(message, _req=req), [])
+        w.wait(5)
+        assert sent[-1]["_req"] == req, message
+        assert w.snapshot == before, message
+    assert sent[0]["preview"] and "functions" in sent[1] and "export" in sent[4] and "script" in sent[5]
+    # an edit is everybody's
+    w._on_msg(w, {"action": "replace", "path": "/", "src": "cos(x)", "_req": 20}, [])
+    w.wait(5)
+    assert json.loads(w.snapshot)["_req"] == 20 and json.loads(w.snapshot)["src"] == "cos(x)"
+    # a failure after a preview answers with the committed state, not the preview
+    w._on_msg(w, {"action": "preview", "src": "x + 7", "_req": 21}, [])
+    w.wait(5)
+    w.document.handle = lambda message: (_ for _ in ()).throw(RuntimeError("boom"))
+    w._on_msg(w, {"action": "snapshot", "_req": 22}, [])
+    w.wait(5)
+    assert sent[-1]["_req"] == 22 and not sent[-1].get("preview") and sent[-1]["src"] == "cos(x)"
+
+
+def test_a_session_is_opened_in_the_widget(tmp_path):
+    """The widget held one document and could not open a session, so a
+    notebook never saved one: `load` swaps in the session's Document (the
+    old one's settings and listeners kept) and answers in the trait - every
+    display shows the session now; a session it cannot read changes nothing."""
+    w = SympyEditorWidget(sin(x), store=tmp_path)
+    sent = _answers(w)
+    seen = []
+    w.on_change(seen.append)
+    other = Document(y)
+    other.replace("/", "y**2")
+    w._on_msg(w, {"action": "load", "state": other.export(), "_req": 1}, [])
+    w.wait(5)
+    snap = json.loads(w.snapshot)
+    assert snap["_req"] == 1 and snap["src"] == "y**2" and snap["can_undo"] and w.expr == y**2
+    w._on_msg(w, {"action": "undo", "_req": 2}, [])
+    w.wait(5)
+    assert w.expr == y and seen[-1] == y
+    w._on_msg(w, {"action": "load", "state": {"history": ["Integer(1)"], "symbols": ["garbage("]}, "_req": 3}, [])
+    w.wait(5)
+    assert sent[-1]["_req"] == 3 and "could not be opened" in sent[-1]["error"] and w.expr == y
+
+
+def test_a_late_interrupt_still_lets_the_answer_out(monkeypatch):
+    """The interrupt read the running thread, then delivered: arriving after
+    the message was done, it went off while the answer was being sent - the
+    thread died and the editor stayed busy for good.  Here the delivery is
+    held until the message has returned, as a slow scheduler would."""
+    import time
+    import sympy_editor.document as document_module
+    import sympy_editor.server as server_module
+    import sympy_editor.widget as widget_module
+    real = document_module.interrupt_thread
+    entered, left = threading.Event(), threading.Event()
+
+    def slow(ident):
+        entered.set()
+        left.wait(2)
+        time.sleep(0.05)
+        return real(ident)
+
+    for module in (server_module, widget_module):
+        if hasattr(module, "interrupt_thread"):
+            monkeypatch.setattr(module, "interrupt_thread", slow)
+    w = SympyEditorWidget(x)
+    got = []
+
+    def record(content, buffers=None):
+        time.sleep(0.3)                      # sending the answer takes a moment
+        got.append(content)
+
+    w.send = record
+    w.observe(lambda change: record(json.loads(change.new)), names="snapshot")
+    handle = w.document.handle
+
+    def late(message):
+        snap = handle(message)
+        threading.Thread(target=w._on_msg, args=(w, {"action": "interrupt"}, []), daemon=True).start()
+        entered.wait(2)
+        left.set()
+        return snap
+
+    w.document.handle = late
+    w._on_msg(w, {"action": "replace", "path": "/", "src": "x + 1", "_req": 1}, [])
+    w.wait(5)
+    assert got and got[-1]["_req"] == 1
+    assert w._running is None and w.expr == x + 1

@@ -36,13 +36,14 @@ from sympy.core.function import UndefinedFunction
 from sympy.core.numbers import Integer
 from sympy.core.symbol import Str
 from sympy.matrices import MatrixBase
-from sympy.matrices.expressions import MatAdd, MatrixExpr
+from sympy.matrices.expressions import MatAdd, MatMul, MatrixExpr
 from sympy.parsing.sympy_parser import stringify_expr
 
 from .printer import register_rebuild, rebuild, rebuild_fallback
 
 __all__ = ["InvalidExpr", "Invalid", "invalid", "build", "node_problem", "first_problem", "tolerate",
-           "allowing_invalid", "tolerant_parse", "tolerant_locals", "has_invalid"]
+           "allowing_invalid", "tolerant_parse", "tolerant_locals", "has_invalid", "read_srepr", "read_source",
+           "UnsafeText"]
 
 
 class InvalidExpr(Expr):
@@ -94,6 +95,8 @@ def _head_name(head: Any) -> str:
 
 def _constructor(head: str) -> Callable:
     fn = getattr(sympy, head, None)
+    if fn is None:
+        fn = _sympy_class(head)     # a class SymPy does not export: ExprCondPair
     return fn if callable(fn) else Function(head)
 
 
@@ -104,7 +107,10 @@ def build(head: Any, args) -> Basic:
     name = _head_name(head)
     fn = head if callable(head) and not isinstance(head, (str, Basic)) else _constructor(name)
     try:
-        result = sympify(fn(*args))
+        # evaluated, even while a saved step is read unevaluated: the head
+        # is tried as SymPy's operators would try it, which is what refused it
+        with sympy.evaluate(True):
+            result = sympify(fn(*args))
     except Exception:
         return invalid(name)(*args)
     if isinstance(result, Basic) and node_problem(result) is not None:
@@ -134,6 +140,17 @@ def _unusual(a) -> bool:
     return _matrixish(a) or not isinstance(a, Expr)
 
 
+def _rebuild_unevaluated(node: Basic, args) -> Basic:
+    """``rebuild(node, args)`` under ``evaluate(False)``.  A matrix sum or
+    product is built by its constructor alone: ``rebuild`` canonicalises
+    those (``doit``), which unevaluated recurses without end on an explicit
+    matrix term (``Matrix([[1, 2], [3, 4]]) + B``)."""
+    with sympy.evaluate(False):
+        if isinstance(node, (MatAdd, MatMul)):
+            return node.func(*args)
+        return rebuild(node, list(args))
+
+
 def node_problem(node: Basic) -> Optional[str]:
     """Why SymPy would not have built ``node`` from its arguments (the
     constructor's error), or None.  Only this node is looked at, not its
@@ -149,12 +166,14 @@ def node_problem(node: Basic) -> Optional[str]:
     try:
         if isinstance(node, Add) and not isinstance(node, MatAdd) and any(_matrixish(a) for a in args):
             raise TypeError("a matrix cannot be added to a scalar")
-        if isinstance(node, sympy.Pow) and _matrixish(node.exp):
+        if isinstance(node, (sympy.Pow, sympy.MatPow)) and _matrixish(node.exp):
             raise TypeError("a matrix cannot be an exponent")
-        with sympy.evaluate(False):
-            rebuild(node, list(args))
+        _rebuild_unevaluated(node, list(args))
         if any(_unusual(a) for a in args):
-            rebuild(node, list(args))
+            # evaluated even while the caller reads unevaluated (a saved
+            # step): these checks only run when the constructor evaluates
+            with sympy.evaluate(True):
+                rebuild(node, list(args))
     except Exception as exc:
         return f"{type(exc).__name__}: {exc}"
     return None
@@ -202,8 +221,7 @@ def tolerate(expr: Basic) -> Basic:
     node = expr
     if any(a is not b for a, b in zip(args, expr.args)):
         try:
-            with sympy.evaluate(False):
-                node = rebuild(expr, args)
+            node = _rebuild_unevaluated(expr, args)
         except Exception:
             if not _keepable(expr):
                 raise
@@ -366,3 +384,311 @@ def _tolerant_constructor(fn):
                 raise
             return invalid(fn.__name__)(*[_basic(a) for a in args])
     return construct
+
+
+# -- reading saved data without running it ------------------------------------------
+# A saved formula (a .sympy file, a session a page kept) arrives from a mail,
+# a file manager, a page's storage: it is data, and reading it must never run
+# code.  ``sympify``/``eval`` of its text would - ``(open(...).write(...),
+# Symbol('x'))[1]`` is a valid srepr to them.  What follows reads the two
+# things such data holds - ``srepr`` text and a line of SymPy source - by
+# walking the syntax tree, with nothing but SymPy's constructors to call.
+
+class UnsafeText(ValueError):
+    """Text the restricted reader will not read (an attribute, a subscript,
+    a name it does not know as SymPy's...)."""
+
+
+class _NotSrepr(UnsafeText):
+    """Text that is not ``srepr`` but may be SymPy source (an operator, a
+    name that is not SymPy's)."""
+
+
+#: Where the SymPy functions a saved formula may call live: the ones that
+#: build expressions.  (``lambdify``, ``preview``, ``sympify`` and their kind
+#: live elsewhere or are named in ``_UNSAFE_FUNCTIONS``.)
+_SAFE_MODULES = ("sympy.core.", "sympy.functions.", "sympy.sets.", "sympy.logic.", "sympy.concrete.",
+                 "sympy.integrals.", "sympy.series.", "sympy.matrices.", "sympy.tensor.array.",
+                 "sympy.calculus.", "sympy.polys.polytools", "sympy.simplify.")
+_UNSAFE_FUNCTIONS = frozenset({"sympify", "_sympify", "S", "var", "symbols", "evaluate", "lambdify", "parse_expr",
+                               "srepr", "sstr", "pprint", "preview", "init_printing", "init_session"})
+_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z_0-9]*$")
+
+
+_CLASS_CACHE: Dict[str, Any] = {}
+
+
+def _sympy_class(name: str) -> Optional[type]:
+    """One of SymPy's expression, matrix or array classes by name, those
+    the ``sympy`` namespace does not export included (``srepr`` writes
+    ``ExprCondPair``...).  The classes are listed again when a name is not
+    found, in case a module defining it was imported since."""
+    if name in _CLASS_CACHE or name in _CLASS_CACHE.get("", {}).get("missing", ()):
+        return _CLASS_CACHE.get(name)
+    from sympy.tensor.array import NDimArray
+    seen = set()
+    stack = [Basic, MatrixBase, NDimArray]
+    while stack:
+        cls = stack.pop()
+        try:
+            subs = cls.__subclasses__()
+        except TypeError:              # a metaclass
+            subs = type.__subclasses__(cls)
+        for sub in subs:
+            if sub not in seen:
+                seen.add(sub)
+                stack.append(sub)
+    for cls in seen:
+        if (cls.__module__ or "").startswith("sympy.") and not cls.__name__.startswith("_"):
+            _CLASS_CACHE.setdefault(cls.__name__, cls)
+    if name not in _CLASS_CACHE:
+        missing = _CLASS_CACHE.setdefault("", {}).setdefault("missing", set())
+        if len(missing) < 1000:
+            missing.add(name)
+    return _CLASS_CACHE.get(name)
+
+
+def _name_taker(fn: Any) -> bool:
+    """A constructor whose string arguments are names (``Symbol('x')``,
+    ``MatrixSymbol('A', 2, 2)``, ``Function('f')``, ``Float('1.5')``),
+    never text it would parse."""
+    from sympy import Dummy, Float, IndexedBase, MatrixSymbol, Symbol, Wild
+    from sympy.tensor.array.expressions import ArraySymbol
+    if fn is Invalid or fn is Function or fn is Float:
+        return True
+    return isinstance(fn, type) and issubclass(fn, (Symbol, Str, Dummy, Wild, IndexedBase, MatrixSymbol, ArraySymbol))
+
+
+def _constructor_ok(fn: Any) -> bool:
+    """Whether a saved formula may call ``fn``: a SymPy class (an
+    expression, a matrix, an array), an undefined function, or a SymPy
+    function that builds expressions."""
+    if isinstance(fn, type):
+        from sympy.tensor.array import NDimArray
+        return issubclass(fn, (Basic, MatrixBase, NDimArray))
+    name = getattr(fn, "__name__", None)
+    module = getattr(fn, "__module__", None) or ""
+    if not name or name.startswith("_") or name in _UNSAFE_FUNCTIONS or getattr(sympy, name, None) is not fn:
+        return False
+    return module.startswith(_SAFE_MODULES)
+
+
+def _check_strings(value: Any, top_ok: bool) -> None:
+    """Strings handed to a constructor that is not a name taker must be
+    plain names: some constructors ``sympify`` a string, which parses it."""
+    if isinstance(value, str):
+        if not top_ok and (not _NAME_RE.match(value) or value.startswith("__")):
+            raise UnsafeText(f"text {value!r} where an expression belongs")
+    elif isinstance(value, (list, tuple)):
+        for v in value:
+            _check_strings(v, False)
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            _check_strings(k, False)
+            _check_strings(v, False)
+
+
+_SOURCE_BINARY = {ast.Add: "add", ast.Sub: "sub", ast.Mult: "mul", ast.Div: "truediv", ast.Pow: "pow",
+                  ast.MatMult: "matmul", ast.Mod: "mod", ast.BitAnd: "and_", ast.BitOr: "or_", ast.BitXor: "xor"}
+_COMPARE = {ast.Lt: "Lt", ast.Gt: "Gt", ast.LtE: "Le", ast.GtE: "Ge"}
+
+
+class _Reader:
+    """The interpreter behind :func:`read_srepr` and :func:`read_source`."""
+
+    def __init__(self, text: str, names: Optional[Dict[str, Any]], source: bool, python_numbers: bool = False,
+                 new_name: Optional[Callable[[str], Any]] = None):
+        self.text = text
+        self.names = dict(names or {})
+        self.names.setdefault("Invalid", Invalid)
+        self.names.setdefault("Str", Str)
+        self.source = source
+        self.python_numbers = python_numbers
+        self.new_name = new_name
+
+    def fail(self, what: str):
+        raise (UnsafeText if self.source else _NotSrepr)(what)
+
+    def lookup(self, name: str, called: bool) -> Any:
+        if name.startswith("__"):
+            raise UnsafeText(f"the name {name!r} is not allowed")
+        if name in self.names:
+            return self.names[name]
+        obj = getattr(sympy, name, None)
+        if obj is None:
+            obj = _sympy_class(name)        # srepr names classes SymPy does not export: ExprCondPair
+        if obj is not None:
+            if called and _constructor_ok(obj):
+                return obj
+            if not called and isinstance(obj, Basic):
+                return obj
+            if not called and not self.source and _constructor_ok(obj):
+                return obj                      # a head named as a value: Invalid(MatMul, A, B)
+        if not self.source:
+            raise _NotSrepr(f"unknown name {name!r}")
+        if called:
+            if obj is not None:
+                raise UnsafeText(f"{name} cannot be called in a saved formula")
+            return Function(name)
+        if self.new_name is not None:
+            made = self.new_name(name)
+            if made is not None:
+                return made
+        from sympy import Symbol
+        return Symbol(name)
+
+    def number(self, node: ast.Constant) -> Any:
+        value = node.value
+        if not self.source or self.python_numbers:
+            return value
+        from sympy import Float
+        if isinstance(value, bool):
+            return sympy.true if value else sympy.false
+        if isinstance(value, int):
+            return Integer(value)
+        if isinstance(value, float):
+            segment = ast.get_source_segment(self.text, node)
+            return Float(segment if segment else repr(value))
+        return value
+
+    def eval(self, node: ast.AST) -> Any:
+        if isinstance(node, ast.Expression):
+            return self.eval(node.body)
+        if isinstance(node, ast.Constant):
+            if node.value is None or isinstance(node.value, (bool, int, float, str)):
+                return self.number(node)
+            raise UnsafeText(f"a {type(node.value).__name__} literal")
+        if isinstance(node, ast.Name):
+            return self.lookup(node.id, called=False)
+        if isinstance(node, (ast.Tuple, ast.List)):
+            items = [self.eval(e) for e in node.elts]
+            return tuple(items) if isinstance(node, ast.Tuple) else items
+        if isinstance(node, ast.Dict):
+            if any(k is None for k in node.keys):
+                raise UnsafeText("** in a dict")
+            return {self.eval(k): self.eval(v) for k, v in zip(node.keys, node.values)}
+        if isinstance(node, ast.UnaryOp):
+            operand = self.eval(node.operand)
+            if isinstance(node.op, ast.USub):
+                if not self.source and not isinstance(operand, (int, float)):
+                    self.fail("a minus sign")
+                if isinstance(operand, (str, list, tuple, dict)) or operand is None:
+                    self.fail("a minus sign before something that is not a number")
+                return -operand if isinstance(operand, (int, float)) else _se_unop(operand)
+            if isinstance(node.op, ast.UAdd) and self.source:
+                return operand
+            if isinstance(node.op, ast.Invert) and self.source:
+                return ~operand
+            self.fail("this operator")
+        if isinstance(node, ast.Call):
+            return self.call(node)
+        if not self.source:
+            raise _NotSrepr(type(node).__name__)
+        if isinstance(node, ast.BinOp):
+            op = _SOURCE_BINARY.get(type(node.op))
+            if op is None:
+                raise UnsafeText(f"the operator {type(node.op).__name__}")
+            a, b = self.eval(node.left), self.eval(node.right)
+            for v in (a, b):
+                if isinstance(v, (str, list, tuple, dict)) or v is None:
+                    raise UnsafeText("an operator on something that is not an expression")
+            if op == "pow" and not self.python_numbers and isinstance(a, Integer) and isinstance(b, Integer) \
+                    and abs(int(b)) > 10000:
+                return sympy.Pow(a, b, evaluate=False)         # no huge powers computed while reading
+            if op in ("add", "sub", "mul", "truediv", "pow", "matmul"):
+                return _se_binop(op, a, b)
+            return getattr(operator, op)(a, b)
+        if isinstance(node, ast.Compare):
+            if len(node.ops) != 1 or type(node.ops[0]) not in _COMPARE:
+                raise UnsafeText("this comparison")
+            a, b = self.eval(node.left), self.eval(node.comparators[0])
+            return getattr(sympy, _COMPARE[type(node.ops[0])])(a, b)
+        raise UnsafeText(f"{type(node).__name__} is not allowed in a saved formula")
+
+    def call(self, node: ast.Call) -> Any:
+        if isinstance(node.func, ast.Name):
+            fn = self.lookup(node.func.id, called=True)
+        elif isinstance(node.func, ast.Call):
+            fn = self.call(node.func)           # Function('f')(x)
+        else:
+            raise UnsafeText(f"a call of {type(node.func).__name__}")
+        from_names = isinstance(node.func, ast.Name) and node.func.id in self.names
+        if not (callable(fn) and (_constructor_ok(fn) or fn is Invalid or (from_names and not isinstance(fn, Basic)))):
+            raise UnsafeText(f"{getattr(fn, '__name__', fn)!s} cannot be called in a saved formula")
+        args = []
+        for i, a in enumerate(node.args):
+            if isinstance(a, ast.Starred):
+                raise UnsafeText("* in a call")
+            if fn is Invalid and i == 0 and isinstance(a, ast.Name):
+                args.append(a.id)               # the head, named: Invalid(MatMul, A, B)
+                continue
+            args.append(self.eval(a))
+        kwargs = {}
+        for kw in node.keywords:
+            if kw.arg is None or kw.arg.startswith("__"):
+                raise UnsafeText("** in a call")
+            kwargs[kw.arg] = self.eval(kw.value)
+        takes_names = _name_taker(fn)
+        for v in args:
+            _check_strings(v, takes_names)
+        for v in kwargs.values():
+            _check_strings(v, takes_names)
+        try:
+            if _builds_as_evaluated(fn):
+                with sympy.evaluate(True):
+                    return fn(*args, **kwargs)
+            return fn(*args, **kwargs)
+        except Exception:
+            # a node SymPy refuses (a step saved by an older version, which
+            # let it through) reads back as an invalid node
+            if kwargs or fn is Invalid or not _is_constructor(fn) or not all(isinstance(a, (Basic, int)) for a in args) \
+                    or isinstance(fn, UndefinedFunction):
+                raise
+            return invalid(fn.__name__)(*[_basic(a) for a in args])
+
+
+def _builds_as_evaluated(fn: Any) -> bool:
+    """Constructors that compute nothing, but that unevaluated leave marks
+    of their own: ``Integral(x, (x, 0, 1))`` built under ``evaluate(False)``
+    holds ``1*x``.  A saved step is read with them evaluating."""
+    from sympy.concrete.expr_with_limits import ExprWithLimits
+    return isinstance(fn, type) and issubclass(fn, ExprWithLimits)
+
+
+def _parse(text: str) -> ast.AST:
+    try:
+        return ast.parse(text.strip(), mode="eval")
+    except (SyntaxError, ValueError, MemoryError, RecursionError) as exc:
+        raise UnsafeText(f"not a formula: {exc}") from None
+
+
+def read_srepr(text: str, names: Optional[Dict[str, Any]] = None, evaluate: bool = False) -> Any:
+    """``srepr`` text read back without running it, *unevaluated* unless
+    ``evaluate`` - the node as it was saved (``sqrt(-3/4)`` stays itself
+    rather than becoming ``sqrt(3)*I/2``).  Only calls of SymPy's
+    constructors (and of ``names``: ``Placeholder``, the add-ons' node
+    types) with literal, container or nested-call arguments are read;
+    anything else raises :class:`UnsafeText`.  A node SymPy refuses is read
+    as an invalid one."""
+    tree = _parse(text)
+    try:
+        with sympy.evaluate(bool(evaluate)):
+            return _Reader(text, names, source=False).eval(tree)
+    except RecursionError:
+        raise UnsafeText("the formula is nested too deeply") from None
+
+
+def read_source(text: str, names: Optional[Dict[str, Any]] = None, *, python_numbers: bool = False,
+                new_name: Optional[Callable[[str], Any]] = None) -> Any:
+    """A line of SymPy source (``x**2 + sin(y)``, ``Matrix([[1, 2]])``) read
+    without running it: operators, numbers, names and calls of SymPy's
+    constructors, evaluated as SymPy would.  A name that is neither in
+    ``names`` nor SymPy's is a new ``Symbol`` (``new_name(name)`` may say
+    otherwise), a new name called is an undefined function.  With
+    ``python_numbers`` numbers stay Python's (``1/2`` is ``0.5``), as they
+    would in a script."""
+    tree = _parse(text)
+    try:
+        return _Reader(text, names, source=True, python_numbers=python_numbers, new_name=new_name).eval(tree)
+    except RecursionError:
+        raise UnsafeText("the formula is nested too deeply") from None

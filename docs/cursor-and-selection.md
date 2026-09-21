@@ -145,6 +145,11 @@ Clicking a gap and typing is different from arrowing to a side of an operator:
 a click in a gap inserts a **new argument** there, attached to neither
 neighbour.
 
+↓ from an operator puts the caret just after it, on its own line only. A
+caret attached to the term on its left stands at the end of that term in the
+source line (`x| + y`), and the source cursor at `x|` gives that caret. A
+resize of the view redraws the caret where it was.
+
 ## 6. Ranges
 
 A range is several *neighbouring* arguments of one parent, selected together.
@@ -164,6 +169,10 @@ right edge of one block enters the next.
 
 At an edge the ordinary meaning takes over: ↑ in the top row selects the
 matrix itself, ← / → step out of it.
+
+In a grid, ←/→ from a cell (or from anything inside one) go to the cell
+beside it in the same drawn row; at the row's end they step out of the grid,
+never onto the next row.
 
 ## 8. Templates and empty slots
 
@@ -210,3 +219,7 @@ expression; with nothing at all, to the whole expression.
 **A refused edit never changes the selection.** The message appears under the
 formula and the formula flickers red for half a second; what was selected
 stays selected.
+
+A refused edit changes nothing: the caret or the selection stays, and an
+expression refused in the empty view stays in its field to be corrected. The
+error line goes away at the next change of selection.

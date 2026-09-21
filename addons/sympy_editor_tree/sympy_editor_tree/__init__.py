@@ -262,27 +262,33 @@ class TreeAddon(Addon):
         target = get_at(expr, dst)
         if not target.args:
             raise ValueError(f"{target} is a leaf and takes no argument; drop onto an inner node")
-        # Take it out first.  Removing an argument shifts the indices after
-        # it in the same parent, so the destination path is corrected when
-        # it passes through that parent at a later index.
-        without = delete_at(expr, src)
-        parent, i = src[:-1], src[-1]
-        dst2 = list(dst)
-        if dst[:len(parent)] == parent and len(dst) > len(parent) and dst[len(parent)] > i:
-            dst2[len(parent)] -= 1
-        try:
-            target2 = get_at(without, tuple(dst2))
-        except ValueError:
-            # The parent collapsed (a Mul of two became one factor): the
-            # destination is gone with it - put the subtree at its parent.
-            target2 = get_at(without, tuple(dst2[:-1]))
-            dst2 = dst2[:-1]
-        args = list(target2.args)
-        if not args:
-            return replace_at(without, tuple(dst2), target2 * subtree)
-        at = len(args) if index is None else max(0, min(int(index), len(args)))
-        args.insert(at, subtree)
-        return replace_at(without, tuple(dst2), _with_args(target2, args))
+        # Out and in, in one pass over the tree as it is: every path is read
+        # in the original, so neither the removal nor the insertion can move
+        # the other.  (Taken out first, a sum or a product of two collapses
+        # into its other argument, and a destination path read afterwards
+        # pointed at a leaf or at the wrong node: x + f(y), x moved into
+        # f(y), gave f(x*y).)
+        def walk(node: Basic, path: tuple) -> Basic:
+            args, changed = [], False
+            for k, arg in enumerate(node.args):
+                here = path + (k,)
+                if here == src:
+                    changed = True
+                    continue
+                if src[:len(here)] == here or dst[:len(here)] == here:
+                    arg, changed = walk(arg, here), True
+                args.append(arg)
+            if path == dst:
+                at = len(args)
+                if index is not None:
+                    at = int(index)
+                    if src[:-1] == dst and src[-1] < at:
+                        at -= 1                  # the index counted the argument moved away
+                    at = max(0, min(at, len(args)))
+                args.insert(at, subtree)
+                changed = True
+            return _with_args(node, args) if changed else node
 
+        return walk(expr, ())
 
 ADDON = TreeAddon()

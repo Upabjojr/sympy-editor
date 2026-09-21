@@ -54,8 +54,28 @@ final class FilesBridge: NSObject, WKScriptMessageHandler {
     /// The web view a report is printed from, held until it has loaded.
     private var printer: ReportPrinter?
 
+    #if os(macOS)
+    /// Every bridge alive, one per window: what quitting asks to keep their
+    /// pages' work (AppDelegate.applicationShouldTerminate).
+    static let live = NSHashTable<FilesBridge>.weakObjects()
+
+    /// Told once when the page has next kept something (keepWrite): a flush
+    /// for quitting, or for a window closing, is waiting for it.
+    private var waitingForKeep: [() -> Void] = []
+
+    /// The web view of a window that is closing, held until its page has
+    /// kept what it was keeping (or a moment has passed): a flush is a round
+    /// trip through Python, and the view would otherwise go with the window.
+    private var closing: WKWebView?
+    #endif
+
     override init() {
         super.init()
+        #if os(macOS)
+        Self.live.add(self)
+        NotificationCenter.default.addObserver(self, selector: #selector(windowWillClose(_:)),
+                                               name: NSWindow.willCloseNotification, object: nil)
+        #endif
         HostChrome.shared.files = self
         // Leaving the foreground, where the system may end the app without
         // another word: the page keeps now what it was about to keep.
@@ -82,6 +102,43 @@ final class FilesBridge: NSObject, WKScriptMessageHandler {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { UIApplication.shared.endBackgroundTask(task) }
         }
         #endif
+    }
+
+    #if os(macOS)
+    /// Ask the page to keep now what it was about to keep, and call `kept`
+    /// when it has written it (the next keepWrite).  Nothing may come - the
+    /// page had nothing waiting - so the caller keeps a timeout of its own.
+    func flushForKeeping(then kept: @escaping () -> Void) {
+        guard let view = webView else { kept(); return }
+        waitingForKeep.append(kept)
+        // flush() answers whether a save was waiting: when none was, nothing
+        // will be written, and whoever waits may go on at once.
+        view.evaluateJavaScript("!!(window.SympyEditor && window.SympyEditor.flush && window.SympyEditor.flush())") {
+            [weak self] result, _ in
+            if (result as? Bool) != true { self?.keptSomething() }
+        }
+    }
+
+    /// This bridge's window is closing: its page keeps what was waiting
+    /// first.  The view is held until it has (or 1.5 s have passed).
+    @objc private func windowWillClose(_ note: Notification) {
+        guard let window = note.object as? NSWindow, let view = webView, view.window === window else { return }
+        closing = view
+        flushForKeeping { [weak self] in self?.closing = nil }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.closing = nil }
+    }
+
+    /// The page kept something: whoever waited for it may go on.
+    private func keptSomething() {
+        let waiting = waitingForKeep
+        waitingForKeep = []
+        for kept in waiting { kept() }
+    }
+    #endif
+
+    /// The page is gone (its process ended) until it loads again.
+    func pageUnloaded() {
+        pageReady = false
     }
 
     /// The page has loaded: hand it what arrived meanwhile.
@@ -362,6 +419,9 @@ final class FilesBridge: NSObject, WKScriptMessageHandler {
         } catch {
             report("What the editor keeps could not be written: \(error.localizedDescription)")
         }
+        #if os(macOS)
+        keptSomething()
+        #endif
     }
 
     // MARK: - reading handwriting with this device's own reader
@@ -507,11 +567,15 @@ final class ReportPrinter: NSObject, WKNavigationDelegate {
         // A web view's print operation needs a view with a size to lay out in.
         operation.view?.frame = webView.bounds
         if let window = over?.window {
-            operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+            // A sheet: it stays up after this returns, and prints from this
+            // object's web view - which lives until the sheet says it is done
+            // (printOperationDidRun), not a moment less.
+            operation.runModal(for: window, delegate: self,
+                               didRun: #selector(printOperationDidRun(_:success:contextInfo:)), contextInfo: nil)
         } else {
             operation.run()
+            done(nil)
         }
-        done(nil)
         #else
         let info = UIPrintInfo(dictionary: nil)
         info.jobName = name
@@ -535,4 +599,13 @@ final class ReportPrinter: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         done("The report could not be printed: \(error.localizedDescription)")
     }
+
+    #if os(macOS)
+    /// The print sheet is done (printed, kept as a PDF, or cancelled - which
+    /// is no error): the printer may go.
+    @objc func printOperationDidRun(_ operation: NSPrintOperation, success: Bool,
+                                    contextInfo: UnsafeMutableRawPointer?) {
+        done(nil)
+    }
+    #endif
 }

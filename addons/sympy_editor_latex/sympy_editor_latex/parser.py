@@ -236,12 +236,23 @@ class _Transformer:
                 name = inner.name if isinstance(inner, Symbol) else str(inner)
                 return Symbol("%s{%s}" % (cmd, name))
 
+            #: The reading's own choices (the derivative points below) and
+            #: the points met: set and read by LatexReader around a transform.
+            choices: Dict[str, int] = {}
+            points: Dict[str, Point] = {}
+            text: str = ""
+
             def fraction(self, tokens):
                 # SymPy reads \\frac{d}{dx} as an operator awaiting its operand
                 # ("derivative", x) and forgets the numerator of \\frac{dy}{dx}.
                 # Here a differential over a differential is Derivative(y, x),
-                # and d^n over dx^n (the numerator d**n alone, or d**n times
-                # the function) is the n-th derivative.
+                # and d^n over dx^n (the numerator d**n alone) the operator.
+                # Any other numerator over a differential is a division by d
+                # times the variable (\\frac{1}{dx} is 1/(d x)) - except one
+                # that is d**n times something else (\\frac{d^2 y}{dx^2},
+                # \\frac{b d}{dt}): that is the n-th derivative of the rest or
+                # a division, a choice point of the reading (a derivative when
+                # the numerator begins with the d, by convention).
                 num, den = tokens[1], tokens[2]
                 d = Symbol("d")
                 if isinstance(den, tuple) and len(den) == 2 and den[0] == d:
@@ -251,13 +262,51 @@ class _Transformer:
                     wrt = (var, order) if order > 1 else var
                     if isinstance(num, tuple) and len(num) == 2 and num[0] == d:
                         return sympy.Derivative(num[1], wrt)
+                    divided = lambda top: self._handle_division(top, d * den[1])      # noqa: E731
                     if isinstance(num, Basic) and num.has(d):
                         rest = sympy.cancel(num / d ** order)
                         if not rest.has(d):
                             if rest == 1:
                                 return "derivative", wrt
-                            return sympy.Derivative(rest, wrt)
+                            key, leads = self._derivative_point(tokens[0])
+                            idx = self.choices.get(key, 0 if leads else 1) if key else (0 if leads else 1)
+                            if key:
+                                start, end = (int(v) for v in key.split("@")[1].split("-"))
+                                self.points.setdefault(key, Point(key, "derivative", start, end, 2, choice=idx))
+                            return sympy.Derivative(rest, wrt) if idx == 0 else divided(num)
+                    if isinstance(num, tuple) and len(num) == 2:
+                        num = num[0] * num[1]                  # a differential on top of a division
+                    if isinstance(num, Basic):
+                        return divided(num)
                 return super().fraction(tokens)
+
+            def _derivative_point(self, cmd):
+                """The key of the \\frac beginning at ``cmd`` as a choice
+                point (its text's span), and whether its numerator begins
+                with the d."""
+                start, text = getattr(cmd, "start_pos", None), self.text
+                if start is None or not text:
+                    return None, False
+                i = start + len(str(cmd))
+                spans = []
+                for _ in range(2):
+                    while i < len(text) and text[i].isspace():
+                        i += 1
+                    if i < len(text) and text[i] == "{":
+                        depth, j = 0, i
+                        while j < len(text):
+                            depth += {"{": 1, "}": -1}.get(text[j], 0)
+                            if depth == 0:
+                                break
+                            j += 1
+                        spans.append((i + 1, j))
+                        i = j + 1
+                    else:
+                        spans.append((i, i + 1))
+                        i += 1
+                top = text[spans[0][0]:spans[0][1]].lstrip()
+                leads = bool(re.match(r"(d|\\partial|\\mathrm\{d\}|\\text\{d\})(?![A-Za-z])", top))
+                return "derivative@%d-%d" % (start, min(i, len(text))), leads
 
         return Transformer()
 
@@ -383,12 +432,16 @@ class LatexReader:
     # -- reading ------------------------------------------------------------------
 
     def read(self, latex: str, choices: Optional[Dict[str, int]] = None, constants: Optional[Dict[str, bool]] = None,
-             known: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+             known: Optional[Dict[str, Any]] = None, pieces: Optional[Dict[str, Basic]] = None) -> Dict[str, Any]:
         """Read ``latex``.  ``choices`` fixes alternatives at choice points
         (by key), ``constants`` says which constant names are constants
         (``{"pi": True, "e": False}``; the defaults of :data:`CONSTANTS`
         otherwise), ``known`` maps names to the document's own symbols and
         functions (a symbol of the same name is reused, with its assumptions).
+        ``pieces`` maps the names of placeholder symbols in the text to the
+        objects that take their place as they are (``xreplace``): a piece of
+        the formula spliced into a reading keeps its own tree and names,
+        which its LaTeX read back would not (``f(x)`` would be ``f*x``).
 
         Returns ``{"ok": True, "expr", "src", "latex", "ambiguities": [...],
         "constants": [...]}`` or ``{"ok": False, "error": ...}`` - with
@@ -428,13 +481,21 @@ class LatexReader:
         chosen = dict(fixed)
         chosen.update({k: p.choice for k, p in points.items() if k not in chosen})
         try:
-            expr = self._to_expr(tree)
+            expr, own = self._to_expr(tree, chosen, points=True)
         except Exception as exc:  # noqa: BLE001 - the transformer's own errors
             return {"ok": False, "error": f"This LaTeX could not be turned into an expression: {str(exc).splitlines()[0][:120]}"}
+        for k, p in own.items():                  # the reading's own choice points (a derivative or a division)
+            points.setdefault(k, p)
+            chosen.setdefault(k, p.choice)
 
         expr, consts = self._apply_constants(expr, constants or {})
-        expr = self._reuse_known(expr, known)
-        finish = lambda e: self._reuse_known(self._apply_constants(e, constants or {})[0], known)   # noqa: E731
+        swap = {Symbol(str(k)): v for k, v in (pieces or {}).items() if isinstance(v, Basic)}
+        put = (lambda e: e.xreplace(swap)) if swap else (lambda e: e)          # noqa: E731
+        try:
+            expr = self._reuse_known(put(expr), known)
+        except Exception as exc:  # noqa: BLE001 - SymPy refuses the piece there (a relation in a sum)
+            return {"ok": False, "error": f"This LaTeX could not be turned into an expression: {str(exc).splitlines()[0][:120]}"}
+        finish = lambda e: self._reuse_known(put(self._apply_constants(e, constants or {})[0]), known)   # noqa: E731
         ambiguities = self._describe_points(forest, chosen, points, known_functions, finish)
         # ``choices`` is every decision taken, the user's and the reader's own:
         # sent back with one changed, the others stay as they were, so a pick
@@ -449,16 +510,20 @@ class LatexReader:
         snippet = latex[max(0, (col or 1) - 1):(col or 1) + 11] if col else ""
         return {"ok": False, "error": f"This LaTeX could not be read{where}" + (f": near {snippet!r}" if snippet else "")}
 
-    def _to_expr(self, tree) -> Basic:
+    def _to_expr(self, tree, choices: Optional[Dict[str, int]] = None, points: bool = False):
+        """The tree as SymPy, with ``choices`` for the transformer's own choice
+        points; ``points``: return them too, ``(expr, {key: Point})``."""
         import warnings
+        tf = self._transformer
+        tf.choices, tf.points, tf.text = dict(choices or {}), {}, self._latex_text
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")          # SymPy's transformer warns on readings it then rejects
-            result = self._transformer.transform(tree)
+            result = tf.transform(tree)
         if isinstance(result, (tuple, list)):
             raise ValueError("a differential or a derivative that stands alone")
         if not isinstance(result, Basic):
             result = sympy.sympify(result)
-        return result
+        return (result, dict(tf.points)) if points else result
 
     def _describe_points(self, forest, chosen, points, known_functions, finish) -> List[Dict[str, Any]]:
         """Every choice point of the reading, with the whole expression under
@@ -475,7 +540,7 @@ class LatexReader:
                 trial[point.key] = i
                 try:
                     t, _pts = self._tree(forest, trial, known_functions)
-                    e = finish(self._to_expr(t))
+                    e = finish(self._to_expr(t, trial))
                     options.append({"src": str(e), "latex": sympy.latex(e)})
                 except Exception:  # noqa: BLE001
                     options.append(None)
@@ -515,13 +580,48 @@ class LatexReader:
 
     def _reuse_known(self, expr: Basic, known: Dict[str, Any]) -> Basic:
         """A free symbol named like one the document already has becomes
-        that one (its assumptions, or its matrix shape, come along)."""
+        that one (its assumptions, or its matrix shape, come along).  Names
+        are compared as :func:`symbol_key` has them, since the LaTeX of a
+        name is not the name: ``x_1`` prints ``x_{1}``, ``lamda``
+        ``\\lambda``.  A ``lambda`` the document does not have is read as
+        ``lamda`` all the same: ``lambda`` cannot be typed back (a keyword)."""
+        by_key: Dict[str, Any] = {}
+        for name, obj in known.items():
+            by_key.setdefault(symbol_key(str(name)), obj)
         subs = {}
         for s in expr.free_symbols:
-            other = known.get(getattr(s, "name", None))
+            name = getattr(s, "name", None)
+            if name is None:
+                continue
+            other = known.get(name)
+            if other is None:
+                other = by_key.get(symbol_key(name))
             if isinstance(other, Basic) and other != s and (isinstance(other, Symbol) or getattr(other, "is_MatrixExpr", False)):
                 subs[s] = other
+            elif other is None and isinstance(s, Symbol) and _LAMBDA.search(name):
+                subs[s] = Symbol(_LAMBDA.sub(lambda m: m.group(1) + "amda", name))
         return expr.subs(subs) if subs else expr
+
+
+#: ``lambda`` as a whole name or a part of one (``lambda_1``), capital too.
+_LAMBDA = re.compile(r"(?<![A-Za-z])([lL])ambda(?![A-Za-z])")
+#: SymPy's name modifiers the reader writes as a decoration (``\hat{x}``).
+_DECORATIONS = ("hat", "bar", "vec", "dot", "ddot", "tilde", "check", "breve", "acute", "grave")
+
+
+def symbol_key(name: str) -> str:
+    """A symbol's name as it is compared with the document's: the LaTeX
+    spelling a reading gives and SymPy's own name meet here - ``x_{1}`` and
+    ``x_1``, ``lambda`` and ``lamda``, ``alpha_{i}`` and ``alpha_i``,
+    ``\\hat{x}`` and ``xhat``."""
+    name = name.strip()
+    m = re.fullmatch(r"\\(%s)\{(.+)\}" % "|".join(_DECORATIONS), name)
+    if m:
+        return symbol_key(m.group(2)) + m.group(1)
+    prev = None
+    while prev != name:                                  # x_{1} -> x_1, nested braces from the inside
+        prev, name = name, re.sub(r"([_^])\{([^{}]*)\}", r"\1\2", name)
+    return _LAMBDA.sub(lambda m: m.group(1) + "amda", name)
 
 
 def read_latex(latex: str, **kwargs) -> Dict[str, Any]:

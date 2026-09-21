@@ -86,8 +86,10 @@ class LatexAddon(Addon):
     def read(self, doc, payload: Dict[str, Any]) -> Dict[str, Any]:
         choices = payload.get("choices") or {}
         constants = payload.get("constants") or {}
+        pieces = payload.get("pieces")
         return self.reader.read(str(payload.get("latex", "")), choices=dict(choices) if isinstance(choices, dict) else {},
-                                constants=dict(constants) if isinstance(constants, dict) else {}, known=self._known(doc))
+                                constants=dict(constants) if isinstance(constants, dict) else {}, known=self._known(doc),
+                                pieces=dict(pieces) if isinstance(pieces, dict) else None)
 
     def handle(self, doc, method: str, payload: Dict[str, Any]):
         if method == "warm":

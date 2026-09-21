@@ -4280,7 +4280,7 @@ def test_a_page_opened_as_a_file_says_why_python_cannot_start(browser, tmp_path)
 def test_new_session_leads_the_list(browser, serve_expr):
     """Starting one is as much what the drawer is opened for as picking an old
     one out of the list, so it sits above the sessions rather than under them."""
-    srv, doc = serve_expr(x + y, options={"sessions": True})
+    srv, doc = serve_expr(x + y, options={"sessions": True}, store=False)   # the browser keeps them here
     page = browser.new_page()
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
@@ -4293,9 +4293,9 @@ def test_new_session_leads_the_list(browser, serve_expr):
     page.locator('[data-cmd="drawer"]').click()
     page.wait_for_selector(".se-session-add", state="visible", timeout=10000)
     rows = page.evaluate("(() => [...document.querySelectorAll('.se-sessions > .se-session')].map(r => r.className))()")
-    assert len(rows) == 3, rows                       # the new-session row and the two sessions
+    assert len(rows) >= 3, rows                       # the new-session row, the two sessions (and the page's own)
     assert "se-session-add" in rows[0], rows          # leading them, not trailing
-    assert "se-session-add" not in rows[1] and "se-session-add" not in rows[2], rows
+    assert all("se-session-add" not in r for r in rows[1:]), rows
     assert errors == []
     page.close()
 
@@ -5329,8 +5329,9 @@ def test_what_is_waiting_to_be_kept_is_kept_when_the_page_goes(browser, serve_ex
     assert "cos" in current["state"]["history"][-1]
     # the host's own call does the same
     page.evaluate("window.SympyEditorApp.calls = []")
-    page.evaluate(ed + "._scheduleSessionSave(); SympyEditor.flush()")
+    assert page.evaluate(ed + "._scheduleSessionSave(); SympyEditor.flush()") is True    # something was waiting
     assert _wait(lambda: _host_calls(page, "keepWrite"), timeout=0.6)
+    assert page.evaluate("SympyEditor.flush()") is False                                # and now nothing is
     assert page.errors == []
 
 

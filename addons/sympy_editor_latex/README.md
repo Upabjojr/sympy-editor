@@ -36,7 +36,16 @@ the reading goes is the editor's own answer: the selected sub-expression, the
 selected range, the cursor, or the end of the formula (where it goes in as if
 typed there - multiplied, or added when it begins with + or -).  To replace
 the whole expression, select it first.  Names the document already uses are
-reused with their assumptions or matrix shapes.
+reused with their assumptions or matrix shapes - found under their LaTeX
+spelling too: `x_{1}` is the document's `x_1`, `\lambda` its `lamda`,
+`\hat{x}` its `xhat` (and `\lambda` is `lamda` in any case: `lambda` cannot
+be typed back).
+
+A fraction over a differential is a derivative only when its numerator is a
+differential or `d^n` (`\frac{dy}{dx}`, `\frac{d}{dx} f`); anything else over
+`dx` divides (`\frac{1}{dx}` is `1/(d x)`), and a numerator that is `d^n`
+times something else (`\frac{d^2 y}{dx^2}`, `\frac{b d}{dt}`) is a choice
+between the two - a derivative by default when the `d` comes first.
 
 ## Install
 

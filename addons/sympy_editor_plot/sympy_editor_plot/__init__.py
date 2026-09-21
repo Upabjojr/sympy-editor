@@ -15,7 +15,7 @@ import math
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from sympy import Basic, Expr, Symbol, lambdify, sympify
+from sympy import Basic, Expr, Symbol, lambdify
 from sympy.core.relational import Relational
 
 from sympy_editor.addons import Addon
@@ -23,6 +23,33 @@ from sympy_editor.addons import Addon
 __all__ = ["PlotAddon", "ADDON", "sample"]
 
 STATIC = Path(__file__).parent / "static"
+
+#: The most points a curve is sampled at: more would only be a longer answer.
+MAX_SAMPLES = 5000
+#: What a sample raises when the function cannot be evaluated as numbers at
+#: all (``besselj`` unknown to ``math``, ``factorial`` of a float), rather
+#: than having no real value at a point.
+_CANNOT = (NameError, TypeError, AttributeError)
+
+
+def _count(n) -> int:
+    """How many points: between 2 and :data:`MAX_SAMPLES`."""
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        raise ValueError(f"The number of points must be a whole number, not {n!r}") from None
+    return max(2, min(n, MAX_SAMPLES))
+
+
+def _span(span):
+    """``span`` as two different finite floats, in order."""
+    try:
+        a, b = float(span[0]), float(span[1])
+    except (TypeError, ValueError, IndexError, KeyError):
+        raise ValueError(f"The span must be two numbers, not {span!r}") from None
+    if not (math.isfinite(a) and math.isfinite(b)) or a == b:
+        raise ValueError(f"The span must be two different finite numbers, not {span!r}")
+    return (a, b) if a < b else (b, a)
 
 #: Plotly.js (MIT), pinned; override with ``PlotAddon(plotly_js=...)`` or
 #: a vendored copy for an offline bundle.
@@ -48,8 +75,8 @@ def sample(expr: Expr, var: Symbol, span=(-6.0, 6.0), n: int = 400) -> List[Opti
     """``expr`` at ``n`` points of ``span``: floats, None where it is not a
     real number.  numpy when it is installed (one vectorised call), plain
     ``math`` otherwise (Pyodide pages without numpy, and thin installs)."""
-    a, b = float(span[0]), float(span[1])
-    n = max(2, min(int(n), 5000))
+    a, b = _span(span)
+    n = _count(n)
     xs = [a + (b - a) * i / (n - 1) for i in range(n)]
     try:
         import numpy as np
@@ -65,11 +92,21 @@ def sample(expr: Expr, var: Symbol, span=(-6.0, 6.0), n: int = 400) -> List[Opti
             pass                                    # fall back to point by point
     f = lambdify(var, expr, "math")
     out: List[Optional[float]] = []
+    first, evaluated = None, False
     for xv in xs:
         try:
             out.append(_real(f(xv)))
-        except Exception:
+            evaluated = True
+        except _CANNOT as exc:
             out.append(None)
+            first = first or exc
+        except Exception:                           # no value there (a domain error): a gap
+            out.append(None)
+            evaluated = True
+    if first is not None and not evaluated:
+        # not one point could be evaluated, for want of the function rather
+        # than of a real value: a curve of gaps would say nothing
+        raise first
     return out
 
 
@@ -106,17 +143,23 @@ class PlotAddon(Addon):
         values = {}
         for name, value in (payload.get("values") or {}).items():
             if str(name) in by_name and by_name[str(name)] != var:
-                values[by_name[str(name)]] = sympify(value)
+                # read as the document reads what is typed; a value must be a
+                # number - one naming a symbol would leave a curve of gaps
+                parsed = doc.parse(str(value))
+                if getattr(parsed, "free_symbols", None):
+                    names = ", ".join(sorted(str(s) for s in parsed.free_symbols))
+                    raise ValueError(f"The value of {name} must be a number: {value} names {names}")
+                values[by_name[str(name)]] = parsed
         others = [str(s) for s in free if s != var and s not in values]
-        span = payload.get("span") or self.span
-        n = int(payload.get("n") or self.samples)
+        span = _span(payload.get("span") or self.span)
+        n = _count(payload.get("n") or self.samples)
         answer: Dict[str, Any] = {"var": str(var), "free": [str(s) for s in free], "needs": others,
                                   "span": [float(span[0]), float(span[1])], "src": str(node), "curves": []}
         if others:
             return answer                            # the panel says which values are missing
         node = node.subs(values)
         sides = [("lhs", node.lhs), ("rhs", node.rhs)] if isinstance(node, Relational) else [("", node)]
-        xs = [float(span[0]) + (float(span[1]) - float(span[0])) * i / (n - 1) for i in range(max(2, n))]
+        xs = [span[0] + (span[1] - span[0]) * i / (n - 1) for i in range(n)]
         answer["x"] = xs
         for label, side in sides:
             if not isinstance(side, Expr):

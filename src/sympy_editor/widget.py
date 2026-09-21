@@ -15,11 +15,16 @@ import anywidget
 import traitlets
 from sympy import Basic
 
-from .document import SAVE_EXT, Document, interrupt_thread
+from .document import SAVE_EXT, Document
 from .html import addon_clients, default_urls, read_static
+from .server import _Running, load_session
 from .store import Store, unused_path
 
 __all__ = ["SympyEditorWidget"]
+
+#: Messages whose answer is for the view that asked and nobody else: nothing
+#: in the document changes (a preview, a list, the session to keep, a file).
+QUERY_ACTIONS = frozenset({"preview", "functions", "methods", "signature", "export", "script", "savefile"})
 
 
 class SympyEditorWidget(anywidget.AnyWidget):
@@ -92,12 +97,11 @@ class SympyEditorWidget(anywidget.AnyWidget):
         self.save_dir: Optional[Path] = Path(save_dir) if save_dir is not None else None
         self._lock = threading.Lock()          # one message at a time
         self._worker: Optional[threading.Thread] = None
-        #: ident of the thread inside ``Document.handle`` right now - the one
-        #: an interrupt is for.  Not the latest thread started: that one may
-        #: be waiting for the lock behind it (an autosave, a preview), and
-        #: interrupting it would kill the wrong message and let the long
-        #: computation run on.
-        self._running: Optional[int] = None
+        #: The thread inside ``Document.handle`` right now - the one an
+        #: interrupt is for (see ``_running``), set, cleared and interrupted
+        #: under a lock of its own.
+        self._runner = _Running()
+        #: The last *committed* snapshot: what the trait holds.
         self._last: Dict[str, Any] = {}
         self._push(self.document.snapshot())
         self.on_msg(self._on_msg)
@@ -112,9 +116,7 @@ class SympyEditorWidget(anywidget.AnyWidget):
         if not isinstance(content, dict) or "action" not in content:
             return
         if content["action"] == "interrupt":
-            ident = self._running
-            if ident is not None:
-                interrupt_thread(ident)
+            self._runner.interrupt()
             return
         if content["action"] in ("keep", "writefile"):
             # Not the document's business, and not a snapshot either: the
@@ -128,24 +130,66 @@ class SympyEditorWidget(anywidget.AnyWidget):
         self._worker = threading.Thread(target=self._run, args=(content,), daemon=True)
         self._worker.start()
 
+    @property
+    def _running(self) -> Optional[int]:
+        """ident of the thread inside ``Document.handle`` right now.  Not the
+        latest thread started: that one may be waiting for the lock behind it
+        (an autosave, a preview), and interrupting it would kill the wrong
+        message and let the long computation run on."""
+        return self._runner.ident
+
     def _run(self, content: Dict[str, Any]) -> None:
         """Answer one message - always.  The front end pairs each answer with
         the message it sent by the request id it put in (``_req``), so a
         message that got no answer would leave its promise hanging and the
         editor busy for good: whatever goes wrong, a snapshot goes back."""
         req = content.get("_req")
+        committed = False
         try:
             with self._lock:
-                self._running = threading.get_ident()
-                try:
-                    snap = self.document.handle(content)
-                finally:
-                    self._running = None
-        except BaseException as exc:            # Interrupted while waiting, a broken document...
+                if content.get("action") == "load":
+                    snap = self._load(content.get("state"))
+                else:
+                    snap = self._runner.run(lambda: self.document.handle(content))
+                committed = self._commits(content, snap)
+        except BaseException as exc:            # Interrupted on the way out, a broken document...
             snap = dict(self._last, error=f"{type(exc).__name__}: {exc}", seq=self._last.get("seq", 0) + 1)
+        try:
+            self._answer(snap, req, committed)
+        except Exception as exc:                # an answer that cannot be sent: say so, still paired
+            self._answer({"error": f"{type(exc).__name__}: {exc}"}, req, False)
+
+    @staticmethod
+    def _commits(content: Dict[str, Any], snap: Dict[str, Any]) -> bool:
+        """Whether ``snap`` is the document's new state - what every display
+        of this widget shows - rather than an answer for the view that asked:
+        a preview, a query (an add-on's, the function list, the session to
+        keep, a file), an error that changed nothing."""
+        return not (content.get("action") in QUERY_ACTIONS or snap.get("preview") or "query" in snap
+                    or snap.get("error"))
+
+    def _answer(self, snap: Dict[str, Any], req: Any, committed: bool) -> None:
+        """A committed state goes in the ``snapshot`` trait (a second display
+        draws it too); anything else goes back to the view that asked, as a
+        message of its own paired by ``_req`` - in the trait, a preview or a
+        function list was drawn by every display, and an error fallback made
+        from the last pushed snapshot could bring back a stale preview."""
         if req is not None:
             snap["_req"] = req
-        self._push(snap)
+        if committed:
+            self._push(snap)
+        else:
+            self.send(snap)
+
+    def _load(self, state: Any) -> Dict[str, Any]:
+        """Open a session (the ``load`` message): the widget's document
+        becomes one holding ``state`` (see :func:`~sympy_editor.server.load_session`);
+        a state it cannot read leaves the document as it was."""
+        try:
+            self.document = load_session(self.document, state)
+        except Exception as exc:
+            return self.document.snapshot(error=f"The session could not be opened: {type(exc).__name__}: {exc}")
+        return self.document.snapshot()
 
     def _keep(self, content: Dict[str, Any]) -> Dict[str, Any]:
         """What the page keeps, kept by the kernel (see :class:`Store`)."""

@@ -16,6 +16,8 @@ import android.net.Uri
 import android.print.PrintAttributes
 import android.print.PrintManager
 import android.view.HapticFeedbackConstants
+import android.view.ViewGroup
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -58,17 +60,21 @@ class MainActivity : AppCompatActivity() {
      *  one this WebView navigates to. */
     private val BUNDLE_HOST = "appassets.androidplatform.net"
 
-    /** Python runs on one thread of its own: a long computation must not
-     *  block the interface, and CPython objects belong to their thread. */
-    private val pythonThread = Executors.newSingleThreadExecutor()
-
     /** The file the page asked to keep, waiting for the user to say where:
-     *  Android's own "create document" dialog answers in [saveTo]. */
+     *  Android's own "create document" dialog answers in [saveTo].  Its text
+     *  waits in a file of the cache, and the file's name and type go into the
+     *  saved instance state: the activity may be recreated, or the process
+     *  ended, while the dialog is up, and the answer comes to the new one. */
     private var pending: PendingSave? = null
 
     /** What ``SympyEditor.openedFile`` is waiting for: the token the page
-     *  gave when it asked for a file, or null when nothing was asked. */
+     *  gave when it asked for a file, or null when nothing was asked.  Kept
+     *  across a recreation like [pending]. */
     private var opening: String? = null
+
+    /** The page's renderer died and the activity is being made again: the
+     *  dead WebView has no state worth saving. */
+    private var renderGone = false
 
     /** Android's create-document dialog: the page's text goes where the user
      *  says, under the name it asked for. */
@@ -164,6 +170,18 @@ class MainActivity : AppCompatActivity() {
              *  above are injected into whatever page it loads, and the
              *  Python one evaluates what it is given: a page from anywhere
              *  else must never get them.  Any other link opens outside. */
+            /** The renderer died (the system reclaimed its memory, or it
+             *  crashed): the WebView is dead with it, and without this the
+             *  app would go too.  The activity is made again with a new one,
+             *  and the page opens the sessions it keeps, as at a launch. */
+            override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                if (view !== web || renderGone) return true
+                renderGone = true
+                pageReady = false
+                recreate()
+                return true
+            }
+
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val url = request.url
                 if (url.scheme == "https" && url.host == BUNDLE_HOST) return false
@@ -187,8 +205,15 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        if (savedInstanceState != null) web.restoreState(savedInstanceState)
-        else web.loadUrl("https://appassets.androidplatform.net/assets/www/index.html")
+        // A save or an opening the user was answering when the activity went.
+        savedInstanceState?.let { state ->
+            val path = state.getString(STATE_PENDING_PATH)
+            if (path != null) pending = PendingSave(state.getString(STATE_PENDING_MIME) ?: "*/*", path)
+            opening = state.getString(STATE_OPENING)
+        }
+        if (savedInstanceState == null || web.restoreState(savedInstanceState) == null) {
+            web.loadUrl("https://appassets.androidplatform.net/assets/www/index.html")
+        }
         if (savedInstanceState == null) receive(intent)
     }
 
@@ -250,13 +275,30 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        // The WebView goes with the activity (its renderer, its bridges):
+        // out of the layout first, as WebView.destroy() asks.  The Python
+        // thread is the process's and stays - a recreated activity uses it.
+        (web.parent as? ViewGroup)?.removeView(web)
+        web.destroy()
+        printing?.destroy()
+        printing = null
         super.onDestroy()
-        pythonThread.shutdown()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        web.saveState(outState)
+        if (!renderGone) web.saveState(outState)
+        pending?.let {
+            outState.putString(STATE_PENDING_PATH, it.path)
+            outState.putString(STATE_PENDING_MIME, it.mime)
+        }
+        opening?.let { outState.putString(STATE_OPENING, it) }
+    }
+
+    /** Run `js` in the page, on the UI thread - unless the activity is gone:
+     *  a Python answer can arrive after a recreation, for a dead WebView. */
+    private fun evaluate(js: String) {
+        runOnUiThread { if (!isDestroyed) web.evaluateJavascript(js, null) }
     }
 
     /** ``window.SympyEditorPy`` in the page: the native backend of editor.js
@@ -279,6 +321,13 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun version(req: String) = answer(req) { pythonApp.callAttr("version").toString() }
 
+        /** Forget the document `id` (the page left the session). */
+        @JavascriptInterface
+        fun close(req: String, id: String) = answer(req) {
+            pythonApp.callAttr("close", id)
+            ""
+        }
+
         /** Stop the message being processed, if any.  Answered here, on the
          *  bridge's own thread: on the Python thread it would wait behind the
          *  very computation it is to stop.  Chaquopy takes the GIL for it,
@@ -296,8 +345,7 @@ class MainActivity : AppCompatActivity() {
                 ok = false
                 e.message ?: e.toString()
             }
-            val js = "window.__sympyEditorNative(${JSONObject.quote(req)}, $ok, ${JSONObject.quote(payload)});"
-            runOnUiThread { web.evaluateJavascript(js, null) }
+            evaluate("window.__sympyEditorNative(${JSONObject.quote(req)}, $ok, ${JSONObject.quote(payload)});")
         }
     }
 
@@ -319,8 +367,9 @@ class MainActivity : AppCompatActivity() {
         if (hasFocus && wantsFullscreen) applyFullscreen()
     }
 
-    /** A file the page is keeping: its text and type, until the user says where. */
-    private data class PendingSave(val mime: String, val text: String)
+    /** A file the page is keeping: its type, and the cache file its text
+     *  waits in until the user says where. */
+    private data class PendingSave(val mime: String, val path: String)
 
     /** Register the two dialogs.  They must be registered before the activity
      *  is started, so this is called from [onCreate]. */
@@ -328,11 +377,17 @@ class MainActivity : AppCompatActivity() {
         saveTo = registerForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { uri: Uri? ->
             val save = pending
             pending = null
-            if (uri == null || save == null) return@registerForActivityResult      // nothing chosen
+            if (save == null) return@registerForActivityResult
+            val waiting = File(save.path)
             try {
-                contentResolver.openOutputStream(uri)?.use { it.write(save.text.toByteArray()) }
+                if (uri != null) {                                             // else nothing chosen
+                    val bytes = waiting.readBytes()
+                    contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+                }
             } catch (exc: Exception) {
                 report("The file could not be written: " + (exc.message ?: exc.toString()))
+            } finally {
+                waiting.delete()
             }
         }
         openFrom = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
@@ -375,14 +430,14 @@ class MainActivity : AppCompatActivity() {
             "window.SympyEditor.openedFile(${JSONObject.quote(token)}, ${JSONObject.quote(name ?: "")}, " +
                 "${JSONObject.quote(text)});"
         }
-        runOnUiThread { web.evaluateJavascript(js, null) }
+        evaluate(js)
     }
 
     /** Say something went wrong, in the page's own status line. */
     private fun report(message: String) {
         val js = "window.SympyEditor && window.SympyEditor.hostError && " +
             "window.SympyEditor.hostError(${JSONObject.quote(message)});"
-        runOnUiThread { web.evaluateJavascript(js, null) }
+        evaluate(js)
     }
 
     /** Print `html` through Android's print service, which also keeps it as
@@ -394,6 +449,14 @@ class MainActivity : AppCompatActivity() {
         view.settings.javaScriptEnabled = false
         view.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(v: WebView, request: WebResourceRequest) = true
+
+            /** A renderer that dies takes the app with it unless every
+             *  WebView it served says it has dealt with it - this one too. */
+            override fun onRenderProcessGone(v: WebView, detail: RenderProcessGoneDetail): Boolean {
+                if (printing === v) printing = null
+                v.destroy()
+                return true
+            }
 
             override fun onPageFinished(v: WebView, url: String) {
                 val manager = getSystemService(Context.PRINT_SERVICE) as? PrintManager
@@ -412,7 +475,7 @@ class MainActivity : AppCompatActivity() {
     private fun answerHost(token: String, value: String?) {
         val js = "window.SympyEditor && window.SympyEditor.hostAnswer(${JSONObject.quote(token)}" +
             (if (value == null) "" else ", ${JSONObject.quote(value)}") + ");"
-        runOnUiThread { web.evaluateJavascript(js, null) }
+        evaluate(js)
     }
 
     /** ``window.SympyEditorApp`` in the page. */
@@ -500,12 +563,21 @@ class MainActivity : AppCompatActivity() {
          *  This is "Save formula" - sharing is what the history exports do. */
         @JavascriptInterface
         fun saveFile(name: String, mime: String, text: String) {
-            pending = PendingSave(mime, text)
+            // The text waits on disk, not in this activity: the dialog may
+            // outlive it (a recreation, or the process ended meanwhile).
+            val waiting = try {
+                File(File(cacheDir, "saving").apply { mkdirs() }, "pending").apply { writeText(text) }
+            } catch (exc: Exception) {
+                report("The file could not be written: " + (exc.message ?: exc.toString()))
+                return
+            }
             runOnUiThread {
+                pending = PendingSave(mime, waiting.path)
                 try {
                     saveTo.launch(name)
                 } catch (exc: Exception) {
                     pending = null
+                    waiting.delete()
                     report("No app on this phone can keep a file: " + (exc.message ?: exc.toString()))
                 }
             }
@@ -545,7 +617,7 @@ class MainActivity : AppCompatActivity() {
             } else {
                 "window.SympyEditor.keptValue(${JSONObject.quote(token)}, ${JSONObject.quote(text)});"
             }
-            runOnUiThread { web.evaluateJavascript(js, null) }
+            evaluate(js)
         }
 
         /** Keep `text` under `key`, through a temporary file and a rename, so
@@ -571,13 +643,13 @@ class MainActivity : AppCompatActivity() {
          *  ``SympyEditor.openedFile(token, name, text)``. */
         @JavascriptInterface
         fun openFile(token: String, accept: String) {
-            opening = token
             val types = if (accept.contains("json")) {
                 arrayOf("application/json", "application/x-sympy-editor+json", "text/plain", "*/*")
             } else {
                 arrayOf("*/*")
             }
             runOnUiThread {
+                opening = token
                 try {
                     openFrom.launch(types)
                 } catch (exc: Exception) {
@@ -592,6 +664,19 @@ class MainActivity : AppCompatActivity() {
     companion object {
         /** The largest file taken as a formula: a saved one is a few kB. */
         private const val MAX_OPEN_BYTES = 20L * 1024 * 1024
+
+        /** Python runs on one thread of its own: a long computation must not
+         *  block the interface, and CPython objects belong to their thread.
+         *  One for the process, not per activity: a recreated activity (or a
+         *  message still running for the one before) must not put a second
+         *  thread into the same documents. */
+        private val pythonThread = Executors.newSingleThreadExecutor()
+
+        /** Saved instance state: a pending save's text file and type, and
+         *  the token of an opening the page waits for. */
+        private const val STATE_PENDING_PATH = "sympyEditor.pendingSavePath"
+        private const val STATE_PENDING_MIME = "sympyEditor.pendingSaveMime"
+        private const val STATE_OPENING = "sympyEditor.opening"
     }
 
     /** The asset loader guesses MIME types from extensions and misses these. */

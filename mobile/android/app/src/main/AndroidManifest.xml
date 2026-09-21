@@ -9,10 +9,14 @@
         android:allowBackup="true"
         android:supportsRtl="true"
         android:theme="@style/Theme.AppCompat.DayNight.NoActionBar">
+        <!-- configChanges: a rotation, a fold, a window resized, a keyboard or a
+             display density changing must not recreate the activity - that
+             would reload the page in the middle of an edit (and a pending
+             save or file choice would be asked again). -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|fontScale|keyboard|keyboardHidden|navigation|uiMode"
             android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>

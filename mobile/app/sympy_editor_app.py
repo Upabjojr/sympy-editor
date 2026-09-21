@@ -17,7 +17,7 @@ import inspect
 import json
 import threading
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from sympy_editor.addons import register_addons_folder
 from sympy_editor.document import Document, Interrupted, interrupt_thread
@@ -41,8 +41,47 @@ _DOCUMENT_SETTINGS = {name for name, prm in inspect.signature(Document.__init__)
 #: One Document per editor/session, by the id the page chose.
 _documents: Dict[str, Document] = {}
 
-#: The thread running a message, while one does: what :func:`interrupt` stops.
-_running: Optional[int] = None
+#: The message being processed, while one is: ``(thread, document id)``,
+#: what :func:`interrupt` stops.  Read and written under ``_lock`` only, and
+#: an interrupt is delivered under it too - so it can reach only the message
+#: it was meant for, never the next one.
+_running: Optional[Tuple[int, str]] = None
+#: The thread an interrupt was delivered to during the current message: the
+#: exception may still be pending when the message ends, and is taken back.
+_delivered: Optional[int] = None
+_lock = threading.Lock()
+
+
+def _begin(doc_id: str) -> None:
+    global _running, _delivered
+    with _lock:
+        _running = (threading.get_ident(), doc_id)
+        _delivered = None
+
+
+def _end() -> None:
+    """The message is over: nothing may stop it any more, and an interrupt
+    delivered as it ended - still pending in this thread - is cancelled.
+    Retried if that very exception fires in here: it fires at most once per
+    delivery, and none comes once ``_running`` is cleared."""
+    global _running, _delivered
+    while True:
+        try:
+            with _lock:
+                _running = None
+                if _delivered is not None:
+                    cancel_interrupt(_delivered)
+                    _delivered = None
+            return
+        except Interrupted:
+            continue
+
+
+def cancel_interrupt(ident: int) -> None:
+    """Take back an exception :func:`interrupt_thread` set in ``ident`` and
+    which has not fired yet (harmless if it has)."""
+    import ctypes
+    ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_ulong(ident), None)
 
 
 def new_doc(doc_id: str, srepr: str, settings_json: str) -> str:
@@ -64,29 +103,50 @@ def new_doc(doc_id: str, srepr: str, settings_json: str) -> str:
 
 def handle(doc_id: str, message_json: str) -> str:
     """Process one front-end message for ``doc_id``; the answer is a snapshot
-    (errors of the edit itself travel inside it, in ``error``)."""
-    global _running
+    (errors of the edit itself travel inside it, in ``error``).  An interrupt
+    always ends in an answer - the document as it stands, with the reason -
+    never in an exception the host would take for a failed call."""
     doc = _documents.get(doc_id)
     if doc is None:
         raise KeyError(f"Unknown document {doc_id!r}: the page must call new_doc first")
-    _running = threading.get_ident()
+    answer: Optional[str] = None
     try:
-        return json.dumps(doc.handle(json.loads(message_json)))
+        try:
+            _begin(doc_id)
+            answer = json.dumps(doc.handle(json.loads(message_json)))
+        finally:
+            _end()
     except Interrupted:
-        # stopped where Document.handle does not report it itself: the
-        # document as it stands, with the reason
-        return json.dumps(doc.snapshot(error="Interrupted"))
-    finally:
-        _running = None
+        # stopped where Document.handle does not report it itself (or just
+        # as it finished: then its answer, computed, still stands)
+        pass
+    if answer is None:
+        answer = json.dumps(doc.snapshot(error="Interrupted"))
+    return answer
 
 
-def interrupt() -> str:
+def interrupt(doc_id: Optional[str] = None) -> str:
     """Stop the message being processed, if any; JSON ``true`` when there was
-    one.  The bridges call this from a thread of their own, not the Python
+    one.  With ``doc_id``, only a message for that document - or for one
+    under it, ``doc_id/...``: the Mac app's windows share this interpreter,
+    each bridge naming its documents ``<window>/<page's id>`` and asking to
+    stop its window's work alone.
+
+    The bridges call this from a thread of their own, not the Python
     thread: that one is busy with the computation, and lets this in between
     two of its steps (:func:`sympy_editor.document.interrupt_thread`)."""
-    ident = _running
-    return json.dumps(ident is not None and interrupt_thread(ident))
+    global _delivered
+    with _lock:
+        running = _running
+        if running is None:
+            return json.dumps(False)
+        ident, running_id = running
+        if doc_id and running_id != doc_id and not running_id.startswith(doc_id + "/"):
+            return json.dumps(False)
+        stopped = interrupt_thread(ident)
+        if stopped:
+            _delivered = ident
+    return json.dumps(bool(stopped))
 
 
 def close(doc_id: str) -> None:

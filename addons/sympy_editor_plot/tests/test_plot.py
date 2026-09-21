@@ -79,3 +79,33 @@ def test_a_piece_that_cannot_be_sampled_says_so():
     assert snap["error"] is None                                     # not the editor's error
     assert "cannot be plotted as it stands" in snap["query"]["error"]
     assert "PrintMethodNotImplementedError" in snap["query"]["error"]
+
+
+def _error(doc, **payload):
+    snap = doc.handle(dict(payload, action="addon", addon="plot", method="samples"))
+    return snap["query"].get("error") or ""
+
+
+def test_the_number_of_points_is_clamped_once_for_both_axes():
+    doc = Document(sin(x), addons=[ADDON])
+    for n, want in [(1, 2), (6000, 5000), (10 ** 9, 5000)]:
+        res = _samples(doc, path="/", span=[0, 1], n=n)
+        assert len(res["x"]) == want and len(res["curves"][0]["y"]) == want
+    assert "span" in _error(doc, path="/", span=[1, 1])
+    assert "span" in _error(doc, path="/", span=["a", 2])
+
+
+def test_a_function_with_no_numbers_behind_it_is_said_not_drawn_as_gaps():
+    from sympy import besselj, factorial, zeta
+    for expr in (besselj(0, x), zeta(x), factorial(x)):
+        assert "cannot be plotted" in _error(Document(expr, addons=[ADDON]), path="/", span=[1, 3], n=5)
+    # a curve with no real value anywhere is gaps, not an error
+    res = _samples(Document(sqrt(-1 - x ** 2), addons=[ADDON]), path="/", span=[0, 1], n=5)
+    assert res["curves"][0]["y"] == [None] * 5
+
+
+def test_a_value_is_a_number_read_in_the_documents_names():
+    doc = Document(y * sin(x), addons=[ADDON])
+    assert "must be a number" in _error(doc, path="/", var="x", values={"y": "z"}, span=[0, 1], n=3)
+    res = _samples(doc, path="/", var="x", values={"y": "pi/2"}, span=[0, 1], n=3)
+    assert abs(res["curves"][0]["y"][2] - 3.141592653589793 / 2 * 0.8414709848078965) < 1e-9

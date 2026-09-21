@@ -21,7 +21,12 @@ module is not involved.
 - The variable on the axis is the first free symbol; pick another in the menu.
 - With more than one free symbol nothing is drawn until the others have a
   value: each gets a field and a slider, the values are substituted on the way
-  to the plot and the formula stays symbolic.  No value is guessed.
+  to the plot and the formula stays symbolic.  No value is guessed, and a
+  value must be a number (read in the document's names: `pi/2` works, `z` is
+  refused).
+- At most 5000 points a curve (and at least 2); the range must be two
+  different finite numbers.  A function the numeric libraries cannot evaluate
+  at all (`besselj`, `zeta`, `factorial`...) is said so, not drawn as gaps.
 - Zoom or pan in the picture: the *from*/*to* fields take the visible range,
   and the curve is sampled again over it.
 - An equation plots both sides.

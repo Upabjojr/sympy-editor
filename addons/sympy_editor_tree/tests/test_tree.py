@@ -100,6 +100,29 @@ def test_move_a_subtree():
     assert "into itself" in snap["query"]["error"]
 
 
+def test_a_move_out_of_a_pair_lands_where_it_was_dropped():
+    # Taking a term out of a sum of two leaves the other term alone in its
+    # place: the destination must still be the node it was dropped on.
+    from sympy import Function
+    f = Function("f")
+    doc = Document(x + f(y), addons=[ADDON])
+    args = list(doc.expr.args)
+    _call(doc, "move", **{"from": [args.index(x)], "to": [args.index(f(y))]})
+    assert doc.expr == f(y, x)
+    doc = Document(x + y * f(z), addons=[ADDON])
+    mi = list(doc.expr.args).index(y * f(z))
+    m = doc.expr.args[mi]
+    _call(doc, "move", **{"from": [mi, list(m.args).index(y)], "to": [mi, list(m.args).index(f(z))]})
+    assert doc.expr == x + f(z, y)
+    # into its own parent: it stays a term, at the index asked for
+    doc = Document(x + y, addons=[ADDON])
+    _call(doc, "move", **{"from": [0], "to": []})
+    assert doc.expr == x + y
+    doc = Document(f(x, y, z), addons=[ADDON])
+    _call(doc, "move", **{"from": [0], "to": [], "index": 2})
+    assert doc.expr == f(y, x, z)
+
+
 def test_the_page_carries_the_addon():
     # `available=[]`: this page carries the tree add-on and nothing else,
     # whatever else happens to be installed beside it in this Python - the

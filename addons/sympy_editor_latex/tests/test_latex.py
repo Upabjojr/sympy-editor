@@ -284,3 +284,35 @@ def test_the_methods_read_and_insert():
     assert "could not be read" in bad["query"]["error"] and doc.expr == E ** (Symbol("i") * Symbol("pi"))
     assert ADDON.client_options()["constants"][0]["name"] == "pi"
     assert "static/grammar/latex.lark" in ADDON.python_sources()                             # the grammar travels to Pyodide pages
+
+
+def test_the_documents_symbols_are_found_under_their_latex_spelling():
+    # x_1 prints x_{1} and lamda \lambda: read back, those are the document's
+    # own symbols (assumptions included), not new ones named as printed.
+    x1, lam, al, xh = Symbol("x_1", positive=True), Symbol("lamda"), Symbol("alpha_i"), Symbol("xhat")
+    doc = Document(x1 + lam + al + xh, addons=[ADDON])
+    for tex, want in [(r"x_1 + 1", x1 + 1), (r"x_{1}", x1), (r"\lambda", lam), (r"\alpha_{i}", al), (r"\hat{x}", xh)]:
+        got = ADDON.read(doc, {"latex": tex})
+        assert got["ok"] and got["expr"] == want, (tex, got)
+    assert ADDON.read(doc, {"latex": "x_1"})["expr"].is_positive
+    # a lambda the document does not have is still lamda: "lambda" cannot be typed back
+    assert read_latex(r"\lambda + 1")["src"] == "lamda + 1"
+
+
+def test_a_fraction_over_a_differential_that_is_no_derivative_divides(reader):
+    d, t = symbols("d t")
+    got = reader.read(r"\frac{1}{d x}")
+    assert got["ok"] and got["expr"] == 1 / (d * x)
+    got = reader.read(r"\frac{y}{d x}")
+    assert got["ok"] and got["expr"] == y / (d * x)
+    # d times something else on top: a division, or the derivative of the rest -
+    # a choice, a derivative by convention only when the d comes first
+    got = reader.read(r"\frac{b d}{d t}")
+    assert got["ok"] and got["expr"] == b / t
+    point = [p for p in got["ambiguities"] if p["key"].startswith("derivative@")]
+    assert point and [o["src"] for o in point[0]["options"]] == ["Derivative(b, t)", "b/t"]
+    again = reader.read(r"\frac{b d}{d t}", choices={point[0]["key"]: 0})
+    assert again["expr"] == Derivative(b, t)
+    got = reader.read(r"\frac{d^2 y}{dx^2}")
+    assert got["expr"] == Derivative(y, (x, 2)) and any(p["key"].startswith("derivative@") for p in got["ambiguities"])
+    assert reader.read(r"\frac{dy}{dx}")["expr"] == Derivative(y, x)                       # no choice there

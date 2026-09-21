@@ -198,3 +198,59 @@ def test_a_recognizer_that_does_not_gets_the_triangle():
     tri = rec.got[0][0]
     assert tri[-1][2] < rec.got[0][1][0][2] and max(p[1] for p in tri) <= 20
     assert best["nested"] and best["reading"]["src"] == "sin(x)/x"
+
+
+def _nest_and_insert(expr, latex, reader=_BoxReader):
+    """Ink written by the whole of ``expr``, read as ``latex``, put in."""
+    doc = Document(expr, addons=[HandwritingAddon(reader(latex))])
+    snap = doc.handle({"action": "addon", "addon": "handwriting", "method": "write",
+                       "strokes": [[[0, 30, 0], [20, 30, 5]]], "context": [0, 0, 20, 20], "nest": "/", "beam": 1})
+    best = snap["query"]["result"]["candidates"][0]
+    assert best["nested"] and best["reading"]["ok"], best
+    doc.handle({"action": "addon", "addon": "handwriting", "method": "insert", "latex": best["latex"],
+                "path": "/", "nest": best.get("nest"), "display": best["display"]})
+    return doc.expr, best
+
+
+@pytest.mark.parametrize("make", [
+    lambda: __import__("sympy").Function("f")(x),
+    lambda: __import__("sympy").Derivative(__import__("sympy").Function("f")(x), x),
+    lambda: __import__("sympy").Function("f")(x, y),
+    lambda: __import__("sympy").Symbol("x_1"),
+    lambda: __import__("sympy").Symbol("lamda"),
+    lambda: __import__("sympy").Symbol("xy"),
+    lambda: __import__("sympy").Symbol("e"),
+    lambda: __import__("sympy").Symbol("i") + 1,
+])
+@pytest.mark.parametrize("reader", [_BoxReader, _InkReader])
+def test_the_piece_written_by_goes_in_as_itself(make, reader):
+    # Its LaTeX read back is another expression: f(x) a product, x_1 the symbol
+    # x_{1}, e Euler's number...  The piece itself takes the stand-in's place.
+    piece = make()
+    stand = r"\ctx" if reader is _BoxReader else r"\Delta"
+    got, best = _nest_and_insert(piece, stand + " + 1", reader)
+    assert got == piece + 1
+    assert best["reading"]["src"] == str(piece + 1)
+    got, _ = _nest_and_insert(piece, stand + "^{2}", reader)
+    assert got == piece ** 2
+    import sympy
+    assert sympy.latex(piece) in best["display"]                   # shown as the piece's LaTeX
+
+
+def test_strokes_without_an_engine_after_the_host_was_chosen_go_to_the_model():
+    rec = _InkReader(r"x + 1")
+    addon = HandwritingAddon(rec)
+    doc = Document(y, addons=[addon])
+    doc.handle({"action": "addon", "addon": "handwriting", "method": "engine", "name": "host"})
+    snap = doc.handle({"action": "addon", "addon": "handwriting", "method": "write",
+                       "strokes": [[[0, 30, 0], [20, 30, 5]]], "beam": 1})
+    assert snap["query"]["result"]["candidates"][0]["reading"]["src"] == "x + 1"
+    assert snap["query"]["result"]["engine"] == "math-ocr"
+    # and "recognize" asks the engine that reads here, not a fixed one
+    other = _InkReader(r"y")
+    from sympy_editor_handwriting import Engine
+    addon2 = HandwritingAddon(engines=[Engine("a", "A", rec), Engine("b", "B", other)], engine="b")
+    doc2 = Document(y, addons=[addon2])
+    snap = doc2.handle({"action": "addon", "addon": "handwriting", "method": "recognize",
+                        "strokes": [[[0, 30, 0], [20, 30, 5]]], "beam": 1})
+    assert snap["query"]["result"]["candidates"][0]["latex"] == "y" and other.got is not None

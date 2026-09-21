@@ -14,6 +14,9 @@ from __future__ import annotations
 import os
 import re
 import sys
+import tempfile
+import threading
+import time
 from pathlib import Path
 from typing import Optional, Union
 
@@ -66,6 +69,10 @@ class Store:
 
     def __init__(self, folder: Optional[Union[str, Path, bool]] = None):
         self.folder: Optional[Path] = None if folder is False else Path(folder or default_store())
+        #: One write at a time from this store: the page saves the sessions
+        #: from every editor it shows, and the server answers each request
+        #: on a thread of its own.
+        self._lock = threading.Lock()
 
     def file(self, key: str) -> Path:
         """The file ``key`` is kept in.  A name from the page cannot reach out
@@ -86,20 +93,47 @@ class Store:
 
     def keep(self, key: str, value: str) -> None:
         """Keep ``value`` under ``key``, through a temporary file and a
-        rename, so that an interrupted write leaves what was there before."""
+        rename, so that an interrupted write leaves what was there before.
+
+        Each write has a temporary file of its own (two writes of one name
+        sharing ``<key>.json.new`` renamed it from under each other, and the
+        loser's error told the page this store keeps nothing), and the
+        rename is tried again for a moment when Windows refuses it because
+        someone - a virus scanner, another editor reading - has the file open."""
         if self.folder is None:
             return
-        self.folder.mkdir(parents=True, exist_ok=True)
-        path = self.file(key)
-        temp = path.with_suffix(path.suffix + ".new")
-        temp.write_text(value, encoding="utf-8")
-        temp.replace(path)
+        with self._lock:
+            self.folder.mkdir(parents=True, exist_ok=True)
+            path = self.file(key)
+            fd, name = tempfile.mkstemp(dir=str(self.folder), prefix=path.name + ".", suffix=".new")
+            temp = Path(name)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as out:
+                    out.write(value)
+                for attempt in range(20):
+                    try:
+                        os.replace(temp, path)
+                        break
+                    except PermissionError:
+                        if attempt == 19:
+                            raise
+                        time.sleep(0.05)
+            except BaseException:
+                try:
+                    temp.unlink()
+                except OSError:
+                    pass
+                raise
 
     def answer(self, message: dict) -> dict:
         """The answer to a ``keep`` message: ``{"keep": text or None}``, or
         ``{"error": ...}`` when the folder cannot be used - which the page
-        takes as "this one keeps nothing" and falls back."""
+        takes as "this one keeps nothing" and falls back.  A store with no
+        folder (``Store(False)``) says so too: answering ``{"keep": None}``
+        told the page its writes were kept, and it dropped the browser's copy."""
         key = str(message.get("key") or "")
+        if self.folder is None:
+            return {"error": "This store keeps nothing (store=False): the page keeps what it keeps itself"}
         try:
             if "value" in message:
                 self.keep(key, str(message.get("value") or ""))

@@ -87,7 +87,8 @@ editor, rather than being made an argument of whatever happens to be there:
 * no operator means juxtaposition — a product with the neighbour the cursor
   belongs to;
 * `+` and `−` bind at the level of the sum: typed into a product they split
-  it at the cursor (`x*z`, with `+y+` typed between, gives `x + y + z`);
+  it at the cursor, the halves as drawn (`x*z`, with `+y+` typed between,
+  gives `x + y + z`);
 * `,` makes a new argument;
 * a SymPy object (from an add-on, say) goes in as it is.
 
@@ -107,6 +108,9 @@ the expression around it:
   `*` over it gives `x*y`;
 * a relation (`=`, `<`) or a connective (`&`, `|`) needs the two arguments to
   be the whole expression;
+* left and right are as drawn, not SymPy's argument order: `x² + x` with
+  `/` over the `+` gives `x²/x`, and a product splits between the factors
+  drawn on either side;
 * deleting the operator leaves juxtaposition, a product;
 * asking for the operator that is already there changes nothing.
 
@@ -119,6 +123,9 @@ from the top-left corner; **reshape** lays the same entries out in another
 shape and so accepts only a shape that multiplies to the number of entries
 there already are — nothing is added and nothing is lost. New entries are
 empty slots (`_1`, `_2`…), and the matrix keeps its class, dense or sparse.
+Deleting an entry of a sparse matrix empties the cell (`0`); an empty cell
+of a sparse matrix cannot be selected on its own yet (a click selects the
+matrix).
 
 ## 7. Names
 
@@ -128,6 +135,8 @@ undefined `Function`. **Retype** changes what a name stands for *everywhere in
 the expression* at once, rebuilding the ancestors: a product of two names
 becomes a `MatMul` when both become matrices. The reverse can fail (a matrix
 back to a scalar under a transpose), and the error is reported as any other.
+A retype is a step: undo gives the name back what it meant.  A declaration is
+not a step, and holds in every step.
 
 ## 8. Expressions SymPy refuses to build
 
@@ -152,7 +161,7 @@ it first.
 
 ## 10. History
 
-Undo and redo walk the steps; going to a step in the history view makes it the
+Tab walks the empty slots in reading order.  Undo and redo walk the steps; going to a step in the history view makes it the
 current expression (and drops what was after it on the next edit). An edit
 made from Python (`doc.set(...)`) is a step like any other. The history and
 everything about the session travel together: see

@@ -54,18 +54,20 @@ PAGE = """<!doctype html><meta charset="utf-8">
   const start = await (await fetch("/state")).json();
   const { default: widget } = await import("/esm.js");
   let snapshot = start.snapshot;
-  const subs = [];
+  const subs = [], customs = [];
   // What widget.js uses of anywidget's model, and no more.
   const model = {
     get: (k) => (k === "options" ? start.options : k === "snapshot" ? snapshot : undefined),
-    on: (ev, cb) => { if (ev === "change:snapshot") subs.push(cb); },
-    off: (ev, cb) => { const i = subs.indexOf(cb); if (i >= 0) subs.splice(i, 1); },
+    on: (ev, cb) => { if (ev === "change:snapshot") subs.push(cb); if (ev === "msg:custom") customs.push(cb); },
+    off: (ev, cb) => { [subs, customs].forEach((l) => { const i = l.indexOf(cb); if (i >= 0) l.splice(i, 1); }); },
     send: (msg) => {
       fetch("/msg", { method: "POST", body: JSON.stringify(msg) })
-        .then((r) => r.text())
-        .then((s) => {
-          if (s === snapshot) return;              // a trait set to what it was fires nothing
-          snapshot = s;
+        .then((r) => r.json())
+        .then((answer) => {
+          // what the kernel sent back as messages of their own, then the trait
+          (answer.custom || []).forEach((m) => customs.slice().forEach((cb) => cb(m)));
+          if (answer.snapshot === snapshot) return;  // a trait set to what it was fires nothing
+          snapshot = answer.snapshot;
           subs.slice().forEach((cb) => cb());
         });
     },
@@ -83,6 +85,8 @@ def widget_page():
 
     def open_(w):
         lock = threading.Lock()
+        sent = []                                # the widget's custom messages (w.send)
+        w.send = lambda content, buffers=None: sent.append(content)
 
         class Bridge(http.server.BaseHTTPRequestHandler):
             def _reply(self, body, kind):
@@ -104,9 +108,10 @@ def widget_page():
             def do_POST(self):
                 msg = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 with lock:                       # one message at a time, each with its own answer
+                    before = len(sent)
                     w._on_msg(w, msg, [])
                     w.wait(60)
-                    self._reply(w.snapshot, "application/json")
+                    self._reply(json.dumps({"custom": sent[before:], "snapshot": w.snapshot}), "application/json")
 
             def log_message(self, *args):
                 pass

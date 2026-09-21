@@ -1144,11 +1144,27 @@ var SympyEditor = (function () {
    *
    *  Reading answers a Promise; writing is told and not waited for. */
   var Keep = {
-    backend: null,                 // set by mount, for the server's own store
-    //: Whether the backend keeps things: null until asked, false once one has
-    //: said it does not - a write must not be handed to something that drops
-    //: it, or the sessions would quietly stop being kept.
-    backendKeeps: null,
+    /** The keeper of `owner` (an Editor): its backend, and whether that
+     *  backend keeps things - null until asked, false once it has said it
+     *  does not (a write must not be handed to something that drops it).
+     *  One per editor: a page-wide one was whichever editor mounted last,
+     *  and a notebook view closed long ago kept answering for the others,
+     *  or never answered at all.  With no owner, the editor made last (an
+     *  add-on's SympyEditor.keep), or what setKeeper named. */
+    of: function (owner) {
+      var ed = owner || lastEditor;
+      if (ed && ed.backend) {
+        if (!ed._keeper || ed._keeper.backend !== ed.backend) ed._keeper = Keep.keeper(ed.backend);
+        return ed._keeper;
+      }
+      return Keep.fallback;
+    },
+
+    keeper: function (backend) {
+      return { backend: backend || null, keeps: null, queue: {}, running: {} };
+    },
+
+    fallback: null,
 
     /** The host's storage, when the page is running inside an app. */
     host: function () {
@@ -1156,7 +1172,7 @@ var SympyEditor = (function () {
       return app && app.keepRead && app.keepWrite ? app : null;
     },
 
-    read: async function (key) {
+    read: async function (key, owner) {
       var app = Keep.host();
       if (app) {
         var kept = await new Promise(function (resolve) {
@@ -1168,33 +1184,58 @@ var SympyEditor = (function () {
         if (kept !== null && kept !== undefined) return kept;
         return Keep.local(key);          // nothing kept yet: what the page kept before it had a host
       }
-      if (Keep.backend && Keep.backend.keep && Keep.backendKeeps !== false) {
+      var k = Keep.of(owner);
+      if (k && k.backend && k.backend.keep && k.keeps !== false) {
         try {
-          var answer = await Keep.backend.keep(key);
-          Keep.backendKeeps = true;
+          var answer = await k.backend.keep(key);
+          k.keeps = true;
           if (answer !== null && answer !== undefined) return answer;
           return Keep.local(key);        // it keeps, but nothing yet: what the page kept before
-        } catch (e) { Keep.backendKeeps = false; }   // it does not keep: the browser's, then
+        } catch (e) { k.keeps = false; } // it does not keep: the browser's, then
       }
       return Keep.local(key);
     },
 
-    write: function (key, text) {
+    write: function (key, text, owner) {
       var app = Keep.host();
       if (app) {
         try { app.keepWrite(key, text); Keep.forget(key); return true; }
         catch (e) { /* the host could not: fall through to the browser's */ }
       }
-      if (Keep.backend && Keep.backend.keep && Keep.backendKeeps) {
-        try {
-          Keep.backend.keep(key, text).then(function () { Keep.forget(key); }, function () {
-            Keep.backendKeeps = false;                 // it stopped keeping: the browser takes over
-            Keep.setLocal(key, text);
-          });
-          return true;
-        } catch (e) { /* likewise */ }
+      var k = Keep.of(owner);
+      if (k && k.backend && k.backend.keep && k.keeps) {
+        // One write per name at a time, the latest waiting behind it: two in
+        // flight could land out of order - the older last, and stale - and a
+        // burst (the zoom through a pinch) goes as the one it ends with.
+        k.queue[key] = text;
+        if (!k.running[key]) Keep._drain(k, key);
+        return true;
       }
       return Keep.setLocal(key, text);
+    },
+
+    /** Hand the keeper what waits under `key`, one write after another.  A
+     *  write that fails is tried once more, then left to the browser - that
+     *  write only: one busy moment of the server's disk used to switch the
+     *  page to the browser's storage for good.  The browser's copy is
+     *  dropped only once the keeper has said it holds the text. */
+    _drain: async function (k, key) {
+      k.running[key] = true;
+      try {
+        while (Object.prototype.hasOwnProperty.call(k.queue, key)) {
+          var text = k.queue[key];
+          delete k.queue[key];
+          var ok = false;
+          for (var attempt = 0; attempt < 2 && !ok; attempt++) {
+            try { await k.backend.keep(key, text); ok = true; }
+            catch (e) { if (!attempt) await new Promise(function (r) { setTimeout(r, 250); }); }
+          }
+          if (ok) Keep.forget(key);
+          else Keep.setLocal(key, text);
+        }
+      } finally {
+        k.running[key] = false;
+      }
     },
 
     /** Drop the browser's copy of `key` once a keeper holds it.  A page that
@@ -1794,6 +1835,12 @@ var SympyEditor = (function () {
             self._hideKeep(); self.view.focus({ preventScroll: true });
           } else if ((ev.key === "Enter" || ev.key === " ") && document.activeElement && document.activeElement.tagName === "BUTTON") {
             ev.stopPropagation();   // the button's own click handler applies it
+          } else if (ev.key === "Backspace" || ev.key === "ArrowUp") {
+            // ↑ and Backspace keep the focused choice, as Enter does: left to
+            // bubble, the view's handler unwrapped (asked) again or went up
+            ev.preventDefault(); ev.stopPropagation();
+            var focusedBtn = at >= 0 ? buttons[at] : buttons[0];
+            if (focusedBtn) focusedBtn.click();
           } else if ((ev.key === "ArrowRight" || ev.key === "ArrowLeft") && buttons.length) {
             ev.preventDefault(); ev.stopPropagation();
             var next = (at + (ev.key === "ArrowRight" ? 1 : buttons.length - 1) + buttons.length) % buttons.length;
@@ -1956,7 +2003,7 @@ var SympyEditor = (function () {
       for (var c = 0; c < clients.length; c++) this._addonClients[clients[c].name] = clients[c];
       var on = snap.addons || [];
       if (this.opts.rememberAddons && !snap.preview && this._addonsRestored) {
-        Keep.write("addons", JSON.stringify(on));
+        Keep.write("addons", JSON.stringify(on), this);
       }
       var mounted = this._addons.slice();
       for (var i = 0; i < mounted.length; i++) if (on.indexOf(mounted[i].name) < 0) this._unmountAddon(mounted[i].name);
@@ -1974,7 +2021,7 @@ var SympyEditor = (function () {
       this._addonsRestored = true;
       if (!this.opts.rememberAddons || !this.state) return Promise.resolve();
       var self = this;
-      return Keep.read("addons").then(function (text) {
+      return Keep.read("addons", this).then(function (text) {
         var wanted = null;
         try { wanted = JSON.parse(text || "null"); } catch (e) { wanted = null; }
         return Array.isArray(wanted) ? self._wantAddons(wanted) : undefined;
@@ -2206,7 +2253,16 @@ var SympyEditor = (function () {
         self._clearChangeMarks();
         self._suppressClick = false;      // the click that follows belongs to this press
         if (ev.pointerType === "mouse" && ev.button !== 0) return;
-        self._pointers[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
+        // Pointers whose release never reached us (a mouse let go outside
+        // the page) must not make this press the second finger of a pinch:
+        // only fingers of the same kind still down count.
+        Object.keys(self._pointers).forEach(function (id) {
+          var old = self._pointers[id];
+          if (String(id) === String(ev.pointerId) || old.type !== ev.pointerType || old.type === "mouse" || old.type === "pen")
+            delete self._pointers[id];
+        });
+        if (!Object.keys(self._pointers).length) self._pinch = null;
+        self._pointers[ev.pointerId] = { x: ev.clientX, y: ev.clientY, type: ev.pointerType };
         if (Object.keys(self._pointers).length === 2) {   // a second finger: a pinch, no longer a drag
           self._drag = null;
           self._cancelHold();
@@ -2236,7 +2292,7 @@ var SympyEditor = (function () {
         }
       });
       this.view.addEventListener("pointermove", function (ev) {
-        if (self._pointers[ev.pointerId]) self._pointers[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
+        if (self._pointers[ev.pointerId]) self._pointers[ev.pointerId] = { x: ev.clientX, y: ev.clientY, type: ev.pointerType };
         var slop = ev.pointerType === "touch" ? 8 : 3;   // a finger trembles more than a mouse
         if (self._hold && self._hold.id === ev.pointerId && Math.hypot(ev.clientX - self._hold.x, ev.clientY - self._hold.y) > slop) self._cancelHold();
         if (self._pinch) {
@@ -2385,6 +2441,14 @@ var SympyEditor = (function () {
       this._docListeners = [];
       var onDocument = function (kind, fn) { document.addEventListener(kind, fn); self._docListeners.push([kind, fn]); };
       onDocument("selectionchange", function () { self._onSourceSelection(); });
+      // A press on the view released outside it: forget that pointer too.
+      var endOutside = function (ev) {
+        if (self._pointers[ev.pointerId] && !self.view.contains(ev.target)) endPointer(ev, ev.type === "pointercancel");
+      };
+      // (on the window: a release outside the page, when it comes, is its)
+      this._endOutside = endOutside;
+      window.addEventListener("pointerup", endOutside);
+      window.addEventListener("pointercancel", endOutside);
       // The highlight boxes, the caret and the action bar are placed in
       // pixels measured from the rendering: whenever the view changes size
       // they must be measured again.  Entering full screen is the case that
@@ -2403,7 +2467,9 @@ var SympyEditor = (function () {
           // in the formula spreads it, which arrives here as a resize).  Nor
           // does it take the caret away - what is being typed is going there.
           if (self._typingHere()) return;
-          if (self.caret) self._hideCaret();
+          // the caret is measured again at the same place (the rendering is
+          // the same elements); only a place that is gone takes it away
+          if (self.caret && !self._caretAgain()) self._hideCaret();
           self._applySelection(true);
         });
       };
@@ -2467,6 +2533,15 @@ var SympyEditor = (function () {
         // the rendering as it is and only marks the line.
         if (snap.error) { this.source.classList.add("se-invalid"); this._setStatus(snap.error); return; }
         this.source.classList.remove("se-invalid");
+      } else if (snap.error && this.emptyField) {
+        // The expression typed in the empty view was refused: the field keeps
+        // its text and the focus, to be corrected (Esc still restores).
+        this.committed = snap;
+        this.source.classList.add("se-invalid");
+        this._showError(snap.error);
+        this.emptyField.focus({ preventScroll: true });
+        this._updateToolbar();
+        return;
       } else {
         this.committed = snap;
         if (this._sessionsReady && !snap.error) this._scheduleSessionSave();
@@ -3107,6 +3182,9 @@ var SympyEditor = (function () {
         var after = null, before = null;
         for (var q = 0; q < jlist.length; q++) {
           var pos = jlist[q];
+          // only the places on the glyph's own line: a caret in the
+          // denominator below (or a row of a matrix) is not "after" it
+          if (!(pos.gap.top < gr.bottom - 1 && pos.gap.bottom > gr.top + 1)) continue;
           if (pos.x >= gx) { if (!after || pos.x < after.x) after = pos; }
           else if (!before || pos.x > before.x) before = pos;
         }
@@ -3121,7 +3199,7 @@ var SympyEditor = (function () {
       if (t && t.children.length) {
         var back = this._cameFrom[this.selected];
         this.select(back && this.tree[back] && isAncestorOrSelf(this.selected, back) ? back
-                    : this._displayChildren(this.selected)[0]);
+                    : (this._readingChildren(this.selected)[0] || this._displayChildren(this.selected)[0]));
         return;
       }
       if (this.opts.readOnly) return;
@@ -3149,6 +3227,8 @@ var SympyEditor = (function () {
     /** Select a path (null to clear). */
     select(path) {
       this._hideKeep();
+      var target = (path && this.tree && (path in this.tree)) ? path : null;
+      if (target !== this.selected || this.range || this.junction || this.caret) this._clearStaleError();
       this.range = null;
       this.junction = null;
       this._fnCaret = null;
@@ -4062,10 +4142,21 @@ var SympyEditor = (function () {
       var list = this._caretPositions();
       var best = null, bestDist = Infinity;
       for (var i = 0; i < list.length; i++) {
-        var where = this._sourceOffsetOf(list[i].gap);
-        if (where === null) continue;
-        var d = Math.abs(where - off);
-        if (d < bestDist) { bestDist = d; best = list[i]; }
+        var g = list[i].gap;
+        // a gap between two arguments is two places of the text - the end of
+        // the left one and the start of the right one - and the caret takes
+        // the side the text cursor is nearer to (x| + y is attached to x)
+        var sides = g.extend ? [null] : ["left", "right"];
+        for (var k = 0; k < sides.length; k++) {
+          var cand = sides[k] ? Object.assign({}, g, { attach: sides[k] }) : g;
+          var where = this._sourceOffsetOf(cand);
+          if (where === null) continue;
+          var d = Math.abs(where - off);
+          if (d < bestDist) {
+            bestDist = d;
+            best = sides[k] ? { gap: cand, x: sides[k] === "left" ? g.a : g.b } : list[i];
+          }
+        }
       }
       return best;
     }
@@ -4082,6 +4173,9 @@ var SympyEditor = (function () {
       var p;
       if (gap.extend === "before" && spans[gap.path]) return spans[gap.path][0];
       if (gap.extend === "after" && spans[gap.path]) return spans[gap.path][1];
+      // attached to the left: the end of what is on the left (x| + y), not
+      // the start of what follows the operator (x + |y)
+      if (gap.attach === "left" && (p = pathOf(gap.leftEl)) && spans[p]) return spans[p][1];
       if ((p = pathOf(gap.rightEl)) && spans[p]) return spans[p][0];
       if ((p = pathOf(gap.leftEl)) && spans[p]) return spans[p][1];
       if (spans[gap.path]) return spans[gap.path][0];
@@ -4186,7 +4280,8 @@ var SympyEditor = (function () {
           ev.preventDefault();
           var src = toSource(input.value).trim();
           if (!src) return;
-          self._endEmptyInput();
+          // the field stays until the answer: a refused text is kept to fix
+          // (setState ends it when the expression is committed)
           self.source.textContent = src;
           self.send({ action: "set", src: src });
         } else if (ev.key === "Escape") {
@@ -4385,7 +4480,53 @@ var SympyEditor = (function () {
       return best;
     }
 
+    /** The error line of a refused request is about that request: the next
+     *  change of selection (or caret) takes it away. */
+    _clearStaleError() {
+      if (this._keepError || !this.error || this.error.hidden) return;
+      this._showError(null);
+    }
+
+    /** A refused insertion must not lose the caret it was typed at: the
+     *  rendering is the same, so the position nearest to where it stood. */
+    _restoreCaret(gap, cx) {
+      var list = this._caretPositions(), best = null, bestD = Infinity;
+      var y0 = (gap.top + gap.bottom) / 2;
+      for (var i = 0; i < list.length; i++) {
+        var g = list[i].gap, d = Math.abs(list[i].x - cx) + Math.abs((g.top + g.bottom) / 2 - y0);
+        if (g.path === gap.path) d -= 0.5;             // same node wins a tie
+        if (d < bestD) { bestD = d; best = list[i]; }
+      }
+      if (!best) return;
+      this._keepError = true;
+      try { this._showCaret(best.gap, best.x); } finally { this._keepError = false; }
+    }
+
+    /** Draw the caret again at the same place after the view changed size:
+     *  the position of the fresh list with the same node and neighbours.
+     *  False when there is none. */
+    _caretAgain() {
+      var c = this.caret;
+      if (!c) return false;
+      var list = this._caretPositions();
+      for (var i = 0; i < list.length; i++) {
+        var g = list[i].gap;
+        if (g.path === c.path && (g.extend || null) === (c.extend || null) && (g.leftEl || null) === (c.leftEl || null)
+            && (g.rightEl || null) === (c.rightEl || null)) {
+          var gap = Object.assign({}, g, { attach: c.attach });
+          var status = this.status.textContent;
+          this._keepError = true;
+          var atA = this._caretX !== undefined && Math.abs(this._caretX - c.a) < Math.abs(this._caretX - c.b);
+          try { this._showCaret(gap, g.extend ? list[i].x : (atA ? g.a : g.b)); } finally { this._keepError = false; }
+          this._setStatus(status);             // a relayout says nothing new
+          return true;
+        }
+      }
+      return false;
+    }
+
     _showCaret(gap, x) {
+      this._clearStaleError();
       this._hideCaret();
       this.caret = gap;
       this.junction = null;
@@ -4475,6 +4616,7 @@ var SympyEditor = (function () {
 
     selectJunction(j) {
       this._hideKeep();
+      this._clearStaleError();
       this._hideCaret();
       this.selected = null;
       this.range = null;
@@ -4742,6 +4884,16 @@ var SympyEditor = (function () {
       while (cur) {
         var parent = this.tree[cur] ? this.tree[cur].parent : null;
         if (!parent) return null;
+        var pnode = this.state && this.state.nodes ? this.state.nodes[parent] : null;
+        if (pnode && (pnode.matrix || pnode.array)) {
+          // a cell of a grid: the cell beside it in the same drawn row,
+          // else a step out of the grid (never the next row's first cell)
+          var grid = this._gridOf(cur);
+          var cell = grid ? this._gridNeighbour(cur, grid.cells, step < 0 ? "left" : "right") : null;
+          if (cell) return cell;
+          cur = parent;
+          continue;
+        }
         var sib = this._displayChildren(parent);
         var i = sib.indexOf(cur) + step;
         if (i >= 0 && i < sib.length) return sib[i];
@@ -4834,7 +4986,10 @@ var SympyEditor = (function () {
       var sep = /Add$/.test(type) ? " + " : /Mul$/.test(type) ? "*" : type === "And" ? " & " : type === "Or" ? " | " : ", ";
       return paths.map(function (c) {
         var src = self.state.nodes[c].src;
-        return sep === "*" && /[+\-]/.test(src.slice(1)) ? "(" + src + ")" : src;
+        if (sep === "*" && /[+\-]/.test(src.slice(1))) return "(" + src + ")";
+        // & and | bind tighter than the relations: x > 1 & y < 2 is x > (1 & y) < 2
+        if ((sep === " & " || sep === " | ") && !/^[\w.]+$/.test(src)) return "(" + src + ")";
+        return src;
       }).join(sep);
     }
 
@@ -5116,7 +5271,16 @@ var SympyEditor = (function () {
         return;
       }
       if (inserting) {
-        if (src) this.send(this._insertMessage(inserting, src));
+        if (src) {
+          var self = this, was = this.state ? this.state.srepr : null, cx = this._caretX;
+          var sent = this.send(this._insertMessage(inserting, src));
+          if (sent && sent.then) sent.then(function (snap) {
+            // refused: the caret comes back where the text was typed
+            if (snap && snap.error && self.state === snap && snap.srepr === was
+                && !self.selected && !self.range && !self.caret && !self.junction && !self.input)
+              self._restoreCaret(inserting, cx === undefined ? inserting.a : cx);
+          });
+        }
         return;
       }
       if (!src || src === original) return;
@@ -5176,6 +5340,10 @@ var SympyEditor = (function () {
           var step = cmd === "left" ? -1 : 1;
           var way = cmd === "left" ? "left" : "right";
           if (this.caret) { if (!this._gridCaretMove(way)) this._moveCaret(step); return; }
+          if (this.junction) {   // an operator: the term on that side, as the key does
+            var jn = this.junction, jnk = this._displayChildren(jn.path);
+            return this.select(jnk[step < 0 ? jn.leftIndex : jn.rightIndex]);
+          }
           if (this.range) return this.select(this._displayChildren(this.range.parent)[this.range.focus]);
           if (this._gridMove(way)) return;
           if (this.selected) return this._moveSideways(step);
@@ -5184,6 +5352,7 @@ var SympyEditor = (function () {
         case "parent": {
           if (this.caret) { if (!this._gridCaretMove("up")) this._selectBesideCaret(); return; }
           if (this.range) { this.select(this.range.parent); return; }
+          if (this.junction) { this.select(this.junction.path); return; }   // an operator: the node it belongs to
           if (this._gridMove("up")) return;
           if (this.selected) this._selectParent(this.selected);
           return;
@@ -5340,7 +5509,7 @@ var SympyEditor = (function () {
      *  server's, or the browser's (see Keep).  Read once, at startup. */
     async _readSessions() {
       var text = null;
-      try { text = await Keep.read("sessions"); }
+      try { text = await Keep.read("sessions", this); }
       catch (e) { text = null; }
       var store = null;
       try { store = JSON.parse(text || "null"); }
@@ -5351,7 +5520,7 @@ var SympyEditor = (function () {
 
     _saveSessions(store) {
       this._sessionStore = store;
-      var kept = Keep.write("sessions", JSON.stringify(store));
+      var kept = Keep.write("sessions", JSON.stringify(store), this);
       if (kept) { this._storageFull = false; return; }
       // Nothing took it.  No storage at all (a private window, say) is
       // nothing to report; a full one is: the sessions silently stopping
@@ -5367,6 +5536,27 @@ var SympyEditor = (function () {
       return store.list.filter(function (s) { return s.id === store.current; })[0] || null;
     }
 
+    /** A session id no other session has, even one made the same millisecond. */
+    _newSessionId() {
+      return "s" + Date.now() + Math.random().toString(36).slice(2, 6);
+    }
+
+    /** Resolves once the editor is not busy (a computation running, a
+     *  session opening): what is asked of it from outside - a file the host
+     *  hands over - waits for its turn instead of being dropped or, worse,
+     *  landing in the session that was open. */
+    _whenIdle() {
+      var self = this;
+      if (!this.busy) return Promise.resolve(!this.closed);
+      return new Promise(function (resolve) {
+        (function wait() {
+          if (self.closed) resolve(false);
+          else if (!self.busy) resolve(true);
+          else setTimeout(wait, 50);
+        })();
+      });
+    }
+
     /** Open the current session (or start one from the expression shown). */
     async _initSessions() {
       if (!this.sessions) return;
@@ -5376,15 +5566,35 @@ var SympyEditor = (function () {
       this._fillSessions();
       if (!this.backend || !this.backend.openDocument) return;
       var cur = store.list.filter(function (s) { return s.id === store.current; })[0];
-      if (cur && cur.state) {
+      var fresh = !cur;
+      if (cur && this.backend.givenDocument) {
+        // The document was handed in - serve(expr), a widget in a notebook -
+        // and it is the work: it gets a session of its own rather than the
+        // last one opened over it.  The last one is reused only when it holds
+        // nothing but this same expression (a cell run again), or nothing at
+        // all, so that the list does not grow by one at every run.
+        var h0 = cur.state && cur.state.history;
+        var blank = !cur.state && !cur.name && !cur.title;
+        fresh = !(blank || (h0 && h0.length === 1 && this.state && h0[0] === this.state.srepr));
+      } else if (cur && cur.state) {
         try {
-          await this.setState(await this.backend.openDocument(sessionState(cur.state), this._report.bind(this)));
+          var opened = await this.backend.openDocument(sessionState(cur.state), this._report.bind(this));
+          if (!opened) throw new Error("No answer");
+          if (opened.error) throw new Error(opened.error);
+          await this.setState(opened);
           if (cur.empty) this.editSource("");
+          delete cur.broken;
         } catch (e) {
-          this._showError("The session could not be opened: " + ((e && e.message) || e));
+          // One session that cannot be read must not stop every launch: it
+          // stays in the list, marked, and the editor starts afresh.
+          var why = String((e && e.message) || e);
+          cur.broken = why;
+          fresh = true;
+          this._showError("The last session could not be opened (it is kept in the list): " + why);
         }
-      } else {
-        cur = { id: "s" + Date.now(), name: "", updated: Date.now(), state: null };
+      }
+      if (fresh) {
+        cur = { id: this._newSessionId(), name: "", updated: Date.now(), state: null };
         store.list.push(cur);
         store.current = cur.id;
       }
@@ -5399,10 +5609,11 @@ var SympyEditor = (function () {
      *  when the page is going away - hidden, closed, or the app sent to the
      *  background, where the system may end it without another word. */
     flush() {
-      if (!this._sessionSaveTimer) return;
+      if (!this._sessionSaveTimer) return false;       // nothing waiting: nothing to wait for
       clearTimeout(this._sessionSaveTimer);
       this._sessionSaveTimer = null;
       this._saveSession();
+      return true;
     }
 
     /** What the system's Back does (Android's button or gesture, through the
@@ -5442,18 +5653,31 @@ var SympyEditor = (function () {
       this.closeHistory();
       this.closeHelp();
       this._setStatus("Opening " + (name || "the file") + "\u2026");
+      var holding = false;
       try {
-        if (this._sessionsReady) await this._sessionFor(base);
+        // A computation running (or a session opening) has the document: the
+        // file waits for it.  Sent at once, it went to the session that was
+        // open and replaced its history.
+        if (!(await this._whenIdle())) return;
+        if (this._sessionsReady && !(await this._sessionFor(base))) {
+          throw new Error("no session could be made for it, and the one open is left as it was");
+        }
+        if (!(await this._whenIdle())) return;
+        this.busy = holding = true;
+        this._updateToolbar();
         var snap = await this.backend.send({ action: "openfile", text: text }, this._report.bind(this));
         if (!snap) throw new Error("No answer");
         if (snap.error) throw new Error(snap.error);
         this._history = null;
+        this.busy = holding = false;
         this.select(null);
         this._hideCaret();
         await this.setState(snap);
         this._setStatus(name ? "Opened " + name : "Opened");
       } catch (e) {
         this._showError("The file could not be opened: " + ((e && e.message) || e));
+      } finally {
+        if (holding) { this.busy = false; this._updateToolbar(); }
       }
     }
 
@@ -5481,6 +5705,7 @@ var SympyEditor = (function () {
     }
 
     _storeSession(snap) {
+      if (!snap || !snap.export) return;          // an error answer holds no session: keep what is kept
       var store = this._sessionStore || this._loadSessions();
       var cur = store.list.filter(function (s) { return s.id === store.current; })[0];
       if (!cur) return;
@@ -5805,12 +6030,24 @@ var SympyEditor = (function () {
     /** A session of its own for a file about to be opened: the one open is
      *  saved and left as it is, and the new one takes the file's name. */
     async _sessionFor(name) {
+      if (!(await this._whenIdle())) return false;
       var store = this._sessionStore || this._loadSessions();
-      var sess = { id: "s" + Date.now(), name: name || "(opened)", title: !!name, updated: Date.now(),
+      var sess = { id: this._newSessionId(), name: name || "(opened)", title: !!name, updated: Date.now(),
                    state: { history: ["Integer(0)"], index: 0, symbols: [] }, empty: false };
       store.list.push(sess);
       this._saveSessions(store);
-      await this.openSession(sess.id);
+      if (await this.openSession(sess.id)) return true;
+      this._dropSession(sess.id);                 // it never opened: no orphan left in the list
+      return false;
+    }
+
+    /** Take a session out of the list (not the current one). */
+    _dropSession(id) {
+      var store = this._sessionStore || this._loadSessions();
+      if (id === store.current) return;
+      store.list = store.list.filter(function (s) { return s.id !== id; });
+      this._saveSessions(store);
+      this._fillSessions();
     }
 
     _exportName(ext) {
@@ -5969,11 +6206,17 @@ var SympyEditor = (function () {
       this.send({ action: "goto", index: index });
     }
 
+    /** Open the session `id`.  Resolves true once it is the one open, false
+     *  if it was not opened - the editor busy, no such session, or the
+     *  document refused (said in the error line) - so that whoever asked
+     *  (a file being opened, a session deleted) knows where it stands. */
     async openSession(id) {
-      if (this.busy || !this._sessionsReady) return;
+      if (this.busy || !this._sessionsReady) return false;
       var store = this._sessionStore || this._loadSessions();
       var sess = store.list.filter(function (s) { return s.id === id; })[0];
-      if (!sess || id === store.current) return;
+      if (!sess) return false;
+      if (id === store.current) return true;
+      var ok = false;
       clearTimeout(this._sessionSaveTimer);
       this.busy = true;
       this._updateToolbar();
@@ -5983,8 +6226,11 @@ var SympyEditor = (function () {
         var state = sess.state || { history: [this.state.srepr], index: 0, symbols: this.state.declared || [] };
         var snap = await this.backend.openDocument(sessionState(state), this._report.bind(this));
         if (snap && snap.error) throw new Error(snap.error);
+        if (!snap) throw new Error("No answer");
         store.current = id;                 // only once the document is open: a failure leaves the pointer alone
+        delete sess.broken;
         this._saveSessions(store);
+        ok = true;
         this._history = null;
         this.busy = false;
         this.select(null);
@@ -6000,15 +6246,17 @@ var SympyEditor = (function () {
         this._updateToolbar();
         this._fillSessions();
       }
+      return ok;
     }
 
     /** A new session from `start`: "empty" (an empty formula to type into),
      *  "current" (a copy of the current expression) or an example's srepr -
      *  with a fresh history. */
-    newSession(start) {
-      if (!this._sessionsReady || !this.state) return;
+    async newSession(start) {
+      // Busy, it would be added and never opened: nothing is added then.
+      if (!this._sessionsReady || !this.state || this.busy) return false;
       var store = this._sessionStore || this._loadSessions();
-      var sess = { id: "s" + Date.now(), name: "", updated: Date.now(), state: null, empty: false };
+      var sess = { id: this._newSessionId(), name: "", updated: Date.now(), state: null, empty: false };
       if (!start || start === "empty") {
         sess.empty = true;                     // a placeholder 0 hidden by the empty state until something is typed
         sess.name = "(empty)";
@@ -6021,7 +6269,9 @@ var SympyEditor = (function () {
       }
       store.list.push(sess);
       this._saveSessions(store);
-      this.openSession(sess.id);
+      if (await this.openSession(sess.id)) return true;
+      this._dropSession(sess.id);
+      return false;
     }
 
     /** The chooser under "New session": empty (default), a copy, the examples. */
@@ -6045,20 +6295,27 @@ var SympyEditor = (function () {
       picker.querySelector(".se-choice-default").focus();
     }
 
-    deleteSession(id) {
+    async deleteSession(id) {
       var store = this._sessionStore || this._loadSessions();
-      if (store.list.length < 2) return;                       // the last session stays
+      if (store.list.length < 2) return false;                 // the last session stays
       var rest = store.list.filter(function (s) { return s.id !== id; });
+      if (id === store.current) {
+        // Another one is opened first, and this one goes only once it has:
+        // clearing the pointer before a refused open (busy, or a session
+        // Python cannot read) left no current session, and nothing saved.
+        if (this.busy) return false;
+        var latest = rest.slice().sort(function (a, b) { return b.updated - a.updated; })[0];
+        if (!(await this.openSession(latest.id))) return false;
+        store = this._sessionStore || this._loadSessions();
+        store.list = store.list.filter(function (s) { return s.id !== id; });
+        this._saveSessions(store);
+        this._fillSessions();
+        return true;
+      }
       store.list = rest;
       this._saveSessions(store);
-      if (id === store.current) {
-        store.current = null;                                  // openSession() may then switch to it
-        this._saveSessions(store);
-        var latest = rest.slice().sort(function (a, b) { return b.updated - a.updated; })[0];
-        this.openSession(latest.id);
-      } else {
-        this._fillSessions();
-      }
+      this._fillSessions();
+      return true;
     }
 
     _fillSessions() {
@@ -6084,7 +6341,9 @@ var SympyEditor = (function () {
       list.forEach(function (sess) {
         var current = sess.id === store.current;
         var when = new Date(sess.updated || 0);
-        var row = h("div", { class: "se-session" + (current ? " se-session-current" : ""), "data-id": sess.id });
+        var row = h("div", { class: "se-session" + (current ? " se-session-current" : "") + (sess.broken ? " se-session-broken" : ""),
+                             "data-id": sess.id });
+        if (sess.broken) row.setAttribute("data-broken", String(sess.broken));
         var head = h("div", { class: "se-session-row" });
         row.appendChild(head);
         var label = h("code", { title: sess.title ? sess.name : "Rename this session" }, [sess.name || "(new)"]);
@@ -6236,7 +6495,7 @@ var SympyEditor = (function () {
         var here = parseFloat(Keep.local("zoom"));
         if (here > 0) z = here;                     // at once, before the keeper answers
         var self = this;
-        Keep.read("zoom").then(function (text) {
+        Keep.read("zoom", this).then(function (text) {
           var kept = parseFloat(text);
           if (kept > 0 && Math.abs(kept - self.zoom) > 0.001) self.setZoom(kept);
         }, function () { /* nothing kept */ });
@@ -6268,7 +6527,7 @@ var SympyEditor = (function () {
       this._updateToolbar();
       this._addonsNotify("onZoom", this.zoom);   // an add-on drawing on the formula follows it
       if (this.opts.rememberZoom) {
-        Keep.write("zoom", String(this.zoom));
+        Keep.write("zoom", String(this.zoom), this);
       }
     }
 
@@ -6445,7 +6704,7 @@ var SympyEditor = (function () {
       set("delete", dis || !(range || this.selected || this.junction));
       set("unwrap", dis || range || !this.selected || !(s.nodes && s.nodes[this.selected] && (s.nodes[this.selected].nargs || s.nodes[this.selected].parts)));
       set("isolate", dis || !(range || (this.selected && this.selected !== "/")));
-      set("parent", dis || !(range || (t && t.parent) || this.caret));
+      set("parent", dis || !(range || (t && t.parent) || this.caret || this.junction));
       set("child", dis || (!!this.caret && !gridWay("down")));
       // ←/→: at a caret, the previous/next position (none at the ends); on a
       // selection, a sibling at some level; otherwise a caret at either end.
@@ -6494,6 +6753,11 @@ var SympyEditor = (function () {
       if (this.fullscreen) this.setFullscreen(false);
       (this._docListeners || []).forEach(function (l) { document.removeEventListener(l[0], l[1]); });
       this._docListeners = [];
+      if (this._endOutside) {
+        window.removeEventListener("pointerup", this._endOutside);
+        window.removeEventListener("pointercancel", this._endOutside);
+        this._endOutside = null;
+      }
       if (this._fsListener) {
         document.removeEventListener("fullscreenchange", this._fsListener);
         document.removeEventListener("webkitfullscreenchange", this._fsListener);
@@ -6552,7 +6816,25 @@ var SympyEditor = (function () {
     // What the server keeps for this page: the sessions, in a file of its own
     // (see EditorServer's store).  The message goes the way every other does.
     backend.keep = keepThrough(backend.send);
+    // The server holds one document, which a session replaces ("load").
+    backend.openDocument = loadThrough(backend.send);
+    // It was handed in by whoever called serve(expr): the sessions keep it,
+    // they do not open the last one over it (see _initSessions).
+    backend.givenDocument = true;
     return backend;
+  }
+
+  /** Open a session in a Python that holds one document (the server, the
+   *  widget): the "load" message swaps in a Document built from `state` - a
+   *  session as Document.export gives it - and answers its snapshot.  A
+   *  state it refuses leaves the document as it was, and throws here. */
+  function loadThrough(send) {
+    return async function (state, report) {
+      var snap = await send({ action: "load", state: state }, report || function () {});
+      if (!snap) throw new Error("No answer");
+      if (snap.error) throw new Error(snap.error);
+      return snap;
+    };
   }
 
   var PYODIDE_BOOT = [
@@ -6565,6 +6847,8 @@ var SympyEditor = (function () {
     "    __sympy_editor_docs[doc_id] = Document(srepr, **json.loads(settings))",
     "def __sympy_editor_handle(doc_id, msg):",
     "    return json.dumps(__sympy_editor_docs[doc_id].handle(json.loads(msg)))",
+    "def __sympy_editor_close(doc_id):",
+    "    __sympy_editor_docs.pop(doc_id, None)",
     ""
   ].join("\n");
 
@@ -6575,7 +6859,7 @@ var SympyEditor = (function () {
   // thread, so a long computation leaves the page responsive and can be
   // stopped by terminating the worker (see pyodideRuntime).
   var PYODIDE_WORKER = [
-    "var newDoc = null, handle = null, py = null;",
+    "var newDoc = null, handle = null, closeDoc = null, py = null;",
     "self.onmessage = async function (e) {",
     "  var m = e.data;",
     "  try {",
@@ -6601,6 +6885,7 @@ var SympyEditor = (function () {
     "      py.runPython(m.boot);",
     "      newDoc = py.globals.get('__sympy_editor_new');",
     "      handle = py.globals.get('__sympy_editor_handle');",
+    "      closeDoc = py.globals.get('__sympy_editor_close');",
     "      self.postMessage({ type: 'done', req: m.req });",
     "    } else if (m.type === 'packages') {",
     "      for (var pk in (m.packages || {})) for (var pf in m.packages[pk]) {",
@@ -6619,6 +6904,9 @@ var SympyEditor = (function () {
     "      self.postMessage({ type: 'done', req: m.req });",
     "    } else if (m.type === 'handle') {",
     "      self.postMessage({ type: 'done', req: m.req, json: handle(m.id, m.msg) });",
+    "    } else if (m.type === 'close') {",
+    "      if (closeDoc) closeDoc(m.id);",
+    "      self.postMessage({ type: 'done', req: m.req });",
     "    }",
     "  } catch (err) {",
     "    self.postMessage({ type: 'error', req: m.req, message: String((err && err.message) || err) });",
@@ -6663,7 +6951,8 @@ var SympyEditor = (function () {
       }
     }
     py.runPython(PYODIDE_BOOT);
-    return { py: py, newDoc: py.globals.get("__sympy_editor_new"), handle: py.globals.get("__sympy_editor_handle") };
+    return { py: py, newDoc: py.globals.get("__sympy_editor_new"), handle: py.globals.get("__sympy_editor_handle"),
+             close: py.globals.get("__sympy_editor_close") };
   }
 
   /** Add-on packages written into a runtime that is running already (and
@@ -6799,9 +7088,29 @@ var SympyEditor = (function () {
       return true;
     };
 
-    rt.newDoc = function (id, srepr, settings) {
+    /** A document made in the runtime.  One that Python refuses (a kept
+     *  session it cannot read) is forgotten at once: left in `docs`, every
+     *  later request made it again and failed again. */
+    rt.newDoc = async function (id, srepr, settings) {
       rt.docs[id] = { srepr: srepr, settings: settings || {}, declared: null, last: null, created: false };
-      return rt.ensureDoc(id);
+      try {
+        await rt.ensureDoc(id);
+      } catch (e) {
+        delete rt.docs[id];
+        throw e;
+      }
+    };
+
+    /** Drop a document no editor shows any more (a session left). */
+    rt.close = function (id) {
+      if (!rt.docs[id]) return;
+      var created = rt.docs[id].created;
+      delete rt.docs[id];
+      if (!created) return;                            // a new worker never made it
+      try {
+        if (rt.inPage) { if (rt.inPage.close) rt.inPage.close(id); }
+        else if (rt.worker) post({ type: "close", id: id }).catch(function () {});
+      } catch (e) { /* gone with the runtime */ }
     };
 
     rt.ensureDoc = async function (id) {
@@ -6873,11 +7182,23 @@ var SympyEditor = (function () {
        *  index, symbols - a session), returning its snapshot. */
       openDocument: async function (state, report) {
         await start(report || function () {});
-        id = "doc" + (++window.__sympyEditorPyodide.docs);
+        var next = "doc" + (++window.__sympyEditorPyodide.docs);
         var history = state && state.history;
         var srepr = history && history.length ? history[Math.min(state.index || 0, history.length - 1)] : cfg.srepr;
-        await rt.newDoc(id, srepr, Object.assign({}, cfg.document || {}, state || {}));
-        return rt.handle(id, JSON.stringify({ action: "snapshot" }));
+        // The editor moves to the new document only once it exists: a
+        // session Python refuses leaves the one open working.
+        await rt.newDoc(next, srepr, Object.assign({}, cfg.document || {}, state || {}));
+        var snap;
+        try {
+          snap = await rt.handle(next, JSON.stringify({ action: "snapshot" }));
+        } catch (e) {
+          rt.close(next);
+          throw e;
+        }
+        var old = id;
+        id = next;
+        if (old && old !== next) rt.close(old);          // nobody shows it any more
+        return snap;
       },
       /** Load the runtime now (page load) instead of at the first edit.  A
        *  failure is passed on rather than reported and forgotten: the caller
@@ -6924,9 +7245,23 @@ var SympyEditor = (function () {
         }
       });
     }
-    function newDoc(srepr, state) {
-      docId = "doc" + (++shared.seq);
-      return call("newDoc", [docId, srepr, JSON.stringify(Object.assign({}, cfg.document || {}, state || {}))]);
+    /** A document made by the host; the editor moves to it only once the
+     *  host has made it.  Switching first left every later request with the
+     *  id of a document that never came to be ("Unknown document"), for good. */
+    async function newDoc(srepr, state) {
+      var next = "doc" + (++shared.seq);
+      var snap = await call("newDoc", [next, srepr, JSON.stringify(Object.assign({}, cfg.document || {}, state || {}))]);
+      var old = docId;
+      docId = next;
+      if (old && old !== next) closeDoc(old);
+      return snap;
+    }
+    /** The host drops a document nobody shows any more - a host that can
+     *  (sympy_editor_app.close); its answer is not waited for. */
+    function closeDoc(id) {
+      var py = window.SympyEditorPy;
+      if (!py || typeof py.close !== "function") return;
+      call("close", [id]).catch(function () {});
     }
     function start(report) {
       if (!started) {
@@ -7070,8 +7405,7 @@ var SympyEditor = (function () {
     if (cfg.backend === "readonly") options.readOnly = true;
     if (cfg.examples) options.examples = cfg.examples;     // what a new session can start from
     if (cfg.addons) options.addons = cfg.addons;           // their front ends (loaded by the Editor)
-    var backend = make(cfg);
-    Keep.backend = backend;        // what keeps the sessions, when the backend does (see Keep)
+    var backend = make(cfg);       // it keeps the sessions too, when it can (Keep.of: the editor's own keeper)
     var editor = new Editor(host, backend, options);
     editor.mountConfig = cfg;      // what a fresh one is mounted from (a tour played again)
     editor.setState(cfg.snapshot).then(function () {
@@ -7141,7 +7475,12 @@ var SympyEditor = (function () {
     /** Keep now what every editor on the page is waiting to keep - the host
      *  calls it when the app goes to the background (see Editor.flush). */
     flush: function () {
-      liveEditors.forEach(function (ed) { ed.flush(); });
+      // True when a save was waiting and has now started: a host that waits
+      // for it to reach keepWrite (the Mac app, quitting) need not wait
+      // when the answer is false.
+      var started = false;
+      liveEditors.forEach(function (ed) { if (ed.flush()) started = true; });
+      return started;
     },
     /** The system's Back: true if an editor closed something (Editor.back),
      *  false if there was nothing to close and the app may leave. */
@@ -7161,10 +7500,12 @@ var SympyEditor = (function () {
     /** The keeper of what the page keeps, for a front end that makes its
      *  Editor itself (the Jupyter widget): a backend with keep(key[, value]). */
     setKeeper: function (backend) {
-      Keep.backend = backend || null;
-      Keep.backendKeeps = null;
+      // Each editor keeps through its own backend (Keep.of); this names the
+      // keeper for what is asked with no editor on the page.
+      Keep.fallback = backend ? Keep.keeper(backend) : null;
     },
     keepThrough: function (send) { return keepThrough(send); },
+    loadThrough: function (send) { return loadThrough(send); },
     openedFile: function (token, name, text) {
       var waiting = openFileText.waiting[token];
       if (!waiting) return false;

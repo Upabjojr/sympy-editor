@@ -80,7 +80,7 @@ SW = """// sympy-editor web app: precache the bundle, serve it from the cache (o
 var CACHE = "sympy-editor-%(hash)s";
 var FILES = %(files)s;
 self.addEventListener("install", function (event) {
-  event.waitUntil(caches.open(CACHE).then(function (cache) { return cache.addAll(FILES); }).then(function () { return self.skipWaiting(); }));
+  event.waitUntil(caches.open(CACHE).then(function (cache) { return cache.addAll(FILES.map(function (u) { return new Request(u, { cache: "reload" }); })); }).then(function () { return self.skipWaiting(); }));
 });
 self.addEventListener("activate", function (event) {
   event.waitUntil(caches.keys().then(function (keys) {
@@ -802,7 +802,7 @@ def build(out: Path, *, cdn: bool = False, cache: Path | None = None) -> Path:
     digest = hashlib.sha256()
     for name in files:
         digest.update(name.encode()); digest.update((out / name).read_bytes())
-    (out / "sw.js").write_text(SW % {"hash": digest.hexdigest()[:12], "files": json.dumps(["./" + f for f in files])}, encoding="utf-8")
+    (out / "sw.js").write_text(SW % {"hash": digest.hexdigest()[:12], "files": json.dumps(["./"] + ["./" + f for f in files])}, encoding="utf-8")
     return out
 
 

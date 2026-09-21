@@ -1286,9 +1286,11 @@ def test_a_failing_listener_does_not_fail_the_edit(caplog):
     assert "on_change callback" in caplog.text and "ZeroDivisionError" in caplog.text
 
 
-def test_labels_that_do_not_fit_the_history_are_refused():
-    with pytest.raises(ValueError, match="labels for"):
-        Document(None, history=["Symbol('x')"], labels=["a", "b"])
+def test_labels_that_do_not_fit_the_history_are_trimmed():
+    # saved data opens: more labels than steps keeps the last ones, as
+    # open_text does (the two used to disagree - one raised, one trimmed)
+    doc = Document(None, history=["Symbol('x')"], labels=["a", "b"])
+    assert doc._labels == ["b"]
     # trimming to max_history keeps the labels with the steps that stay
     doc = Document(None, history=["Symbol('x')", "Symbol('y')", "Symbol('z')"], labels=["a", "b", "c"], max_history=2)
     assert [str(e) for e in doc._history] == ["y", "z"] and doc._labels == ["b", "c"]
@@ -1534,3 +1536,307 @@ def test_what_is_saved_says_its_format_and_who_can_read_it():
     assert data["sympy-editor"] == SAVE_FORMAT and data["min-reader"] == SAVE_MIN_READER
     assert data["session"]["format"] == SAVE_FORMAT and doc.export()["format"] == SAVE_FORMAT
     assert Document(0, **doc.export()).expr == doc.expr          # a session's export goes back in as it is
+
+
+# -- saved data is read, never run; and comes back as it was saved -------------------
+
+def _session_file(history, **session):
+    session = dict(session, history=history)
+    return json.dumps({"sympy-editor": 1, "session": session})
+
+
+def test_opening_a_file_never_runs_what_it_holds(tmp_path):
+    """A .sympy file arrives from a mail or a file manager: its srepr steps
+    and declared names used to go through ``sympify`` - ``eval`` - so a file
+    could run any Python.  They are read by walking the syntax tree now,
+    with nothing to call but SymPy's constructors."""
+    target = tmp_path / "pwned"
+    payloads = [
+        f"(open({str(target)!r}, 'w').write('hi'), Symbol('x'))[1]",
+        f"sin(\"open({str(target)!r}, 'w').write('hi')\")",          # a constructor that sympifies text
+        f"Matrix([\"open({str(target)!r}, 'w').write('hi')\"])",
+        "Symbol(\"x\").__class__.__init__.__globals__",
+        "lambdify(Symbol('x'), Symbol('x'))",
+        "__import__('os').system('true')",
+        "Symbol('x').subs(Symbol('x'), 1)",
+        "[c for c in ()]",
+    ]
+    for payload in payloads:
+        with pytest.raises(ValueError):
+            Document(0).open_text(_session_file([payload]))
+        with pytest.raises(ValueError):
+            Document(0).open_text(_session_file(["Symbol('x')"], symbols=[payload]))
+        with pytest.raises(ValueError):
+            Document(0).open_text(json.dumps({"expr": payload}))
+        with pytest.raises(ValueError):
+            Document(0).open_text(payload)
+        with pytest.raises(ValueError):
+            Document(0, history=[payload])
+        with pytest.raises(ValueError):
+            Document(0, history=["Symbol('x')"], symbols=[payload])
+        doc = Document(y)
+        snap = doc.handle({"action": "openfile", "text": _session_file([payload])})
+        assert snap["error"] and doc.expr == y
+    assert not target.exists()
+
+
+def test_what_the_editor_saves_reads_back_without_running_it():
+    """Everything the editor itself writes still opens: srepr of every kind
+    of node it holds - matrix symbols (Str), placeholders, invalid nodes,
+    Piecewise (ExprCondPair, which SymPy does not export), dummies, sets,
+    matrices sparse and dense, arrays, undefined functions - and plain
+    SymPy source in a hand-written file."""
+    from sympy import (Abs, Array, Derivative, Dummy, Eq, FiniteSet, Float, ImmutableSparseMatrix, Interval,
+                       Lambda, Limit, Piecewise, Rational, S, Subs, oo)
+    from sympy_editor.document import srepr
+    from sympy_editor.invalid import invalid
+    from sympy_editor.printer import Placeholder
+    f = Function("f")
+    A, B = MatrixSymbol("A", 2, 2), MatrixSymbol("B", 3, 3)
+    p = Symbol("p", positive=True)
+    exprs = [x**2 + 1, A*A.T + 2*A, Placeholder("_1") + Placeholder("_2"), invalid("MatMul")(A, B),
+             Piecewise((x, x > 0), (0, True)), Dummy("d") + 1, FiniteSet(1, x), Interval(0, 1, True), S.Reals,
+             ImmutableSparseMatrix([[1, 0], [0, x]]), Matrix([[1, x], [y, 2]]).as_immutable(), Array([[1, x]]),
+             f(x) + p, Derivative(f(x), x), Integral(x**2, (x, 0, oo)), Subs(x**2, x, 1), Lambda(x, x**2),
+             Limit(sin(x)/x, x, 0), Eq(x, y), Float("0.1", 30), Rational(-2, 3)*y, Abs(x - y),
+             ArraySymbol("T", (2, 3))]
+    for e in exprs:
+        doc = Document(0, history=[srepr(e)], symbols=[srepr(p), srepr(A)], allow_invalid=True)
+        assert doc.expr == e and srepr(doc.expr) == srepr(e), e
+        again = Document(0)
+        again.open_text(Document(e, allow_invalid=True).save_text())
+        assert again.expr == e, e
+    # a hand-written file: SymPy source, evaluated as typed input is
+    doc = Document(0)
+    assert doc.open_text("x**2 + sin(y)/2") == x**2 + sin(y)/2
+    assert doc.open_text('{"expr": "Integral(f(x), (x, 0, 1)) + _1"}') == Integral(f(x), (x, 0, 1)) + Placeholder("_1")
+    assert doc.open_text("x < 1") == (x < 1)
+
+
+def test_a_step_that_cannot_be_shown_does_not_kill_the_document():
+    """A file whose step does not print used to be taken, and then every
+    message - even ``snapshot`` - raised: the document was dead."""
+    for step in ["Transpose(Symbol('x'))", "Add(Tuple(Integer(1)), Symbol('x'))"]:
+        doc = Document(y)
+        snap = doc.handle({"action": "openfile", "text": _session_file([step])})
+        assert snap["error"] and "cannot be shown" in snap["error"] and doc.expr == y
+        assert doc.handle({"action": "snapshot"})["error"] is None
+        with pytest.raises(ValueError):
+            Document(0, history=[step])
+    # an earlier step that does not print: the file opens, and undo into it
+    # is refused rather than breaking every answer after it
+    doc = Document(y)
+    doc.handle({"action": "openfile", "text": _session_file(["Transpose(Symbol('x'))", "Symbol('z')"])})
+    assert str(doc.expr) == "z"
+    snap = doc.handle({"action": "undo"})
+    assert snap["error"] and str(doc.expr) == "z"
+    assert doc.handle({"action": "export"})["error"] is None
+    # and whatever happens, handle answers
+    doc._history[doc._index] = sympy_transpose_of_symbol()
+    snap = doc.handle({"action": "snapshot"})
+    assert snap["error"] and snap["nodes"] == {}
+
+
+def sympy_transpose_of_symbol():
+    from sympy import Transpose
+    return Transpose(x)
+
+
+def test_an_operator_joins_the_arguments_as_they_are_drawn():
+    """The front end sends ``left``/``right``: the arguments drawn left and
+    right of the operator.  The operation used to take them in argument
+    order, which is not the screen's (``x**2 + x`` is ``Add(x, x**2)``)."""
+    from sympy import cos
+    doc = Document(x**2 + x)
+    assert doc.expr.args == (x, x**2)
+    doc.operator("/", 1, 0, "/")
+    assert doc.expr == x                              # x**2/x, not x/x**2
+    doc = Document(x**2 + x)
+    doc.operator("/", 1, 0, "^")
+    assert doc.expr == (x**2)**x
+    A, B = MatrixSymbol("A", 2, 2), MatrixSymbol("B", 2, 2)
+    doc = Document(A - B)
+    L = doc.expr.args.index(A)
+    doc.operator("/", L, 1 - L, "*")
+    assert doc.expr == A*B
+    # a product split where the + is drawn: x**2*y | sin(x)*cos(x)
+    e = x**2*y*sin(x)*cos(x)
+    doc = Document(e)
+    left, right = e.args.index(y), e.args.index(sin(x))
+    doc.operator("/", left, right, "+")
+    assert doc.expr == x**2*y + sin(x)*cos(x)
+    doc = Document(e)
+    doc.insert("/", 1, "+z+", left=left, right=right)
+    assert doc.expr == x**2*y + Symbol("z") + sin(x)*cos(x)
+
+
+def test_a_saved_session_keeps_its_unevaluated_steps():
+    """Steps were read back evaluated: sqrt(-3/4) came back as sqrt(3)*I/2."""
+    from sympy import Abs, Add, Mul, Pow, Rational
+    doc = Document(Rational(-3, 4))
+    doc.handle({"action": "wrap", "path": "/", "func": "sqrt"})
+    assert doc.expr == Pow(Rational(-3, 4), Rational(1, 2), evaluate=False)
+    doc.handle({"action": "wrap", "path": "/", "func": "Abs"})
+    again = Document(0, **doc.export())
+    assert again._history == doc._history
+    opened = Document(0)
+    opened.open_text(doc.save_text())
+    assert opened._history == doc._history
+    for e in [Add(x, x, evaluate=False), Mul(2, 3, evaluate=False), Abs(Integer(-3), evaluate=False),
+              Mul(Rational(-1, 4), Pow(Integer(3), Rational(1, 2)), evaluate=False), Integral(Mul(1, x, evaluate=False), x)]:
+        kept = Document(0, **Document(e).export())
+        assert kept.expr == e and type(kept.expr) is type(e), e
+    # an evaluated step still comes back as itself, factors in order
+    for e in [-2*y/3, x/3 - 2*y/3, Integral(x, (x, 0, 1)), sqrt(2)/2]:
+        assert Document(0, **Document(e).export()).expr == e
+
+
+def test_a_matrix_plus_a_matrix_symbol_is_a_valid_sum():
+    """The unevaluated check of a MatAdd recursed without end on an
+    explicit matrix term, and the sum was refused (or made invalid)."""
+    from sympy import ImmutableMatrix
+    B = MatrixSymbol("B", 2, 2)
+    doc = Document(B)
+    snap = doc.handle({"action": "set", "src": "Matrix([[1, 2], [3, 4]]) + B"})
+    assert snap["error"] is None and doc.expr == ImmutableMatrix([[1, 2], [3, 4]]) + B
+    start = Document(ImmutableMatrix([[1, 2], [3, 4]]) + B)
+    assert "Invalid" not in str(start.expr)
+
+
+def test_the_python_script_rebuilds_every_step_exactly():
+    """exec(script) gives back each step of the history: unevaluated steps,
+    a limit (its direction is a Symbol('+') inside), placeholders, the same
+    name with two sets of assumptions, names that are not identifiers or
+    that the script itself uses, an array symbol, a dummy."""
+    from sympy import Abs, Dummy, Limit
+    from sympy_editor.printer import Placeholder
+    from sympy_editor.document import srepr
+    xp = Symbol("x", positive=True)
+    odd = [Symbol("steps"), Symbol("Symbol"), Symbol("lambda"), Symbol("x_{1}"), Symbol("expr")]
+    T = ArraySymbol("T", (2, 3))
+    doc = Document(x + 1)
+    doc.set(Limit(sin(x)/x, x, 0))
+    doc.set(Placeholder("_1") + Placeholder("_2"))
+    doc.set(xp + x)                                     # two symbols named x
+    doc.set(sum(odd) + 1)
+    doc.set(T)
+    doc.set(Dummy("x") + 2)
+    doc.handle({"action": "set", "src": "-3/4"})
+    doc.handle({"action": "wrap", "path": "/", "func": "sqrt"})
+    doc.set(Abs(Integer(-3), evaluate=False))
+    script = doc.python_script()
+    ns = {}
+    exec(script, ns)
+    assert len(ns["steps"]) == len(doc._history)
+    for got, want in zip(ns["steps"], doc._history):
+        assert got == want and srepr(got) == srepr(want), (got, want)
+    assert ns["steps"][3].atoms(Symbol) == {x, xp}
+
+
+def test_a_file_saved_with_a_matrix_opens():
+    from sympy import ImmutableMatrix
+    assert Document("Matrix([[1, 2]])").expr == ImmutableMatrix([[1, 2]])
+    doc = Document(0)
+    assert doc.open_text("Matrix([[1, 2]])") == ImmutableMatrix([[1, 2]])
+    assert doc.open_text('{"expr": "Matrix([[1, 2]])"}') == ImmutableMatrix([[1, 2]])
+    assert isinstance(doc.expr, ImmutableMatrix)
+    with pytest.raises(TypeError, match="list"):
+        Document([1, 2])
+
+
+def test_undo_undoes_a_retype():
+    """Retyping a name is a step, and the name's new meaning belongs to it:
+    undone, typed input must read the name as it was."""
+    doc = Document("x + 1")
+    doc.handle({"action": "retype", "name": "x", "type": "Symbol", "assumptions": ["positive"]})
+    assert doc.expr.atoms(Symbol).pop().is_positive
+    doc.handle({"action": "undo"})
+    doc.handle({"action": "set", "src": "y"})
+    doc.handle({"action": "set", "src": "sqrt(x**2)"})
+    assert doc.expr == sqrt(x**2)                     # not x: x is not positive here
+    # redo and goto give it back; a declaration made outside the history stays
+    doc = Document("x + 1")
+    doc.declare("q", "Symbol", assumptions=["integer"])
+    doc.handle({"action": "retype", "name": "x", "type": "Symbol", "assumptions": ["positive"]})
+    doc.undo()
+    assert "q" in doc.declared and not doc.namespace()["x"].is_positive
+    doc.redo()
+    assert doc.namespace()["x"].is_positive and doc.declared["x"].is_positive
+    doc.goto(0)
+    assert "x" not in doc.declared and doc.export()["symbols"] == ["Symbol('q', integer=True)"]
+
+
+def test_placeholders_are_walked_in_reading_order():
+    """Paths were sorted as text: a fraction's denominator (d) came before
+    its numerator (n), and /2/10 before /2/2."""
+    doc = Document(0)
+    doc.handle({"action": "set", "src": "_1/_2"})
+    snap = doc.snapshot()
+    assert [str(doc._get_at(doc.expr, doc._path(p))) for p in snap["placeholders"]] == ["_1", "_2"]
+    doc = Document("Matrix(4, 3, [" + ", ".join(f"_{i}" for i in range(1, 13)) + "])")
+    order = [str(doc._get_at(doc.expr, doc._path(p))) for p in doc.snapshot()["placeholders"]]
+    assert order == [f"_{i}" for i in range(1, 13)]
+
+
+def test_opening_a_file_reads_its_fields_as_meant():
+    doc = Document(x)
+    doc.open_text(_session_file(["Symbol('x')"], allow_invalid="false"))
+    assert doc.allow_invalid is False
+    doc.open_text(_session_file(["Symbol('x')"], allow_invalid="true"))
+    assert doc.allow_invalid is True
+    assert Document(0, history=["Symbol('x')"], allow_invalid="false").allow_invalid is False
+    assert doc.open_text('{"expr": 0}') == 0
+    # more labels than steps: trimmed, as the constructor does
+    doc.open_text(_session_file(["Symbol('x')"], labels=["a", "b"]))
+    assert doc._labels == ["b"]
+
+
+def test_export_keeps_the_state_of_add_ons_that_are_off():
+    """What a session kept for an add-on that is loaded but off - or not
+    loaded at all - was dropped by the next export."""
+    from sympy_editor.addons import Addon
+
+    class Keeper(Addon):
+        name = "keeper"
+
+        def export_state(self, doc):
+            return dict(doc.addon_state.get(self.name) or {})
+
+        def restore_state(self, doc, data):
+            doc.addon_state.setdefault(self.name, {}).update(data)
+
+    doc = Document(x, addons=[], available=[Keeper()], addon_state={"keeper": {"rules": [1]}, "gone": {"a": 1}})
+    out = doc.export().get("addon_state")
+    assert out == {"keeper": {"rules": [1]}, "gone": {"a": 1}}
+    doc.enable("keeper")
+    assert doc.addon_state["keeper"] == {"rules": [1]}
+    doc.addon_state["keeper"]["rules"].append(2)
+    doc.disable("keeper")
+    assert doc.export()["addon_state"] == {"keeper": {"rules": [1, 2]}, "gone": {"a": 1}}
+
+
+def test_text_from_the_program_is_the_programs_and_text_from_a_file_is_not(tmp_path):
+    """A string handed to Document by the Python using it is that program's
+    own, as trusted as the rest of it (``Document("M.T")``); the same string
+    in a file is data, and data is read, never run."""
+    from sympy import MatrixSymbol
+
+    assert Document("MatrixSymbol('M', 2, 2).T").expr == MatrixSymbol("M", 2, 2).T
+    with pytest.raises(ValueError, match="not allowed in a saved formula"):
+        Document(0).open_text(json.dumps({"expr": "MatrixSymbol('M', 2, 2).T"}))
+    marker = tmp_path / "ran"
+    with pytest.raises(ValueError):
+        Document(0).open_text(f"__import__('pathlib').Path({str(marker)!r}).write_text('x')")
+    assert not marker.exists()
+
+
+def test_a_history_built_from_text_reads_it_without_running_it(tmp_path):
+    from sympy import Matrix, symbols
+
+    from sympy_editor.history import History
+
+    x = symbols("x")
+    h = History()
+    assert h.add("x**2 + 1") == x**2 + 1
+    assert h.add("Pow(Symbol('x'), Integer(2))") == x**2
+    assert h.add("Matrix([[1, 2]]).T") == Matrix([[1], [2]])        # the caller's own Python, as before

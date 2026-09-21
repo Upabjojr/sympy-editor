@@ -236,12 +236,21 @@ def test_both_bridges_offer_what_the_page_calls():
     about box - hence a subset, not an equality.)"""
     src = (ROOT / "src" / "sympy_editor" / "static" / "editor.js").read_text(encoding="utf-8")
     called = set(re.findall(r'call\("(\w+)"', src))
-    assert called == {"newDoc", "handle", "interrupt"}, called
-    for bridge in ("mobile/ios/SymPyEditor/EditorView.swift",
-                   "mobile/android/app/src/main/java/org/sympy/editor/MainActivity.kt"):
-        text = (ROOT / bridge).read_text(encoding="utf-8")
-        for method in called:
-            assert method in text, (bridge, method)
+    assert {"newDoc", "handle", "interrupt"} <= called <= {"newDoc", "handle", "interrupt", "close"}, called
+    # `close` is bridged whether or not this page calls it yet: a document
+    # the page leaves must not stay in the app's Python for ever
+    offered = called | {"close"}
+    kotlin = (ROOT / "mobile/android/app/src/main/java/org/sympy/editor/MainActivity.kt").read_text(encoding="utf-8")
+    swift = (ROOT / "mobile/ios/SymPyEditor/EditorView.swift").read_text(encoding="utf-8")
+    injected = swift[swift.index("window.SympyEditorPy = {"):swift.index("};", swift.index("window.SympyEditorPy = {"))]
+    functions = swift[swift.index("private static let functions"):]
+    functions = functions[:functions.index("]") + 1]
+    python = {"newDoc": "new_doc", "handle": "handle", "interrupt": "interrupt", "close": "close"}
+    for method in offered:
+        assert re.search(r"@JavascriptInterface\s+fun " + method + r"\(req: String", kotlin), ("android", method)
+        assert method + ': forward("' + method + '")' in injected, ("ios", method)
+        assert '"%s": "%s"' % (method, python[method]) in functions, ("ios", method)
+        assert 'callAttr("%s"' % python[method] in kotlin, ("android", method)
     mod = _load_app_module()
     for function in ("new_doc", "handle", "version", "close", "interrupt"):
         assert callable(getattr(mod, function))
@@ -364,6 +373,185 @@ def test_the_app_interrupts_a_long_message_from_another_thread():
     assert out["snap"]["error"] == "Interrupted" and out["snap"]["src"] == "x"
     assert json.loads(mod.interrupt()) is False
     mod.close("slow")
+
+
+def test_an_interrupt_that_comes_too_late_stops_nothing_else():
+    """The race: the button is pressed as a message finishes.  interrupt()
+    used to read which thread was running, and deliver the exception a
+    moment later - by then into the *next* message, whose edit came back as
+    "Interrupted" although nobody had asked.  Now the exception is only
+    delivered while that same message runs, and one that arrives as it ends
+    is taken back before the thread goes on."""
+    import json
+    import threading
+    import time
+
+    from sympy import Symbol, srepr
+
+    mod = _load_app_module()
+    mod.new_doc("race", srepr(Symbol("x")), "{}")
+    busy, asked, finished, delivered = (threading.Event() for _ in range(4))
+    real = mod.interrupt_thread
+    calls = []
+
+    def first(message):                    # the message the button was meant for
+        busy.set()
+        asked.wait(10)                     # ...which finishes just as the button is pressed
+        return {"n": 1}
+
+    def second(message):                   # the next one, which nobody interrupted
+        deadline = time.monotonic() + 5
+        while not delivered.is_set() and time.monotonic() < deadline:
+            pass
+        return {"n": 2}
+
+    def late(ident):                       # the delivery, a moment after the check
+        asked.set()
+        finished.wait(0.5)
+        try:
+            return real(ident)
+        finally:
+            delivered.set()
+
+    mod._documents["race"].handle = lambda message: (first if not calls else second)(calls.append(1) or message)
+    mod.interrupt_thread = late
+    out = {}
+
+    def run():
+        try:
+            out["first"] = json.loads(mod.handle("race", "{}"))
+            finished.set()
+            out["second"] = json.loads(mod.handle("race", "{}"))
+            end = time.monotonic() + 0.3   # nothing still pending in this thread
+            while time.monotonic() < end:
+                pass
+        except BaseException as exc:       # an Interrupted that escaped: the host would answer ok=false
+            out["escaped"] = exc
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    assert busy.wait(10)
+    mod.interrupt()
+    worker.join(15)
+    assert not worker.is_alive()
+    assert "escaped" not in out, out
+    assert out["first"] in ({"n": 1},) or out["first"].get("error") == "Interrupted"
+    assert out["second"] == {"n": 2}, out
+    mod.close("race")
+
+
+def test_an_interrupt_names_the_document_it_is_for():
+    """Each Mac window has documents of its own in the one interpreter (the
+    bridge puts the window's name in front of the page's ids: `w2/doc1`), so
+    a window's Interrupt must stop its own message and nobody else's."""
+    import json
+    import threading
+
+    from sympy import Symbol, srepr
+
+    mod = _load_app_module()
+    mod.new_doc("w2/doc1", srepr(Symbol("x")), "{}")
+    started = threading.Event()
+
+    def forever(message):
+        started.set()
+        while True:
+            pass
+
+    mod._documents["w2/doc1"].handle = forever
+    out = {}
+    worker = threading.Thread(target=lambda: out.update(snap=json.loads(mod.handle("w2/doc1", "{}"))), daemon=True)
+    worker.start()
+    assert started.wait(10)
+    assert json.loads(mod.interrupt("w1")) is False                 # another window's button
+    assert json.loads(mod.interrupt("w2/doc2")) is False            # another document
+    assert worker.is_alive()
+    assert json.loads(mod.interrupt("w2")) is True                  # this window's
+    worker.join(10)
+    assert not worker.is_alive() and out["snap"]["error"] == "Interrupted"
+    mod.close("w2/doc1")
+
+
+def test_every_mac_window_shares_the_one_python():
+    """CPython is initialized once per process.  Each window of the Mac app
+    made a PythonRuntime of its own, and the second window's
+    Py_InitializeFromConfig failed: it never had a working Python.  The
+    runtime is a singleton, one queue serves every window, and each window's
+    bridge puts its name in front of the page's document ids (every page
+    starts at doc1) and interrupts only its own."""
+    objc = (ROOT / "mobile/ios/SymPyEditor/PythonRuntime.m").read_text(encoding="utf-8")
+    header = (ROOT / "mobile/ios/SymPyEditor/PythonRuntime.h").read_text(encoding="utf-8")
+    swift = (ROOT / "mobile/ios/SymPyEditor/EditorView.swift").read_text(encoding="utf-8")
+    assert "@property (class, nonatomic, readonly) PythonRuntime *shared;" in header
+    assert "dispatch_once" in objc and "Py_IsInitialized()" in objc
+    assert "static PyObject *sympyEditorApp" in objc          # process-wide, not per instance
+    assert "PythonRuntime()" not in swift                     # nobody makes a second one
+    assert "PythonRuntime.shared" in swift and "static let shared = PythonHost()" in swift
+    assert swift.count("DispatchQueue(label:") == 1           # one Python thread for all windows
+    assert 'rest[0] = window + "/" + rest[0]' in swift        # the window's ids
+    assert "let scope = [window]" in swift                    # its own interrupt
+    assert '"close", arguments: [id]' in swift                # its documents go with it
+
+
+def test_the_hosts_survive_the_page_s_process_dying():
+    """The system may end a WebView's content process (memory) or it may
+    crash.  Unhandled, Android ends the app with it and WebKit leaves a blank
+    view; both hosts load the page again instead."""
+    kotlin = (ROOT / "mobile/android/app/src/main/java/org/sympy/editor/MainActivity.kt").read_text(encoding="utf-8")
+    swift = (ROOT / "mobile/ios/SymPyEditor/EditorView.swift").read_text(encoding="utf-8")
+    assert kotlin.count("override fun onRenderProcessGone(") == 2   # the page's WebView and the printer's
+    gone = kotlin[kotlin.index("override fun onRenderProcessGone("):]
+    assert "recreate()" in gone[:600] and "return true" in gone[:600]
+    assert "func webViewWebContentProcessDidTerminate(_ webView: WKWebView)" in swift
+    assert "webView.reload()" in swift
+
+
+def test_the_android_activity_survives_being_made_again():
+    """A fold, a resize, a keyboard or the density changing recreated the
+    activity - the page reloaded mid-edit, and a save dialog's answer arrived
+    at an activity that had forgotten the text.  The configuration changes
+    are the activity's to handle, and what a dialog waits for is kept in the
+    saved state (the text in a cache file)."""
+    manifest = (ROOT / "mobile/android/app/src/main/AndroidManifest.xml").read_text(encoding="utf-8")
+    changes = set(re.search(r'android:configChanges="([^"]+)"', manifest).group(1).split("|"))
+    assert {"orientation", "screenSize", "smallestScreenSize", "screenLayout", "density", "fontScale",
+            "keyboard", "keyboardHidden", "navigation", "uiMode"} <= changes, changes
+    kotlin = (ROOT / "mobile/android/app/src/main/java/org/sympy/editor/MainActivity.kt").read_text(encoding="utf-8")
+    saved = kotlin[kotlin.index("override fun onSaveInstanceState"):]
+    saved = saved[:saved.index("\n    }\n")]
+    for key in ("STATE_PENDING_PATH", "STATE_PENDING_MIME", "STATE_OPENING"):
+        assert key in saved, key
+        assert "state.getString(" + key + ")" in kotlin, key
+    assert "PendingSave(val mime: String, val path: String)" in kotlin     # the text waits on disk
+    destroy = kotlin[kotlin.index("override fun onDestroy()"):]
+    destroy = destroy[:destroy.index("\n    }\n")]
+    assert "removeView(web)" in destroy and "web.destroy()" in destroy
+    assert destroy.index("removeView(web)") < destroy.index("web.destroy()")
+    assert "pythonThread.shutdown()" not in kotlin                   # the process's thread, not the activity's
+
+
+def test_the_mac_app_keeps_the_work_before_it_quits():
+    """Keeping a session is a round trip through Python; a flush from
+    willTerminate never came back before the app was gone.  Quitting now
+    waits (terminateLater) for every window to have written, or 1.5 s; a
+    window closing flushes too, holding its web view meanwhile."""
+    app = (ROOT / "mobile/ios/SymPyEditor/SymPyEditorApp.swift").read_text(encoding="utf-8")
+    files = (ROOT / "mobile/ios/SymPyEditor/FilesBridge.swift").read_text(encoding="utf-8")
+    assert "@NSApplicationDelegateAdaptor(AppDelegate.self)" in app
+    assert "func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply" in app
+    assert "return .terminateLater" in app and "reply(toApplicationShouldTerminate: true)" in app
+    assert "Timer(timeInterval: 1.5" in app and "FilesBridge.live" in app
+    assert "NSWindow.willCloseNotification" in files and "keptSomething()" in files
+
+
+def test_the_mac_printer_lives_as_long_as_its_sheet():
+    """runModal(for:) returns with the print sheet still up; releasing the
+    printer there took the web view it prints from.  The printer goes when
+    the sheet says it is done."""
+    files = (ROOT / "mobile/ios/SymPyEditor/FilesBridge.swift").read_text(encoding="utf-8")
+    assert "didRun: #selector(printOperationDidRun(_:success:contextInfo:))" in files
+    assert "@objc func printOperationDidRun(_ operation: NSPrintOperation, success: Bool," in files
+    assert "delegate: nil, didRun: nil" not in files
 
 
 def test_the_history_is_written_into_its_frame_not_handed_to_it():

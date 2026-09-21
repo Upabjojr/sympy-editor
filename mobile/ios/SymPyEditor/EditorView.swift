@@ -70,10 +70,62 @@ extension EditorView {
     }
 }
 
+/// The app's one Python, shared by every window: CPython is initialized once
+/// per process (a second window that started one of its own never had a
+/// working Python on the Mac), and it is entered from one serial queue.  A
+/// long computation in one window therefore waits for the other's; the
+/// Interrupt button stops only its own window's (`interrupt(<window>)`).
+final class PythonHost {
+    static let shared = PythonHost()
+
+    let runtime = PythonRuntime.shared
+    /// Python runs on one thread of its own: a long computation must not
+    /// block the interface, and the interpreter is entered from here only.
+    let queue = DispatchQueue(label: "org.sympy.editor.python", qos: .userInitiated)
+
+    /// Set once, on the queue; read from the interrupt's thread too.
+    private let lock = NSLock()
+    private var started: Result<Void, Error>?
+
+    private init() {}
+
+    /// Start the interpreter, once, on the Python thread.
+    func warmUp() {
+        queue.async { [self] in _ = start() }
+    }
+
+    /// Only on `queue`.
+    func start() -> Result<Void, Error> {
+        lock.lock()
+        let known = started
+        lock.unlock()
+        if let known = known { return known }
+        let result = Result { try runtime.start() }
+        lock.lock()
+        started = result
+        lock.unlock()
+        return result
+    }
+
+    /// Whether Python is up (from any thread): before it is there is nothing
+    /// to interrupt.
+    var isRunning: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if case .success? = started { return true }
+        return false
+    }
+}
+
 /// `window.SympyEditorPy` in the page: the native backend of editor.js hands
 /// it JSON messages, each with a request id, and gets the answer back through
 /// `window.__sympyEditorNative(id, ok, payload)`.  Every call returns at once
 /// and is answered from the Python thread.
+///
+/// One per window.  The page in every window starts its ids at `doc1`, and
+/// all windows share one interpreter (PythonHost), so the bridge puts its
+/// window's name in front of every document id it forwards (`w2/doc1`) and
+/// asks `interrupt` for its own window's documents only.
 final class PythonBridge: NSObject, WKScriptMessageHandler {
     static let handlerName = "sympyEditorPy"
 
@@ -91,14 +143,25 @@ final class PythonBridge: NSObject, WKScriptMessageHandler {
           }
           window.SympyEditorPy = {
             newDoc: forward("newDoc"), handle: forward("handle"), version: forward("version"),
-            interrupt: forward("interrupt")
+            interrupt: forward("interrupt"), close: forward("close")
           };
         })();
         """
 
     /// What each method of the page's object is called in sympy_editor_app.py.
     private static let functions = ["newDoc": "new_doc", "handle": "handle", "version": "version",
-                                    "interrupt": "interrupt"]
+                                    "interrupt": "interrupt", "close": "close"]
+    /// The functions whose first argument (after the request id) is a document id.
+    private static let takesDocument: Set<String> = ["new_doc", "handle", "close"]
+
+    /// Windows made so far (on the main thread), which names the next one.
+    private static var windows = 0
+
+    /// This window's name, in front of its documents' ids.
+    let window: String
+
+    /// The documents this window made and has not closed, closed with it.
+    private var documents = Set<String>()
 
     weak var webView: WKWebView? {
         didSet { files.webView = webView }
@@ -113,23 +176,28 @@ final class PythonBridge: NSObject, WKScriptMessageHandler {
     /// and this object is the one SwiftUI keeps alive.
     let navigation = BundleNavigation()
 
-    private let runtime = PythonRuntime()
-    /// Python runs on one thread of its own: a long computation must not
-    /// block the interface, and the interpreter is entered from here only.
-    private let queue = DispatchQueue(label: "org.sympy.editor.python", qos: .userInitiated)
-    private var started: Result<Void, Error>?
+    private let host = PythonHost.shared
 
-    /// Start the interpreter, once, on the Python thread.
-    func warmUp() {
-        queue.async { [self] in _ = start() }
+    override init() {
+        Self.windows += 1
+        window = "w\(Self.windows)"
+        super.init()
     }
 
-    private func start() -> Result<Void, Error> {
-        if let started { return started }
-        let result = Result { try runtime.start() }
-        started = result
-        return result
+    deinit {
+        // The window is gone: so are its documents, in the interpreter the
+        // other windows go on using.
+        let ids = documents
+        let host = self.host
+        guard !ids.isEmpty else { return }
+        host.queue.async {
+            guard host.isRunning else { return }
+            for id in ids { _ = try? host.runtime.call("close", arguments: [id]) }
+        }
     }
+
+    /// Start the interpreter while the page loads (once in the process).
+    func warmUp() { host.warmUp() }
 
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let body = message.body as? [String: Any],
@@ -138,25 +206,37 @@ final class PythonBridge: NSObject, WKScriptMessageHandler {
               let arguments = body["args"] as? [String],
               let request = arguments.first
         else { return }
-        let rest = Array(arguments.dropFirst())
+        var rest = Array(arguments.dropFirst())
+        if Self.takesDocument.contains(function) {
+            guard !rest.isEmpty else { answer(request, ok: false, payload: "\(method) needs a document id"); return }
+            rest[0] = window + "/" + rest[0]
+            if function == "new_doc" { documents.insert(rest[0]) }
+            if function == "close" { documents.remove(rest[0]) }
+        }
         if function == "interrupt" {
-            // Not queued behind the computation it is to stop, on the Python
-            // thread: from a thread of its own.  -call:arguments:error: takes
-            // the GIL, which that computation lets go of every few
-            // milliseconds; before Python has started there is nothing to stop.
+            // This window's work, not another's: all of them share the one
+            // interpreter.  Not queued behind the computation it is to stop,
+            // on the Python thread: from a thread of its own.
+            // -call:arguments:error: takes the GIL, which that computation
+            // lets go of every few milliseconds; before Python has started
+            // there is nothing to stop.
+            let scope = [window]
             DispatchQueue.global(qos: .userInitiated).async { [self] in
-                guard case .success? = started else { answer(request, ok: true, payload: "false"); return }
-                switch Result(catching: { try runtime.call(function, arguments: rest) }) {
+                guard host.isRunning else { answer(request, ok: true, payload: "false"); return }
+                switch Result(catching: { try host.runtime.call(function, arguments: scope) }) {
                 case .success(let payload): answer(request, ok: true, payload: payload)
                 case .failure(let error): answer(request, ok: false, payload: error.localizedDescription)
                 }
             }
             return
         }
-        queue.async { [self] in
-            switch start().flatMap({ _ in Result { try runtime.call(function, arguments: rest) } }) {
-            case .success(let payload): answer(request, ok: true, payload: payload)
-            case .failure(let error): answer(request, ok: false, payload: error.localizedDescription)
+        let host = self.host
+        let forwarded = rest
+        host.queue.async { [weak self] in
+            let result = host.start().flatMap({ _ in Result { try host.runtime.call(function, arguments: forwarded) } })
+            switch result {
+            case .success(let payload): self?.answer(request, ok: true, payload: payload)
+            case .failure(let error): self?.answer(request, ok: false, payload: error.localizedDescription)
             }
         }
     }
@@ -182,6 +262,18 @@ final class BundleNavigation: NSObject, WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         files?.pageLoaded()
+    }
+
+    /// The page's process ended (the system reclaimed its memory, or it
+    /// crashed): the view is left blank and dead.  Load the page again - it
+    /// opens the sessions it keeps, as at a launch.
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        files?.pageUnloaded()               // a file opened meanwhile waits for the new page
+        if webView.url != nil {
+            webView.reload()
+        } else {
+            webView.load(URLRequest(url: EditorView.start))
+        }
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,

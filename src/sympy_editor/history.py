@@ -29,6 +29,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 from sympy import Basic, sympify
 
 from .document import render_step
+from .invalid import read_source
 
 __all__ = ["History"]
 
@@ -74,7 +75,13 @@ class History:
 
     def add(self, expr: Union[Basic, str], action: Optional[str] = None) -> Basic:
         """Append a step - the expression and what produced it."""
-        expr = expr if isinstance(expr, Basic) else sympify(expr)
+        # Text is read without running it (a history's steps may come from a
+        # file); what the safe reading refuses is the caller's own Python.
+        if not isinstance(expr, Basic):
+            try:
+                expr = read_source(expr) if isinstance(expr, str) else sympify(expr)
+            except ValueError:
+                expr = sympify(expr)
         self._exprs.append(expr)
         self._actions.append(action)
         return expr
