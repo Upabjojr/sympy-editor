@@ -148,3 +148,53 @@ def test_recognizing_in_a_document_answers_with_what_sympy_gets():
     assert best["latex"] == "\\frac{1}{2M-r}" and best["reading"]["ok"]
     assert best["reading"]["src"] == str(1 / (2*M - r))
     assert doc.expr == x                                              # a query: nothing changed
+
+
+class _Answers:
+    """A recognizer that answers with one LaTeX and keeps what it was given."""
+
+    def __init__(self, latex):
+        self.latex, self.got = latex, None
+
+    def status(self):
+        return {"available": True}
+
+    def warm(self, background=True):
+        return True
+
+
+class _BoxReader(_Answers):
+    def recognize(self, strokes, beam=4, limit=5, context=None):
+        self.got = (strokes, context)
+        return {"candidates": [{"latex": self.latex}], "ms": 1.0, "stand_in": "\\ctx"}
+
+
+class _InkReader(_Answers):
+    def recognize(self, strokes, beam=4, limit=5):
+        self.got = (strokes, None)
+        return {"candidates": [{"latex": self.latex}], "ms": 1.0}
+
+
+def _write(rec, box):
+    from sympy import sin
+    doc = Document(sin(x), addons=[HandwritingAddon(rec)])
+    snap = doc.handle({"action": "addon", "addon": "handwriting", "method": "write",
+                       "strokes": [[[0, 30, 0], [20, 30, 5]], [[8, 40, 9], [12, 44, 12]]],
+                       "context": box, "nest": "", "beam": 1})
+    return snap["query"]["result"]["candidates"][0]
+
+
+def test_a_recognizer_that_takes_the_piece_gets_its_box():
+    rec = _BoxReader(r"\frac{\ctx}{x}")
+    best = _write(rec, [0, 0, 20, 20])
+    assert rec.got[1] == [0, 0, 20, 20] and len(rec.got[0]) == 2       # the ink as written
+    assert best["nested"] and best["reading"]["src"] == "sin(x)/x"
+
+
+def test_a_recognizer_that_does_not_gets_the_triangle():
+    rec = _InkReader(r"\frac{\Delta}{x}")
+    best = _write(rec, [0, 0, 20, 20])
+    assert len(rec.got[0]) == 3                                         # the triangle first
+    tri = rec.got[0][0]
+    assert tri[-1][2] < rec.got[0][1][0][2] and max(p[1] for p in tri) <= 20
+    assert best["nested"] and best["reading"]["src"] == "sin(x)/x"

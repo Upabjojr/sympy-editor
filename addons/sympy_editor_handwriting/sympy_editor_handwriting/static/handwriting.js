@@ -15,7 +15,7 @@
  * Where a reading goes is the editor's own answer: over the selected
  * sub-expression (or the selected range), at the cursor, or - with neither -
  * against the piece of the formula the ink is written by, which is drawn into
- * the strokes as a stand-in (a triangle, read as \Delta) so that the model
+ * the strokes as a stand-in (its box, or a triangle read as \Delta) so that the model
  * reads the ink together with it: a fraction over it, its exponent, a
  * product.  Python puts that piece's LaTeX in the stand-in's place.
  *
@@ -460,27 +460,11 @@ SympyEditor.registerAddon("handwriting", (function () {
         });
         return { node: best.q, options: options };
       }
-      // The piece drawn into the ink: a triangle, no wider than tall, in its
-      // place and before the ink - the model reads it as \Delta, and Python
-      // puts the piece's own LaTeX there.
-      function standIn(r, list) {
-        var ht = r.h * 0.8, w = Math.min(r.w, ht * 1.2);
-        var x0 = r.x + (r.w - w) / 2, y0 = r.y + (r.h - ht) / 2, pts = [], t = 0;
-        var line = function (ax, ay, bx, by) {
-          var n = Math.max(2, Math.round(Math.sqrt(Math.pow(bx - ax, 2) + Math.pow(by - ay, 2)) / 2));
-          for (var i = pts.length ? 1 : 0; i <= n; i++) {
-            pts.push([ax + (bx - ax) * i / n, ay + (by - ay) * i / n, t]);
-            t += 8;
-          }
-        };
-        line(x0, y0 + ht, x0 + w / 2, y0);
-        line(x0 + w / 2, y0, x0 + w, y0 + ht);
-        line(x0 + w, y0 + ht, x0, y0 + ht);
-        var shift = t + 250;
-        return [pts].concat(list.map(function (s) {
-          return s.map(function (p) { return [p[0], p[1], p[2] + shift]; });
-        }));
-      }
+      // The piece the ink is read together with, as the box it is drawn in:
+      // Python gives it to the model - itself, to a model trained with such
+      // boxes, or drawn into the ink as a triangle (\Delta) - and puts the
+      // piece's own LaTeX in its place.
+      function contextBox(r) { return [r.x, r.y, r.x + r.w, r.y + r.h]; }
 
       /* ---- the way down to the readings ---- */
       function panelSeen() {
@@ -699,11 +683,10 @@ SympyEditor.registerAddon("handwriting", (function () {
         element.setAttribute("data-aim", aim.kind);
         redraw();
         var chosen = engineNamed(engine), byHost = chosen && chosen.where === "host";
-        var ink = held.strokes;
-        // The stand-in is for a reader that reads mathematics: a triangle drawn
-        // over a piece means \Delta to the stroke model and nothing at all to a
-        // reader of text, so a host reading is of the ink alone.
-        if (!byHost && aim.kind === "nest" && aim.node) ink = standIn(aim.node.rect, aim.read || held.strokes);
+        var ink = held.strokes, box = null;
+        // The piece is for a reader that reads mathematics: a box means nothing
+        // at all to a reader of text, so a host reading is of the ink alone.
+        if (!byHost && aim.kind === "nest" && aim.node) { ink = aim.read || held.strokes; box = contextBox(aim.node.rect); }
         var nest = !byHost && aim.kind === "nest" ? aim.path : null;
         say("Reading…");
         element.classList.add("hw-busy");
@@ -713,7 +696,7 @@ SympyEditor.registerAddon("handwriting", (function () {
               return api.call("write", { candidates: found.candidates, ms: found.ms, engine: engine },
                               { quiet: true });
             })
-          : api.call("write", { strokes: ink, nest: nest, engine: engine }, { quiet: true });
+          : api.call("write", { strokes: ink, context: box, nest: nest, engine: engine }, { quiet: true });
         asked
           .then(function (res) {
             if (my !== seq) return;

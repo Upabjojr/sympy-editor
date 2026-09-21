@@ -342,6 +342,34 @@ def _strokes(raw) -> list:
     return out
 
 
+#: What a model without a context input reads where the piece stands: the
+#: triangle :func:`stand_in` draws.
+TRIANGLE_TOKEN = "\\Delta"
+
+
+def stand_in(box, strokes) -> list:
+    """The piece at ``box`` (``[x0, y0, x1, y1]``) drawn into the strokes for a
+    model that has no context input: a triangle 0.8 of its height and no wider
+    than 1.2 times that, centred in it and drawn before the ink.  The model
+    reads it as ``\\Delta``."""
+    x0, y0, x1, y1 = (float(v) for v in box)
+    w, h = abs(x1 - x0), abs(y1 - y0)
+    ht = h * 0.8
+    tw = min(w, ht * 1.2)
+    a, b = min(x0, x1) + (w - tw) / 2, min(y0, y1) + (h - ht) / 2
+    pts: list = []
+    t = 0.0
+    for (ax, ay), (bx, by) in (((a, b + ht), (a + tw / 2, b)), ((a + tw / 2, b), (a + tw, b + ht)),
+                               ((a + tw, b + ht), (a, b + ht))):
+        n = max(2, round(math.hypot(bx - ax, by - ay) / 2))
+        for i in range(1 if pts else 0, n + 1):
+            pts.append([ax + (bx - ax) * i / n, ay + (by - ay) * i / n, t])
+            t += 8
+    shift = t + 250
+    rest = [[[p[0], p[1], (p[2] if len(p) > 2 else 0) + shift] for p in s] for s in strokes or []]
+    return [pts] + rest
+
+
 def _beam_search(enc, dec, feats, bos: int, eos: int, beam: int = 4, max_tokens: int = MAX_TOKENS,
                  alpha: float = 0.7) -> List[Tuple[float, List[int]]]:
     """math-ocr's beam search (``mathocr/infer.py``) over the exported graphs.
@@ -495,17 +523,30 @@ class StrokeRecognizer:
         go()
         return self._loaded is not None
 
-    def recognize(self, strokes, beam: int = 4, limit: int = 5) -> Dict[str, Any]:
+    def recognize(self, strokes, beam: int = 4, limit: int = 5, context=None) -> Dict[str, Any]:
         """The readings of ``strokes`` (lists of ``[x, y, t]``), best first:
-        ``{"candidates": [{"latex", "display", "raw", "score"}], "ms", "strokes", "points"}``.
+        ``{"candidates": [{"latex", "display", "raw", "score"}], "ms", "strokes", "points", "stand_in"}``.
         ``latex`` is what the editor reads - functions as commands, every
         argument braced; ``display`` the same with its delimiters sized, to
-        be shown; ``raw`` the model's own text."""
+        be shown; ``raw`` the model's own text.
+
+        ``context``: the box ``[x0, y0, x1, y1]`` of a printed piece the ink
+        is written around.  A model trained with context boxes (its meta names
+        a ``context_token``) is given the box itself and writes that token
+        where the piece stands; any other is given :func:`stand_in`'s
+        triangle and writes ``\\Delta``.  ``stand_in`` in the answer says which."""
         enc, dec, tok, inkml, tokenizer, meta = self.load()
+        token = meta.get("context_token")
+        boxed = int(meta.get("in_dim", 6)) == 7
+        if context is not None and not token:
+            strokes = stand_in(context, strokes)
         ink = inkml.Ink(strokes=_strokes(strokes), label="")
+        if context is not None and token:
+            ink.context = [tuple(float(v) for v in context)]
         if not ink.strokes:
             raise ValueError("Nothing is written yet")
-        feats = inkml.ink_to_features(ink)
+        # a context-aware model takes a seventh channel, with or without a box
+        feats = inkml.ink_to_features(ink, with_context=True) if boxed else inkml.ink_to_features(ink)
         t0 = time.perf_counter()
         found = _beam_search(enc, dec, feats, int(meta.get("bos_id", tokenizer.BOS_ID)),
                              int(meta.get("eos_id", tokenizer.EOS_ID)), beam=max(1, min(int(beam), 8)))
@@ -524,4 +565,5 @@ class StrokeRecognizer:
             if len(out) >= limit:
                 break
         return {"candidates": out, "ms": round(ms, 1), "strokes": len(ink.strokes),
-                "points": int(sum(len(s) for s in ink.strokes))}
+                "points": int(sum(len(s) for s in ink.strokes)),
+                "stand_in": token if (context is not None and token) else TRIANGLE_TOKEN}

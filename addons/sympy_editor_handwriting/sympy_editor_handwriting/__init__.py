@@ -16,6 +16,7 @@ was written by, which the strokes carry as a stand-in (``\\Delta``: see
 
 from __future__ import annotations
 
+import inspect
 import re
 from pathlib import Path
 from collections import OrderedDict
@@ -26,19 +27,32 @@ from sympy import Basic
 
 from sympy_editor.addons import Addon
 
-from .recognizer import StrokeRecognizer, functions_as_commands, sized_delimiters, with_braces
+from .recognizer import StrokeRecognizer, functions_as_commands, sized_delimiters, stand_in, with_braces
 
 __all__ = ["HandwritingAddon", "Engine", "ADDON", "StrokeRecognizer", "functions_as_commands",
            "sized_delimiters", "with_braces"]
 
 STATIC = Path(__file__).parent / "static"
 
-#: What the strokes carry where a node of the formula stands: the model reads the
-#: triangle drawn there as ``\Delta`` (see the panel's standIn).
+#: What a reading carries where a node of the formula stands: ``\Delta`` for the
+#: triangle drawn in its place (see recognizer.stand_in), or the token a model
+#: trained with context boxes writes (``\ctx``).
 STAND_IN = re.compile(r"\\Delta(?![A-Za-z])")
 
 
-def _nest(tex: str, piece: str) -> str:
+def _stand_in(token: str):
+    return re.compile(re.escape(token) + r"(?![A-Za-z])")
+
+
+def _takes_context(recognizer) -> bool:
+    """Whether a recognizer's ``recognize`` takes the piece's box itself."""
+    try:
+        return "context" in inspect.signature(recognizer.recognize).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def _nest(tex: str, piece: str, stand=STAND_IN) -> str:
     """``tex`` with the node's LaTeX in the stand-in's place: grouped where it is
     more than one symbol, in delimiters where a script follows it."""
     single = bool(re.fullmatch(r"[A-Za-z0-9]|\\[A-Za-z]+|\{[^{}]*\}", piece.strip()))
@@ -49,7 +63,7 @@ def _nest(tex: str, piece: str) -> str:
             return piece if single else r"\left(" + piece + r"\right)"
         return piece if single else "{" + piece + "}"
 
-    return STAND_IN.sub(put, tex, count=1)
+    return stand.sub(put, tex, count=1)
 
 
 class Engine:
@@ -204,7 +218,8 @@ class HandwritingAddon(Addon):
         if method == "write":
             # What is written, read: strokes in, readings out - and, with ``nest``
             # (a node's path), read together with that node, whose LaTeX takes the
-            # place of the stand-in the strokes carry (``\Delta``).  Readings that
+            # place of the stand-in (``\Delta`` for the triangle, or the
+            # recognizer's own ``stand_in`` token for the box).  Readings that
             # do not carry it exactly once are of the ink alone, and say so.
             #
             # The strokes may have been read already, by the host's own reader
@@ -215,12 +230,23 @@ class HandwritingAddon(Addon):
                 result = {"candidates": [dict(c) for c in given], "ms": payload.get("ms", 0),
                           "strokes": len(payload.get("strokes") or []), "engine": payload.get("engine") or self.engine}
             else:
-                result = self._engine(payload.get("engine")).recognizer.recognize(
-                    payload.get("strokes"), beam=payload.get("beam", 4))
+                # A piece to read with (``context``, its box): given to a
+                # recognizer that takes it as such, drawn into the strokes as
+                # the triangle for one that does not.
+                rec = self._engine(payload.get("engine")).recognizer
+                strokes, box = payload.get("strokes"), payload.get("context")
+                nesting = box is not None and payload.get("nest") is not None
+                if nesting and _takes_context(rec):
+                    result = rec.recognize(strokes, beam=payload.get("beam", 4), context=box)
+                else:
+                    if nesting:
+                        strokes = stand_in(box, strokes)
+                    result = rec.recognize(strokes, beam=payload.get("beam", 4))
                 result["engine"] = self._engine(payload.get("engine")).name
+            stand = _stand_in(result.get("stand_in") or r"\Delta")
             nest = payload.get("nest")
             piece = None
-            if nest:
+            if nest is not None:              # "" is the whole formula, a piece like any other
                 try:
                     piece = sympy.latex(doc.get(str(nest)))
                 except Exception:  # noqa: BLE001 - a path the document no longer has
@@ -228,8 +254,8 @@ class HandwritingAddon(Addon):
             out = []
             for cand in result["candidates"]:
                 latex, display, nested = cand["latex"], cand.get("display") or cand["latex"], False
-                if piece is not None and len(STAND_IN.findall(latex)) == 1:
-                    latex, display, nested = _nest(latex, piece), _nest(display, piece), True
+                if piece is not None and len(stand.findall(latex)) == 1:
+                    latex, display, nested = _nest(latex, piece, stand), _nest(display, piece, stand), True
                 out.append({"latex": latex, "display": display, "raw": cand.get("raw"), "score": cand.get("score"),
                             "nested": nested, "reading": self._reading(doc, latex)})
             result["candidates"] = out
