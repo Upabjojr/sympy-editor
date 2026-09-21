@@ -12,8 +12,11 @@ struct SymPyEditorApp: App {
             // A window, with a size to open at and one it will not go under;
             // the page inside is the same one the phones show.
             EditorView().frame(minWidth: 520, idealWidth: 1000, minHeight: 420, idealHeight: 760)
+                .modifier(HostChromeModifier())
             #else
-            EditorView()
+            // The status bar and the home indicator follow the page's full
+            // screen; a .sympy file opened with the app goes to the page.
+            EditorView().modifier(HostChromeModifier())
             #endif
         }
     }

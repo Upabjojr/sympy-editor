@@ -37,12 +37,69 @@ final class FilesBridge: NSObject, WKScriptMessageHandler {
             saveFile: forward("saveFile"), shareFile: forward("shareFile"),
             shareHtml: forward("shareHtml"), openFile: forward("openFile"),
             keepRead: forward("keepRead"), keepWrite: forward("keepWrite"),
-            recognizeInk: forward("recognizeInk"), showKeyboard: forward("showKeyboard")
+            recognizeInk: forward("recognizeInk"), showKeyboard: forward("showKeyboard"),
+            copyText: forward("copyText"), pasteText: forward("pasteText"), haptic: forward("haptic"),
+            printHtml: forward("printHtml"), setFullscreen: forward("setFullscreen")
           };
         })();
         """
 
     weak var webView: WKWebView?
+
+    /// Whether the page has loaded (BundleNavigation says so): a file opened
+    /// with the app waits in `arrived` until there is a page to take it.
+    private var pageReady = false
+    private var arrived: [(String, String)] = []
+
+    /// The web view a report is printed from, held until it has loaded.
+    private var printer: ReportPrinter?
+
+    override init() {
+        super.init()
+        HostChrome.shared.files = self
+        // Leaving the foreground, where the system may end the app without
+        // another word: the page keeps now what it was about to keep.
+        #if os(macOS)
+        let names = [NSApplication.willResignActiveNotification, NSApplication.willTerminateNotification]
+        #else
+        let names = [UIApplication.willResignActiveNotification, UIApplication.didEnterBackgroundNotification]
+        #endif
+        for name in names {
+            NotificationCenter.default.addObserver(self, selector: #selector(flush), name: name, object: nil)
+        }
+    }
+
+    deinit { NotificationCenter.default.removeObserver(self) }
+
+    @objc private func flush() {
+        #if os(macOS)
+        webView?.evaluateJavaScript("window.SympyEditor && window.SympyEditor.flush && window.SympyEditor.flush();")
+        #else
+        // A moment of background time for the write to reach keepWrite.
+        var task = UIBackgroundTaskIdentifier.invalid
+        task = UIApplication.shared.beginBackgroundTask { UIApplication.shared.endBackgroundTask(task) }
+        webView?.evaluateJavaScript("window.SympyEditor && window.SympyEditor.flush && window.SympyEditor.flush();") { _, _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { UIApplication.shared.endBackgroundTask(task) }
+        }
+        #endif
+    }
+
+    /// The page has loaded: hand it what arrived meanwhile.
+    func pageLoaded() {
+        pageReady = true
+        let waiting = arrived
+        arrived = []
+        for (name, text) in waiting { deliver(name: name, text: text) }
+    }
+
+    /// A file opened with the app from elsewhere (HostChrome.open), for the
+    /// page to open in a session of its own.
+    func deliver(name: String, text: String) {
+        guard pageReady else { arrived.append((name, text)); return }
+        webView?.evaluateJavaScript("window.SympyEditor && window.SympyEditor.openText(\(quote(name)), \(quote(text)));")
+    }
+
+    func reportError(_ message: String) { report(message) }
 
     /// The file the page asked to keep, until the panel or the picker is done
     /// with it (macOS answers on the spot; iOS keeps it on disk meanwhile).
@@ -69,6 +126,16 @@ final class FilesBridge: NSObject, WKScriptMessageHandler {
             recognizeInk(token: arguments[0], strokes: arguments[1])
         case "showKeyboard":
             showKeyboard()
+        case "copyText" where arguments.count >= 1:
+            copyText(arguments[0])
+        case "pasteText" where arguments.count >= 1:
+            pasteText(token: arguments[0])
+        case "haptic":
+            haptic(arguments.first ?? "select")
+        case "printHtml" where arguments.count >= 2:
+            printHtml(name: arguments[0], html: arguments[1])
+        case "setFullscreen" where arguments.count >= 1:
+            setFullscreen(arguments[0] == "true")
         default:
             break
         }
@@ -183,6 +250,75 @@ final class FilesBridge: NSObject, WKScriptMessageHandler {
         #endif
     }
 
+    // MARK: - the clipboard, the hand, the printer, the screen
+
+    /// The system pasteboard, which every other app reads.
+    private func copyText(_ text: String) {
+        DispatchQueue.main.async {
+            #if os(macOS)
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            #else
+            UIPasteboard.general.string = text
+            #endif
+        }
+    }
+
+    /// What the pasteboard holds, as text, answered through
+    /// `SympyEditor.hostAnswer`.  iOS asks the user the first time the app
+    /// reads what another app copied (Settings can make it "Allow"), which
+    /// is still one question where the page's own reading asked every time.
+    private func pasteText(token: String) {
+        DispatchQueue.main.async { [weak self] in
+            #if os(macOS)
+            let text = NSPasteboard.general.string(forType: .string)
+            #else
+            let text = UIPasteboard.general.hasStrings ? UIPasteboard.general.string : nil
+            #endif
+            self?.answerHost(token, text)
+        }
+    }
+
+    /// A touch the hand feels: a long press that selected.
+    private func haptic(_ kind: String) {
+        DispatchQueue.main.async {
+            #if os(macOS)
+            NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .now)
+            #else
+            let generator = UIImpactFeedbackGenerator(style: kind == "select" ? .medium : .light)
+            generator.impactOccurred()
+            #endif
+        }
+    }
+
+    /// Print the history report, or keep it as a PDF (both platforms' print
+    /// panels offer that).
+    private func printHtml(name: String, html: String) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, let view = self.webView else { return }
+            let printer = ReportPrinter(name: name.isEmpty ? "SymPy history" : name, html: html, over: view) { [weak self] error in
+                if let error = error { self?.report(error) }
+                self?.printer = nil
+            }
+            self.printer = printer
+            printer.start()
+        }
+    }
+
+    /// Full screen for real: the scene hides the status bar and the home
+    /// indicator (HostChrome); on the Mac the window goes full screen.
+    private func setFullscreen(_ on: Bool) {
+        DispatchQueue.main.async { [weak self] in
+            HostChrome.shared.fullscreen = on
+            #if os(macOS)
+            guard let window = self?.webView?.window else { return }
+            if window.styleMask.contains(.fullScreen) != on { window.toggleFullScreen(nil) }
+            #else
+            _ = self
+            #endif
+        }
+    }
+
     // MARK: - what the page keeps
 
     /// Where the page's own things live: Application Support, which is the
@@ -251,6 +387,13 @@ final class FilesBridge: NSObject, WKScriptMessageHandler {
     }
 
     // MARK: - talking back to the page
+
+    /// Answer a question of the page's (`Host.ask` in editor.js).
+    private func answerHost(_ token: String, _ value: String?) {
+        let call = value.map { "window.SympyEditor && window.SympyEditor.hostAnswer(\(quote(token)), \(quote($0)));" }
+            ?? "window.SympyEditor && window.SympyEditor.hostAnswer(\(quote(token)));"
+        DispatchQueue.main.async { [weak self] in self?.webView?.evaluateJavaScript(call, completionHandler: nil) }
+    }
 
     fileprivate func answer(_ token: String, _ name: String?, _ text: String?) {
         let call: String
@@ -321,3 +464,75 @@ extension FilesBridge.Keeper: UIDocumentPickerDelegate {
     }
 }
 #endif
+
+/// Prints the history report from a web view of its own, made for it: no
+/// scripts, no bridge, going nowhere - the report is static and carries its
+/// fonts.  It lives until the page has loaded and gone to the print panel.
+final class ReportPrinter: NSObject, WKNavigationDelegate {
+    private let name: String
+    private let html: String
+    private weak var over: WKWebView?
+    private let done: (String?) -> Void
+    private var web: WKWebView?
+
+    init(name: String, html: String, over: WKWebView, done: @escaping (String?) -> Void) {
+        self.name = name
+        self.html = html
+        self.over = over
+        self.done = done
+        super.init()
+    }
+
+    func start() {
+        let config = WKWebViewConfiguration()
+        if #available(iOS 14.0, macOS 11.0, *) {
+            config.defaultWebpagePreferences.allowsContentJavaScript = false
+        }
+        let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 800, height: 1100), configuration: config)
+        web.navigationDelegate = self
+        self.web = web
+        web.loadHTMLString(html, baseURL: nil)
+    }
+
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        // The document itself, and nothing it links to.
+        decisionHandler(navigationAction.navigationType == .other ? .allow : .cancel)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        #if os(macOS)
+        let operation = webView.printOperation(with: NSPrintInfo.shared)
+        operation.jobTitle = name
+        // A web view's print operation needs a view with a size to lay out in.
+        operation.view?.frame = webView.bounds
+        if let window = over?.window {
+            operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+        } else {
+            operation.run()
+        }
+        done(nil)
+        #else
+        let info = UIPrintInfo(dictionary: nil)
+        info.jobName = name
+        info.outputType = .general
+        let controller = UIPrintInteractionController.shared
+        controller.printInfo = info
+        controller.printFormatter = webView.viewPrintFormatter()
+        let finished: UIPrintInteractionController.CompletionHandler = { [weak self] _, _, error in
+            self?.done(error.map { "The report could not be printed: \($0.localizedDescription)" })
+        }
+        if UIDevice.current.userInterfaceIdiom == .pad, let view = over {
+            // An iPad shows the panel as a popover, which wants somewhere to point at.
+            controller.present(from: CGRect(x: view.bounds.midX, y: view.bounds.maxY - 8, width: 1, height: 1),
+                               in: view, animated: true, completionHandler: finished)
+        } else {
+            controller.present(animated: true, completionHandler: finished)
+        }
+        #endif
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        done("The report could not be printed: \(error.localizedDescription)")
+    }
+}

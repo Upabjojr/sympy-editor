@@ -1,7 +1,10 @@
 package org.sympy.editor
 
 import android.annotation.SuppressLint
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Color
@@ -10,11 +13,15 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
 import android.net.Uri
+import android.print.PrintAttributes
+import android.print.PrintManager
+import android.view.HapticFeedbackConstants
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.view.inputmethod.InputMethodManager
 import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import androidx.activity.addCallback
 import androidx.activity.result.ActivityResultLauncher
@@ -77,6 +84,15 @@ class MainActivity : AppCompatActivity() {
      *  be remembered and applied again - see [onWindowFocusChanged]. */
     private var wantsFullscreen = false
 
+    /** Whether the page has loaded: a file opened with the app from elsewhere
+     *  waits in [arrived] until it has, since there is nobody to hand it to. */
+    private var pageReady = false
+    private val arrived = ArrayDeque<Pair<String, String>>()
+
+    /** The WebView a report is being printed from, held until it has been
+     *  handed to the print service (nothing else refers to it meanwhile). */
+    private var printing: WebView? = null
+
     /** The app's Python module (sympy_editor_app.py), started on first use. */
     private val pythonApp: PyObject by lazy {
         if (!Python.isStarted()) Python.start(AndroidPlatform(applicationContext))
@@ -138,6 +154,12 @@ class MainActivity : AppCompatActivity() {
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
                 loader.shouldInterceptRequest(request.url)
 
+            override fun onPageFinished(view: WebView, url: String) {
+                super.onPageFinished(view, url)
+                pageReady = true
+                while (arrived.isNotEmpty()) arrived.removeFirst().let { (name, text) -> handOver(name, text) }
+            }
+
             /** Only the bundle is shown in this WebView.  The two bridges
              *  above are injected into whatever page it loads, and the
              *  Python one evaluates what it is given: a page from anywhere
@@ -153,10 +175,78 @@ class MainActivity : AppCompatActivity() {
                 return true
             }
         }
-        onBackPressedDispatcher.addCallback(this) { if (web.canGoBack()) web.goBack() else finish() }
+        // Back belongs to the page first: it closes the drawer, the history,
+        // the help, a chooser, the selection - whatever is open, as Esc does
+        // on a keyboard (SympyEditor.back).  The history of the WebView is no
+        // help: the page is one document and never navigates.  With nothing
+        // left to close the app goes to the background, as Android's own
+        // launcher activities do - its state stays where it was.
+        onBackPressedDispatcher.addCallback(this) {
+            web.evaluateJavascript("!!(window.SympyEditor && window.SympyEditor.back && window.SympyEditor.back())") { closed ->
+                if (closed != "true") moveTaskToBack(true)
+            }
+        }
 
         if (savedInstanceState != null) web.restoreState(savedInstanceState)
         else web.loadUrl("https://appassets.androidplatform.net/assets/www/index.html")
+        if (savedInstanceState == null) receive(intent)
+    }
+
+    /** The app, already running, asked to open a file (singleTask). */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        receive(intent)
+    }
+
+    /** Going to the background, where the system may end the app without
+     *  another word: the page keeps now what it was about to keep. */
+    override fun onPause() {
+        super.onPause()
+        web.evaluateJavascript("window.SympyEditor && window.SympyEditor.flush && window.SympyEditor.flush();", null)
+    }
+
+    /** A file opened with the app from elsewhere - a .sympy file tapped in a
+     *  file manager or a mail (VIEW), or something shared to it (SEND: a file,
+     *  or a formula as text) - is read and handed to the page, which opens it
+     *  in a session of its own. */
+    private fun receive(intent: Intent?) {
+        if (intent == null) return
+        val uri: Uri? = when (intent.action) {
+            Intent.ACTION_VIEW -> intent.data
+            Intent.ACTION_SEND -> if (Build.VERSION.SDK_INT >= 33) {
+                intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+            } else {
+                @Suppress("DEPRECATION") intent.getParcelableExtra(Intent.EXTRA_STREAM)
+            }
+            else -> return
+        }
+        if (uri == null) {
+            val text = intent.getStringExtra(Intent.EXTRA_TEXT)
+            if (intent.action == Intent.ACTION_SEND && !text.isNullOrBlank()) arrive("shared", text)
+            return
+        }
+        pythonThread.execute {
+            try {
+                val size = contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
+                if (size > MAX_OPEN_BYTES) throw java.io.IOException("it is too large to be a formula")
+                val text = contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                    ?: throw java.io.IOException("nothing could be read")
+                val name = nameOf(uri)
+                runOnUiThread { arrive(name, text) }
+            } catch (exc: Exception) {
+                report("The file could not be opened: " + (exc.message ?: exc.toString()))
+            }
+        }
+    }
+
+    private fun arrive(name: String, text: String) {
+        if (pageReady) handOver(name, text) else arrived.addLast(name to text)
+    }
+
+    private fun handOver(name: String, text: String) {
+        web.evaluateJavascript("window.SympyEditor && window.SympyEditor.openText(" +
+            "${JSONObject.quote(name)}, ${JSONObject.quote(text)});", null)
     }
 
     override fun onDestroy() {
@@ -295,8 +385,75 @@ class MainActivity : AppCompatActivity() {
         runOnUiThread { web.evaluateJavascript(js, null) }
     }
 
+    /** Print `html` through Android's print service, which also keeps it as
+     *  a PDF.  From a WebView of its own, made for it: without scripts, with
+     *  no bridge, and going nowhere - the report is static, and self-contained. */
+    private fun printReport(name: String, html: String) {
+        val view = WebView(this)
+        printing = view
+        view.settings.javaScriptEnabled = false
+        view.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(v: WebView, request: WebResourceRequest) = true
+
+            override fun onPageFinished(v: WebView, url: String) {
+                val manager = getSystemService(Context.PRINT_SERVICE) as? PrintManager
+                if (manager == null) {
+                    report("This phone has no print service")
+                } else {
+                    manager.print(name, v.createPrintDocumentAdapter(name), PrintAttributes.Builder().build())
+                }
+                printing = null
+            }
+        }
+        view.loadDataWithBaseURL("https://$BUNDLE_HOST/print/", html, "text/html", "utf-8", null)
+    }
+
+    /** Answer a question of the page's (see ``Host.ask`` in editor.js). */
+    private fun answerHost(token: String, value: String?) {
+        val js = "window.SympyEditor && window.SympyEditor.hostAnswer(${JSONObject.quote(token)}" +
+            (if (value == null) "" else ", ${JSONObject.quote(value)}") + ");"
+        runOnUiThread { web.evaluateJavascript(js, null) }
+    }
+
     /** ``window.SympyEditorApp`` in the page. */
     inner class ReportBridge {
+        /** Copy `text` to the system clipboard (the Copy button): Android's
+         *  own, which every other app reads. */
+        @JavascriptInterface
+        fun copyText(text: String) {
+            runOnUiThread {
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                clipboard?.setPrimaryClip(ClipData.newPlainText("SymPy", text))
+            }
+        }
+
+        /** What the system clipboard holds, as text (the Paste button),
+         *  answered through ``SympyEditor.hostAnswer``.  A WebView's page is
+         *  not let read the clipboard at all; the app is, while in front. */
+        @JavascriptInterface
+        fun pasteText(token: String) {
+            runOnUiThread {
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                val item = clipboard?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)
+                answerHost(token, item?.coerceToText(this@MainActivity)?.toString())
+            }
+        }
+
+        /** A touch the hand feels: a long press that selected. */
+        @JavascriptInterface
+        fun haptic(kind: String) {
+            runOnUiThread {
+                val constant = if (kind == "select") HapticFeedbackConstants.LONG_PRESS else HapticFeedbackConstants.KEYBOARD_TAP
+                web.performHapticFeedback(constant)
+            }
+        }
+
+        /** Print the history report (or keep it as a PDF). */
+        @JavascriptInterface
+        fun printHtml(name: String, html: String) {
+            runOnUiThread { printReport(name.ifBlank { "SymPy history" }, html) }
+        }
+
         /** Full screen for real: the page's own full-screen button asks the
          *  app to take the status and navigation bars away (a swipe from an
          *  edge brings them back transiently).  Without this the WebView
@@ -430,6 +587,11 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    companion object {
+        /** The largest file taken as a formula: a saved one is a few kB. */
+        private const val MAX_OPEN_BYTES = 20L * 1024 * 1024
     }
 
     /** The asset loader guesses MIME types from extensions and misses these. */

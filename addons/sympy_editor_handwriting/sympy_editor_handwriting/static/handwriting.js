@@ -1208,6 +1208,13 @@ SympyEditor.registerAddon("handwriting", (function () {
         undoStroke: undoStroke,
         redoStroke: redoStroke,
         help: guide,
+        /** The system's Back (Android): the pen goes down - the ink stays,
+         *  as when the Pen tool is pressed again. */
+        onBack: function () {
+          if (!pen) return false;
+          setPen(false);
+          return true;
+        },
         onSelect: function () {         // the room follows what is selected
           if (pen && !strokes.length) { closeRoom(); openRoom(); }
           if (strokes.length) redraw();

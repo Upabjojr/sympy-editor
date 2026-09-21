@@ -3,13 +3,21 @@
 <plist version="1.0">
 <dict>
   <!-- What the Mac App Store asks of an app: the sandbox.  The editor reads
-       and writes nothing outside its own container - the page, the
+       and writes nothing outside its own container but what the user picks - the page, the
        interpreter and SymPy are in the bundle. -->
   <key>com.apple.security.app-sandbox</key>
   <true/>
   <!-- WebKit's own processes want this even for a page served from the
        bundle: without it the view stays blank. -->
   <key>com.apple.security.network.client</key>
+  <true/>
+  <!-- A formula saved or opened where the user points (NSSavePanel,
+       NSOpenPanel, a file opened from the Finder): the one door out of the
+       container, and only to what the user chose. -->
+  <key>com.apple.security.files.user-selected.read-write</key>
+  <true/>
+  <!-- Printing the history (or keeping it as a PDF). -->
+  <key>com.apple.security.print</key>
   <true/>
 </dict>
 </plist>

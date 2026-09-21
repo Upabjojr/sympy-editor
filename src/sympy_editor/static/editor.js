@@ -169,13 +169,15 @@ var SympyEditor = (function () {
     "<section><h3>History and sessions</h3><ul>",
     "<li><b>History</b> shows every step and what changed (green: what a step brought, red: what it lost); tap a step to go back to it.</li>",
     "<li>The strip above plays the history as a slideshow \u2014 a step and the change that produced it on one screen \u2014 and its <b>\u25c0 \u25b6</b> walk the steps one at a time when it is not playing; the two dials halve and double the speed, which is written between them (<kbd>,</kbd> and <kbd>.</kbd> while it plays), and <b>\u2212 / +</b> set the size of the formulas (Ctrl+wheel and two fingers too).</li>",
-    "<li><b>Save \u25be</b> writes it out: a self-contained web page that works offline and plays on its own, or a Python script that rebuilds every step with SymPy.</li>",
+    "<li><b>Save \u25be</b> writes it out: a self-contained web page that works offline and plays on its own, or a Python script that rebuilds every step with SymPy \u2014 or sends it to the printer (<i>print or PDF</i>; <i>Print history\u2026</i> under <b>\u2261</b> too).</li>",
+    "<li>A formula saved to a <b>.sympy</b> file opens with the app from a file manager or a mail, in a session of its own; in a notebook, files are saved next to the notebook.</li>",
     "<li><b>\u2261</b> lists the sessions, where the page keeps several. A session is labelled with its formula until you give it a name of your own (the pencil beside it, or a double-click), which nothing overwrites.</li>",
     "</ul></section>",
     "<section><h3>On a phone or tablet</h3><ul>",
     "<li>Tap to select; tap the selected node again to edit it.</li>",
     "<li>Tap a gap for a caret, tap the caret again to insert; tap an operator for its palette.</li>",
-    "<li>Hold a finger still on a node to start a range, then drag over its neighbours; the <b>keyboard</b> button opens the keyboard for the selection.</li>",
+    "<li>Hold a finger still on a node to start a range (the app lets you feel it), then drag over its neighbours; the <b>keyboard</b> button opens the keyboard for the selection.</li>",
+    "<li>Android\u2019s <b>Back</b> closes what is open \u2014 the help, the history, the drawer, a field, the pen \u2014 and lets the selection go before it leaves the app. <b>Copy</b> and <b>Paste</b> use the phone\u2019s clipboard.</li>",
     "<li>Two fingers zoom the formula and, when it is wider or taller than the view, scroll it; one finger dragged across it scrolls it sideways. The arrows at the edges scroll a screen at a time and go away once the end is in sight.</li>",
     "<li>Only what can be zoomed zooms \u2014 the formula, and the plot and the tree when they are on (their <b>?</b> tells how): the page itself never does, and it scrolls up and down only.</li>",
     "</ul></section>",
@@ -1035,9 +1037,15 @@ var SympyEditor = (function () {
     return [playing, speeding, zooming];
   }
 
-  /** Offer `text` as a file: the host app, the share sheet, or a download. */
-  async function saveFile(name, mime, text) {
+  /** Offer `text` as a file: the host app, a backend that writes files of
+   *  its own (the Jupyter widget: next to the notebook), the share sheet, or
+   *  a download. */
+  async function saveFile(name, mime, text, backend) {
     var app = window.SympyEditorApp;
+    if (!(app && (app.saveFile || app.shareFile)) && backend && backend.saveFile) {
+      var where = await backend.saveFile(name, mime, text);
+      return "saved: " + where;
+    }
     if (app && app.saveFile) {            // the host keeps it where the user says (a save dialog of its own)
       app.saveFile(name, mime, text);
       return "ready: choose where to keep it";
@@ -1064,6 +1072,54 @@ var SympyEditor = (function () {
   //: What a saved formula is called and what opens as one (Document.save_text).
   var FORMULA_EXT = ".sympy";
   var FORMULA_ACCEPT = ".sympy,.json,.txt,.py,application/json,text/plain";
+
+  /** The application the page runs in, when it runs in one: the Android and
+   *  iOS/macOS apps inject `window.SympyEditorApp` (MainActivity.ReportBridge,
+   *  FilesBridge.swift).  What the page asks of it that answers something -
+   *  the clipboard's text - carries a token and comes back through
+   *  `SympyEditor.hostAnswer(token, value)`, as a file does through
+   *  openedFile: neither bridge can return a value to a call. */
+  var Host = {
+    app: function (method) {
+      var app = window.SympyEditorApp;
+      return app && typeof app[method] === "function" ? app : null;
+    },
+    /** Tell the host something; false if it has no such method, or it failed. */
+    tell: function (method) {
+      var app = Host.app(method);
+      if (!app) return false;
+      try { app[method].apply(app, Array.prototype.slice.call(arguments, 1)); return true; }
+      catch (e) { return false; }
+    },
+    /** Ask the host for a value: a Promise, null when the host cannot answer. */
+    ask: function (method) {
+      var app = Host.app(method), rest = Array.prototype.slice.call(arguments, 1);
+      if (!app) return null;
+      return new Promise(function (resolve) {
+        var token = "h" + Date.now() + Math.random().toString(36).slice(2, 6);
+        Host.waiting[token] = resolve;
+        try { app[method].apply(app, [token].concat(rest)); }
+        catch (e) { delete Host.waiting[token]; resolve(null); }
+      });
+    },
+    waiting: {}
+  };
+
+  /** Print `html` (the history report): the host's print service when there
+   *  is one - a WebView's own window.print() does nothing on Android - else
+   *  the browser's, from a frame of its own so only the report prints. */
+  function printHtml(name, html) {
+    if (Host.tell("printHtml", name, html)) return "sent to the printer";
+    var frame = h("iframe", { style: "position: fixed; right: 0; bottom: 0; width: 1px; height: 1px; border: 0; opacity: 0" });
+    frame.srcdoc = html;
+    frame.addEventListener("load", function () {
+      try { frame.contentWindow.focus(); frame.contentWindow.print(); }
+      catch (e) { /* no printing here */ }
+      setTimeout(function () { if (frame.parentNode) frame.parentNode.removeChild(frame); }, 60000);
+    });
+    document.body.appendChild(frame);
+    return "sent to the printer";
+  }
 
   /** Where what should outlive the page is kept: the sessions, each with the
    *  history behind it.
@@ -1117,12 +1173,12 @@ var SympyEditor = (function () {
     write: function (key, text) {
       var app = Keep.host();
       if (app) {
-        try { app.keepWrite(key, text); return true; }
+        try { app.keepWrite(key, text); Keep.forget(key); return true; }
         catch (e) { /* the host could not: fall through to the browser's */ }
       }
       if (Keep.backend && Keep.backend.keep && Keep.backendKeeps) {
         try {
-          Keep.backend.keep(key, text).catch(function () {
+          Keep.backend.keep(key, text).then(function () { Keep.forget(key); }, function () {
             Keep.backendKeeps = false;                 // it stopped keeping: the browser takes over
             Keep.setLocal(key, text);
           });
@@ -1130,6 +1186,15 @@ var SympyEditor = (function () {
         } catch (e) { /* likewise */ }
       }
       return Keep.setLocal(key, text);
+    },
+
+    /** Drop the browser's copy of `key` once a keeper holds it.  A page that
+     *  kept things before it had a keeper hands them over on the first read
+     *  (see read); left behind, that copy would come back the day the
+     *  keeper's is lost, stale, as if it were the user's latest. */
+    forget: function (key) {
+      try { localStorage.removeItem("sympy-editor:" + key); }
+      catch (e) { /* no storage: nothing to drop */ }
     },
 
     local: function (key) {
@@ -1252,10 +1317,14 @@ var SympyEditor = (function () {
   //: The editor a host speaks to when it has something to say (an app's
   //: file dialog failing): the last one made, there being one to a page.
   var lastEditor = null;
+  //: Every editor alive on the page, for what the page as a whole is told:
+  //: that it is going away (flush), that Back was pressed, that a file came.
+  var liveEditors = [];
 
   class Editor {
     constructor(host, backend, options) {
       lastEditor = this;
+      liveEditors.push(this);
       this.host = host;
       this.backend = backend;
       this.opts = Object.assign({}, DEFAULTS, options || {});
@@ -1611,6 +1680,8 @@ var SympyEditor = (function () {
                 this.exportPython);
         fileBtn("History as web page\u2026", "Write the history out as a self-contained web page that works offline",
                 this.exportReport);
+        fileBtn("Print history\u2026", "Print the history, every step with what changed - or keep it as a PDF",
+                this.printReport);
         this.filesPane = h("details", { class: "se-drawer-files", open: "" }, [
           h("summary", { class: "se-drawer-subhead" }, ["File"]), this.filesBody]);
 
@@ -3712,6 +3783,13 @@ var SympyEditor = (function () {
         if (!(text || "").trim()) { self._setStatus("Nothing to paste (copy something first, or use Ctrl+V)"); return; }
         self._pasteText(text);
       };
+      // The system clipboard through the app: an Android WebView is not let
+      // read it, and iOS puts a "Paste" bubble in the way of every read.
+      var asked = Host.ask("pasteText");
+      if (asked) {
+        asked.then(function (text) { apply(text === null || text === undefined ? self._clip : text); });
+        return;
+      }
       if (navigator.clipboard && navigator.clipboard.readText) {
         navigator.clipboard.readText().then(apply, function () { apply(self._clip); });
       } else {
@@ -5221,6 +5299,9 @@ var SympyEditor = (function () {
       this._clip = text;
       var self = this;
       var done = function () { self._setStatus("Copied: " + text); };
+      // The app's clipboard is the system's own: a WebView's may refuse, or
+      // (iOS) ask each time.
+      if (Host.tell("copyText", text)) { done(); return; }
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text).then(done, function () { self._fallbackCopy(text); done(); });
       } else {
@@ -5304,10 +5385,80 @@ var SympyEditor = (function () {
       this._scheduleSessionSave();
     }
 
+    /** Keep now what is waiting to be kept: the session a change scheduled
+     *  (_scheduleSessionSave waits 800 ms for the edits to settle).  Called
+     *  when the page is going away - hidden, closed, or the app sent to the
+     *  background, where the system may end it without another word. */
+    flush() {
+      if (!this._sessionSaveTimer) return;
+      clearTimeout(this._sessionSaveTimer);
+      this._sessionSaveTimer = null;
+      this._saveSession();
+    }
+
+    /** What the system's Back does (Android's button or gesture, through the
+     *  app): close the topmost thing that is open, as Esc would, and say
+     *  whether there was one.  Nothing open, nothing selected: false, and
+     *  the app leaves. */
+    back() {
+      if (this.closed) return false;
+      if (this.helpView) { this.closeHelp(); return true; }
+      if (this.historyView) { this.closeHistory(); return true; }
+      if (this.drawer && !this.drawer.hidden) { this.closeDrawer(); return true; }
+      for (var i = this._addons.length - 1; i >= 0; i--) {
+        var inst = this._addons[i].inst;
+        if (!inst || typeof inst.onBack !== "function") continue;
+        try { if (inst.onBack()) return true; }
+        catch (e) { if (window.console) console.error("sympy-editor: add-on " + this._addons[i].name + " failed in onBack", e); }
+      }
+      if (this.keepMenu && !this.keepMenu.hidden) {
+        var cancel = this.keepMenu.querySelector(".se-keep-cancel");
+        if (cancel) { cancel.click(); return true; }
+      }
+      if (this.fnForm && !this.fnForm.hidden) { this._hideFnForm(); return true; }
+      if (this.editing !== null || this.inserting) { this.cancelEdit(); return true; }
+      if (this.junction || this.range || this.selected) { this.select(null); return true; }
+      if (this.caret) { this._hideCaret(); this._applySelection(); return true; }
+      if (this.fullscreen) { this.setFullscreen(false); return true; }
+      return false;
+    }
+
+    /** Open `text` as a formula, as File -> Open does with what was picked:
+     *  what the host hands over when a .sympy file is opened with the app
+     *  from somewhere else (SympyEditor.openText). */
+    async openText(name, text) {
+      if (this.closed || !this.backend || !text) return;
+      var base = (name || "").replace(/\.[^.]*$/, "");
+      this.closeDrawer();
+      this.closeHistory();
+      this.closeHelp();
+      this._setStatus("Opening " + (name || "the file") + "\u2026");
+      try {
+        if (this._sessionsReady) await this._sessionFor(base);
+        var snap = await this.backend.send({ action: "openfile", text: text }, this._report.bind(this));
+        if (!snap) throw new Error("No answer");
+        if (snap.error) throw new Error(snap.error);
+        this._history = null;
+        this.select(null);
+        this._hideCaret();
+        await this.setState(snap);
+        this._setStatus(name ? "Opened " + name : "Opened");
+      } catch (e) {
+        this._showError("The file could not be opened: " + ((e && e.message) || e));
+      }
+    }
+
+    /** A tap the hand can feel: the host's haptics (a long press that
+     *  selected).  Only a host, where it is the platform's own feedback;
+     *  a page in a browser stays silent. */
+    _haptic(kind) {
+      Host.tell("haptic", kind || "select");
+    }
+
     _scheduleSessionSave() {
       var self = this;
       clearTimeout(this._sessionSaveTimer);
-      this._sessionSaveTimer = setTimeout(function () { self._saveSession(); }, 800);
+      this._sessionSaveTimer = setTimeout(function () { self._sessionSaveTimer = null; self._saveSession(); }, 800);
     }
 
     /** Ask the backend for the document's history and store it (setState
@@ -5582,6 +5733,19 @@ var SympyEditor = (function () {
       }
     }
 
+    /** Print the history report (built unless given): the app's print
+     *  service, or the browser's - either can keep it as a PDF. */
+    async printReport(html) {
+      if (this.busy || this.closed || !this.backend) return;
+      this._setStatus("Building the report\u2026");
+      try {
+        if (!html) html = await this.buildReport();
+        this._setStatus("Report " + printHtml(this._exportName("html").replace(/\.html$/, ""), html));
+      } catch (e) {
+        this._showError("The report could not be printed: " + ((e && e.message) || e));
+      }
+    }
+
     /** Download the history as a Python script - or hand it to the app / the share sheet. */
     async exportPython() {
       if (this.busy || this.closed || !this.backend) return;
@@ -5612,7 +5776,7 @@ var SympyEditor = (function () {
         var name = this._formulaName();
         var snap = await this.backend.send({ action: "savefile", name: name }, function () {});
         if (!snap || !snap.file) throw new Error("There is nothing to save");
-        var how = await saveFile(name + FORMULA_EXT, snap.file.mime, snap.file.text);
+        var how = await saveFile(name + FORMULA_EXT, snap.file.mime, snap.file.text, this.backend);
         this._setStatus(how ? "Formula " + how : "");
       } catch (e) {
         this._showError("The formula could not be saved: " + ((e && e.message) || e));
@@ -5626,22 +5790,7 @@ var SympyEditor = (function () {
       if (this.busy || this.closed || !this.backend) return;
       var picked = await openFileText(FORMULA_ACCEPT);
       if (!picked || !picked.text) return;                    // nothing chosen
-      var name = (picked.name || "").replace(/\.[^.]*$/, "");
-      this.closeDrawer();
-      this._setStatus("Opening " + (picked.name || "the file") + "\u2026");
-      try {
-        if (this._sessionsReady) await this._sessionFor(name);
-        var snap = await this.backend.send({ action: "openfile", text: picked.text }, this._report.bind(this));
-        if (!snap) throw new Error("No answer");
-        if (snap.error) throw new Error(snap.error);
-        this._history = null;
-        this.select(null);
-        this._hideCaret();
-        await this.setState(snap);
-        this._setStatus(picked.name ? "Opened " + picked.name : "Opened");
-      } catch (e) {
-        this._showError("The file could not be opened: " + ((e && e.message) || e));
-      }
+      await this.openText(picked.name, picked.text);
     }
 
     /** A session of its own for a file about to be opened: the one open is
@@ -5661,7 +5810,7 @@ var SympyEditor = (function () {
 
     /** Hand `text` to the app's share sheet, the Web Share API or a download, in that order. */
     async _exportFile(name, mime, text, what) {
-      var how = await saveFile(name, mime, text);       // the host app, the share sheet, or a download
+      var how = await saveFile(name, mime, text, this.backend);   // the host app, the kernel, the share sheet, or a download
       this._setStatus(how ? what + " " + how : "");
     }
 
@@ -5691,7 +5840,8 @@ var SympyEditor = (function () {
       var save = h("select", { class: "se-head-save", title: "Save this history" }, [
         h("option", { value: "", disabled: "", selected: "" }, ["Save \u25be"]),
         h("option", { value: "html", title: "A self-contained web page: works offline, KaTeX rendering and fonts included" }, ["as a web page"]),
-        h("option", { value: "py", title: "A Python script rebuilding every step with SymPy" }, ["as a Python script"])
+        h("option", { value: "py", title: "A Python script rebuilding every step with SymPy" }, ["as a Python script"]),
+        h("option", { value: "print", title: "Print the history, or keep it as a PDF" }, ["print or PDF"])
       ]);
       var close = h("button", { type: "button", class: "se-history-close", title: "Close (Esc)", "aria-label": "Close" }, ["\u00d7"]);
       var addonTools = this._addonsHistoryTools({ getDoc: function () { return frame.contentDocument; }, root: null, where: "view" });
@@ -5707,6 +5857,7 @@ var SympyEditor = (function () {
         save.selectedIndex = 0;
         if (how === "html") self.exportReport(html);
         else if (how === "py") self.exportPython();
+        else if (how === "print") self.printReport(html);
       });
       close.addEventListener("click", function () { self.closeHistory(); });
       // Make the steps of the report clickable.  Runs once, whether the frame
@@ -6153,6 +6304,7 @@ var SympyEditor = (function () {
       }
       this._gapCache = null;
       this.select(path);
+      this._haptic("select");                  // the finger cannot see under itself: it feels the selection
       this.lastLeaf = path;
       this._drag = { anchor: path, moved: false, held: true };
       this.view.focus({ preventScroll: true });
@@ -6320,6 +6472,10 @@ var SympyEditor = (function () {
      *  document: a notebook makes and disposes of many editors, and each
      *  listener left behind would keep its editor alive. */
     destroy() {
+      this.flush();
+      var at = liveEditors.indexOf(this);
+      if (at >= 0) liveEditors.splice(at, 1);
+      if (lastEditor === this) lastEditor = liveEditors[liveEditors.length - 1] || null;
       this._stopAutoScroll();
       this._addonsNotify("destroy");
       this._addons = [];
@@ -6876,6 +7032,28 @@ var SympyEditor = (function () {
     return String((err && err.message) || err || "Python could not be started.");
   }
 
+  //: Files a host handed over before an editor was ready to open them.
+  var pendingOpen = [];
+
+  /** An editor has started: its sessions are open, so a file handed over
+   *  now opens in a session of its own rather than over the one restored. */
+  function editorReady(editor) {
+    editor._ready = true;
+    while (pendingOpen.length && !editor.closed) {
+      var file = pendingOpen.shift();
+      editor.openText(file[0], file[1]);
+    }
+  }
+
+  // The page going away - a tab closed or hidden, the app sent to the
+  // background (a WebView reports that as hidden too) - keeps what is waiting.
+  if (typeof window !== "undefined" && window.addEventListener) {
+    window.addEventListener("pagehide", function () { API.flush(); });
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "hidden") API.flush();
+    });
+  }
+
   /** Create an editor from a config object produced by html.py. */
   function mount(host, cfg) {
     var make = backends[cfg.backend] || readonlyBackend;
@@ -6901,7 +7079,9 @@ var SympyEditor = (function () {
           editor._showError(whyNoPython(err));
         });
       }
-      warm.then(function () { return editor._initSessions(); }).then(function () { return editor._restoreAddons(); });
+      warm.then(function () { return editor._initSessions(); })
+        .then(function () { return editor._restoreAddons(); })
+        .then(function () { editorReady(editor); }, function () { editorReady(editor); });
     });
     return editor;
   }
@@ -6940,6 +7120,42 @@ var SympyEditor = (function () {
       waiting(text === undefined ? null : text);
       return true;
     },
+    /** A host answers a question of the page's here (Host.ask): the token
+     *  it was given and the value - the clipboard's text, say. */
+    hostAnswer: function (token, value) {
+      var waiting = Host.waiting[token];
+      if (!waiting) return false;
+      delete Host.waiting[token];
+      waiting(value === undefined ? null : value);
+      return true;
+    },
+    /** Keep now what every editor on the page is waiting to keep - the host
+     *  calls it when the app goes to the background (see Editor.flush). */
+    flush: function () {
+      liveEditors.forEach(function (ed) { ed.flush(); });
+    },
+    /** The system's Back: true if an editor closed something (Editor.back),
+     *  false if there was nothing to close and the app may leave. */
+    back: function () {
+      var ed = lastEditor;
+      return !!(ed && ed.back());
+    },
+    /** A file opened with the app from elsewhere (a file manager, a mail):
+     *  the host hands over its name and text.  An editor that is still
+     *  starting takes it when it is ready (see mount). */
+    openText: function (name, text) {
+      var ed = lastEditor;
+      if (ed && ed._ready) return ed.openText(name, text);
+      pendingOpen.push([name, text]);
+      return null;
+    },
+    /** The keeper of what the page keeps, for a front end that makes its
+     *  Editor itself (the Jupyter widget): a backend with keep(key[, value]). */
+    setKeeper: function (backend) {
+      Keep.backend = backend || null;
+      Keep.backendKeeps = null;
+    },
+    keepThrough: function (send) { return keepThrough(send); },
     openedFile: function (token, name, text) {
       var waiting = openFileText.waiting[token];
       if (!waiting) return false;

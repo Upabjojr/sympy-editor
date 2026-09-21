@@ -19,6 +19,22 @@ function render({ model, el }) {
   // later pairing off by one, and one send() then never settled.
   const pending = {};
   let seq = 0;
+  // Questions that are not edits (keep, writefile) are answered by a
+  // message of their own, not the snapshot trait - which must only ever
+  // hold a snapshot, being what a second display of the widget draws.
+  const asked = {};
+  const ask = (msg) => new Promise((resolve) => {
+    const id = ++seq;
+    asked[id] = resolve;
+    model.send(Object.assign({ _req: id }, msg));
+  });
+  const answered = (msg) => {
+    const done = msg && asked[msg._req];
+    if (!done) return;
+    delete asked[msg._req];
+    done(msg);
+  };
+  model.on("msg:custom", answered);
   const backend = {
     send: (msg) => new Promise((resolve) => {
       const id = ++seq;
@@ -26,7 +42,17 @@ function render({ model, el }) {
       model.send(Object.assign({ _req: id }, msg));
     }),
     interrupt: () => { model.send({ action: "interrupt" }); return true; },
+    /** A file the editor saves (a formula, the history), written by the
+     *  kernel next to the notebook: a download from inside a notebook is
+     *  refused by more front ends than accept it (VS Code, among others). */
+    saveFile: (name, mime, text) => ask({ action: "writefile", name: name, mime: mime, text: text })
+      .then((answer) => { if (answer.error) throw new Error(answer.error); return answer.saved; }),
   };
+  // What the page keeps - sessions, add-on switches, the zoom, an add-on's
+  // library - is kept by the kernel (the widget's Store), not in the
+  // browser storage of whatever page shows the notebook.
+  backend.keep = SympyEditor.keepThrough(ask);
+  SympyEditor.setKeeper(backend);
   const editor = new SympyEditor.Editor(el, backend, model.get("options") || {});
   const apply = () => {
     const raw = model.get("snapshot");
@@ -51,6 +77,7 @@ function render({ model, el }) {
   apply();
   return () => {
     model.off("change:snapshot", apply);
+    model.off("msg:custom", answered);
     editor.destroy();
   };
 }

@@ -440,6 +440,13 @@ SympyEditor.registerAddon("latex", (function () {
         help: guide,
         typing: function () { return typing; },
         setTyping: setTyping,
+        /** The system's Back (Android): the field closes, as Esc closes it,
+         *  and what it would have replaced comes back. */
+        onBack: function () {
+          if (!typing) return false;
+          setTyping(false);
+          return true;
+        },
         onSelect: function () {
           // The field belongs where the selection is: while it is open, a new
           // selection moves it (and the reading follows the new target).

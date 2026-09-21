@@ -389,3 +389,23 @@ def test_the_field_keeps_its_taps_and_keys_to_itself():
             assert page.errors == []
         finally:
             _close(srv, browser)
+
+
+def test_back_closes_the_field_and_brings_back_what_it_covered():
+    """Android's Back (SympyEditor.back) closes the field as Esc does - what
+    it would have replaced shows again, nothing is changed - and says it
+    closed something, so the app stays."""
+    doc = Document(x + y, addons=[ADDON])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc)
+        try:
+            _type(page, r"\cos p")
+            assert page.locator(".se-view .ltx-field").count() == 1
+            assert page.evaluate("SympyEditor.back()") is True
+            assert _wait(lambda: page.locator(".se-view .ltx-field").count() == 0)
+            assert page.locator(TOOL).get_attribute("aria-pressed") == "false"
+            assert doc.expr == x + y
+            assert page.evaluate("SympyEditor.back()") is False           # nothing more to close
+            assert page.errors == []
+        finally:
+            _close(srv, browser)

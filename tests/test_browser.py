@@ -2169,7 +2169,7 @@ def test_history_report_is_self_contained_and_works_offline(browser, serve_expr,
     assert frame.locator('.step[data-current="1"] h2').inner_text().startswith("STEP 3")
     # saved from there as the web page or as a Python script that rebuilds every step
     save = page.locator(".se-history-head .se-head-save")      # one control, both ways out
-    assert save.locator("option").all_inner_texts() == ["Save \u25be", "as a web page", "as a Python script"]
+    assert save.locator("option").all_inner_texts() == ["Save \u25be", "as a web page", "as a Python script", "print or PDF"]
     with page.expect_download() as dl:
         save.select_option("html")
     assert dl.value.suggested_filename.startswith("sympy-editor-history-") and dl.value.suggested_filename.endswith(".html")
@@ -2572,7 +2572,7 @@ def test_help_button_shows_the_guide(browser, serve_expr):
         assert expected in text, expected
     # the guide is the whole tool: everything the editor grew is in it
     for expected in ("full screen", "slideshow", "save", "sessions", "( ) apply",
-                     "the same thing seen twice", "container"):
+                     "the same thing seen twice", "container", "print or pdf", ".sympy file", "back"):
         assert expected in text, expected
     page.keyboard.press("Escape")                     # Esc closes it
     assert page.locator(".se-help-view").count() == 0
@@ -5180,7 +5180,8 @@ def test_a_formula_is_saved_to_a_file_and_opened_from_one(browser, serve_expr, t
     page.locator('.se-toolbar [data-cmd="drawer"]').click()
     files = page.locator(".se-drawer .se-file-action")
     assert files.all_inner_texts() == ["Open formula\u2026", "Save formula\u2026",
-                                       "History as Python\u2026", "History as web page\u2026"]
+                                       "History as Python\u2026", "History as web page\u2026",
+                                       "Print history\u2026"]
     # Save: a file of its own type, named after the formula
     with page.expect_download() as dl:
         files.nth(1).click()
@@ -5232,3 +5233,167 @@ def test_the_sessions_are_kept_by_the_server_not_the_browser(browser, tmp_path):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+#: A host application, as the Android and iOS apps inject it: every call is
+#: recorded, and a question (pasteText) is answered the way theirs are,
+#: later and through SympyEditor.hostAnswer.
+_HOST_STUB = """
+window.SympyEditorApp = {
+  calls: [], kept: {}, clip: 'y + 1',
+  copyText(t) { this.calls.push(['copyText', t]); this.clip = t; },
+  pasteText(token) { this.calls.push(['pasteText']); setTimeout(() => SympyEditor.hostAnswer(token, this.clip), 10); },
+  haptic(kind) { this.calls.push(['haptic', kind]); },
+  printHtml(name, html) { this.calls.push(['printHtml', name, html.length, html.indexOf('<section') >= 0]); },
+  keepRead(token, key) { const v = this.kept[key]; setTimeout(() => SympyEditor.keptValue(token, v), 5); },
+  keepWrite(key, text) { this.calls.push(['keepWrite', key]); this.kept[key] = text; }
+};
+"""
+
+
+def _open_hosted(browser, url, script=_HOST_STUB, wait=True):
+    """A page with a host injected before anything of its own runs."""
+    page = browser.new_page()
+    page.errors = []
+    page.on("pageerror", lambda e: page.errors.append(str(e)))
+    page.add_init_script(script)
+    page.goto(url)
+    if wait:
+        page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    return page
+
+
+def _host_calls(page, name=None):
+    calls = page.evaluate("window.SympyEditorApp.calls")
+    return [c for c in calls if name is None or c[0] == name]
+
+
+def test_the_clipboard_is_the_systems_through_the_app(browser, serve_expr):
+    """Copy and Paste go to the app's clipboard when there is an app: a
+    WebView's page is not let read the system clipboard on Android, and iOS
+    asks each time - so Paste only ever offered the editor's own last copy."""
+    srv, doc = serve_expr(x + sin(y))
+    page = _open_hosted(browser, srv.url)
+    path = page.evaluate("Object.keys(document.querySelector('.sympy-editor').__sympyEditor.state.nodes).find(p => document.querySelector('.sympy-editor').__sympyEditor.state.nodes[p].src === 'sin(y)')")
+    _select(page, path)
+    page.locator('.se-toolbar [data-cmd="copy"]').click()
+    assert _host_calls(page, "copyText") == [["copyText", "sin(y)"]]
+    # what another app copied comes back through the app
+    page.evaluate("window.SympyEditorApp.clip = 'cos(z)'")
+    assert page.locator(".se-selected").first.get_attribute("data-path") == path      # still selected
+    page.locator('.se-toolbar [data-cmd="paste"]').click()
+    page.wait_for_function("document.querySelector('.se-source').textContent.indexOf('cos(z)') >= 0", timeout=10000)
+    assert _host_calls(page, "pasteText") == [["pasteText"]]
+    assert page.errors == []
+
+
+def test_back_closes_what_is_open_and_then_lets_the_app_go(browser, serve_expr):
+    """Android's Back asks the page first (SympyEditor.back): the help, the
+    drawer, the selection close one at a time, as Esc closes them, and only
+    with nothing left does the page say no - and the app leave."""
+    srv, doc = serve_expr(x + sin(y))
+    page = _open(browser, srv.url)
+    back = lambda: page.evaluate("SympyEditor.back()")
+    assert back() is False                                           # nothing open: the app may go
+    page.locator('.se-toolbar [data-cmd="help"]').click()
+    assert page.locator(".se-help-view").count() == 1
+    assert back() is True and page.locator(".se-help-view").count() == 0
+    page.locator('.se-toolbar [data-cmd="drawer"]').click()
+    assert _wait(lambda: page.locator(".se-drawer").is_visible())
+    assert back() is True and _wait(lambda: not page.locator(".se-drawer").is_visible())
+    _select(page, "/")
+    assert back() is True and page.locator(".se-selected").count() == 0
+    assert back() is False
+    assert page.errors == []
+
+
+def test_what_is_waiting_to_be_kept_is_kept_when_the_page_goes(browser, serve_expr):
+    """A session is kept a moment after a change, when the edits settle; the
+    app sent to the background may be ended before that moment comes.  The
+    page going away - hidden, or the host's flush() - keeps it at once."""
+    srv, doc = serve_expr(x + y, options={"sessions": True})
+    page = _open_hosted(browser, srv.url)
+    ed = "document.querySelector('.sympy-editor').__sympyEditor"
+    # (the HTTP backend holds one document and opens no sessions of its own:
+    # one is put in place here, as the apps' backend opens it)
+    page.evaluate(ed + "._sessionStore = {current: 'a', list: [{id: 'a', name: '', updated: 1, state: null}]};"
+                  + ed + "._sessionsReady = true; window.SympyEditorApp.calls = []")
+    page.evaluate(ed + ".send({action: 'replace', path: '/', src: 'cos(x)'})")
+    page.wait_for_function("document.querySelector('.se-source').textContent.indexOf('cos(x)') >= 0")
+    page.evaluate(ed + "._scheduleSessionSave()")                        # as a change does: 800 ms from now
+    page.evaluate("""() => { Object.defineProperty(document, 'visibilityState', {value: 'hidden', configurable: true});
+                             document.dispatchEvent(new Event('visibilitychange')); }""")
+    assert _wait(lambda: any(c[1] == "sessions" for c in _host_calls(page, "keepWrite")), timeout=0.6)
+    kept = json.loads(page.evaluate("window.SympyEditorApp.kept.sessions"))
+    current = [s for s in kept["list"] if s["id"] == kept["current"]][0]
+    assert "cos" in current["state"]["history"][-1]
+    # the host's own call does the same
+    page.evaluate("window.SympyEditorApp.calls = []")
+    page.evaluate(ed + "._scheduleSessionSave(); SympyEditor.flush()")
+    assert _wait(lambda: _host_calls(page, "keepWrite"), timeout=0.6)
+    assert page.errors == []
+
+
+def test_a_file_opened_with_the_app_opens_in_the_editor(browser, serve_expr):
+    """A .sympy file tapped in a file manager comes to the page from the host
+    (SympyEditor.openText) - even before the editor is ready for it, as when
+    the tap is what started the app: it waits, and opens once it is."""
+    srv, doc = serve_expr(x + y)
+    # handed over the moment the editor's script defines SympyEditor, long
+    # before any editor exists
+    page = _open_hosted(browser, srv.url, """Object.defineProperty(window, 'SympyEditor', {configurable: true,
+        get() { return this.__se; },
+        set(v) { this.__se = v; v.openText('early.sympy', JSON.stringify({expr: 'cos(w)'})); }});""", wait=False)
+    page.wait_for_function("document.querySelector('.se-source').textContent.indexOf('cos(w)') >= 0", timeout=15000)
+    page.evaluate("SympyEditor.openText('later.sympy', 'z**3')")
+    page.wait_for_function("document.querySelector('.se-source').textContent.indexOf('z**3') >= 0", timeout=15000)
+    assert str(doc.expr) == "z**3"
+    assert page.errors == []
+
+
+def test_a_long_press_is_felt_through_the_app(browser, serve_expr):
+    """The finger covers what it selects: a long press that selected is felt
+    as well, through the host's haptics."""
+    a, b = symbols("a b")
+    srv, doc = serve_expr(a + b)
+    page = _open_hosted(browser, srv.url)
+    kids = _display_children(page, "/")
+    _touch(page, "pointerdown", kids[0])
+    assert _wait(lambda: page.locator(".se-selected").count() == 1, timeout=2)
+    _touch(page, "pointerup", kids[0])
+    assert _host_calls(page, "haptic") == [["haptic", "select"]]
+    _click(page, kids[1])                                               # a plain tap is not
+    assert _host_calls(page, "haptic") == [["haptic", "select"]]
+
+
+def test_the_history_prints_through_the_app(browser, serve_expr):
+    """Print is the platform's print service in an app (a WebView's own
+    window.print does nothing on Android), from the history view and from
+    the drawer - the report, every step in it."""
+    srv, doc = serve_expr(x + y)
+    doc.handle({"action": "replace", "path": "/", "src": "x + 2*y"})
+    page = _open_hosted(browser, srv.url)
+    page.locator('.se-toolbar [data-cmd="drawer"]').click()
+    page.locator(".se-drawer .se-file-action", has_text="Print history").click()
+    assert _wait(lambda: _host_calls(page, "printHtml"))
+    call = _host_calls(page, "printHtml")[0]
+    assert call[1].startswith("sympy-editor-history-") and call[2] > 1000 and call[3]
+    page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.showHistory()")
+    page.wait_for_selector(".se-head-save", timeout=10000)
+    page.select_option(".se-head-save", "print")
+    assert _wait(lambda: len(_host_calls(page, "printHtml")) == 2)
+    assert page.errors == []
+
+
+def test_what_the_browser_kept_moves_to_the_app_and_goes(browser, serve_expr):
+    """A page that kept its zoom before it had a keeper hands it over on the
+    first read; once the app holds it, the browser's copy goes - left behind,
+    it would come back, stale, the day the app's was lost."""
+    srv, doc = serve_expr(x + y, options={"rememberZoom": True})
+    page = _open_hosted(browser, srv.url, _HOST_STUB + "try { localStorage.setItem('sympy-editor:zoom', '1.5'); } catch (e) {}")
+    ed = "document.querySelector('.sympy-editor').__sympyEditor"
+    assert page.evaluate(ed + ".zoom") == 1.5                         # what the page had, at once
+    page.evaluate(ed + ".setZoom(2)")
+    assert page.evaluate("window.SympyEditorApp.kept.zoom") == "2"
+    assert page.evaluate("localStorage.getItem('sympy-editor:zoom')") is None
+    assert page.errors == []

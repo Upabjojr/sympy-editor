@@ -74,7 +74,26 @@ the browser's own storage is the last resort:
 | the Android app | `filesDir/keep/<name>.json`, written through a temporary file and a rename (Kotlin, `MainActivity`) |
 | the iOS or macOS app | `Application Support/SymPyEditor/keep/<name>.json`, written atomically (Swift, `FilesBridge`) |
 | a page served by Python | the server's store — `EditorServer(store=…)`, by default the user's state directory: `%LOCALAPPDATA%` on Windows, `~/Library/Application Support` on macOS, `$XDG_STATE_HOME` or `~/.local/state` elsewhere |
+| the Jupyter widget | the kernel's store — `SympyEditorWidget(store=…)`, the same folder as the server's by default, so a notebook and `serve()` share their sessions |
 | a standalone HTML page, or the Pyodide web app | `localStorage`, which is all such a page has |
 
+Both Python stores are `sympy_editor.store.Store`: one file per name, written
+through a temporary file and a rename.
+
 A page that has a keeper but has kept nothing yet reads the browser's storage
-once, so what a page kept before it had one moves across on the first save.
+once, so what a page kept before it had one moves across on the first save —
+and the browser's copy is then dropped, so that it cannot come back stale the
+day the keeper's is lost.
+
+## Where a saved file goes, and where one comes from
+
+| Running as | Save writes | Open takes |
+| --- | --- | --- |
+| the Android app | where the user says (the system's create-document dialog); the history exports go to Downloads and the share sheet | the system's picker — or a `.sympy` file opened with the app from a file manager or a mail, or a formula shared to it as text |
+| the iOS app | the share sheet, which offers *Save to Files* | the document picker — or a `.sympy` file opened with the app (the app declares the type `org.sympy.editor.formula`) |
+| the macOS app | the save panel | the open panel — or a `.sympy` file opened from the Finder |
+| the Jupyter widget | next to the notebook (the kernel's working directory, or `save_dir`), under a name not taken yet; `w.save_formula()` / `w.open_formula(path)` from Python | the browser's file picker |
+| a page in a browser | a download (or the Web Share API where there is one) | the browser's file picker |
+
+A file handed over by the app opens in a session of its own, as File → Open
+does, so nothing already open is lost.

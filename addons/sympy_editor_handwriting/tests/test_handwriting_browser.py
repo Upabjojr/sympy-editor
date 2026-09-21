@@ -693,3 +693,25 @@ def test_the_writing_tools_stay_off_while_the_pen_is():
             assert page.errors == []
         finally:
             _close(srv, browser)
+
+
+def test_back_puts_the_pen_down_and_keeps_the_ink():
+    """Android's Back (SympyEditor.back) puts the pen down, as pressing the
+    Pen again does - the ink stays - and says it closed something."""
+    doc = Document(x + y, addons=[HandwritingAddon(MuteRecognizer())])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc)
+        try:
+            view = page.locator(".se-view").bounding_box()
+            _drag(page, view["x"] + 200, view["y"] + 40, view["x"] + 250, view["y"] + 80)
+            pen = page.locator('[data-cmd="addon:handwriting:pen"]')
+            assert page.locator("[data-pen]").first.get_attribute("data-pen") == "on"
+            assert _wait(lambda: page.locator("[data-strokes]").first.get_attribute("data-strokes") == "1")
+            assert page.evaluate("SympyEditor.back()") is True
+            assert _wait(lambda: page.locator("[data-pen]").first.get_attribute("data-pen") == "off")
+            assert page.locator("[data-strokes]").first.get_attribute("data-strokes") == "1"
+            assert pen.get_attribute("aria-pressed") in ("false", None)
+            assert page.evaluate("SympyEditor.back()") is False
+            assert page.errors == []
+        finally:
+            _close(srv, browser)

@@ -59,6 +59,8 @@ src/sympy_editor/
   html.py       Standalone HTML (full page or fragment) with the `pyodide`,
                 `http` or `readonly` backend; embeds the core modules for Pyodide.
   server.py     Stdlib http.server backend: serve(expr) -> edited expr.
+  store.py      Where a Python behind the page keeps what the page keeps
+                (Store, default_store): the server's and the widget's.
   widget.py     anywidget widget (optional dependency): kernel-backed editing.
   static/
     editor.js   The whole front end (plain script, no imports/exports).
@@ -399,7 +401,9 @@ Two conventions between printer, document and front end:
   snapshot, with `history` = `history_labels()`: the `str` of every step and
   the index) carry a document's state; `{"action": "goto", "index"}` →
   `Document.goto` moves within the history.  With `options.sessions` the
-  editor keeps a list of sessions in `localStorage` (`SESSIONS_KEY`), saves
+  editor keeps a list of sessions through the keeper (`Keep`, name `sessions`:
+  the app's files, the server's or the kernel's store, `localStorage` only on
+  a plain page - see docs/file-format.md), saves
   the current one after each committed change (debounced `_saveSession`)
   and switches with `backend.openDocument(state)` (Pyodide: a new document
   id in the shared runtime).  All of it lives in a lateral drawer
@@ -671,8 +675,40 @@ Two conventions between printer, document and front end:
   other and the buttons beside them on every platform.  As text glyphs they
   came from whichever installed font had them - the horizontal pair twice
   as wide as the vertical one, often another weight and baseline.
+- **What the platform does, the platform does.**  Everything the page needs
+  that is not Python goes to the host when there is one, and falls back to
+  the browser only on a plain page (the standalone Pyodide HTML, the web
+  app).  The host is `window.SympyEditorApp` (Kotlin `ReportBridge`, Swift
+  `FilesBridge`, the same method names): `Host.tell(method, ...)` for what
+  the page tells it (`copyText`, `haptic` - a long press that selected -,
+  `printHtml`, `setFullscreen`, `saveFile`/`shareFile`, `keepWrite`),
+  `Host.ask(method, ...)` for what it answers, later, through
+  `SympyEditor.hostAnswer(token, value)` (`pasteText`: a WebView's page may
+  not read the clipboard on Android, and iOS asks every time).  The other
+  way, the host calls into the page: `SympyEditor.back()` (Android's Back:
+  `Editor.back()` closes help, history, drawer, an add-on's own - the
+  `onBack` hook -, the keep chooser, the function form, an edit, the
+  selection, full screen, one per press, and false with nothing open, when
+  the app goes to the background), `SympyEditor.flush()` (on pause /
+  resign-active: the session save waiting in `_scheduleSessionSave` goes at
+  once; `pagehide` and `visibilitychange` do the same in any browser) and
+  `SympyEditor.openText(name, text)` (a `.sympy` opened with the app - an
+  Android VIEW/SEND intent, `onOpenURL` on iOS and the Mac -, queued in
+  `pendingOpen` until `editorReady`; the hosts queue it too until the page
+  has loaded).  Printing is a WebView of its own, scripts off and no bridge
+  (`printReport` in Kotlin, `ReportPrinter` in Swift); iOS full screen hides
+  the status bar and the home indicator through `HostChrome`, the Mac
+  toggles the window's.  On the Python side the widget is the host of its
+  own storage and files: `keep` and `writefile` are answered as custom
+  messages (never through the `snapshot` trait, which a second display
+  draws), from a `store.Store` - the server's, by default - and into
+  `save_dir`.  `test_both_hosts_answer_every_native_call_the_page_makes`
+  checks both hosts have every method the page calls; add one in Kotlin,
+  Swift and editor.js together.
 - **Backends.**  `Editor` only needs `{send(msg, report) -> snapshot}`, plus
-  the optional `warmup`, `openDocument`, `interrupt`/`canInterrupt`.
+  the optional `warmup`, `openDocument`, `interrupt`/`canInterrupt`, `keep`
+  (the storage seam, see file-format.md) and `saveFile` (the widget: a file
+  written by the kernel).
   `http` (the local server), `pyodide` (a worker in the page), `readonly`,
   and `native`: the *host application* runs Python.  The native backend
   hands JSON to `window.SympyEditorPy` (injected by the host) with a
@@ -720,7 +756,7 @@ Two conventions between printer, document and front end:
   centre), so two fingers moving together pan a formula larger than the
   view - sideways, and up and down in full screen, where the view has a
   height of its own.  `rememberZoom` (option; on in the
-  mobile bundle) keeps it in `localStorage`.  A formula wider than the view
+  mobile bundle) keeps it through the keeper (`Keep`, name `zoom`).  A formula wider than the view
   (`overflow-x: auto`) scrolls with a plain wheel over it (the event reaches
   the page again at the ends), by dragging its empty space with a mouse
   (`_pan`; a mouse drag that starts on a glyph still selects a range) or
@@ -836,8 +872,8 @@ editor can load a front end it has not seen.  `Addon.export_state(doc)` /
 `restore_state(doc, data)` carry an add-on's state under
 `Document.export()["addon_state"]` (a session; `Document(addon_state=)`
 gives it back when the add-on is on; `w.addon_state` in the widget is the
-live dict); what must outlive a session the add-on mirrors to
-`localStorage` from its panel (the rules panel's library).
+live dict); what must outlive a session the add-on keeps through
+`SympyEditor.keep` from its panel (the rules panel's library).
 An add-on is a *folder* with `addon.json` (`name`, `label`, `module`,
 `version`, `requires`) beside its package - the layout of a checkout of its
 repository; `scan_addons(dir)` finds such folders and puts them on
@@ -847,7 +883,7 @@ points.  The apps bundle them that way: `mobile/build.py` `stage_addons`
 copies every folder of `addons/` (no tests) beside the app's Python,
 `sympy_editor_app.py` registers the directory at import, `build_www` builds
 the page from a `Document(available=[their modules])` with
-`rememberAddons` on (`ADDONS_KEY` in localStorage, `_restoreAddons` at
+`rememberAddons` on (name `addons` in the keeper, `_restoreAddons` at
 mount), and the manifests' `requires` go to Chaquopy's `pip` list (a test
 checks) and iOS's `app_packages`.  Adding an add-on from a repository later
 = cloning it into that directory; keep the folder format and the scan

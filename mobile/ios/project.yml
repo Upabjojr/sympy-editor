@@ -38,6 +38,23 @@ targets:
         # build phase): the store's export-compliance question is answered here.
         ITSAppUsesNonExemptEncryption: false
         UILaunchScreen: {}
+        # A saved formula (docs/file-format.md) is a type of the app's own: a
+        # .sympy file tapped in Files, a mail or the Finder opens here
+        # (HostChrome.open), and the pickers offer it (FilesBridge.types).
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: SymPy formula
+            CFBundleTypeRole: Editor
+            LSHandlerRank: Owner
+            LSItemContentTypes: [org.sympy.editor.formula]
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: org.sympy.editor.formula
+            UTTypeDescription: SymPy formula
+            UTTypeConformsTo: [public.json, public.data]
+            UTTypeTagSpecification:
+              public.filename-extension: [sympy]
+              public.mime-type: [application/x-sympy-editor+json]
+        # Opened files are copied in (they are read once, not edited where they lie).
+        LSSupportsOpeningDocumentsInPlace: false
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
     settings:

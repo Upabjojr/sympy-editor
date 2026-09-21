@@ -20,6 +20,9 @@ targets:
       - path: SymPyEditor                                   # Info.plist, entitlements, Assets.xcassets
       - path: ../../mobile/ios/SymPyEditor/EditorView.swift
       - path: ../../mobile/ios/SymPyEditor/SymPyEditorApp.swift
+      - path: ../../mobile/ios/SymPyEditor/FilesBridge.swift
+      - path: ../../mobile/ios/SymPyEditor/InkReader.swift
+      - path: ../../mobile/ios/SymPyEditor/HostChrome.swift
       - path: ../../mobile/ios/SymPyEditor/PythonRuntime.h
       - path: ../../mobile/ios/SymPyEditor/PythonRuntime.m
       - path: ../../mobile/www                              # the shared bundle, as a folder
@@ -44,6 +47,21 @@ targets:
         LSApplicationCategoryType: public.app-category.education
         NSHighResolutionCapable: true
         NSHumanReadableCopyright: "Copyright © 2026 Francesco Bonazzi. AGPL-3.0-or-later"
+        # A saved formula (docs/file-format.md) is a type of the app's own: a
+        # .sympy file tapped in Files, a mail or the Finder opens here
+        # (HostChrome.open), and the pickers offer it (FilesBridge.types).
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: SymPy formula
+            CFBundleTypeRole: Editor
+            LSHandlerRank: Owner
+            LSItemContentTypes: [org.sympy.editor.formula]
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: org.sympy.editor.formula
+            UTTypeDescription: SymPy formula
+            UTTypeConformsTo: [public.json, public.data]
+            UTTypeTagSpecification:
+              public.filename-extension: [sympy]
+              public.mime-type: [application/x-sympy-editor+json]
     settings:
       base:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

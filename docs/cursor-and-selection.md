@@ -48,9 +48,10 @@ Everything else is as above.
 |---|---|
 | Tap | selects, exactly like a click |
 | **Tap the selected node again** | opens the field on it — this replaces double-click, which is ignored on touch |
-| **Hold still on a node** (`longPress`, 450 ms by default) | selects it and starts a range: keep the finger down and drag over its neighbours |
+| **Hold still on a node** (`longPress`, 450 ms by default) | selects it and starts a range: keep the finger down and drag over its neighbours. In the apps the selection is felt too (the platform's haptics), since the finger covers what it selected |
 | Drag a held selection past the edge of the view | the formula scrolls itself and the range keeps growing over what comes into sight |
 | Two fingers | pan and pinch-zoom; never selects |
+| Android's **Back** | what Esc does, one thing per press: closes the help, the history, the drawer, the LaTeX field, the pen, an edit — then lets the selection or the caret go, then leaves full screen; with nothing left, the app goes to the background |
 
 While a drag is drawing a range the selection box is **moved, never
 rebuilt**, so it stays painted for the whole gesture, growing into its new

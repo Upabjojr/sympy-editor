@@ -271,6 +271,67 @@ def test_both_hosts_offer_the_files_the_page_asks_of_them():
     assert "hostError: function (message)" in src
 
 
+def test_both_hosts_answer_every_native_call_the_page_makes():
+    """Everything the page hands to the platform - the clipboard, haptics,
+    printing, full screen, Back, the flush on going to the background, a
+    file opened with the app from elsewhere - has an answer in both hosts:
+    a method of the injected SympyEditorApp for what the page asks
+    (Host.tell / Host.ask in editor.js), and a call into the page for what
+    the host tells it (SympyEditor.back, flush, openText, hostAnswer)."""
+    src = (ROOT / "src" / "sympy_editor" / "static" / "editor.js").read_text(encoding="utf-8")
+    asked = set(re.findall(r'Host\.(?:tell|ask)\("(\w+)"', src))
+    assert {"copyText", "pasteText", "haptic", "printHtml"} <= asked, asked
+    kotlin = (ROOT / "mobile/android/app/src/main/java/org/sympy/editor/MainActivity.kt").read_text(encoding="utf-8")
+    swift = (ROOT / "mobile/ios/SymPyEditor/FilesBridge.swift").read_text(encoding="utf-8")
+    injected = swift[swift.index("window.SympyEditorApp = {"):swift.index("};", swift.index("window.SympyEditorApp = {"))]
+    for method in asked | {"setFullscreen"}:
+        assert re.search(r"@JavascriptInterface\s+fun " + method + r"\(", kotlin), ("android", method)
+        assert method + ': forward("' + method + '")' in injected, ("ios", method)
+        assert 'case "' + method + '"' in swift, ("ios", method)
+    for call in ("SympyEditor.hostAnswer", "SympyEditor.openText", "SympyEditor.flush"):
+        assert call in kotlin and call in swift, call
+    assert "SympyEditor.back()" in kotlin                           # the one Back button there is
+    for name in ("hostAnswer: function (token, value)", "flush: function ()", "back: function ()",
+                 "openText: function (name, text)"):
+        assert name in src, name
+
+
+def test_a_saved_formula_opens_with_the_apps():
+    """A .sympy file tapped in a file manager or a mail opens in the app:
+    Android's manifest takes it by type and by extension (and a formula
+    shared as text), and iOS and the Mac declare it as a type of their own,
+    which the pickers already offer by that name."""
+    manifest = (ROOT / "mobile/android/app/src/main/AndroidManifest.xml").read_text(encoding="utf-8")
+    assert 'android:launchMode="singleTask"' in manifest       # a second tap reaches the running app
+    assert "android.intent.action.VIEW" in manifest and "android.intent.action.SEND" in manifest
+    assert 'android:mimeType="application/x-sympy-editor+json"' in manifest
+    assert 'android:pathPattern=".*\\\\.sympy"' in manifest
+    yaml = pytest.importorskip("yaml")
+    swift = (ROOT / "mobile/ios/SymPyEditor/FilesBridge.swift").read_text(encoding="utf-8")
+    assert 'UTType("org.sympy.editor.formula")' in swift
+    for spec in ("mobile/ios/project.yml", "desktop/macos/project.yml"):
+        info = yaml.safe_load((ROOT / spec).read_text(encoding="utf-8"))["targets"]["SymPyEditor"]["info"]["properties"]
+        exported = info["UTExportedTypeDeclarations"][0]
+        assert exported["UTTypeIdentifier"] == "org.sympy.editor.formula", spec
+        assert exported["UTTypeTagSpecification"]["public.filename-extension"] == ["sympy"], spec
+        assert info["CFBundleDocumentTypes"][0]["LSItemContentTypes"] == ["org.sympy.editor.formula"], spec
+
+
+def test_the_mac_app_builds_every_swift_file_the_shell_uses():
+    """The Mac app lists the iOS shell's files one by one; one left out is a
+    type the others name that does not exist - FilesBridge was missing, and
+    the Mac app did not compile.  And the sandboxed (App Store) build may
+    use the panels and the printer it offers."""
+    yaml = pytest.importorskip("yaml")
+    spec = yaml.safe_load((ROOT / "desktop/macos/project.yml").read_text(encoding="utf-8"))
+    listed = {Path(s["path"]).name for s in spec["targets"]["SymPyEditor"]["sources"]}
+    for swift in (ROOT / "mobile/ios/SymPyEditor").glob("*.swift"):
+        assert swift.name in listed, swift.name
+    mas = (ROOT / "desktop/macos/SymPyEditor/SymPyEditorMAS.entitlements").read_text(encoding="utf-8")
+    assert "com.apple.security.files.user-selected.read-write" in mas
+    assert "com.apple.security.print" in mas
+
+
 
 def test_the_app_interrupts_a_long_message_from_another_thread():
     """Issue #27: the apps had no Interrupt button.  Their Python runs on one

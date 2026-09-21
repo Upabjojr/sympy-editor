@@ -169,3 +169,54 @@ def test_widget_offers_addons_and_sends_the_front_end_when_switched_on():
     assert [a["name"] for a in snap["addon_clients"]] == ["demo"]
     assert snap["addon_clients"][0]["js"] == demo.js
     assert list(w.document.addons) == ["demo"]
+
+
+def _answers(w):
+    """What the widget sends back as messages of their own (keep, writefile)."""
+    sent = []
+    w.send = lambda content, buffers=None: sent.append(content)
+    return sent
+
+
+def test_the_widget_keeps_what_the_page_keeps_in_the_kernel(tmp_path):
+    """The sessions, the add-on switches, the zoom are kept by the kernel -
+    in the same kind of store as serve()'s - not in the browser storage of
+    whatever page shows the notebook; and the answer is a message of its
+    own, so the snapshot trait never holds anything but a snapshot."""
+    w = SympyEditorWidget(x, store=tmp_path)
+    sent = _answers(w)
+    before = w.snapshot
+    w._on_msg(w, {"action": "keep", "key": "zoom", "value": "1.5", "_req": 7}, [])
+    assert (tmp_path / "zoom.json").read_text(encoding="utf-8") == "1.5"
+    w._on_msg(w, {"action": "keep", "key": "zoom", "_req": 8}, [])
+    w._on_msg(w, {"action": "keep", "key": "sessions", "_req": 9}, [])
+    assert sent == [{"keep": None, "_req": 7}, {"keep": "1.5", "_req": 8}, {"keep": None, "_req": 9}]
+    assert w.snapshot == before
+    # a widget told to keep nothing says so, and the page falls back
+    quiet = SympyEditorWidget(x, store=False)
+    got = _answers(quiet)
+    quiet._on_msg(quiet, {"action": "keep", "key": "zoom", "value": "2", "_req": 1}, [])
+    assert got == [{"keep": None, "_req": 1}] and not any(tmp_path.glob("*.new"))
+
+
+def test_the_widget_saves_files_next_to_the_notebook(tmp_path):
+    """File -> Save in a notebook writes the file where the notebook is,
+    under a name not taken yet; w.save() and w.open() are the same from
+    Python (save_formula, open_formula)."""
+    w = SympyEditorWidget(sin(x) + y, save_dir=tmp_path)
+    sent = _answers(w)
+    w._on_msg(w, {"action": "writefile", "name": "f.sympy", "text": "one", "_req": 3}, [])
+    w._on_msg(w, {"action": "writefile", "name": "f.sympy", "text": "two", "_req": 4}, [])
+    assert sent == [{"saved": str(tmp_path / "f.sympy"), "_req": 3},
+                    {"saved": str(tmp_path / "f-2.sympy"), "_req": 4}]
+    assert (tmp_path / "f.sympy").read_text(encoding="utf-8") == "one"
+    # a name from the page cannot leave the folder
+    w._on_msg(w, {"action": "writefile", "name": "../../escape.py", "text": "x", "_req": 5}, [])
+    assert sent[-1]["saved"] == str(tmp_path / "escape.py")
+
+    path = w.save_formula()
+    assert path.parent == tmp_path and path.suffix == ".sympy"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["expr"] == "y + sin(x)"
+    w.expr = cos(x)
+    assert w.open_formula(path) == sin(x) + y and json.loads(w.snapshot)["src"] == "y + sin(x)"

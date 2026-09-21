@@ -54,6 +54,7 @@ extension EditorView {
         let web = WKWebView(frame: .zero, configuration: config)
         web.allowsBackForwardNavigationGestures = false
         web.navigationDelegate = bridge.navigation
+        bridge.navigation.files = bridge.files
         #if DEBUG
         // Safari's Web Inspector can attach to a debug build (Develop >
         // Simulator, or the Mac itself): without it a page that fails is a
@@ -176,6 +177,13 @@ final class PythonBridge: NSObject, WKScriptMessageHandler {
 /// into whatever page it loads and evaluates what it is given, so a page from
 /// anywhere else must never get it; any other link opens outside the app.
 final class BundleNavigation: NSObject, WKNavigationDelegate {
+    /// Told when the page has loaded: files opened with the app wait for it.
+    weak var files: FilesBridge?
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        files?.pageLoaded()
+    }
+
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url else { decisionHandler(.cancel); return }

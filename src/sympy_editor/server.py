@@ -7,9 +7,6 @@ presses *Done* (or Ctrl+C), and returns the edited expression.
 from __future__ import annotations
 
 import json
-import os
-import re
-import sys
 import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,38 +17,7 @@ from sympy import Basic
 
 from .document import Document, interrupt_thread
 from .html import build_config, new_token, render_page
-
-
-#: Names Windows keeps for devices, whatever the extension: ``con.json`` is
-#: not a file there.  A key that is one of them is written with a mark.
-_WINDOWS_DEVICES = frozenset(
-    ["con", "prn", "aux", "nul"]
-    + [f"{name}{digit}" for name in ("com", "lpt") for digit in "123456789"]
-)
-
-
-def default_store() -> Path:
-    """Where a server keeps what the page keeps, when it is not told: the
-    place each platform keeps such things.
-
-    * Windows: ``%LOCALAPPDATA%\\sympy-editor`` (``~\\AppData\\Local`` when
-      the variable is not set).
-    * macOS: ``~/Library/Application Support/sympy-editor``.
-    * Elsewhere: ``$XDG_STATE_HOME/sympy-editor``, or ``~/.local/state`` as
-      the XDG specification says when the variable is not set.
-
-    ``XDG_STATE_HOME`` is honoured wherever it is set, for whoever has laid
-    their home out that way.
-    """
-    xdg = os.environ.get("XDG_STATE_HOME")
-    if xdg:
-        return Path(xdg) / "sympy-editor"
-    if sys.platform == "win32":
-        local = os.environ.get("LOCALAPPDATA")
-        return (Path(local) if local else Path.home() / "AppData" / "Local") / "sympy-editor"
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "sympy-editor"
-    return Path.home() / ".local" / "state" / "sympy-editor"
+from .store import Store, default_store  # noqa: F401 - default_store is part of this module's API
 
 
 __all__ = ["EditorServer", "serve"]
@@ -97,17 +63,7 @@ class _Handler(BaseHTTPRequestHandler):
             # What the page keeps between visits - the sessions, each with its
             # history - in a file of this server's own, not the browser's
             # storage: it is the same work whichever browser opens the page.
-            key = str(message.get("key") or "")
-            try:
-                if "value" in message:
-                    srv.keep(key, str(message.get("value") or ""))
-                    kept = None
-                else:
-                    kept = srv.kept(key)
-            except OSError as exc:
-                self._reply(200, "application/json", json.dumps({"error": f"The store could not be used: {exc}"}).encode("utf-8"))
-                return
-            self._reply(200, "application/json", json.dumps({"keep": kept}).encode("utf-8"))
+            self._reply(200, "application/json", json.dumps(srv.keeper.answer(message)).encode("utf-8"))
             return
         if message.get("action") == "interrupt":
             # Served on its own thread while the computing one holds the lock:
@@ -178,7 +134,8 @@ class EditorServer(ThreadingHTTPServer):
         #: Where what the page keeps is written (see :meth:`keep`): one file
         #: per name.  ``store=False`` keeps nothing, and the page falls back
         #: to the browser's own storage.
-        self.store: Optional[Path] = None if store is False else Path(store or default_store())
+        self.keeper = Store(store)
+        self.store: Optional[Path] = self.keeper.folder
         self.token = new_token()
         self.lock = threading.Lock()
         #: ident of the thread running a Document message, while one does.
@@ -190,36 +147,16 @@ class EditorServer(ThreadingHTTPServer):
     # -- what the page keeps ------------------------------------------------
 
     def _store_file(self, key: str) -> Path:
-        """The file ``key`` is kept in.  A name from the page cannot reach out
-        of the store: everything but letters, digits and ``._-`` is replaced,
-        and a name Windows keeps for a device is marked so that it is a file
-        there too."""
-        assert self.store is not None
-        safe = re.sub(r"[^A-Za-z0-9._-]", "_", key) or "keep"
-        if safe.split(".")[0].lower() in _WINDOWS_DEVICES:
-            safe = "_" + safe
-        return self.store / f"{safe}.json"
+        """The file ``key`` is kept in (see :meth:`Store.file`)."""
+        return self.keeper.file(key)
 
     def kept(self, key: str) -> Optional[str]:
         """What the page kept under ``key``, or ``None``."""
-        if self.store is None:
-            return None
-        path = self._store_file(key)
-        try:
-            return path.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            return None
+        return self.keeper.kept(key)
 
     def keep(self, key: str, value: str) -> None:
-        """Keep ``value`` under ``key``, through a temporary file and a
-        rename, so that an interrupted write leaves what was there before."""
-        if self.store is None:
-            return
-        self.store.mkdir(parents=True, exist_ok=True)
-        path = self._store_file(key)
-        temp = path.with_suffix(path.suffix + ".new")
-        temp.write_text(value, encoding="utf-8")
-        temp.replace(path)
+        """Keep ``value`` under ``key`` (see :meth:`Store.keep`)."""
+        self.keeper.keep(key, value)
 
     def interrupt(self) -> bool:
         """Interrupt the message being processed, if any (see
