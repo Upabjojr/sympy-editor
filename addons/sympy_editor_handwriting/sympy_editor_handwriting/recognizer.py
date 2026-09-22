@@ -13,11 +13,11 @@ with onnxruntime.
 Where: ``SYMPY_EDITOR_MATHOCR`` names the checkout; without it, a folder
 ``math-ocr`` beside any folder above this file is used (a checkout next to
 sympy-editor's).  Which model: ``SYMPY_EDITOR_MATHOCR_MODEL``, a folder of the
-checkout or any path, by default ``export/stroke_b_sib_int8`` - the larger stroke
+checkout or any path, by default ``export/stroke_b_sib2_int8`` - the larger stroke
 model, quantised, trained to write around printed pieces, one box per sibling
-(46.6 % exact match on math-ocr's held-out test split; 72.2 % on short ink
-written around a piece; 75.3 % on ink written among siblings, the right ones
-named 89.4 % of the time).
+(50.2 % exact match on math-ocr's held-out test split; 73.1 % on short ink
+written around a piece; 79.0 % on ink written among siblings, the right ones
+named 93.7 % of the time - before quantisation, which costs about 2 points).
 
 In the Android app (Chaquopy) there is no onnxruntime for Python: the model
 runs in onnxruntime-android, the Maven library, through Chaquopy's Java
@@ -37,7 +37,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-DEFAULT_MODEL = "export/stroke_b_sib_int8"
+DEFAULT_MODEL = "export/stroke_b_sib2_int8"
 MAX_POINTS = 20000        # more ink than a formula needs: refused rather than slowed down on
 MAX_TOKENS = 150          # the decoder's position table holds 168: never run past it
 

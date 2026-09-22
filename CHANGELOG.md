@@ -7,9 +7,9 @@
   ``sin(x) cos(y) tan(z)`` - is read with every factor or term as a box of
   its own, and the model says which the ink goes with, or which run of
   them under one longer bar: the page's guess no longer decides it. The
-  default model is math-ocr's ``stroke_b_sib``, trained for it (75 % of
-  such readings right, the right pieces 89 % of the time), and better at
-  ink around a single piece too.
+  default model is math-ocr's ``stroke_b_sib2``, trained for it (79 % of
+  such readings right, the right pieces 94 % of the time), and better at
+  ink around a single piece and at plain handwriting too.
 
 * **Handwriting around a formula.** Ink written around a piece of the formula
   - a bar and an ``x`` under ``sin(x)`` for ``sin(x)/x`` - is read by a new
