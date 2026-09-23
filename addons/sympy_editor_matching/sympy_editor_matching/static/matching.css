@@ -18,4 +18,6 @@
 .se-addon-matching .mt-rules li.mt-editing { background: rgba(var(--se-accent), 0.1); border-radius: 0.3rem; }
 .se-addon-matching .mt-sets { align-items: center; flex-wrap: wrap; }
 .se-addon-matching .mt-name { flex: 0 1 12em; min-width: 6em; font: 12px var(--se-mono); padding: 3px 6px; }
+.se-addon-matching .mt-name.mt-renaming { outline: 2px solid rgba(var(--se-accent), 0.7); outline-offset: 1px; }
+.se-addon-matching .mt-lib-rename[aria-pressed="true"] { border-color: rgba(var(--se-accent), 0.9); background: rgba(var(--se-accent), 0.14); }
 .se-addon-matching .mt-lib { font: inherit; font-size: 12px; padding: 2px 4px; max-width: 14em; }

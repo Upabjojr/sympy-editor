@@ -389,6 +389,24 @@ class MatchingAddon(Addon):
             else:
                 state["name"] = None
             return self._rules_answer(doc)
+        if method == "rename_ruleset":
+            # A saved set under another name: its library entry moves (the
+            # name field alone saves a copy under the new name).  The set is
+            # the current one unless ``old`` names another; nothing of its
+            # rules changes, so Revert and Restore are left as they were.
+            old = str(payload.get("old") or state["name"] or "")
+            name = str(payload.get("name") or "").strip()
+            if not old or old not in state["library"]:
+                raise ValueError("Only a saved rule set can be renamed: give this one a name first")
+            if not name:
+                raise ValueError("A rule set needs a name")
+            if name != old:
+                if name in state["library"]:
+                    raise ValueError(f"A rule set named {name!r} is saved already: delete it first, or pick another name")
+                state["library"][name] = state["library"].pop(old)
+                if state["name"] == old:
+                    state["name"] = name
+            return self._rules_answer(doc)
         if method == "load_ruleset":
             name = str(payload.get("name") or "")
             if name not in state["library"]:

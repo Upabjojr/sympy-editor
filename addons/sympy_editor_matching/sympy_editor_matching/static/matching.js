@@ -29,12 +29,16 @@ SympyEditor.registerAddon("matching", {
     var nameField = h("input", { type: "text", class: "mt-name", placeholder: "rule set name", title: "Type a name and the set is kept under it from then on, every change saved; clear it to leave the set unnamed", spellcheck: "false", autocomplete: "off" });
     var libSel = h("select", { class: "mt-lib", title: "The saved rule sets: pick one to load it" });
     var del = h("button", { type: "button", class: "mt-lib-del", title: "Delete the saved set of this name" }, ["Delete"]);
+    // Typing another name in the field saves a copy under it; Rename moves
+    // the saved set to the new name instead.
+    var rename = h("button", { type: "button", class: "mt-lib-rename", title: "Give the saved set another name: type it in the field, then Enter (Esc keeps the old one)" }, ["Rename"]);
+    var renaming = false;
     // A named set saves itself at every change; these step back from that.
     var revert = h("button", { type: "button", class: "mt-revert", disabled: "", title: "Back to the rules as they were when the set was saved, loaded or restored last; what changed since is kept for Restore" }, ["Revert"]);
     var restore = h("button", { type: "button", class: "mt-restore", disabled: "", title: "Bring back the rules Revert discarded" }, ["Restore"]);
     var element = h("div", { class: "mt-panel" }, [
       h("div", { class: "mt-head" }, [h("strong", {}, ["Rules"]), use]),
-      h("div", { class: "mt-row mt-sets" }, [nameField, libSel, del, revert, restore]),
+      h("div", { class: "mt-row mt-sets" }, [nameField, libSel, rename, del, revert, restore]),
       empty, list,
       h("div", { class: "mt-row" }, [field, add]),
       h("div", { class: "mt-head" }, [h("strong", {}, ["Matching the selection"]), once, all]),
@@ -59,6 +63,7 @@ SympyEditor.registerAddon("matching", {
       library.forEach(function (name) { libSel.appendChild(h("option", { value: name }, [name])); });
       libSel.disabled = !library.length;
       del.disabled = !(setName && library.indexOf(setName) >= 0);
+      rename.disabled = del.disabled;
       revert.disabled = !dirty;
       restore.disabled = !canRestore;
     }
@@ -205,18 +210,46 @@ SympyEditor.registerAddon("matching", {
     once.addEventListener("click", function () { api.call("rewrite", { path: target() }).then(null, fail); });
     all.addEventListener("click", function () { api.call("rewrite", { path: target(), all: true }).then(null, fail); });
 
-    // The name is the saving: Enter or leaving the field applies it.
+    // The name is the saving: Enter or leaving the field applies it.  In
+    // rename mode (the Rename button) the same field names the saved set anew.
+    function endRename() {
+      renaming = false;
+      nameField.classList.remove("mt-renaming");
+      nameField.placeholder = "rule set name";
+      rename.setAttribute("aria-pressed", "false");
+    }
     var applyName = function () {
       var name = nameField.value.trim();
+      if (renaming) {
+        var from = setName;
+        endRename();
+        if (!name) { nameField.value = setName || ""; api.error("A rule set needs a name"); return; }
+        if (name !== from) query("rename_ruleset", { old: from, name: name }).then(function (res) {
+          if (!res) nameField.value = setName || "";          // refused: the old name stays in the field
+        });
+        return;
+      }
       if (name === (setName || "")) return;
       query("name_ruleset", { name: name });
     };
     nameField.addEventListener("keydown", function (ev) {
       ev.stopPropagation();
       if (ev.key === "Enter") { ev.preventDefault(); applyName(); }
-      else if (ev.key === "Escape") { ev.preventDefault(); nameField.value = setName || ""; nameField.blur(); }
+      else if (ev.key === "Escape") { ev.preventDefault(); endRename(); nameField.value = setName || ""; nameField.blur(); }
     });
     nameField.addEventListener("change", applyName);
+    nameField.addEventListener("blur", function () {
+      if (renaming) { endRename(); nameField.value = setName || ""; }      // left unchanged: nothing to rename
+    });
+    rename.addEventListener("click", function () {
+      if (!setName) return;
+      renaming = true;
+      nameField.classList.add("mt-renaming");
+      nameField.placeholder = "new name for " + setName;
+      rename.setAttribute("aria-pressed", "true");
+      nameField.focus();
+      nameField.select();
+    });
     libSel.addEventListener("change", function () {
       if (libSel.value) query("load_ruleset", { name: libSel.value });
     });
@@ -252,7 +285,7 @@ SympyEditor.registerAddon("matching", {
       "<li>Keep a wildcard required where the rule needs the piece: an optional one may always take its identity, so <code>sin(_a_ + b_) -&gt; sin(_a_)*cos(b_) + cos(_a_)*sin(b_)</code> reads <code>sin(x + y)</code> as <code>sin(0 + (x + y))</code> and changes nothing \u2014 with <code>a_</code> it gives <code>sin(x)*cos(y) + sin(y)*cos(x)</code>.</li>",
       "</ul></section>",
       "<section><h3>The set</h3><ul>",
-      "<li>The set is saved by itself: type a name in the field (Enter, or leave the field) and the set joins the library of saved sets under it, every change saved from then on \u2014 load a set from the menu, delete the current one. <b>Revert</b> goes back to the rules as they were when the set was named, loaded or restored last, and <b>Restore</b> brings back what Revert discarded. The library and the current set are kept where the editor keeps its sessions - the app's own storage on a phone or a Mac, the server's or the kernel's store when Python runs the editor, the browser only on a page that is nothing but itself - so they are there again after a reload, and a set is saved with the editor's sessions too. In Jupyter the same state is Python: <code>w.addon_state[\"matching\"][\"rules\"]</code>.</li>",
+      "<li>The set is saved by itself: type a name in the field (Enter, or leave the field) and the set joins the library of saved sets under it, every change saved from then on \u2014 load a set from the menu, delete the current one. Typing another name there saves a <i>copy</i> under it; <b>Rename</b> gives the saved set a new name instead (type it, then Enter; Esc keeps the old one). <b>Revert</b> goes back to the rules as they were when the set was named, loaded or restored last, and <b>Restore</b> brings back what Revert discarded. The library and the current set are kept where the editor keeps its sessions - the app's own storage on a phone or a Mac, the server's or the kernel's store when Python runs the editor, the browser only on a page that is nothing but itself - so they are there again after a reload, and a set is saved with the editor's sessions too. In Jupyter the same state is Python: <code>w.addon_state[\"matching\"][\"rules\"]</code>.</li>",
       "<li>Type a rule in the field and press <kbd>Enter</kbd> or <b>Add rule</b>. The pencil (or a double-click on a rule) edits it as text; <b>\u2197</b> opens it in the formula editor as a <code>Rule(…)</code> node \u2014 edit its sides there, then <b>Save as rule N</b> puts it back. <b>\u00d7</b> removes it.</li>",
       "<li>A <code>Rule(pattern, replacement[, condition])</code> typed in the editor is a node like any other: <b>Use selection as rule</b> adds the selected one to the set; its type menu can swap its sides.</li>",
       "<li>All the rules are compiled into one many-to-one matcher (sympy-matching, OmniMatch) when the set changes: a query walks it once whatever the number of rules.</li>",

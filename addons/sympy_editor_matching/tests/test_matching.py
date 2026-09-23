@@ -308,3 +308,28 @@ def test_saved_rules_are_read_never_run(tmp_path):
     rules = doc.addons["matching"].rules(doc)
     assert not marker.exists()
     assert [str(r.pattern) for r in rules] == ["sin(a_)**2"]
+
+
+def test_a_saved_set_can_be_renamed():
+    """Typing another name saves a copy; rename moves the saved set: the old
+    name leaves the library, the rules and the current set go along, and a
+    name another set has is refused, both sets left as they were."""
+    doc = Document(x, addons=[ADDON])
+    _q(doc, "add_rule", src="sin(a_)**2 -> 1 - cos(a_)**2")
+    _q(doc, "save_ruleset", name="trig")
+    res = _q(doc, "rename_ruleset", name="identities")
+    assert res["name"] == "identities" and res["library"] == ["identities"]
+    assert res["state"]["library"] == {"identities": ["sin(a_)**2 -> 1 - cos(a_)**2"]}
+    assert not res["dirty"]                              # nothing of the rules changed
+    # another set, then renaming it over the first one: refused
+    _q(doc, "save_ruleset", name="square")
+    snap = doc.handle({"action": "addon", "addon": "matching", "method": "rename_ruleset", "name": "identities"})
+    assert "saved already" in (snap["error"] or snap["query"]["error"])
+    assert sorted(doc.addon_state["matching"]["library"]) == ["identities", "square"]
+    # a set that is not the current one, by its old name
+    res = _q(doc, "rename_ruleset", old="identities", name="trig")
+    assert res["library"] == ["square", "trig"] and res["name"] == "square"
+    # an unnamed set has nothing to rename
+    _q(doc, "name_ruleset", name="")
+    snap = doc.handle({"action": "addon", "addon": "matching", "method": "rename_ruleset", "name": "x"})
+    assert "Only a saved rule set" in (snap["error"] or snap["query"]["error"])

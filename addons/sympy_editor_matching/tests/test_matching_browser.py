@@ -245,3 +245,52 @@ def test_rule_sets_go_to_their_own_editor_s_keeper(tmp_path):
         browser.close()
     srv.shutdown()
     srv.server_close()
+
+
+def test_the_rename_button_gives_the_saved_set_a_new_name(tmp_path):
+    """Rename puts the name field in rename mode: Enter moves the saved set
+    to the new name (no copy left under the old one), Esc keeps it."""
+    doc = Document(sin(x) ** 2, addons=[ADDON])
+    srv = EditorServer(doc, port=0, store=tmp_path)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    with playwright.sync_playwright() as p:
+        try:
+            browser = p.chromium.launch()
+        except Exception as exc:
+            pytest.skip(f"chromium not available: {exc}")
+        page = browser.new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(srv.url)
+        page.wait_for_selector(".se-addon-matching .mt-field", timeout=30000)
+        rename = page.locator(".mt-lib-rename")
+        assert rename.is_disabled()                                    # nothing saved yet
+        page.locator(".mt-field").fill("sin(a_)**2 -> 1 - cos(a_)**2")
+        page.locator(".mt-field").press("Enter")
+        page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1")
+        page.locator(".mt-name").fill("trig")
+        page.locator(".mt-name").press("Enter")
+        page.wait_for_function("document.querySelector('.mt-lib').options.length === 2")
+        assert not rename.is_disabled()
+        # Esc: the old name stays
+        rename.click()
+        assert page.evaluate("document.activeElement.classList.contains('mt-renaming')")
+        page.keyboard.type("other")
+        page.keyboard.press("Escape")
+        assert page.locator(".mt-name").input_value() == "trig"
+        assert sorted(doc.addon_state["matching"]["library"]) == ["trig"]
+        # Enter: renamed, not copied
+        rename.click()
+        page.keyboard.type("identities")
+        page.keyboard.press("Enter")
+        page.wait_for_function("[...document.querySelectorAll('.mt-lib option')].map(o => o.value).join() === ',identities'")
+        assert page.locator(".mt-name").input_value() == "identities"
+        assert sorted(doc.addon_state["matching"]["library"]) == ["identities"]
+        assert doc.addon_state["matching"]["name"] == "identities"
+        kept = tmp_path / "addon_matching.json"
+        assert _wait(lambda: kept.is_file() and list(json.loads(kept.read_text(encoding="utf-8"))["library"]) == ["identities"])
+        assert not page.locator(".mt-name.mt-renaming").count()
+        assert errors == []
+        browser.close()
+    srv.shutdown()
+    srv.server_close()
