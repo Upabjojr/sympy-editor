@@ -245,6 +245,36 @@ def test_what_it_did_is_shown_and_can_be_taken_back():
             _close(srv, browser)
 
 
+def test_keep_scrolls_back_to_the_formula():
+    """The strip that shows what the reading did is under the editor; once it
+    is kept there is nothing more to read there, and the page scrolls back
+    up to the formula."""
+    doc = Document(x + y, addons=[ADDON])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc)
+        try:
+            page.set_viewport_size({"width": 420, "height": 360})
+            _type(page, "7")
+            assert _wait(lambda: not page.locator(".ltx-apply").is_disabled(), 15)
+            page.locator(".ltx-apply").click()
+            strip = page.locator(".ltx-applied")
+            assert _wait(lambda: not strip.is_hidden(), 10)
+            page.set_viewport_size({"width": 420, "height": 240})
+            # a page that goes on below the editor (the phone's does): the strip
+            # going away must not be what brings the formula back
+            page.evaluate("document.body.appendChild(Object.assign(document.createElement('div'), {style: 'height: 2000px'}))")
+            page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
+            page.locator(".ltx-keep").scroll_into_view_if_needed()
+            in_view = """() => { const r = document.querySelector('.se-view').getBoundingClientRect();
+                return r.top >= -1 && r.top < window.innerHeight - 40; }"""
+            assert not page.evaluate(in_view)                           # the formula is off the screen...
+            page.locator(".ltx-keep").click()
+            page.wait_for_function(in_view, timeout=5000)               # ...and back after Keep
+            assert str(doc.expr) == "7*x + 7*y" and page.errors == []
+        finally:
+            _close(srv, browser)
+
+
 def test_the_add_on_switched_off_takes_its_field_and_its_strip_away():
     doc = Document(x + y, available=[LatexAddon()])
     with playwright.sync_playwright() as p:

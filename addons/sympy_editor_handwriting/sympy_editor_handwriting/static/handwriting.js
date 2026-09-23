@@ -139,7 +139,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       + "<li>Where it goes is what the editor says: over the selected sub-expression (or the selected range) - which is hidden, its place kept, while you write over it, and comes back only if the writing is discarded (the ink cleared and the pen put away) -, at the cursor, and - with neither - against the piece of the formula it is written by. That piece is outlined, and it is read <i>together with</i> the ink: a bar under it with ink under the bar is a fraction over it, a small letter at its top-right corner its exponent, a letter beside it a product. <b>Read with</b> offers the other pieces it might be, and <i>alone</i>: the reading by itself, after the formula.</li>"
       + "<li>" + toolIcon("erase", 16) + " <b>Erase</b> takes away the strokes the pointer passes over (a pen turned round erases too); " + toolIcon("undo", 16) + " and " + toolIcon("redo", 16) + " take back the last stroke and write it again; " + toolIcon("clear", 16) + " <b>Clear ink</b> takes all of it. The editor's own Undo is for the formula, and takes back what a reading did.</li>"
       + "<li>Two fingers on the formula zoom it while writing, as they do at any other time, and the ink is zoomed with it; so do the \u2212/100%/+ buttons and <kbd>Ctrl</kbd>+wheel.</li>"
-      + "<li>What the reading did is shown under the editor - the formula as it was and as it now is, what went marked red and what came marked green - to <b>Keep</b> or to <b>Undo the change</b>; the editor's own Undo takes it back too.</li>"
+      + "<li>What the reading did is shown under the editor - the formula as it was and as it now is, what went marked red and what came marked green - to <b>Keep</b> (which takes you back up to the formula) or to <b>Undo the change</b>; the editor's own Undo takes it back too.</li>"
       + "<li>Under the readings: what SymPy gets of the one in the formula, with the ways to read each part of the LaTeX that can be read more than one way, typeset, to pick from and a switch for each constant name. <b>\u270e LaTeX</b> opens the reading's own LaTeX to correct where a glyph was read wrong: what is typed there is read and goes into the formula like any other reading, and stays among them to pick again.</li>"
       + "<li>The reading is done by math-ocr's stroke model. It reads one formula at a time, and mixes up look-alike glyphs most (<code>1</code> and <code>|</code>, <code>V</code> and <code>v</code>).</li>"
       + "<li>Where this device has a reader of its own - the app's (Apple's Vision) or the browser's - it is offered beside the model, in the menu at the top of the strip. It reads <i>text</i>, a line at a time: it knows nothing of fractions, exponents or roots, and what it reads is taken as typed. It is there for a device that carries no model, and for a line of ordinary algebra; the model is what reads mathematics.</li>"
@@ -1150,7 +1150,16 @@ SympyEditor.registerAddon("handwriting", (function () {
       });
 
       function hideApplied() { appliedRow.hidden = true; applied = null; puts++; updateApply(); showPanel(); }
-      keepBtn.addEventListener("click", function () { hideApplied(); forget(); clearReadings(); });
+      /** Back to the formula: after Keep there is nothing more to read down
+       *  here, and the formula is what one works on next. */
+      function backToFormula() {
+        var target = (editor && (editor.stage || editor.view)) || null;
+        if (!target || !target.scrollIntoView) return;
+        var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        try { target.scrollIntoView({ block: "nearest", behavior: reduce ? "auto" : "smooth" }); }
+        catch (e) { target.scrollIntoView(true); }
+      }
+      keepBtn.addEventListener("click", function () { hideApplied(); forget(); clearReadings(); backToFormula(); });
       backBtn.addEventListener("click", function () {
         mine++;
         var done = function () { mine = Math.max(0, mine - 1); };

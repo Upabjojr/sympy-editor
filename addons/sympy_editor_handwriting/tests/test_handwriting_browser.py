@@ -414,6 +414,35 @@ def test_writing_over_a_selected_operator_replaces_it():
             _close(srv, browser)
 
 
+def test_keep_scrolls_back_to_the_formula():
+    """After Keep, the page goes back up from the strip to the formula pad."""
+    doc = Document(x + y, addons=[HandwritingAddon(LetterRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc)
+        try:
+            page.set_viewport_size({"width": 420, "height": 420})
+            view = page.locator(".se-view").bounding_box()
+            _drag(page, view["x"] + 40, view["y"] + 60, view["x"] + 100, view["y"] + 90)
+            apply = page.locator(".hw-apply")
+            apply.scroll_into_view_if_needed(timeout=15000)
+            assert _wait(lambda: apply.is_visible() and not apply.is_disabled(), 15)
+            apply.click()
+            keep = page.locator(".hw-keep")
+            assert _wait(lambda: keep.is_visible(), 15)
+            # a page that goes on below the editor (the phone's does): the strip
+            # going away must not be what brings the formula back
+            page.evaluate("document.body.appendChild(Object.assign(document.createElement('div'), {style: 'height: 2000px'}))")
+            keep.scroll_into_view_if_needed()
+            in_view = """() => { const r = document.querySelector('.se-view').getBoundingClientRect();
+                return r.top >= -1 && r.top < window.innerHeight - 40; }"""
+            assert not page.evaluate(in_view)
+            keep.click()
+            page.wait_for_function(in_view, timeout=5000)
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
 def test_what_is_written_over_a_selection_takes_its_place_when_applied():
     """A piece selected in the editor, then written on: the reading waits to be
     applied - the formula is not touched until then - and takes that piece's

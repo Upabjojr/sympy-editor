@@ -437,7 +437,16 @@ SympyEditor.registerAddon("latex", (function () {
         puts++;
         showPanel();
       }
-      keepBtn.addEventListener("click", function () { hideApplied(); last = null; clearReading(); });
+      /** Back to the formula: after Keep there is nothing more to read down
+       *  here, and the formula is what one works on next. */
+      function backToFormula() {
+        var target = (editor && (editor.stage || editor.view)) || null;
+        if (!target || !target.scrollIntoView) return;
+        var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        try { target.scrollIntoView({ block: "nearest", behavior: reduce ? "auto" : "smooth" }); }
+        catch (e) { target.scrollIntoView(true); }
+      }
+      keepBtn.addEventListener("click", function () { hideApplied(); last = null; clearReading(); backToFormula(); });
       backBtn.addEventListener("click", function () {
         mine++;
         var done = function () { mine = Math.max(0, mine - 1); };
@@ -461,7 +470,7 @@ SympyEditor.registerAddon("latex", (function () {
         + "<li>Opened on a selection, the field stands <i>in that piece's place</i> and the piece is taken off the screen until the field goes: what is typed replaces it. At a cursor the formula is left whole and what is typed is added there - the line under the editor says which it will be.</li>"
         + "<li>What is typed is read as you type. Under the editor: the reading as it will look and what SymPy gets of it, the parts that can be read more than one way - <code>f(x)</code> applied or multiplied, how far <code>\\sin x \\cos y</code> reaches - each a row of its readings, typeset, to pick from, and a switch for each name that usually means a constant (<code>\\pi</code>, <code>e</code>, <code>i</code>, <code>\\gamma</code>).</li>"
         + "<li>A text that stops in the middle of an expression (<code>\\frac{x</code>, <code>x +</code>) or of a command (<code>\\fr</code>) is <i>not finished yet</i>, not wrong: the last reading stays, dimmed, until it reads again.</li>"
-        + "<li><b>Apply to the formula</b> (or <kbd>Enter</kbd>) puts it in - nothing changes before that - and then the formula before and after is shown, what went in red and what came in green, to <b>Keep</b> or to <b>Undo the change</b>. <kbd>Esc</kbd> closes the field and leaves the formula alone.</li>"
+        + "<li><b>Apply to the formula</b> (or <kbd>Enter</kbd>) puts it in - nothing changes before that - and then the formula before and after is shown, what went in red and what came in green, to <b>Keep</b> (which takes you back up to the formula) or to <b>Undo the change</b>. <kbd>Esc</kbd> closes the field and leaves the formula alone.</li>"
         + "</ul></section>";
 
       return {
