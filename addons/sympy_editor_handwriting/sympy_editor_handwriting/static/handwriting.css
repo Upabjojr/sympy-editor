@@ -211,9 +211,27 @@
 .hw-ambig,
 .hw-consts { display: flex; flex-wrap: wrap; gap: 0.4rem 0.8rem; align-items: center; }
 .hw-point,
-.hw-const { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 12px; }
+.hw-const { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.25rem; font-size: 12px; }
 .hw-fragment { font-size: 12px; }
-.hw-choice { font: inherit; font-size: 12px; max-width: 16rem; }
+.hw-choice { display: flex; flex-wrap: wrap; gap: 0.3rem; max-width: 100%; }
+.hw-option {
+  font: inherit;
+  font-size: 14px;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--se-rule);
+  border-radius: 0.3rem;
+  background: var(--se-btn);
+  color: inherit;
+  cursor: pointer;
+}
+.hw-option.hw-chosen {
+  border-color: rgba(var(--se-accent), 0.9);
+  background: rgba(var(--se-accent), 0.14);
+  box-shadow: inset 0 0 0 1px rgba(var(--se-accent), 0.9);
+}
+.hw-option:disabled { opacity: 0.5; cursor: default; font-size: 12px; }
 
 /* the ask: nothing goes into the formula until this is pressed */
 .hw-actions { display: flex; gap: 0.4rem; }
@@ -269,7 +287,7 @@
 .sympy-editor[data-theme="dark"] .hw-applied .rep-removed { color: #ff7b72; }
 
 @media (any-pointer: coarse) {
-  .hw-cand { font-size: 17px; padding: 0.4rem 0.7rem; }
+  .hw-cand, .hw-option { font-size: 17px; padding: 0.4rem 0.7rem; }
   .hw-with button { font-size: 15px; padding: 0.4rem 0.7rem; }
   .hw-applied-ask button { font-size: 14px; padding: 0.4rem 0.8rem; }
   .hw-edit, .hw-latex-read { font-size: 14px; padding: 0.4rem 0.7rem; }

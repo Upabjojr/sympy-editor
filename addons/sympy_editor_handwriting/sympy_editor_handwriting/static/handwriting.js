@@ -139,7 +139,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       + "<li>" + toolIcon("erase", 16) + " <b>Erase</b> takes away the strokes the pointer passes over (a pen turned round erases too); " + toolIcon("undo", 16) + " and " + toolIcon("redo", 16) + " take back the last stroke and write it again; " + toolIcon("clear", 16) + " <b>Clear ink</b> takes all of it. The editor's own Undo is for the formula, and takes back what a reading did.</li>"
       + "<li>Two fingers on the formula zoom it while writing, as they do at any other time, and the ink is zoomed with it; so do the \u2212/100%/+ buttons and <kbd>Ctrl</kbd>+wheel.</li>"
       + "<li>What the reading did is shown under the editor - the formula as it was and as it now is, what went marked red and what came marked green - to <b>Keep</b> or to <b>Undo the change</b>; the editor's own Undo takes it back too.</li>"
-      + "<li>Under the readings: what SymPy gets of the one in the formula, with a menu for each part of the LaTeX that can be read more than one way and a switch for each constant name. <b>\u270e LaTeX</b> opens the reading's own LaTeX to correct where a glyph was read wrong: what is typed there is read and goes into the formula like any other reading, and stays among them to pick again.</li>"
+      + "<li>Under the readings: what SymPy gets of the one in the formula, with the ways to read each part of the LaTeX that can be read more than one way, typeset, to pick from and a switch for each constant name. <b>\u270e LaTeX</b> opens the reading's own LaTeX to correct where a glyph was read wrong: what is typed there is read and goes into the formula like any other reading, and stays among them to pick again.</li>"
       + "<li>The reading is done by math-ocr's stroke model. It reads one formula at a time, and mixes up look-alike glyphs most (<code>1</code> and <code>|</code>, <code>V</code> and <code>v</code>).</li>"
       + "<li>Where this device has a reader of its own - the app's (Apple's Vision) or the browser's - it is offered beside the model, in the menu at the top of the strip. It reads <i>text</i>, a line at a time: it knows nothing of fractions, exponents or roots, and what it reads is taken as typed. It is there for a device that carries no model, and for a line of ordinary algebra; the model is what reads mathematics.</li>"
       + "</ul></section>"
@@ -868,7 +868,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         editBtn.hidden = false;
         options(reading);
       }
-      // The LaTeX parser's own options: a menu per ambiguity, a switch per
+      // The LaTeX parser's own options: a row of typeset readings per ambiguity, a switch per
       // constant name.  A pick reads the LaTeX again and puts that in instead.
       function options(reading) {
         ambig.textContent = "";
@@ -877,16 +877,8 @@ SympyEditor.registerAddon("handwriting", (function () {
         if (!reading || !reading.ok) return;
         picks.choices = Object.assign({}, reading.choices || {});
         (reading.ambiguities || []).forEach(function (a) {
-          var sel = h("select", { class: "hw-choice", title: "How to read " + a.fragment });
-          a.options.forEach(function (o, i) {
-            var opt = h("option", { value: String(i) }, [o.invalid ? "(not a reading)" : o.src]);
-            if (o.invalid) opt.disabled = true;
-            if (i === a.choice) opt.selected = true;
-            sel.appendChild(opt);
-          });
-          sel.addEventListener("change", function () { picks.choices[a.key] = parseInt(sel.value, 10); again(); });
-          ambig.appendChild(h("label", { class: "hw-point" },
-            [h("code", { class: "hw-fragment" }, [a.fragment]), " → ", sel]));
+          ambig.appendChild(h("div", { class: "hw-point" },
+            [h("code", { class: "hw-fragment" }, [a.fragment]), " \u2192 ", choiceRow(a)]));
         });
         (reading.constants || []).forEach(function (c) {
           var box = h("input", { type: "checkbox" });
@@ -896,6 +888,33 @@ SympyEditor.registerAddon("handwriting", (function () {
             [box, " ", h("code", {}, [c.name]), " is " + c.value + " (" + c.label + ")"]));
         });
         parseBlock.hidden = !ambig.children.length && !consts.children.length;
+      }
+      /** The readings of one ambiguous part, as buttons showing each whole
+       *  expression typeset; a pick reads the LaTeX again with it. */
+      function choiceRow(a) {
+        var row = h("div", { class: "hw-choice", role: "radiogroup", "aria-label": "How to read " + a.fragment });
+        a.options.forEach(function (o, i) {
+          var b = h("button", { type: "button", class: "hw-option", role: "radio", "data-index": String(i),
+                                title: o.invalid ? "Not a reading" : o.src });
+          if (o.invalid) { b.disabled = true; b.textContent = "(not a reading)"; }
+          else typeset(b, o.latex, o.src);
+          b.addEventListener("click", function () {
+            if (picks.choices[a.key] === i) return;
+            picks.choices[a.key] = i;
+            mark();
+            again();
+          });
+          row.appendChild(b);
+        });
+        function mark() {
+          var at = a.key in picks.choices ? picks.choices[a.key] : a.choice;
+          for (var k = 0; k < row.children.length; k++) {
+            row.children[k].classList.toggle("hw-chosen", k === at);
+            row.children[k].setAttribute("aria-checked", k === at ? "true" : "false");
+          }
+        }
+        mark();
+        return row;
       }
       function again() {          // the same reading, with the options picked
         var c = readings[chosen];

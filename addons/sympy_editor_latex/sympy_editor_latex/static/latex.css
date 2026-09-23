@@ -93,16 +93,25 @@
   border-radius: 0.25rem;
   background: rgba(var(--se-accent), 0.1);
 }
-.ltx-choice {
+.ltx-choice { display: flex; flex-wrap: wrap; gap: 0.3rem; max-width: 100%; }
+.ltx-option {
   font: inherit;
-  font-size: 12px;
+  font-size: 14px;
   max-width: 100%;
-  padding: 0.15rem 0.3rem;
+  overflow-x: auto;
+  padding: 0.2rem 0.5rem;
   border: 1px solid var(--se-rule);
   border-radius: 0.3rem;
   background: var(--se-btn);
   color: inherit;
+  cursor: pointer;
 }
+.ltx-option.ltx-chosen {
+  border-color: rgba(var(--se-accent), 0.9);
+  background: rgba(var(--se-accent), 0.14);
+  box-shadow: inset 0 0 0 1px rgba(var(--se-accent), 0.9);
+}
+.ltx-option:disabled { opacity: 0.5; cursor: default; font-size: 12px; }
 .ltx-const { display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer; }
 
 .ltx-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
@@ -156,7 +165,8 @@
 .sympy-editor[data-theme="dark"] .ltx-applied .rep-removed { color: #ff7b72; }
 
 @media (any-pointer: coarse) {
-  .ltx-choice, .ltx-applied-ask button { font-size: 14px; padding: 0.45rem 0.7rem; }
+  .ltx-applied-ask button { font-size: 14px; padding: 0.45rem 0.7rem; }
+  .ltx-option { font-size: 17px; padding: 0.4rem 0.7rem; }
   .ltx-apply { font-size: 15px; padding: 0.45rem 0.9rem; }
   .se-view .ltx-field { font-size: 0.55em; }
 }

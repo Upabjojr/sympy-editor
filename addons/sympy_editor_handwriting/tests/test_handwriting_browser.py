@@ -12,7 +12,7 @@ from contextlib import closing
 from pathlib import Path
 
 import pytest
-from sympy import symbols
+from sympy import cos, pi, sin, symbols
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
@@ -168,6 +168,34 @@ def test_without_the_pen_the_editor_is_the_editor_it_was():
             assert page.locator(".sympy-editor.se-inking").count() == 0
             assert _wait(lambda: page.evaluate("document.querySelector('.se-view').clientHeight") == was)
             assert page.locator(".hw-panel").is_hidden()
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
+def test_the_ways_to_read_an_ambiguous_part_are_typeset_buttons():
+    """Where the reading's LaTeX can be read several ways, each way is a button
+    showing the whole expression typeset; a press reads it again that way."""
+    doc = Document(x + y, addons=[HandwritingAddon(FakeRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc)
+        try:
+            view = page.locator(".se-view").bounding_box()
+            _drag(page, view["x"] + 40, view["y"] + 90, view["x"] + 110, view["y"] + 120)
+            page.locator(".hw-cand").first.wait_for(timeout=15000)
+            page.locator(".hw-cand").first.click()
+            usual, other = str(sin(x) * cos(y) + pi), str(sin(x * cos(y)) + pi)
+            assert _wait(lambda: page.locator(".hw-src").inner_text() == usual, 15)
+            row = page.locator(".hw-point").filter(
+                has=page.locator(".hw-fragment", has_text=r"\sin x \cos y").filter(has_not_text=r"\pi"))
+            buttons = row.locator(".hw-choice .hw-option")
+            titles = [buttons.nth(i).get_attribute("title") for i in range(buttons.count())]
+            assert usual in titles and other in titles
+            assert all(buttons.nth(i).locator(".katex").count() == 1 for i in range(buttons.count()))
+            assert row.locator(".hw-chosen").get_attribute("title") == usual
+            buttons.nth(titles.index(other)).click()
+            assert _wait(lambda: page.locator(".hw-src").inner_text() == other, 15)
+            assert row.locator(".hw-chosen").get_attribute("title") == other
             assert page.errors == []
         finally:
             _close(srv, browser)

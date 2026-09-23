@@ -10,7 +10,7 @@
  * document until "Apply to the formula" says so, and then the strip shows the
  * formula before and after, to keep or to take back.
  *
- * The ambiguities of the text - each a menu of the readings it allows - and
+ * The ambiguities of the text - each a row of the readings it allows, typeset - and
  * the constant names it uses - each a switch - live in that strip, as the
  * handwriting add-on's do: one shape for both, since both end in the same
  * question ("which reading did you mean, and shall it go in?").
@@ -71,7 +71,14 @@ SympyEditor.registerAddon("latex", (function () {
       var seq = 0, timer = null, katex = null;
       var applied = null, mine = 0, puts = 0, guide;
 
-      api.katex().then(function (k) { katex = k; if (last && last.ok) drawGhost(last.latex); }, function () {});
+      api.katex().then(function (k) {
+        katex = k;
+        if (last && last.ok) drawGhost(last.latex);
+        // readings offered before KaTeX came were written as text
+        Array.prototype.forEach.call(ambig.querySelectorAll(".ltx-option[data-tex]"), function (b) {
+          typesetInto(b, b.getAttribute("data-tex"), b.title);
+        });
+      }, function () {});
       // The parsers are built as the add-on is switched on, not at the first
       // reading: in a thread of its own where Python has threads, and where it
       // has none (Pyodide) by this request, which goes before what comes next.
@@ -292,6 +299,36 @@ SympyEditor.registerAddon("latex", (function () {
         }
         preview.textContent = tex;
       }
+      /** The readings of one ambiguous part, as buttons showing each whole
+       *  expression typeset: a pick reads the text again with it. */
+      function drawChoice(a) {
+        var row = h("div", { class: "ltx-choice", role: "radiogroup", "aria-label": "How to read " + a.fragment });
+        a.options.forEach(function (o, i) {
+          var on = i === a.choice;
+          var b = h("button", { type: "button", class: "ltx-option" + (on ? " ltx-chosen" : ""), role: "radio",
+                                "data-index": String(i), "aria-checked": on ? "true" : "false",
+                                title: o.invalid ? "Not a reading" : o.src });
+          if (o.invalid) { b.disabled = true; b.textContent = "(not a reading)"; }
+          else { b.setAttribute("data-tex", o.latex || ""); typesetInto(b, o.latex, o.src); }
+          b.addEventListener("click", function () {
+            if (on) return;
+            choices[a.key] = i;
+            read();
+          });
+          row.appendChild(b);
+        });
+        return row;
+      }
+      function typesetInto(el, tex, fallback) {
+        el.textContent = "";
+        if (katex && tex) {
+          try {
+            el.innerHTML = katex.renderToString(tex, { throwOnError: false, displayMode: false, output: "html" });
+            return;
+          } catch (e) { /* the text, then */ }
+        }
+        el.textContent = fallback || tex || "";
+      }
       function render(res) {
         if (!res.ok && res.incomplete) {
           // The text stops mid-expression: it is being typed, not wrong.  The
@@ -318,16 +355,8 @@ SympyEditor.registerAddon("latex", (function () {
         src.textContent = res.src;
         ambig.textContent = "";
         res.ambiguities.forEach(function (a) {
-          var sel = h("select", { class: "ltx-choice", title: "How to read " + a.fragment });
-          a.options.forEach(function (o, i) {
-            var opt = h("option", { value: String(i) }, [o.invalid ? "(not a reading)" : o.src]);
-            if (o.invalid) opt.disabled = true;
-            if (i === a.choice) opt.selected = true;
-            sel.appendChild(opt);
-          });
-          sel.addEventListener("change", function () { choices[a.key] = parseInt(sel.value, 10); read(); });
-          ambig.appendChild(h("label", { class: "ltx-point" },
-            [h("code", { class: "ltx-fragment" }, [a.fragment]), " → ", sel]));
+          ambig.appendChild(h("div", { class: "ltx-point" },
+            [h("code", { class: "ltx-fragment" }, [a.fragment]), " \u2192 ", drawChoice(a)]));
         });
         consts.textContent = "";
         res.constants.forEach(function (c) {
@@ -430,7 +459,7 @@ SympyEditor.registerAddon("latex", (function () {
       guide = "<section><h3>LaTeX into the formula</h3><ul>"
         + "<li><b>LaTeX</b>, among the editor's tools, opens a field <i>in the formula</i>: over the selection, at the cursor, or after the whole expression - wherever what you type will go. It is drawn as what it is - in dashes, on tinted paper - because it is not part of the formula yet.</li>"
         + "<li>Opened on a selection, the field stands <i>in that piece's place</i> and the piece is taken off the screen until the field goes: what is typed replaces it. At a cursor the formula is left whole and what is typed is added there - the line under the editor says which it will be.</li>"
-        + "<li>What is typed is read as you type. Under the editor: the reading as it will look and what SymPy gets of it, the parts that can be read more than one way - <code>f(x)</code> applied or multiplied, how far <code>\\sin x \\cos y</code> reaches - each a menu, and a switch for each name that usually means a constant (<code>\\pi</code>, <code>e</code>, <code>i</code>, <code>\\gamma</code>).</li>"
+        + "<li>What is typed is read as you type. Under the editor: the reading as it will look and what SymPy gets of it, the parts that can be read more than one way - <code>f(x)</code> applied or multiplied, how far <code>\\sin x \\cos y</code> reaches - each a row of its readings, typeset, to pick from, and a switch for each name that usually means a constant (<code>\\pi</code>, <code>e</code>, <code>i</code>, <code>\\gamma</code>).</li>"
         + "<li>A text that stops in the middle of an expression (<code>\\frac{x</code>, <code>x +</code>) or of a command (<code>\\fr</code>) is <i>not finished yet</i>, not wrong: the last reading stays, dimmed, until it reads again.</li>"
         + "<li><b>Apply to the formula</b> (or <kbd>Enter</kbd>) puts it in - nothing changes before that - and then the formula before and after is shown, what went in red and what came in green, to <b>Keep</b> or to <b>Undo the change</b>. <kbd>Esc</kbd> closes the field and leaves the formula alone.</li>"
         + "</ul></section>";

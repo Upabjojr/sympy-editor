@@ -17,8 +17,8 @@ conversion a bad idea, and both are in the user's hands there:
   is `sin(x) cos(y)` or `sin(x cos(y))`; `a/bc` divides by `b` or by `bc`.
   The parser keeps every reading (an Earley parser, through
   [Lark](https://github.com/lark-parser/lark)), and each ambiguous part of
-  the text becomes a menu of the readings it allows, the whole expression
-  shown under each.  The first is picked by convention - a function without
+  the text becomes a row of buttons, one per reading it allows, each the
+  whole expression under that reading, typeset.  The first is picked by convention - a function without
   parentheses takes the product after it but stops at a sum and at another
   function, `f`, `g`, `h` and the document's own functions are applied while
   other letters multiply, parentheses end an argument - and any pick changes

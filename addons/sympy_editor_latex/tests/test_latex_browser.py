@@ -175,8 +175,8 @@ def test_the_reading_goes_where_the_editor_says():
 
 
 def test_the_ambiguities_and_the_constants_are_offered_under_the_editor():
-    """Where the text can be read several ways, a menu per point with the whole
-    expression under each reading; every name that usually means a constant is
+    """Where the text can be read several ways, a row of buttons per point, each
+    the whole expression under one reading, typeset; every name that usually means a constant is
     a switch.  Both live in the strip, and the reading follows a pick."""
     doc = Document(x + y, addons=[ADDON])
     with playwright.sync_playwright() as p:
@@ -188,11 +188,17 @@ def test_the_ambiguities_and_the_constants_are_offered_under_the_editor():
             rows = page.locator(".ltx-point")
             assert rows.count() == 2
             row = rows.filter(has=page.locator(".ltx-fragment", has_text=r"\sin x \cos y").filter(has_not_text=r"\pi"))
-            choice = row.locator(".ltx-choice")
-            options = choice.locator("option").all_inner_texts()
-            assert usual in options and other in options and choice.input_value() == str(options.index(usual))
-            choice.select_option(str(options.index(other)))
+            buttons = row.locator(".ltx-choice .ltx-option")
+            options = [buttons.nth(i).get_attribute("title") for i in range(buttons.count())]
+            assert usual in options and other in options
+            # each reading is a button with the expression typeset, not its text
+            assert buttons.nth(0).locator(".katex").count() == 1
+            assert row.locator(".ltx-chosen").get_attribute("title") == usual
+            buttons.nth(options.index(other)).click()
             assert _wait(lambda: page.locator(".ltx-src").inner_text() == other, 15)
+            chosen = page.locator(".ltx-point .ltx-chosen")
+            assert _wait(lambda: other in [chosen.nth(i).get_attribute("title") for i in range(chosen.count())]), \
+                [chosen.nth(i).get_attribute("title") for i in range(chosen.count())]
 
             const = page.locator(".ltx-const input")
             assert const.count() == 1 and const.is_checked() and "pi" in page.locator(".ltx-const").inner_text()
