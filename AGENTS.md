@@ -437,6 +437,11 @@ Two conventions between printer, document and front end:
   seconds at most - and the change animation is skipped meanwhile, or its
   ghost would show the stand-in fading out.  Not for a backend handed an
   expression of its own (`givenDocument`), whose expression is the work.
+  When nothing replaced the page's own snapshot by the end of start-up (no
+  session reopened, no add-on switch restored: a first install, or an empty
+  current session), `mount` asks the backend for one: the page is built
+  with the builder's add-on catalogue, and an app's Python carries add-ons
+  the page was built without (handwriting, staged with its model).
 - **Wrap.**  `{"action": "wrap", "path", "func"[, "args", "children"]}` →
   `Document.wrap` puts the node (or range) inside a function - the inverse of
   unwrap: `cos`, `sqrt`, `Integral` with `args="x"` (or `func="Integral(x)"`).

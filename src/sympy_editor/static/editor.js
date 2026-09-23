@@ -7505,6 +7505,21 @@ var SympyEditor = (function () {
       warm.then(function () { return editor._initSessions(); })
         .then(reveal, reveal)
         .then(function () { return editor._restoreAddons(); })
+        .then(function () {
+          // The snapshot the page was built with is the builder's, not the
+          // running Python's: an app's Python carries add-ons the page was
+          // built without (handwriting, staged with its model).  Nothing
+          // replaced it when there was no session to reopen and no add-on
+          // switch to restore - a first install - and the Add-ons menu went
+          // on without them until the first edit.  Ask the Python now.
+          if (editor.state !== cfg.snapshot || editor.opts.readOnly || editor.closed) return null;
+          // what start-up had to say (a session that could not be opened)
+          // stays said: the refresh is no answer to it
+          var said = editor.error && !editor.error.hidden ? editor.error.textContent : "";
+          return editor.send({ action: "snapshot" }, { quiet: true }).then(function () {
+            if (said && editor.error.hidden) { editor.error.textContent = said; editor.error.hidden = false; }
+          });
+        })
         .then(function () { editorReady(editor); }, function () { editorReady(editor); });
     });
     return editor;

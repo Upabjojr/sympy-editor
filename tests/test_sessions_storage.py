@@ -429,3 +429,28 @@ def test_the_page_s_own_expression_does_not_flash_before_the_last_session(browse
     assert "z2" in seen[-1], seen
     assert not page.locator("#native-host .sympy-editor.se-restoring").count()
     assert page.errors == []
+
+
+def test_a_first_launch_shows_the_add_ons_the_python_has(browser, serving):
+    """Bug: the page opens on the snapshot it was built with; an app's Python
+    carries add-ons the page was built without (handwriting, staged with its
+    model), and with no session to reopen - a first install - nothing asked
+    the Python again: the Add-ons menu lacked them until the first edit."""
+    from sympy_editor import Addon
+
+    class Staged(Addon):
+        name = "staged"
+        label = "Staged by the app"
+
+    built = Document(x + y, available=[])                  # what the page was built from
+    live = Document(x + y, available=[Staged()])           # what the app's Python holds
+    srv = serving(live, store=False)
+    cfg = build_config(built, backend="native", options=dict(KATEX, sessions=True))
+    assert not cfg["snapshot"]["addons_available"]
+    page = _open(browser, srv.url)
+    page.evaluate(_NATIVE_HOST, [srv.url.rstrip("/") + "/api", srv.token])
+    page.evaluate("() => localStorage.removeItem('sympy-editor:sessions')")          # a first install
+    page.evaluate("(cfg) => { window.__nativeEditor = SympyEditor.mount(document.getElementById('native-host'), cfg); }", cfg)
+    _ready(page, NATIVE)
+    page.wait_for_function(NATIVE + ".state.addons_available.some(a => a.name === 'staged')", timeout=10000)
+    assert page.errors == []
