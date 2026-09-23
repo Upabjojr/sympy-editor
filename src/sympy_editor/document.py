@@ -406,6 +406,9 @@ LAZY_FORMS: Dict[str, Callable] = {
 #: What can be typed for the operator between two arguments (see
 #: ``Document.operator``): nothing means juxtaposition, a product.
 OPERATORS = "+-*/^=<>&|"
+#: Relations beyond the one-key operators, for Document.operator: what a
+#: written ≤, ≥ or ≠ becomes (the handwriting add-on sends them).
+RELATION_OPERATORS = ("<=", ">=", "!=")
 
 UNEVALUATED_CONSTRUCTORS = frozenset({"cbrt", "root", "real_root", "Rational", "Mul", "Add", "Pow"})
 
@@ -1369,7 +1372,8 @@ class Document:
         """Change the operator shown between two neighbouring arguments
         (``left`` and ``right`` are their indices) of the node at ``path``.
 
-        ``op`` is one of ``OPERATORS``; ``""`` (the operator deleted) means
+        ``op`` is one of ``OPERATORS`` or ``RELATION_OPERATORS`` (``<=``,
+        ``>=``, ``!=``: ``Le``, ``Ge``, ``Ne``); ``""`` (the operator deleted) means
         juxtaposition, a product.  In a sum, ``*``/``/``/``^`` bind the two
         terms (``x + y + z`` with ``*`` at the first ``+`` gives ``x*y + z``)
         and ``-`` negates the right one; in a product, ``+``/``-`` split it at
@@ -1391,7 +1395,7 @@ class Document:
         if not (0 <= L < n and 0 <= R < n) or L == R:
             raise ValueError("No operator there")
         op = (op or "").strip() or "*"
-        if op not in OPERATORS:
+        if op not in RELATION_OPERATORS and (len(op) != 1 or op not in OPERATORS):
             raise ValueError(f"Not an operator: {op!r}")
         is_sum = bool(parent.is_Add) or isinstance(parent, sympy.MatAdd)
         is_prod = bool(parent.is_Mul) or isinstance(parent, sympy.MatMul)
@@ -1440,7 +1444,8 @@ class Document:
         elif op == "^":
             new = build(sympy.Pow, first, second)
         else:
-            rel = {"=": sympy.Eq, "<": sympy.Lt, ">": sympy.Gt, "&": sympy.And, "|": sympy.Or}[op]
+            rel = {"=": sympy.Eq, "<": sympy.Lt, ">": sympy.Gt, "<=": sympy.Le, ">=": sympy.Ge, "!=": sympy.Ne,
+                   "&": sympy.And, "|": sympy.Or}[op]
             if not whole:
                 raise ValueError(f"{op!r} needs two sides: it can only replace the operator of a node with two arguments")
             new = build(rel, first, second)

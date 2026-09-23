@@ -1070,6 +1070,12 @@ def test_the_operator_between_two_arguments_can_be_changed():
     assert op(x + y, "^") == x ** y
     assert op(x + y, "=") == Eq(x, y)
     assert op(Eq(x, y), "<") == Lt(x, y)
+    from sympy import Ge, Le, Ne
+    assert op(Eq(x, y), "<=") == Le(x, y)                # the relations a written ≤ ≥ ≠ become
+    assert op(Eq(x, y), ">=") == Ge(x, y)
+    assert op(Lt(x, y), "!=") == Ne(x, y)
+    d = Document(Eq(x, y))
+    assert "Not an operator" in d.handle({"action": "operator", "path": "/", "left": 0, "right": 1, "op": "=="})["error"]
     assert op(Eq(x, y), "+") == x + y
     assert op(x ** y, "*") == x * y
     assert op(And(x > 0, y > 0), "|") == Or(x > 0, y > 0)

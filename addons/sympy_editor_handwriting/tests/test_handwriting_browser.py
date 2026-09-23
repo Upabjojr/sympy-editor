@@ -369,6 +369,51 @@ def test_a_room_opened_past_the_edge_is_scrolled_towards_the_middle():
             _close(srv, browser)
 
 
+class LeqRecognizer(FakeRecognizer):
+    """Reads anything as a less-or-equal sign (and a letter after it)."""
+
+    def readings(self):
+        return [r"\leq", "x"]
+
+
+def test_writing_over_a_selected_operator_replaces_it():
+    """Bug: with the = of an equation selected, the pen asked which piece to
+    read the ink with.  A selected operator is where the ink goes: no piece
+    to read it with, the ink read as an operator, the = hidden meanwhile, and
+    Apply puts the new relation in its place."""
+    from sympy import Eq, Le
+    doc = Document(Eq(x, y), addons=[HandwritingAddon(LeqRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc, pen=False)
+        try:
+            eq = page.evaluate("""() => { for (const el of document.querySelectorAll('.se-view *')) {
+                if (el.querySelector('[data-path]')) continue;
+                if ((el.textContent || '').trim() === '=') { const r = el.getBoundingClientRect();
+                    return [r.left + r.width / 2, r.top + r.height / 2]; } } return null; }""")
+            page.mouse.click(eq[0], eq[1])
+            ed = "document.querySelector('.sympy-editor').__sympyEditor"
+            assert _wait(lambda: page.evaluate(f"!!{ed}.junction"))
+            page.locator('[data-cmd="addon:handwriting:pen"]').click()
+            assert _wait(lambda: page.evaluate(f"getComputedStyle({ed}.junction.el).visibility") == "hidden")
+            view = page.locator(".se-view").bounding_box()
+            _drag(page, view["x"] + 40, view["y"] + 90, view["x"] + 70, view["y"] + 110)
+            apply = page.locator(".hw-apply")
+            ok = _wait(lambda: apply.is_visible() and not apply.is_disabled(), 15)
+            assert ok, (page.locator(".hw-panel").inner_text(), page.evaluate(f"!!{ed}.junction"),
+                        page.locator(".hw-panel").get_attribute("data-aim"))
+            assert page.locator(".hw-with-option").count() == 0            # no piece to read it with
+            assert page.locator(".hw-panel").get_attribute("data-aim") == "operator"
+            assert "operator's place" in page.locator(".hw-reading-of").inner_text()
+            assert page.locator(".hw-src").inner_text() == "<="
+            assert page.locator(".hw-cand").count() == 1                   # "x" is no operator
+            assert str(doc.expr) == "Eq(x, y)"                               # nothing touched yet
+            apply.click()
+            assert _wait(lambda: doc.expr == Le(x, y), 15), str(doc.expr)
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
 def test_what_is_written_over_a_selection_takes_its_place_when_applied():
     """A piece selected in the editor, then written on: the reading waits to be
     applied - the formula is not touched until then - and takes that piece's

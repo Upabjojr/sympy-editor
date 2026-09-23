@@ -106,13 +106,19 @@ the expression around it:
   typed into;
 * the `−` shown before a negative term counts as the operator: `x − y` with
   `*` over it gives `x*y`;
-* a relation (`=`, `<`) or a connective (`&`, `|`) needs the two arguments to
-  be the whole expression;
+* a relation (`=`, `<`, `>`, and `≤`, `≥`, `≠` - sent as `<=`, `>=`, `!=`)
+  or a connective (`&`, `|`) needs the two arguments to be the whole
+  expression;
 * left and right are as drawn, not SymPy's argument order: `x² + x` with
   `/` over the `+` gives `x²/x`, and a product splits between the factors
   drawn on either side;
 * deleting the operator leaves juxtaposition, a product;
 * asking for the operator that is already there changes nothing.
+
+With the pen (the handwriting add-on), ink written over a selected operator
+is read as the operator that takes its place - never as a formula, and
+never together with a piece of the formula; Apply changes it as the palette
+would.
 
 ## 6. Matrices
 

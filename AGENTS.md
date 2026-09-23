@@ -174,8 +174,9 @@ Two conventions between printer, document and front end:
   `{"action": "operator", "path", "left", "right", "op"}` ->
   `Document.operator`: in a sum `*`/`/`/`^` bind the two terms and `-`
   negates the right one, in a product `+`/`-` split it at the operator, a
-  relation or connective (`= < > & |`) needs the two arguments to be the
-  whole node; honours the unevaluated toggle (`lazy`).  A lone operator
+  relation or connective (`= < > & |`, and `<=`/`>=`/`!=` -
+  `RELATION_OPERATORS`, what the pen's ≤ ≥ ≠ become) needs the two arguments
+  to be the whole node; honours the unevaluated toggle (`lazy`).  A lone operator
   typed at a caret between two arguments is routed to `Document.operator`
   by `Document.insert`.  The node the junction belonged to is selected
   after the change.

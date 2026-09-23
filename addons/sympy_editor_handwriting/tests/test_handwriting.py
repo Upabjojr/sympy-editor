@@ -313,3 +313,40 @@ def test_strokes_without_an_engine_after_the_host_was_chosen_go_to_the_model():
     snap = doc2.handle({"action": "addon", "addon": "handwriting", "method": "recognize",
                         "strokes": [[[0, 30, 0], [20, 30, 5]]], "beam": 1})
     assert snap["query"]["result"]["candidates"][0]["latex"] == "y" and other.got is not None
+
+
+class _Says:
+    """A recognizer that reads any ink as the LaTeX it is given, best first."""
+    def __init__(self, *latex):
+        self.latex = latex
+
+    def status(self):
+        return {"available": True}
+
+    def warm(self, background=True):
+        return True
+
+    def recognize(self, strokes, beam=4, limit=5, context=None):
+        return {"candidates": [{"latex": t, "raw": t, "score": -i} for i, t in enumerate(self.latex)], "ms": 1.0}
+
+
+def test_ink_over_a_selected_operator_is_read_as_an_operator():
+    """Written over the = of an equation, the ink is the operator that takes
+    its place: readings that are no operator go, each operator once, and
+    nothing is read together with a piece."""
+    from sympy import Eq
+    from sympy_editor_handwriting import operator_of
+    doc = Document(Eq(x, y), addons=[HandwritingAddon(_Says(r"\leq", "x", r"\le", "=", r"\neq"))])
+    snap = doc.handle({"action": "addon", "addon": "handwriting", "method": "write", "operator": True,
+                       "strokes": [[[0, 0, 0], [5, 5, 10]]]})
+    got = snap["query"]["result"]["candidates"]
+    assert [c["reading"]["operator"] for c in got] == ["<=", "=", "!="]
+    assert all(c["reading"]["ok"] and not c["nested"] for c in got)
+    assert got[0]["display"] == r"\le"
+    # nothing that is an operator: said so, not read as a formula
+    doc = Document(Eq(x, y), addons=[HandwritingAddon(_Says("x^2"))])
+    snap = doc.handle({"action": "addon", "addon": "handwriting", "method": "write", "operator": True,
+                       "strokes": [[[0, 0, 0]]]})
+    [only] = snap["query"]["result"]["candidates"]
+    assert not only["reading"]["ok"] and "Not an operator" in only["reading"]["error"]
+    assert operator_of(" {\\geq} ") == ">=" and operator_of(r"\cdot") == "*" and operator_of("xy") is None

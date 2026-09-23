@@ -11,6 +11,10 @@ reader turns them into SymPy, in the document's own names, and the one picked
 goes into the formula when **Apply to the formula** is pressed - nothing
 changes before that.
 
+Written over a selected operator (the `=` of an equation, a `+`), the ink is
+read as the operator that takes its place - `=`, `<`, `>`, `≤`, `≥`, `≠`,
+`+`, `−`, `·`, `/`... - and nothing is read together with it.
+
 Where it goes is what the editor says: over the selected sub-expression (or
 the selected range) - hidden, its place kept, while the pen is on or ink
 waits, back only when the writing is discarded -, at the cursor, or - with neither - against the piece of

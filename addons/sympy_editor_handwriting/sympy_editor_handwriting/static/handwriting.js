@@ -135,6 +135,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       + "<li>A moment after the pen lifts what is written is read, and the readings are offered under the formula, the best first. <b>Apply to the formula</b> puts the one picked in - nothing changes before that. Once one is in, picking another changes the formula to it instead (the one before is taken back, so they never pile up).</li>"
       + "<li>The choices come in the order one makes them: first the piece of the formula what is written goes with (writing freely, with nothing selected), then the reading, then the ways its LaTeX can be read - and then Apply.</li>"
       + "<li>Writing on a formula that fills the screen leaves the readings out of sight: a moment after the pen rests a button rises at the foot of the screen, and a press goes down to them. Writing again sends it away.</li>"
+      + "<li>Written over a selected <b>operator</b> (the = of an equation, a +), the ink is read as the operator that takes its place \u2014 =, &lt;, &gt;, \u2264, \u2265, \u2260, +, \u2212, \u00b7, / \u2026 \u2014 with nothing to read it together with.</li>"
       + "<li>Where it goes is what the editor says: over the selected sub-expression (or the selected range) - which is hidden, its place kept, while you write over it, and comes back only if the writing is discarded (the ink cleared and the pen put away) -, at the cursor, and - with neither - against the piece of the formula it is written by. That piece is outlined, and it is read <i>together with</i> the ink: a bar under it with ink under the bar is a fraction over it, a small letter at its top-right corner its exponent, a letter beside it a product. <b>Read with</b> offers the other pieces it might be, and <i>alone</i>: the reading by itself, after the formula.</li>"
       + "<li>" + toolIcon("erase", 16) + " <b>Erase</b> takes away the strokes the pointer passes over (a pen turned round erases too); " + toolIcon("undo", 16) + " and " + toolIcon("redo", 16) + " take back the last stroke and write it again; " + toolIcon("clear", 16) + " <b>Clear ink</b> takes all of it. The editor's own Undo is for the formula, and takes back what a reading did.</li>"
       + "<li>Two fingers on the formula zoom it while writing, as they do at any other time, and the ink is zoomed with it; so do the \u2212/100%/+ buttons and <kbd>Ctrl</kbd>+wheel.</li>"
@@ -523,6 +524,8 @@ SympyEditor.registerAddon("handwriting", (function () {
       }
       // What the room is opened beside, and on which side of it.
       function anchor() {
+        var j = editor && editor.junction;
+        if (j && j.el && j.el.isConnected) return { el: j.el, side: "right" };
         var c = api.caret && api.caret();
         if (c && c.leftEl) return { el: c.leftEl, side: "right" };
         if (c && c.rightEl) return { el: c.rightEl, side: "left" };
@@ -549,7 +552,9 @@ SympyEditor.registerAddon("handwriting", (function () {
       function targetKey() {
         var r = api.range && api.range(), c = api.caret && api.caret(), sel = api.selected && api.selected();
         var at = function (el) { return el && el.getAttribute ? el.getAttribute("data-path") || "?" : ""; };
+        var j = editor && editor.junction;
         return JSON.stringify([sel || null, r ? [r.parent, r.anchor, r.focus] : null,
+                               j ? [j.path, j.left, j.right] : null,
                                c ? [at(c.leftEl), at(c.rightEl), c.path || null, c.index == null ? null : c.index] : null]);
       }
       function openRoom() {
@@ -598,6 +603,15 @@ SympyEditor.registerAddon("handwriting", (function () {
       // for good, replaced.
       var covered = [];
       function childPath(parent, i) { return (parent === "/" ? "" : parent) + "/" + i; }
+      /** The operator glyph written over, when that is the target. */
+      function coverOperator() {
+        if (applied || mine) return null;
+        if (!(pen || strokes.length || current || held || readings.length)) return null;
+        if (aim && aim.kind === "operator") return aim.el && aim.el.isConnected ? aim.el : null;
+        if (aim && aim.kind) return null;
+        var j = editor && editor.junction;
+        return j && j.el && j.el.isConnected ? j.el : null;
+      }
       function coverPaths() {
         // applied, or going in (mine: the formula is being redrawn with the
         // reading, and the piece now at that place is the new one)
@@ -617,6 +631,8 @@ SympyEditor.registerAddon("handwriting", (function () {
       }
       function syncCover() {
         var want = coverPaths().map(elementFor).filter(function (el) { return !!el; });
+        var op = coverOperator();
+        if (op) want = [op];
         var same = want.length === covered.length && want.every(function (el, i) { return covered[i] === el; });
         if (same) return;
         covered.forEach(function (el) { el.classList.remove("hw-covered"); });
@@ -713,6 +729,10 @@ SympyEditor.registerAddon("handwriting", (function () {
 
       /* ---- where a reading goes ---- */
       function aimNow() {
+        // A selected operator (the = of an equation): what is written takes
+        // its place, read as an operator - no piece to read it with.
+        var j = editor && editor.junction;
+        if (j) return { kind: "operator", path: j.path, left: j.left, right: j.right, el: j.el };
         var r = api.range && api.range(), sel = api.selected && api.selected();
         if (r) return { kind: "range", path: r.parent, children: editor._rangeIndices() };
         if (sel) return { kind: "selection", path: sel };
@@ -731,6 +751,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         if (!a) return "";
         if (a.kind === "range") return "What is written takes the selected range's place:";
         if (a.kind === "selection") return "What is written takes the selection's place:";
+        if (a.kind === "operator") return "What is written takes the operator's place:";
         if (a.kind === "caret") return "What is written goes in at the cursor:";
         if (a.kind === "nest") return "What is written is read together with the piece outlined:";
         return "What is written goes after the formula:";
@@ -835,11 +856,11 @@ SympyEditor.registerAddon("handwriting", (function () {
         // quiet: the editor's overlay would cover the formula while one writes on
         var asked = byHost
           ? hostRead(ink).then(function (found) {
-              return api.call("write", { candidates: found.candidates, ms: found.ms, engine: engine },
-                              { quiet: true });
+              return api.call("write", { candidates: found.candidates, ms: found.ms, engine: engine,
+                                         operator: aim.kind === "operator" }, { quiet: true });
             })
-          : api.call("write", { strokes: ink, context: box, nest: nest, siblings: sibs, engine: engine },
-                     { quiet: true });
+          : api.call("write", { strokes: ink, context: box, nest: nest, siblings: sibs, engine: engine,
+                                operator: aim.kind === "operator" }, { quiet: true });
         asked
           .then(function (res) {
             if (my !== seq) return;
@@ -960,14 +981,22 @@ SympyEditor.registerAddon("handwriting", (function () {
         var was = applied ? applied.before : step(), my = ++puts;
         mine++;
         var back = applied ? api.send({ action: "undo" }) : Promise.resolve();
-        back.then(function () { return api.call("insert", payloadFor(c)); }).then(function () {
+        back.then(function () {
+          if (aim.kind === "operator") {          // the operator changed, as the palette changes it
+            return api.send({ action: "operator", path: aim.path, left: aim.left, right: aim.right,
+                              op: c.reading.operator }).then(function (snap) {
+              if (snap && snap.error) throw new Error(snap.error);
+            });
+          }
+          return api.call("insert", payloadFor(c));
+        }).then(function () {
           mine = Math.max(0, mine - 1);
           if (my !== puts) return;            // answered for since: Keep, Undo, or fresh ink
           applied = { before: was, latex: c.latex };
           showApplied(was, step());
           // What was written is in: the piece it replaced is not the
           // selection any more, so nothing is left to write over.
-          if (aim && (aim.kind === "selection" || aim.kind === "range")) {
+          if (aim && (aim.kind === "selection" || aim.kind === "range" || aim.kind === "operator")) {
             closeRoom();
             if (api.select) api.select(null);
           }

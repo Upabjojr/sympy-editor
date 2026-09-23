@@ -112,6 +112,30 @@ class Engine:
                 "note": self.note, "status": self.status()}
 
 
+#: What a reading of ink over an operator may say, as LaTeX, and the
+#: operator it is (``Document.operator``'s).
+OPERATOR_LATEX = {
+    "=": "=", "<": "<", ">": ">",
+    "\\le": "<=", "\\leq": "<=", "\\leqslant": "<=", "\u2264": "<=", "<=": "<=",
+    "\\ge": ">=", "\\geq": ">=", "\\geqslant": ">=", "\u2265": ">=", ">=": ">=",
+    "\\ne": "!=", "\\neq": "!=", "\u2260": "!=", "!=": "!=",
+    "+": "+", "-": "-", "\u2212": "-",
+    "*": "*", "\\cdot": "*", "\\times": "*", "\\ast": "*",
+    "/": "/", "\\div": "/", "^": "^",
+    "&": "&", "\\land": "&", "\\wedge": "&", "|": "|", "\\lor": "|", "\\vee": "|",
+}
+#: How each operator is shown on its reading's button.
+OPERATOR_TEX = {"=": "=", "<": "<", ">": ">", "<=": "\\le", ">=": "\\ge", "!=": "\\ne", "+": "+", "-": "-",
+                "*": "\\cdot", "/": "/", "^": "\\hat{\\,}", "&": "\\land", "|": "\\lor"}
+
+
+def operator_of(latex: str) -> Optional[str]:
+    """The operator a reading is, or None: ``\\leq`` -> ``<=``, ``=`` ->
+    ``=``; braces and spaces around it do not count."""
+    text = re.sub(r"\s+", "", str(latex or "")).strip("{}")
+    return OPERATOR_LATEX.get(text)
+
+
 class HandwritingAddon(Addon):
     name = "handwriting"
     label = "Handwriting"
@@ -222,6 +246,17 @@ class HandwritingAddon(Addon):
             payload["pieces"] = {PIECE_NAME: piece}
         return self._latex().read(doc, payload)
 
+    @staticmethod
+    def _operator_reading(latex: str) -> Dict[str, Any]:
+        """A reading of ink written over a selected operator: the operator it
+        is (what ``Document.operator`` takes), never an expression."""
+        op = operator_of(latex)
+        if op is None:
+            return {"ok": False, "src": "", "latex": latex, "error": f"Not an operator: {latex}",
+                    "ambiguities": [], "constants": [], "choices": {}, "readings": 0}
+        return {"ok": True, "src": op, "latex": latex, "operator": op, "error": None,
+                "ambiguities": [], "constants": [], "choices": {}, "readings": 1}
+
     def _reading(self, doc, latex: str, picks: Optional[Dict[str, Any]] = None, nest=None,
                  children=None) -> Dict[str, Any]:
         """The LaTeX as SymPy would get it - read as the LaTeX panel reads, in
@@ -270,6 +305,35 @@ class HandwritingAddon(Addon):
             # (a host engine, see Engine): then the readings come in as
             # ``candidates`` and only the nesting and the SymPy are done here.
             given = payload.get("candidates")
+            if payload.get("operator"):
+                # Written over a selected operator: it takes that operator's
+                # place, so it is read as an operator - never as a formula,
+                # nor together with a piece.  The readings that are no
+                # operator go; the rest once each, best first.
+                if given is not None:
+                    result = {"candidates": [dict(c) for c in given], "ms": payload.get("ms", 0),
+                              "engine": payload.get("engine") or self.engine}
+                else:
+                    reader = self._reader(payload.get("engine"))
+                    result = reader.recognizer.recognize(payload.get("strokes"), beam=payload.get("beam", 4))
+                    result["engine"] = reader.name
+                out, seen = [], set()
+                for cand in result["candidates"]:
+                    reading = self._operator_reading(cand["latex"])
+                    if not reading["ok"] or reading["operator"] in seen:
+                        continue
+                    seen.add(reading["operator"])
+                    out.append({"latex": cand["latex"], "display": OPERATOR_TEX.get(reading["operator"], cand["latex"]),
+                                "raw": cand.get("raw"), "score": cand.get("score"), "nested": False,
+                                "reading": reading})
+                if not out and result["candidates"]:
+                    first = result["candidates"][0]["latex"]
+                    out.append({"latex": first, "display": first, "raw": result["candidates"][0].get("raw"),
+                                "score": result["candidates"][0].get("score"), "nested": False,
+                                "reading": self._operator_reading(first)})
+                result["candidates"] = out
+                result["nested"] = False
+                return result
             if given is not None:
                 result = {"candidates": [dict(c) for c in given], "ms": payload.get("ms", 0),
                           "strokes": len(payload.get("strokes") or []), "engine": payload.get("engine") or self.engine}
