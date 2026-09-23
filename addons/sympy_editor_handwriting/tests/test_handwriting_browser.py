@@ -201,6 +201,60 @@ def test_the_ways_to_read_an_ambiguous_part_are_typeset_buttons():
             _close(srv, browser)
 
 
+def test_the_selection_written_over_is_hidden_until_the_writing_is_discarded():
+    """Bug: with a piece selected, taking the pen left the piece on the screen
+    under the ink.  It is what the writing replaces: hidden while the pen is
+    on and while ink waits (its place kept, its outline gone too), back when
+    the writing is discarded, and replaced - not shown again - once applied."""
+    doc = Document(x + y, addons=[HandwritingAddon(LetterRecognizer()), LATEX])
+    hidden = """() => {
+        const el = [...document.querySelectorAll('.se-view [data-path]')]
+            .find(e => e.textContent.replace(/[\\s\\u200b]/g, '') === 'y');
+        const box = document.querySelector('.se-view .se-box-select');
+        return {y: el ? getComputedStyle(el).visibility : null,
+                box: box ? getComputedStyle(box).display !== 'none' : false};
+    }"""
+    pen = '[data-cmd="addon:handwriting:pen"]'
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc, pen=False)
+        try:
+            r = page.evaluate(TEXT_RECT, "y")
+            page.mouse.click((r["left"] + r["right"]) / 2, (r["top"] + r["bottom"]) / 2)
+            assert _wait(lambda: page.locator(".se-view .se-selected").count() == 1)
+            assert page.evaluate(hidden) == {"y": "visible", "box": True}
+            width = page.evaluate("document.querySelector('.se-view .katex').getBoundingClientRect().width")
+            page.locator(pen).click()                             # the pen: y goes, its outline too
+            assert _wait(lambda: page.evaluate(hidden) == {"y": "hidden", "box": False})
+            page.locator(pen).click()                             # nothing written: discarded, y is back
+            assert _wait(lambda: page.evaluate(hidden) == {"y": "visible", "box": True})
+            page.locator(pen).click()
+            view = page.locator(".se-view").bounding_box()
+            _drag(page, view["x"] + 40, view["y"] + 90, view["x"] + 110, view["y"] + 120)
+            assert _wait(lambda: page.locator(".hw-apply").is_visible(), 15)
+            assert page.evaluate(hidden)["y"] == "hidden"
+            # the place is kept: the formula did not close up around the hole
+            assert page.evaluate("document.querySelector('.se-view .katex').getBoundingClientRect().width") >= width - 1
+            page.locator(pen).click()                             # the pen down, the ink kept: still hidden
+            assert page.evaluate(hidden)["y"] == "hidden"
+            page.locator(pen).click()
+            page.locator('[data-cmd="addon:handwriting:clear"]').click()   # the ink discarded...
+            assert page.evaluate(hidden)["y"] == "hidden"                  # ...the pen still on
+            page.locator(pen).click()                                      # and put away: back
+            assert _wait(lambda: page.evaluate(hidden) == {"y": "visible", "box": True})
+            # written again and applied: replaced, never shown again
+            page.locator(pen).click()
+            _drag(page, view["x"] + 40, view["y"] + 90, view["x"] + 110, view["y"] + 120)
+            apply = page.locator(".hw-apply")
+            assert _wait(lambda: apply.is_visible() and not apply.is_disabled(), 15)
+            apply.click()
+            assert _wait(lambda: str(doc.expr) == "x + z", 15), str(doc.expr)
+            assert _wait(lambda: page.evaluate("document.querySelectorAll('.se-view .hw-covered').length") == 0), \
+                page.evaluate("[...document.querySelectorAll('.se-view .hw-covered')].map(e => e.textContent)")
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
 def test_what_is_written_over_a_selection_takes_its_place_when_applied():
     """A piece selected in the editor, then written on: the reading waits to be
     applied - the formula is not touched until then - and takes that piece's

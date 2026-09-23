@@ -30,6 +30,9 @@
 /* The bar of actions a selection brings up sits just where one would write:
  * it steps aside while the Pen is on, and comes back with it. */
 .sympy-editor.se-inking .se-actions { display: none !important; }
+/* what the ink replaces: hidden while one writes over it, its place kept */
+.sympy-editor .se-view .hw-covered { visibility: hidden !important; }
+.sympy-editor.hw-covering .se-box-select { display: none !important; }
 /* the tools: the Pen and the Eraser stay pressed while they are on */
 .sympy-editor .se-tools button.hw-tool { line-height: 1; }
 .sympy-editor .se-tools button.hw-tool .se-icon { display: block; width: 1.2em; height: 1.2em; }

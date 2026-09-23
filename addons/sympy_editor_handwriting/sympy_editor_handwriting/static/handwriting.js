@@ -135,7 +135,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       + "<li>A moment after the pen lifts what is written is read, and the readings are offered under the formula, the best first. <b>Apply to the formula</b> puts the one picked in - nothing changes before that. Once one is in, picking another changes the formula to it instead (the one before is taken back, so they never pile up).</li>"
       + "<li>The choices come in the order one makes them: first the piece of the formula what is written goes with (writing freely, with nothing selected), then the reading, then the ways its LaTeX can be read - and then Apply.</li>"
       + "<li>Writing on a formula that fills the screen leaves the readings out of sight: a moment after the pen rests a button rises at the foot of the screen, and a press goes down to them. Writing again sends it away.</li>"
-      + "<li>Where it goes is what the editor says: over the selected sub-expression (or the selected range), at the cursor, and - with neither - against the piece of the formula it is written by. That piece is outlined, and it is read <i>together with</i> the ink: a bar under it with ink under the bar is a fraction over it, a small letter at its top-right corner its exponent, a letter beside it a product. <b>Read with</b> offers the other pieces it might be, and <i>alone</i>: the reading by itself, after the formula.</li>"
+      + "<li>Where it goes is what the editor says: over the selected sub-expression (or the selected range) - which is hidden, its place kept, while you write over it, and comes back only if the writing is discarded (the ink cleared and the pen put away) -, at the cursor, and - with neither - against the piece of the formula it is written by. That piece is outlined, and it is read <i>together with</i> the ink: a bar under it with ink under the bar is a fraction over it, a small letter at its top-right corner its exponent, a letter beside it a product. <b>Read with</b> offers the other pieces it might be, and <i>alone</i>: the reading by itself, after the formula.</li>"
       + "<li>" + toolIcon("erase", 16) + " <b>Erase</b> takes away the strokes the pointer passes over (a pen turned round erases too); " + toolIcon("undo", 16) + " and " + toolIcon("redo", 16) + " take back the last stroke and write it again; " + toolIcon("clear", 16) + " <b>Clear ink</b> takes all of it. The editor's own Undo is for the formula, and takes back what a reading did.</li>"
       + "<li>Two fingers on the formula zoom it while writing, as they do at any other time, and the ink is zoomed with it; so do the \u2212/100%/+ buttons and <kbd>Ctrl</kbd>+wheel.</li>"
       + "<li>What the reading did is shown under the editor - the formula as it was and as it now is, what went marked red and what came marked green - to <b>Keep</b> or to <b>Undo the change</b>; the editor's own Undo takes it back too.</li>"
@@ -301,6 +301,7 @@ SympyEditor.registerAddon("handwriting", (function () {
                 Math.round(ev.timeStamp - t0)];
       }
       function redraw() {
+        syncCover();
         var o = offset();
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -577,6 +578,41 @@ SympyEditor.registerAddon("handwriting", (function () {
         room.el.style[room.side === "right" ? "marginRight" : "marginLeft"] = want + "px";
         layout();
       }
+      /* ---- what the writing replaces is off the screen ---- */
+      // A selection written over is what the ink replaces: while the pen is
+      // on - or ink, or readings of it, are still waiting - it is hidden, its
+      // place kept (visibility, so the formula does not move under the pen),
+      // and the editor's outline of it with it.  It comes back only when the
+      // writing is discarded: the ink cleared with the pen down, or the pen
+      // put down with nothing written.  Once a reading is applied it is gone
+      // for good, replaced.
+      var covered = [];
+      function childPath(parent, i) { return (parent === "/" ? "" : parent) + "/" + i; }
+      function coverPaths() {
+        // applied, or going in (mine: the formula is being redrawn with the
+        // reading, and the piece now at that place is the new one)
+        if (applied || mine) return [];
+        if (!(pen || strokes.length || current || held || readings.length)) return [];
+        var a = aim && (aim.kind === "selection" || aim.kind === "range") ? aim : null;
+        if (!a && !held && !strokes.length) {              // nothing written yet: what is selected now
+          var r = api.range && api.range(), sel = api.selected && api.selected();
+          if (r) a = { kind: "range", path: r.parent, children: editor._rangeIndices ? editor._rangeIndices() : [] };
+          else if (sel) a = { kind: "selection", path: sel };
+        }
+        if (!a) return [];
+        if (a.kind === "selection") return [a.path];
+        return (a.children || []).map(function (i) { return childPath(a.path, i); });
+      }
+      function syncCover() {
+        var want = coverPaths().map(elementFor).filter(function (el) { return !!el; });
+        var same = want.length === covered.length && want.every(function (el, i) { return covered[i] === el; });
+        if (same) return;
+        covered.forEach(function (el) { el.classList.remove("hw-covered"); });
+        want.forEach(function (el) { el.classList.add("hw-covered"); });
+        covered = want;
+        if (editor && editor.root) editor.root.classList.toggle("hw-covering", want.length > 0);
+      }
+
       function closeRoom() {
         if (!room) return;
         try { room.el.style[room.side === "right" ? "marginRight" : "marginLeft"] = ""; }
@@ -619,6 +655,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         readings = [];
         chosen = -1;
         picks = { choices: {}, constants: {} };
+        syncCover();
         readingOf.textContent = "";
         src.textContent = "";
         latexRow.hidden = true;
@@ -1079,6 +1116,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         canvas.style.pointerEvents = pen ? "auto" : "none";
         if (pen) openRoom(); else closeRoom();
         if (!pen) hideDown();
+        syncCover();
         if (!strokes.length) say(idle(), !canRead);
         showPanel();
         updateTools();
@@ -1261,12 +1299,16 @@ SympyEditor.registerAddon("handwriting", (function () {
         onSelect: function () {         // the room follows what is selected
           if (pen && !strokes.length) { closeRoom(); openRoom(); }
           if (strokes.length) redraw();
+          syncCover();
         },
         onZoom: function () { layout(); },
         onState: function () {
           dressTools();
           room = null;                       // rendered again: the margin went with the old nodes
+          covered = [];                      // and what was hidden went with them
+          if (editor && editor.root) editor.root.classList.remove("hw-covering");
           if (pen) openRoom();
+          syncCover();
           if (!mine && applied) hideApplied();   // edited in the editor itself: what we did is answered for
           setTimeout(layout, 0);
         },
@@ -1277,6 +1319,9 @@ SympyEditor.registerAddon("handwriting", (function () {
           if (downBtn.parentNode) downBtn.parentNode.removeChild(downBtn);
           closeRoom();
           setPen(false);
+          covered.forEach(function (el) { el.classList.remove("hw-covered"); });   // nothing stays hidden once the add-on goes
+          covered = [];
+          if (editor && editor.root) editor.root.classList.remove("hw-covering");
           if (resizer) resizer.disconnect(); else window.removeEventListener("resize", layout);
           if (view) view.removeEventListener("scroll", redraw);
           if (canvas.parentNode) canvas.parentNode.removeChild(canvas);

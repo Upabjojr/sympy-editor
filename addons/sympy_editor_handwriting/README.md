@@ -12,7 +12,8 @@ goes into the formula when **Apply to the formula** is pressed - nothing
 changes before that.
 
 Where it goes is what the editor says: over the selected sub-expression (or
-the selected range), at the cursor, or - with neither - against the piece of
+the selected range) - hidden, its place kept, while the pen is on or ink
+waits, back only when the writing is discarded -, at the cursor, or - with neither - against the piece of
 the formula it is written by.  That piece is drawn into the strokes as a
 stand-in (a triangle, which the model reads as `\Delta`), so the ink is read
 *together with* it: a bar under it with ink under the bar is a fraction over
