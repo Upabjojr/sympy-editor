@@ -330,7 +330,8 @@ helpers on the real `args`, so SymPy's evaluation applies and undo works.
 query, `samples`: Python evaluates the node at a view path (with the sliders'
 values substituted, the first free symbol on the axis, an equation as two
 curves) with `lambdify` - numpy when present, `math` otherwise, a non-real
-value a gap - and `plot.js` draws with Plotly.js from the CDN, or an SVG
+value a gap - and `plot.js` draws with Plotly.js from the CDN (from the bundle's own copy
+in the apps and the web app: the page option `localAssets`), or an SVG
 polyline when the CDN is out of reach.  It follows the selection, so
 selecting the numerator plots the numerator.  SymPy's plotting module is not
 used.

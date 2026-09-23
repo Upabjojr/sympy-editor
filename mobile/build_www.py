@@ -20,11 +20,15 @@ a WebView (see ``mobile/android`` and ``mobile/ios``).
 from __future__ import annotations
 
 import argparse
+import email
+import hashlib
 import json
 import re
 import shutil
+import subprocess
 import sys
 import urllib.request
+import zipfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -34,7 +38,8 @@ from sympy import Function, Integral, Sum, exp, oo, pi, sin, sqrt, symbols  # no
 
 from sympy_editor import Document, to_html  # noqa: E402
 from sympy_editor.addons import scan_addons  # noqa: E402
-from sympy_editor.html import KATEX_VERSION, PYODIDE_VERSION, SYMPY_VERSION, SYMPY_WHEEL, default_urls  # noqa: E402
+from sympy_editor.html import (  # noqa: E402
+    KATEX_VERSION, PYODIDE_VERSION, SYMPY_VERSION, SYMPY_WHEEL, addon_catalog, default_urls, pyodide_requirements)
 
 #: The add-on folders the bundle knows: what the apps stage beside their
 #: Python (mobile/build.py), and what a Pyodide bundle carries in the page.
@@ -52,9 +57,14 @@ PYODIDE_PACKAGES = ("mpmath", "micropip")
 NOTICE_PAGE = """Third-party components vendored in this bundle
 ================================================
 KaTeX {katex} (with its fonts)   MIT   https://katex.org
-Plotly.js (the plot add-on, fetched from jsDelivr, not vendored)  MIT  https://plotly.com/javascript/
 sympy-editor and its add-ons     AGPL-3.0-or-later
 """
+
+#: What an add-on loads from a CDN and the bundle carries instead, by the
+#: start of its URL: the licence line its NOTICE entry gets.
+ASSET_LICENCES = {
+    "https://cdn.jsdelivr.net/npm/plotly.js": "Plotly.js (the plot add-on)  MIT  https://plotly.com/javascript/",
+}
 
 #: A page that carries its own Python: Pyodide and the wheels beside it.
 NOTICE_PYODIDE = """Pyodide {pyodide}  MPL-2.0   https://pyodide.org  (core runtime, python_stdlib.zip)
@@ -63,6 +73,10 @@ micropip (Pyodide's, for an add-on's requirements)  MPL-2.0  https://pyodide.org
 SymPy {sympy} (wheel from PyPI)  BSD-3   https://www.sympy.org
 mpmath (wheel)        BSD-3     https://mpmath.org
 """
+
+#: Packages a Pyodide page has without micropip: never vendored as wheels of
+#: the add-ons' requirements (SymPy is SYMPY_WHEEL, the rest Pyodide's own).
+PROVIDED = {"sympy", "mpmath", "micropip", "packaging"}
 
 #: A page inside the app: the Python is Chaquopy's, and the rest is Java.
 NOTICE_NATIVE = """The Python beside this bundle, and what the app is built on:
@@ -79,13 +93,14 @@ terms it is distributed under.
 """
 
 
-def notice(pyodide: bool = True) -> str:
+def notice(pyodide: bool = True, extra: str = "") -> str:
     """The bundle's NOTICE.txt: what it carries in the page, then what runs its
     Python - Pyodide's wheels, or the app's own - and then sympy-editor's
     LICENSE, which carries SymPy's licence in full (a binary copy must carry
     it).  THIRD-PARTY.md has the whole list, with what each is used for."""
     listed = NOTICE_PAGE.format(katex=KATEX_VERSION)
     listed += (NOTICE_PYODIDE if pyodide else NOTICE_NATIVE).format(pyodide=PYODIDE_VERSION, sympy=SYMPY_VERSION)
+    listed += extra
     return listed + "\n" + (HERE.parent / "LICENSE").read_text(encoding="utf-8")
 
 
@@ -108,9 +123,87 @@ def fetch(url: str, dest: Path, cache: Path) -> Path:
     return dest
 
 
-def vendor(out: Path, cache: Path, pyodide: bool = True) -> dict:
+def _norm(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _wheel_meta(path: Path) -> dict:
+    """Name, version and licence of a wheel, from its METADATA."""
+    with zipfile.ZipFile(path) as z:
+        meta = next(n for n in z.namelist() if n.endswith(".dist-info/METADATA"))
+        md = email.message_from_bytes(z.read(meta))
+    classifiers = [c.rsplit("::", 1)[-1].strip() for c in md.get_all("Classifier") or [] if c.startswith("License ::")]
+    first_line = ((md.get("License") or "").strip().splitlines() or [""])[0]
+    licence = md.get("License-Expression") or (classifiers[0] if classifiers else first_line)
+    return {"name": md["Name"], "version": md["Version"], "license": licence or "see the wheel's METADATA"}
+
+
+def vendor_wheels(requirements, python: str, pdir: Path, cache: Path) -> list:
+    """The add-ons' requirements and everything they depend on, as wheels in
+    ``pdir``: a Pyodide page then installs them from the bundle and asks
+    PyPI for nothing - the apps' web views and the web app work offline.
+
+    pip resolves the closure for Pyodide's Python (pure-Python wheels only:
+    ``--platform any --abi none``; a requirement with compiled code has no
+    such wheel and stops the build, which is better than a bundle that goes
+    online).  The resolution is kept in the cache under a key of the
+    requirements and the Python version, so a second build needs no network.
+    Returns the wheels' metadata, their file names under ``file``."""
+    requirements = sorted(requirements)
+    if not requirements:
+        return []
+    key = hashlib.sha256(json.dumps([requirements, python]).encode()).hexdigest()[:16]
+    where = cache / "wheels" / key
+    listing = where / "wheels.json"
+    if not listing.is_file():
+        shutil.rmtree(where, ignore_errors=True)
+        where.mkdir(parents=True)
+        print("  resolving", ", ".join(requirements), "for Python", python)
+        subprocess.run([sys.executable, "-m", "pip", "download", "--quiet", "--only-binary=:all:",
+                        "--platform", "any", "--abi", "none", "--implementation", "py",
+                        "--python-version", python, "--dest", str(where), *requirements], check=True)
+        listing.write_text(json.dumps(sorted(p.name for p in where.glob("*.whl"))), encoding="utf-8")
+    out = []
+    for name in json.loads(listing.read_text(encoding="utf-8")):
+        meta = _wheel_meta(where / name)
+        if _norm(meta["name"]) in PROVIDED:
+            continue
+        shutil.copyfile(where / name, pdir / name)
+        out.append(dict(meta, file=name))
+    return out
+
+
+def vendor_assets(doc: Document, out: Path, cache: Path) -> tuple:
+    """What the add-ons load from a CDN - a script or a stylesheet named in
+    their options (Plotly, for the plot) - copied into ``vendor/addons/``.
+
+    Returns ``({url: path in the bundle}, NOTICE lines)``; the page's option
+    ``localAssets`` sends every load of such a URL to the copy, so an add-on
+    works with no network in the apps as it does in a browser online.  An
+    asset with no licence line in :data:`ASSET_LICENCES` stops the build:
+    what the bundle carries is listed in its NOTICE, always."""
+    found = {}
+    for addon in addon_catalog(doc):
+        for value in addon.client_options().values():
+            if isinstance(value, str) and re.match(r"https://[^\s]+\.(js|css)$", value):
+                found[value] = addon.name
+    assets, lines = {}, []
+    for url in sorted(found):
+        licence = next((line for start, line in ASSET_LICENCES.items() if url.startswith(start)), None)
+        if licence is None:
+            raise SystemExit(f"{url} (the {found[url]} add-on) has no licence line in ASSET_LICENCES: "
+                             "check its licence and add one")
+        rel = "vendor/addons/" + url.split("://", 1)[1]
+        fetch(url, out / rel, cache)
+        assets[url] = rel
+        lines.append(licence + "\n")
+    return assets, "".join(lines)
+
+
+def vendor(out: Path, cache: Path, pyodide: bool = True, requirements=(), extra_notice: str = "") -> dict:
     """Vendor KaTeX and (unless the host runs Python itself) the Pyodide
-    subset; return the relative URLs to use."""
+    subset, with the wheels of the add-ons' ``requirements``; return the
+    relative URLs to use."""
     katex_base = f"https://cdn.jsdelivr.net/npm/katex@{KATEX_VERSION}/dist/"
     kdir = out / "vendor" / "katex"
     fetch(katex_base + "katex.min.js", kdir / "katex.min.js", cache)
@@ -120,7 +213,7 @@ def vendor(out: Path, cache: Path, pyodide: bool = True) -> dict:
 
     if not pyodide:
         shutil.rmtree(out / "vendor" / "pyodide", ignore_errors=True)     # a leftover from an earlier build
-        (out / "vendor" / "NOTICE.txt").write_text(notice(pyodide=False), encoding="utf-8")
+        (out / "vendor" / "NOTICE.txt").write_text(notice(pyodide=False, extra=extra_notice), encoding="utf-8")
         return {"katexJs": "vendor/katex/katex.min.js", "katexCss": "vendor/katex/katex.min.css"}
 
     pyodide_base = default_urls()["pyodideIndex"]
@@ -140,14 +233,20 @@ def vendor(out: Path, cache: Path, pyodide: bool = True) -> dict:
         fetch(pyodide_base + file_name, pdir / file_name, cache)
     wheel = SYMPY_WHEEL.rsplit("/", 1)[1]
     fetch(SYMPY_WHEEL, pdir / wheel, cache)
-    (out / "vendor" / "NOTICE.txt").write_text(notice(), encoding="utf-8")
-    return {
+    python = ".".join(str(lock["info"]["python"]).split(".")[:2])
+    extra = vendor_wheels(requirements, python, pdir, cache)
+    listed = "".join(f"{w['name']} {w['version']} (wheel, for an add-on)  {w['license']}\n" for w in extra)
+    (out / "vendor" / "NOTICE.txt").write_text(notice(extra=extra_notice + listed), encoding="utf-8")
+    urls = {
         "katexJs": "vendor/katex/katex.min.js",
         "katexCss": "vendor/katex/katex.min.css",
         "pyodideJs": "vendor/pyodide/pyodide.js",
         "pyodideIndex": "vendor/pyodide/",
         "sympyWheel": "vendor/pyodide/" + wheel,
     }
+    if extra:
+        urls["wheels"] = ["vendor/pyodide/" + w["file"] for w in extra]
+    return urls
 
 
 def app_logo(debug: bool = False) -> str:
@@ -209,7 +308,6 @@ def build(out: Path, *, cdn: bool = False, cache: Path | None = None, expr=None,
     each shipping CPython and SymPy itself, so nothing of Pyodide is vendored
     into the bundle."""
     out.mkdir(parents=True, exist_ok=True)
-    urls = None if cdn else vendor(out, cache or Path.home() / ".cache" / "sympy-editor", pyodide=not native)
     # The add-ons, off to start with and a click away in the Add-ons menu: the
     # document's catalogue names them by module; the app's Python imports them
     # from the folders it bundles, a Pyodide page from the packages it carries.
@@ -224,10 +322,19 @@ def build(out: Path, *, cdn: bool = False, cache: Path | None = None, expr=None,
     # boots, so the add-on is still listed and can be switched on there.
     doc = document_with_addons(expr if expr is not None else demo_expression(),
                                enable=enable_addons, addons_dir=addons_dir)
-    return _write(out, doc, urls, title, head, native, debug)
+    # Everything the page needs is in the bundle, the add-ons' requirements
+    # included: an app, and the web app once installed, work with no network.
+    urls, assets = None, {}
+    if not cdn:
+        cache = cache or Path.home() / ".cache" / "sympy-editor"
+        shutil.rmtree(out / "vendor" / "addons", ignore_errors=True)     # a leftover from an earlier build
+        assets, assets_notice = vendor_assets(doc, out, cache)
+        urls = vendor(out, cache, pyodide=not native, requirements=pyodide_requirements(doc),
+                      extra_notice=assets_notice)
+    return _write(out, doc, urls, title, head, native, debug, assets)
 
 
-def _write(out, doc, urls, title, head, native, debug):
+def _write(out, doc, urls, title, head, native, debug, assets=None):
     # A debug build is a second application on the phone: it says so over the
     # formula and wears the badged icon, as its launcher entry does.
     if debug and not title.endswith(DEBUG_SUFFIX):
@@ -239,7 +346,9 @@ def _write(out, doc, urls, title, head, native, debug):
                    # there is no title bar to say whose window this is
                    logo=app_logo(debug),
                    # an app keeps its zoom, its sessions and its add-on switches between launches
-                   options={"rememberZoom": True, "sessions": True, "rememberAddons": True})
+                   options=dict({"rememberZoom": True, "sessions": True, "rememberAddons": True},
+                                # the add-ons' CDN files, loaded from the bundle's copies
+                                **({"localAssets": assets} if assets else {})))
     (out / "index.html").write_text(page, encoding="utf-8")
     return out
 

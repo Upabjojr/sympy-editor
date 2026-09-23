@@ -1074,7 +1074,18 @@ pip package.  The rule is minimal wrapping and maximal sharing:
   `www/vendor/` so the app works offline.  `--native` (what both apps use)
   leaves Pyodide out - the app has an interpreter of its own; without it the
   Pyodide subset SymPy needs is vendored too (about 30 MB), which is what the
-  web app and a desktop preview want.  Test it in a desktop browser with
+  web app and a desktop preview want.  **A bundle never goes online**:
+  whatever the page or an add-on would fetch is in it.  The add-ons'
+  requirements are wheels beside Pyodide (`vendor_wheels`: pip resolves the
+  closure for Pyodide's Python, pure-Python wheels only, cached by
+  requirements; `urls["wheels"]` → `cfg["micropip"]` names them, and
+  `micropipCode` installs them with `deps=False`, resolved against the page
+  since the worker is a blob), and the CDN scripts an add-on names in its
+  `client_options` (Plotly) are copied under `vendor/addons/`
+  (`vendor_assets`, each with a line in `ASSET_LICENCES` for the NOTICE) and
+  mapped by the page option `localAssets`, which `loadScript`/`ensureCss`
+  consult.  `test_vendored_bundle_is_self_contained` switches the LaTeX and
+  rules add-ons on with every outside request blocked.  Test it in a desktop browser with
   `python -m http.server -d mobile/www` (it must be served, not opened as a
   file: WebAssembly and fetch need an origin).
 - `mobile/android/`: a Gradle/Kotlin project whose only activity is a WebView

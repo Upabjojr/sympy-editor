@@ -51,8 +51,9 @@ def _span(span):
         raise ValueError(f"The span must be two different finite numbers, not {span!r}")
     return (a, b) if a < b else (b, a)
 
-#: Plotly.js (MIT), pinned; override with ``PlotAddon(plotly_js=...)`` or
-#: a vendored copy for an offline bundle.
+#: Plotly.js (MIT), pinned; override with ``PlotAddon(plotly_js=...)``.  An
+#: offline bundle (mobile/build_www.py) vendors it and its page loads the
+#: copy instead (the option ``localAssets``).
 PLOTLY_VERSION = "2.35.2"
 PLOTLY_JS = f"https://cdn.jsdelivr.net/npm/plotly.js-dist-min@{PLOTLY_VERSION}/plotly.min.js"
 

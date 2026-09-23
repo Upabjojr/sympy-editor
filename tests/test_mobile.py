@@ -39,6 +39,12 @@ def test_vendored_bundle_is_self_contained(tmp_path):
     for name in ("vendor/katex/katex.min.js", "vendor/pyodide/pyodide.asm.wasm", "vendor/pyodide/python_stdlib.zip", "vendor/NOTICE.txt"):
         assert (out / name).exists(), name
     assert any(p.name.startswith("sympy-") for p in (out / "vendor" / "pyodide").iterdir())
+    # the add-ons' requirements, with what they depend on, are wheels in the
+    # bundle, each named in the NOTICE with its licence
+    wheels = {p.name.split("-")[0].lower() for p in (out / "vendor" / "pyodide").glob("*.whl")}
+    assert {"lark", "sympy_matching", "omnimatch", "multiset"} <= wheels, wheels
+    listed = (out / "vendor" / "NOTICE.txt").read_text(encoding="utf-8")
+    assert "lark " in listed and "sympy-matching " in listed and "MIT" in listed
 
     handler = type("H", (http.server.SimpleHTTPRequestHandler,), {"log_message": lambda *a: None})
     handler.extensions_map.update({".wasm": "application/wasm", ".whl": "application/zip", ".mjs": "text/javascript"})
@@ -51,6 +57,8 @@ def test_vendored_bundle_is_self_contained(tmp_path):
             page = b.new_page()
             errors = []
             page.on("pageerror", lambda e: errors.append(str(e)))
+            warnings = []
+            page.on("console", lambda m: warnings.append(m.text) if m.type in ("warning", "error") else None)
             page.route("**/*", lambda route: (external.append(route.request.url), route.abort())
                        if "127.0.0.1" not in route.request.url else route.continue_())
             page.goto(f"http://127.0.0.1:{srv.server_address[1]}/index.html")
@@ -67,6 +75,21 @@ def test_vendored_bundle_is_self_contained(tmp_path):
             page.keyboard.press("Enter")
             page.wait_for_function("document.querySelector('.se-source').textContent === 'x**2 + 1'", timeout=240000)
             assert page.locator(".se-error").is_hidden()
+            # The add-ons' requirements (lark, sympy-matching and what it needs)
+            # came from the bundle, not from PyPI: both add-ons work offline.
+            ed = "document.querySelector('.sympy-editor').__sympyEditor"
+            page.evaluate(ed + ".send({action: 'addons', enable: ['latex', 'matching']})")
+            page.wait_for_selector(".se-addon-matching .mt-field", timeout=60000)
+            read = page.evaluate("(ed) => eval(ed).send({action: 'addon', addon: 'latex', method: 'read', "
+                                 "latex: '\\\\frac{x}{2}'}).then(s => s.query.result.reading || s.query.result)", ed)
+            assert read["ok"] and read["src"] == "x/2", read
+            page.locator(".mt-field").fill("x**2 -> y")
+            page.locator(".mt-field").press("Enter")
+            page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1", timeout=60000)
+            assert not [m for m in warnings if "could not be installed" in m], warnings
+            # and what the plot add-on loads from a CDN comes from the bundle
+            from sympy_editor_plot import PLOTLY_JS
+            assert page.evaluate("(u) => SympyEditor.loadScript(u).then(() => !!window.Plotly)", PLOTLY_JS)
             assert errors == []
             b.close()
     finally:
@@ -178,8 +201,10 @@ def test_native_bundle_has_no_pyodide(tmp_path):
     assert '"pyodideJs"' not in page and "vendor/pyodide" not in page   # nothing of Pyodide to load
     assert (out / "vendor" / "katex" / "katex.min.js").exists()      # KaTeX is still vendored
     assert not (out / "vendor" / "pyodide").exists()
-    size = sum(p.stat().st_size for p in out.rglob("*") if p.is_file())
+    addons = out / "vendor" / "addons"          # the add-ons' CDN files (Plotly, ~4.6 MB): offline
+    size = sum(p.stat().st_size for p in out.rglob("*") if p.is_file() and addons not in p.parents)
     assert size < 5e6, size          # ~1 MB, against ~24 MB with Pyodide
+    assert sum(p.stat().st_size for p in addons.rglob("*") if p.is_file()) < 8e6
 
 
 def test_the_android_app_is_configured_for_its_own_python():
@@ -865,3 +890,17 @@ def test_a_debug_build_says_debug_everywhere_it_is_named(tmp_path):
     with Image.open(debug_res / "mipmap-xxhdpi/ic_launcher_foreground.png") as image:
         box = [v * 108 / image.size[0] for v in image.split()[-1].getbbox()]
     assert box[0] >= 18 and box[1] >= 18 and box[2] <= 90 and box[3] <= 90, box
+
+
+def test_the_bundle_carries_what_its_add_ons_load_from_a_cdn(tmp_path):
+    """The apps' bundle (native) has Plotly for the plot add-on beside the
+    page, and the page loads that copy: a CDN script in an app is a plot that
+    never comes without a network."""
+    mod = _load_builder()
+    out = mod.build(tmp_path / "www", native=True)
+    from sympy_editor_plot import PLOTLY_JS
+    copy = out / "vendor" / "addons" / PLOTLY_JS.split("://", 1)[1]
+    assert copy.is_file() and copy.stat().st_size > 1_000_000
+    page = (out / "index.html").read_text(encoding="utf-8")
+    assert '"localAssets"' in page and PLOTLY_JS in page
+    assert "Plotly.js (the plot add-on)" in (out / "vendor" / "NOTICE.txt").read_text(encoding="utf-8")

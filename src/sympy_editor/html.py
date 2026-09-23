@@ -25,7 +25,7 @@ import json
 import secrets
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from sympy import Basic
 
@@ -74,6 +74,25 @@ def default_urls() -> Dict[str, str]:
         "pyodideIndex": f"https://cdn.jsdelivr.net/pyodide/v{PYODIDE_VERSION}/full/",
         "sympyWheel": SYMPY_WHEEL,     # "" to use Pyodide's own sympy package instead
     }
+
+
+def addon_catalog(doc: Document) -> List[Any]:
+    """The add-ons ``doc`` can switch on, as far as they load: the ones that
+    are on and the rest of its catalogue."""
+    catalog: List[Any] = []
+    for entry in doc.available_addons():
+        if "error" in entry:
+            continue
+        addon = doc._load(entry["name"])
+        if addon not in catalog:
+            catalog.append(addon)
+    return catalog
+
+
+def pyodide_requirements(doc: Document) -> List[str]:
+    """What a Pyodide page must ``micropip.install`` for the add-ons ``doc``
+    can switch on (their ``requires``): names, as PyPI knows them."""
+    return sorted({pkg for addon in addon_catalog(doc) for pkg in addon.pyodide_packages()})
 
 
 def read_static(name: str) -> str:
@@ -138,13 +157,7 @@ def build_config(
     # the document's catalogue, as far as it loads - by module name, which is
     # what the Python that makes the document again (a Pyodide page, the
     # host application) can import.
-    catalog = []
-    for entry in doc.available_addons():
-        if "error" in entry:
-            continue
-        addon = doc._load(entry["name"])
-        if addon not in catalog:
-            catalog.append(addon)
+    catalog = addon_catalog(doc)
     if doc.addons:
         document["addons"] = [addon.module for addon in doc.addons.values()]
     if catalog:
@@ -163,7 +176,10 @@ def build_config(
             # Pyodide file system, and what micropip must install first -
             # for what is on and what may be switched on later.
             cfg["packages"] = {addon.module: addon.python_sources() for addon in catalog}
-            cfg["micropip"] = sorted({pkg for addon in catalog for pkg in addon.pyodide_packages()})
+            # A bundle that carries the wheels (mobile/build_www.py, offline)
+            # names them instead: the page installs those, and asks PyPI
+            # for nothing.
+            cfg["micropip"] = list(all_urls.get("wheels") or pyodide_requirements(doc))
     elif backend == "native":
         # The host application runs Python itself (the Android app ships
         # CPython and SymPy); it only needs to know which expression to start

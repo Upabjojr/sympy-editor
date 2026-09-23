@@ -20,7 +20,7 @@ are those the projects state for those versions.
 | Component | Licence | Where |
 | --- | --- | --- |
 | [KaTeX](https://katex.org) (0.16.22, with its fonts) | MIT | the formula is rendered with it; `src/sympy_editor/html.py`. From jsDelivr on a page that has the network, vendored into the app and the web bundle (`mobile/build_www.py`) |
-| [Plotly.js](https://plotly.com/javascript/) | MIT | the plot add-on's graphs; fetched from jsDelivr when that add-on is on (`addons/sympy_editor_plot`). No build vendors it |
+| [Plotly.js](https://plotly.com/javascript/) | MIT | the plot add-on's graphs (`addons/sympy_editor_plot`); from jsDelivr on a page that has the network, vendored into the app and the web bundle (`vendor/addons/`, `mobile/build_www.py`) |
 
 ## The add-ons' own dependencies
 
@@ -44,6 +44,7 @@ Everything above that the page uses, vendored beside it, and:
 | CPython (inside Pyodide) | PSF-2.0 | |
 | micropip | MPL-2.0 | Pyodide's own; a page with add-ons installs their requirements with it |
 | SymPy and mpmath wheels | BSD-3-Clause | taken from PyPI and Pyodide's index |
+| lark, sympy-matching, omnimatch, multiset wheels | MIT | the add-ons' requirements and what they depend on, from PyPI, installed from the bundle: the page asks PyPI for nothing |
 
 The bundle's `vendor/NOTICE.txt` lists these and carries the editor's `LICENSE`
 (and so SymPy's) in full.  It is written by `mobile/build_www.py`.

@@ -193,7 +193,18 @@ var SympyEditor = (function () {
   /* Resource loading                                                    */
   /* ------------------------------------------------------------------ */
 
+  /** Copies of remote files that the page carries itself: CDN URL -> the
+   *  copy's path.  A bundle that must work offline (mobile/build_www.py)
+   *  vendors what its add-ons load from a CDN - Plotly for the plot - and
+   *  names the copies in the option `localAssets`; loadScript and ensureCss
+   *  take the copy whenever there is one. */
+  var localAssets = {};
+  function localAsset(url) {
+    return url && Object.prototype.hasOwnProperty.call(localAssets, url) ? localAssets[url] : url;
+  }
+
   function loadScript(src) {
+    src = localAsset(src);
     return new Promise(function (resolve, reject) {
       var s = document.createElement("script");
       s.src = src;
@@ -205,6 +216,7 @@ var SympyEditor = (function () {
   }
 
   function ensureCss(href) {
+    href = localAsset(href);
     if (!href) return;
     var links = document.querySelectorAll("link[rel=stylesheet]");
     for (var i = 0; i < links.length; i++) {
@@ -6890,11 +6902,11 @@ var SympyEditor = (function () {
     "      for (var pkg in (m.packages || {})) for (var f in m.packages[pkg]) {",
     "        var fp = m.root + '/' + pkg + '/' + f; py.FS.mkdirTree(fp.slice(0, fp.lastIndexOf('/'))); py.FS.writeFile(fp, m.packages[pkg][f]);",
     "      }",
-    "      if (m.micropip && m.micropip.length) {",
+    "      if (m.pipCode) {",
     "        self.postMessage({ type: 'progress', text: 'Installing add-ons…' });",
     "        try {",                       // an add-on's packages failing is not the editor's failure
     "          await py.loadPackage('micropip');",
-    "          await py.runPythonAsync('import micropip\\nawait micropip.install(' + JSON.stringify(m.micropip) + ')');",
+    "          await py.runPythonAsync(m.pipCode);",
     "        } catch (err) { console.warn('sympy-editor: an add-on\\'s packages could not be installed:', err); }",
     "      }",
     "      py.runPython(m.boot);",
@@ -6906,10 +6918,10 @@ var SympyEditor = (function () {
     "      for (var pk in (m.packages || {})) for (var pf in m.packages[pk]) {",
     "        var pp = m.root + '/' + pk + '/' + pf; py.FS.mkdirTree(pp.slice(0, pp.lastIndexOf('/'))); py.FS.writeFile(pp, m.packages[pk][pf]);",
     "      }",
-    "      if (m.micropip && m.micropip.length) {",
+    "      if (m.pipCode) {",
     "        try {",
     "          await py.loadPackage('micropip');",
-    "          await py.runPythonAsync('import micropip\\nawait micropip.install(' + JSON.stringify(m.micropip) + ')');",
+    "          await py.runPythonAsync(m.pipCode);",
     "        } catch (err) { console.warn('sympy-editor: an add-on\\'s packages could not be installed:', err); }",
     "      }",
     "      py.runPython('import importlib\\nimportlib.invalidate_caches()');",
@@ -6936,6 +6948,20 @@ var SympyEditor = (function () {
     return e;
   }
 
+  /** The Python that installs what the add-ons need (`micropip`): names,
+   *  which micropip looks up on PyPI, or wheels (a path ending in .whl)
+   *  that a bundle carries beside the page - resolved against the page
+   *  here, since the worker runs from a blob: URL.  When every one is such a
+   *  wheel the bundle carries the whole closure (mobile/build_www.py
+   *  vendors it), so nothing is looked up: deps=False, and an offline page
+   *  installs them all.  Empty for nothing to install. */
+  function micropipCode(list) {
+    if (!list || !list.length) return "";
+    var wheel = function (r) { return /\.whl$/i.test(r); };
+    var reqs = list.map(function (r) { return wheel(r) ? new URL(r, document.baseURI).href : r; });
+    return "import micropip\nawait micropip.install(" + JSON.stringify(reqs) + (reqs.every(wheel) ? ", deps=False" : "") + ")";
+  }
+
   /** Pyodide loaded in the page itself (the fallback when a worker cannot be
    *  created, e.g. by Chrome for a file:// page): no interruption possible. */
   async function pyodideInPage(cfg, report) {
@@ -6953,14 +6979,14 @@ var SympyEditor = (function () {
       py.FS.writeFile(fp, cfg.packages[pkg][f]);
     }
     if (cfg.micropip && cfg.micropip.length) {
-      // What an add-on needs from PyPI.  Its failure is the add-on's, not the
+      // What an add-on needs from PyPI (or the wheels a bundle carries).  Its failure is the add-on's, not the
       // editor's: without a network (or without micropip beside the runtime)
       // the formula still edits, and the add-ons that wanted these packages
       // say so when they are switched on.
       report("Installing add-ons…");
       try {
         await py.loadPackage("micropip");
-        await py.runPythonAsync("import micropip\nawait micropip.install(" + JSON.stringify(cfg.micropip) + ")");
+        await py.runPythonAsync(micropipCode(cfg.micropip));
       } catch (err) {
         console.warn("sympy-editor: an add-on's packages could not be installed:", err);
       }
@@ -6981,7 +7007,7 @@ var SympyEditor = (function () {
     if (micropip.length) {
       try {
         await py.loadPackage("micropip");
-        await py.runPythonAsync("import micropip\nawait micropip.install(" + JSON.stringify(micropip) + ")");
+        await py.runPythonAsync(micropipCode(micropip));
       } catch (err) {
         console.warn("sympy-editor: an add-on's packages could not be installed:", err);
       }
@@ -7058,7 +7084,7 @@ var SympyEditor = (function () {
               indexURL: new URL(cfg.pyodideIndex, document.baseURI).href,
               sympyWheel: cfg.sympyWheel ? new URL(cfg.sympyWheel, document.baseURI).href : "",
               dir: PYODIDE_DIR, root: PYODIDE_ROOT, sources: cfg.sources,
-              packages: packagesOf(), micropip: micropipOf(), boot: PYODIDE_BOOT });
+              packages: packagesOf(), pipCode: micropipCode(micropipOf()), boot: PYODIDE_BOOT });
             return;
           } catch (e) {
             if (window.console) console.warn("sympy-editor: Python could not start in a worker, using the page instead.", e);
@@ -7089,7 +7115,7 @@ var SympyEditor = (function () {
       rt.extra.micropip = rt.extra.micropip.concat(pip);
       await rt.start();
       if (rt.inPage) await installPackages(rt.inPage.py, pk, pip);
-      else await post({ type: "packages", root: PYODIDE_ROOT, packages: pk, micropip: pip });
+      else await post({ type: "packages", root: PYODIDE_ROOT, packages: pk, pipCode: micropipCode(pip) });
     };
 
     rt.interrupt = function () {
@@ -7420,6 +7446,7 @@ var SympyEditor = (function () {
     if (cfg.backend === "readonly") options.readOnly = true;
     if (cfg.examples) options.examples = cfg.examples;     // what a new session can start from
     if (cfg.addons) options.addons = cfg.addons;           // their front ends (loaded by the Editor)
+    if (options.localAssets) Object.assign(localAssets, options.localAssets);   // before an add-on loads anything
     var backend = make(cfg);       // it keeps the sessions too, when it can (Keep.of: the editor's own keeper)
     var editor = new Editor(host, backend, options);
     editor.mountConfig = cfg;      // what a fresh one is mounted from (a tour played again)
