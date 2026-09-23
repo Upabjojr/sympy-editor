@@ -209,7 +209,7 @@ Two pieces of interface follow the pointer rather than the host:
 * the **arrow buttons** on the tool strip do exactly what the arrow keys do,
   so everything reachable by keyboard is reachable by finger.
 
-## 10. Two rules that hold everywhere
+## 10. Three rules that hold everywhere
 
 **A command applies to what is pointed at.** With a node selected it applies
 to that node; with a range, to those arguments; with a caret and nothing
@@ -219,6 +219,11 @@ expression; with nothing at all, to the whole expression.
 **A refused edit never changes the selection.** The message appears under the
 formula and the formula flickers red for half a second; what was selected
 stays selected.
+
+**Scrolling and zooming never take the pointing away.** A formula scrolled -
+by a finger, the wheel, the edge arrows, or by the pen bringing its space to
+write in into sight - keeps its selection and its caret where they were; the
+caret goes only when its place does.
 
 A refused edit changes nothing: the caret or the selection stays, and an
 expression refused in the empty view stays in its field to be corrected. The

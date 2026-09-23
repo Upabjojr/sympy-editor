@@ -346,6 +346,24 @@ def test_a_room_opened_past_the_edge_is_scrolled_towards_the_middle():
             assert _wait(lambda: page.evaluate(f"!!{ed}.caret"))
             page.locator(pen).click()
             page.wait_for_function("document.querySelector('.se-view').scrollLeft < 100", timeout=5000)
+            # a cursor at the end, the view at the start: scrolled there, and
+            # the cursor and the room are still there once it has (the scroll
+            # used to take the cursor away, and the room with it)
+            page.locator(pen).click()
+            page.evaluate("document.querySelector('.se-view').scrollLeft = 0")
+            page.evaluate(f"{ed}._hideCaret(); {ed}.select(null)")
+            page.locator(".se-view").focus()
+            page.keyboard.press("ArrowRight")                               # a caret at the last position
+            assert _wait(lambda: page.evaluate(f"!!{ed}.caret"))
+            page.locator(pen).click()
+            page.wait_for_function("document.querySelector('.se-view').scrollLeft > 50", timeout=5000)
+            page.wait_for_timeout(1000)
+            assert page.evaluate(f"!!{ed}.caret")
+            room = page.evaluate("""() => { const el = [...document.querySelectorAll('.se-view [data-path]')]
+                .find(e => e.style.marginRight); if (!el) return null; const q = el.getBoundingClientRect();
+                return {left: q.right, right: q.right + parseFloat(el.style.marginRight)}; }""")
+            v = page.evaluate(box)
+            assert room and v["left"] <= room["left"] and room["right"] <= v["right"] + 1, (room, v)
             assert page.errors == []
         finally:
             _close(srv, browser)

@@ -2561,6 +2561,30 @@ def test_methods_menu_lists_and_calls_class_methods(browser, serve_expr):
     assert page.errors == []
 
 
+def test_scrolling_the_formula_keeps_the_caret(browser, serve_expr):
+    """Bug: every scroll of the view took the caret away (the pen's room went
+    with it).  It is measured again where it stood, and stays."""
+    from sympy import Add, Symbol
+    srv, doc = serve_expr(Add(*[Symbol(f"a{i}") for i in range(30)]))
+    page = _open(browser, srv.url)
+    page.set_viewport_size({"width": 420, "height": 800})
+    ed = "document.querySelector('.sympy-editor').__sympyEditor"
+    page.locator(".se-view").focus()
+    page.keyboard.press("ArrowLeft")                               # a caret at the first position
+    assert _wait(lambda: page.evaluate(f"!!{ed}.caret"))
+    x0 = page.evaluate("document.querySelector('.se-caret').getBoundingClientRect().left")
+    for left in (40, 80, 120):
+        page.evaluate(f"document.querySelector('.se-view').scrollLeft = {left}")
+        page.wait_for_timeout(100)
+    assert page.evaluate(f"!!{ed}.caret") and page.locator(".se-caret").count() == 1
+    x1 = page.evaluate("document.querySelector('.se-caret').getBoundingClientRect().left")
+    assert abs((x0 - x1) - 120) < 3, (x0, x1)                    # it moved with the formula
+    page.keyboard.type("b")                                        # and typing still goes there
+    page.keyboard.press("Enter")
+    assert _wait(lambda: str(doc.expr).count("b") == 1), str(doc.expr)
+    assert page.errors == []
+
+
 def test_help_button_shows_the_guide(browser, serve_expr):
     srv, doc = serve_expr(x + y)
     page = _open(browser, srv.url)

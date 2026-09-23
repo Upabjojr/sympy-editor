@@ -2232,9 +2232,21 @@ var SympyEditor = (function () {
       this.view.addEventListener("scroll", function () {
         self._gapCache = null;
         // Scrolling moves the glyphs under the boxes, and says nothing about
-        // the selection: the status line and the caret stand here too.
+        // the selection: the status line and the caret stand here too.  The
+        // caret is measured again where it stood, as a relayout does, once a
+        // frame; taking it away at each scroll lost it to every scroll - a
+        // formula scrolled to bring the cursor's place into sight, or the
+        // pen's room, found no cursor there any more.
         if (self._typingHere()) return;
-        if (self.caret) self._hideCaret();
+        if (self.caret) {
+          if (!self._scrollCaretPending) {
+            self._scrollCaretPending = true;
+            requestAnimationFrame(function () {
+              self._scrollCaretPending = false;
+              if (self.caret && !self._caretAgain()) self._hideCaret();
+            });
+          }
+        }
         self._applySelection(true);
       });
       // A long press must not bring up the browser's own menu (Android
@@ -4561,7 +4573,10 @@ var SympyEditor = (function () {
 
     _showCaret(gap, x) {
       this._clearStaleError();
-      this._hideCaret();
+      // quietly: the caret placed again is reported below (_applySelection);
+      // a report of it gone in between told the add-ons there was none - the
+      // pen closed its room at every scroll, and the view snapped back
+      this._hideCaret(true);
       this.caret = gap;
       this.junction = null;
       this._placeActions(null);
@@ -4591,8 +4606,8 @@ var SympyEditor = (function () {
       this._updateToolbar();
     }
 
-    _hideCaret() {
-      var had = !!this.caret;
+    _hideCaret(quiet) {
+      var had = !!this.caret && !quiet;
       this.caret = null;
       if (this.caretEl.parentNode) this.caretEl.parentNode.removeChild(this.caretEl);
       // showing one notifies the add-ons (through _applySelection); its going
