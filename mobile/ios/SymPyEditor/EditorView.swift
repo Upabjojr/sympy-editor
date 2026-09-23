@@ -213,6 +213,7 @@ final class PythonBridge: NSObject, WKScriptMessageHandler {
             if function == "new_doc" { documents.insert(rest[0]) }
             if function == "close" { documents.remove(rest[0]) }
         }
+        let host = self.host
         if function == "interrupt" {
             // This window's work, not another's: all of them share the one
             // interpreter.  Not queued behind the computation it is to stop,
@@ -230,7 +231,6 @@ final class PythonBridge: NSObject, WKScriptMessageHandler {
             }
             return
         }
-        let host = self.host
         let forwarded = rest
         host.queue.async { [weak self] in
             let result = host.start().flatMap({ _ in Result { try host.runtime.call(function, arguments: forwarded) } })
