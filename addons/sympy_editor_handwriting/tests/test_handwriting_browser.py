@@ -298,6 +298,59 @@ def test_writing_at_the_edge_of_the_screen_scrolls_the_room_into_sight():
             _close(srv, browser)
 
 
+def test_a_room_opened_past_the_edge_is_scrolled_towards_the_middle():
+    """The space to write in opens beside the selection or at the cursor; when
+    that is past the edge of the view, the view scrolls to bring the blue box
+    towards the middle - for a selection, and for a cursor."""
+    from sympy import Add, Symbol
+    doc = Document(Add(*[Symbol(f"a{i}") for i in range(30)]), addons=[HandwritingAddon(MuteRecognizer()), LATEX])
+    box = """() => {
+        const v = document.querySelector('.se-view').getBoundingClientRect();
+        return {left: v.left, right: v.right, scroll: document.querySelector('.se-view').scrollLeft,
+                wide: document.querySelector('.se-view').scrollWidth};
+    }"""
+    pen = '[data-cmd="addon:handwriting:pen"]'
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc, pen=False)
+        try:
+            page.set_viewport_size({"width": 420, "height": 800})
+            v = page.evaluate(box)
+            assert v["wide"] > 2 * (v["right"] - v["left"]) and v["scroll"] == 0      # a formula past the edge
+            # a selection past the right edge: taking the pen brings its room in
+            last = sorted(doc.expr.args, key=str)[-1]
+            ed = "document.querySelector('.sympy-editor').__sympyEditor"
+            path = page.evaluate(f"Object.keys({ed}.state.nodes).find(k => {ed}.state.nodes[k].src === '{last}')")
+            page.evaluate(f"{ed}.select('{path}')")
+            page.locator(pen).click()
+            page.wait_for_function("document.querySelector('.se-view').scrollLeft > 50", timeout=5000)
+            page.wait_for_timeout(1000)
+            # and it settles: the editor reports the selection after every
+            # scroll, and reopening the room at each report kept it scrolling
+            page.evaluate("""() => { window.__scrolls = 0; document.querySelector('.se-view')
+                .addEventListener('scroll', () => window.__scrolls++); }""")
+            page.wait_for_timeout(500)
+            assert page.evaluate("window.__scrolls") == 0
+            room = page.evaluate("""() => { const el = document.querySelector('.se-view .se-selected')
+                || [...document.querySelectorAll('.se-view [data-path]')].find(e => e.style.marginRight);
+                const q = el.getBoundingClientRect(); return {right: q.right, margin: parseFloat(el.style.marginRight) || 0}; }""")
+            v = page.evaluate(box)
+            centre = room["right"] + room["margin"] / 2                  # the middle of the blue box
+            assert v["left"] < centre < v["right"], (room, v)
+            assert abs(centre - (v["left"] + v["right"]) / 2) < 0.3 * (v["right"] - v["left"]), (room, v)
+            # a cursor at the start, the view scrolled to the end: brought back
+            page.locator(pen).click()
+            page.evaluate(f"{ed}.select(null)")
+            page.evaluate("document.querySelector('.se-view').scrollLeft = 1e6")
+            page.locator(".se-view").focus()
+            page.keyboard.press("ArrowLeft")                                # a caret at the first position
+            assert _wait(lambda: page.evaluate(f"!!{ed}.caret"))
+            page.locator(pen).click()
+            page.wait_for_function("document.querySelector('.se-view').scrollLeft < 100", timeout=5000)
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
 def test_what_is_written_over_a_selection_takes_its_place_when_applied():
     """A piece selected in the editor, then written on: the reading waits to be
     applied - the formula is not touched until then - and takes that piece's

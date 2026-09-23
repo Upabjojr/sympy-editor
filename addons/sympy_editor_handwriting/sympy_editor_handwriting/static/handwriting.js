@@ -130,7 +130,7 @@ SympyEditor.registerAddon("handwriting", (function () {
   function HELP(status) {
     return "<section><h3>Writing on the formula</h3><ul>"
       + "<li>" + toolIcon("pen", 16) + " <b>Write</b>, among the editor's tools, takes the pointer; with it off the editor is the editor it was - the formula is tapped, selected and edited in the usual way.</li>"
-      + "<li>The formula itself makes room: the area grows, and it opens a space where what is written will go - after the selection, at the cursor, or by the piece the ink is written against - drawn as a box in light dashes, which widens as you write. A stroke that ends by the edge of the screen opens more space ahead and scrolls the box back into sight. Nothing is sent while it is open: it closes when the ink goes.</li>"
+      + "<li>The formula itself makes room: the area grows, and it opens a space where what is written will go - after the selection, at the cursor, or by the piece the ink is written against - drawn as a box in light dashes, which widens as you write. A box that opens past the edge of the screen is scrolled towards the middle (wider, when it is at the end of the formula), and a stroke that ends by the edge opens more space ahead and scrolls the box back into sight. Nothing is sent while it is open: it closes when the ink goes.</li>"
       + "<li>A tap, with nothing written yet, still selects a piece or puts the cursor between two, the Pen on or off: choose where to write, then write there. (Once there is ink on the formula a tap is a dot.)</li>"
       + "<li>A moment after the pen lifts what is written is read, and the readings are offered under the formula, the best first. <b>Apply to the formula</b> puts the one picked in - nothing changes before that. Once one is in, picking another changes the formula to it instead (the one before is taken back, so they never pile up).</li>"
       + "<li>The choices come in the order one makes them: first the piece of the formula what is written goes with (writing freely, with nothing selected), then the reading, then the ways its LaTeX can be read - and then Apply.</li>"
@@ -544,8 +544,17 @@ SympyEditor.registerAddon("handwriting", (function () {
         }
         return null;
       }
+      /** What the room is opened by: the selection, the range, the caret. */
+      var roomKey = null;
+      function targetKey() {
+        var r = api.range && api.range(), c = api.caret && api.caret(), sel = api.selected && api.selected();
+        var at = function (el) { return el && el.getAttribute ? el.getAttribute("data-path") || "?" : ""; };
+        return JSON.stringify([sel || null, r ? [r.parent, r.anchor, r.focus] : null,
+                               c ? [at(c.leftEl), at(c.rightEl), c.path || null, c.index == null ? null : c.index] : null]);
+      }
       function openRoom() {
         if (room || !view) return;
+        roomKey = targetKey();
         var a = anchor();
         if (!a) return;
         room = { el: a.el, side: a.side, px: 0 };
@@ -622,16 +631,58 @@ SympyEditor.registerAddon("handwriting", (function () {
        *  go on.  Sideways the formula's view scrolls; up and down the view
        *  when it scrolls itself (full screen), the page otherwise.  The ink
        *  keeps the formula's own pixels, so it moves with the scroll. */
+      /** The part of the formula's view that is on the screen, in client
+       *  pixels (the page may have scrolled part of it away, a keyboard may
+       *  cover the bottom). */
+      function visibleBox() {
+        var v = view.getBoundingClientRect(), vv = window.visualViewport;
+        var box = { left: Math.max(v.left, 0), right: Math.min(v.right, window.innerWidth),
+                    top: Math.max(v.top, vv ? vv.offsetTop : 0),
+                    bottom: Math.min(v.bottom, vv ? vv.offsetTop + vv.height : window.innerHeight) };
+        return box.right > box.left && box.bottom > box.top ? box : null;
+      }
+      function scrollHow() {
+        return window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+      }
+      function scrollByPx(dx, dy) {
+        if (dx > 0.5 || dx < -0.5) view.scrollBy({ left: dx, behavior: scrollHow() });
+        if (dy > 0.5 || dy < -0.5) {
+          if (view.scrollHeight > view.clientHeight + 1) view.scrollBy({ top: dy, behavior: scrollHow() });
+          else window.scrollBy({ top: dy, behavior: scrollHow() });
+        }
+      }
+      /** The room just opened - by the selection, at the cursor - may lie past
+       *  the edge of what is on the screen: then it is brought towards the
+       *  middle, so that the blue box to write in is there to write in.  A
+       *  room already in sight stays where it is. */
+      function centerRoom() {
+        if (!room || !view) return;
+        var r = roomRect(), box = visibleBox();
+        if (!r || !box) return;
+        var c = canvas.getBoundingClientRect(), o = offset();
+        var x0 = r.x - o.x + c.left, x1 = x0 + r.w, y0 = r.y - o.y + c.top, y1 = y0 + r.h;
+        var pad = 8, dx = 0, dy = 0;
+        if (x1 > box.right - pad && room.side === "right" && !room.lead) {
+          // Past the right edge - at the end of the formula there is nothing
+          // after it to scroll to: the room opens wider, space to write in,
+          // and can then be brought to the middle.
+          room.lead = Math.round(0.35 * (box.right - box.left));
+          sizeRoom();
+          r = roomRect();
+          x0 = r.x - o.x + c.left; x1 = x0 + r.w;
+        }
+        if (x0 < box.left + pad || x1 > box.right - pad) dx = (x0 + x1) / 2 - (box.left + box.right) / 2;
+        if (y0 < box.top + pad || y1 > box.bottom - pad) dy = (y0 + y1) / 2 - (box.top + box.bottom) / 2;
+        scrollByPx(dx, dy);
+      }
       function revealRoom(stroke) {
         if (!stroke || !stroke.length || !view) return;
         var c = canvas.getBoundingClientRect(), o = offset(), b = boxOf([stroke]);
         var x0 = b.minX - o.x + c.left, x1 = b.maxX - o.x + c.left;
         var y0 = b.minY - o.y + c.top, y1 = b.maxY - o.y + c.top;
-        var v = view.getBoundingClientRect(), vv = window.visualViewport;
-        var left = Math.max(v.left, 0), right = Math.min(v.right, window.innerWidth);
-        var top = Math.max(v.top, vv ? vv.offsetTop : 0);
-        var bottom = Math.min(v.bottom, vv ? vv.offsetTop + vv.height : window.innerHeight);
-        if (right <= left || bottom <= top) return;
+        var box = visibleBox();
+        if (!box) return;
+        var left = box.left, right = box.right, top = box.top, bottom = box.bottom;
         var mx = Math.max(32, 0.12 * (right - left)), my = Math.max(32, 0.12 * (bottom - top));
         var dx = 0, dy = 0;
         if (x1 > right - mx) {
@@ -649,12 +700,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         var rTop = rr ? rr.y - o.y + c.top : y0, rBottom = rr ? rr.y + rr.h - o.y + c.top : y1;
         if (y1 > bottom - my) dy = Math.min(Math.max(rBottom, y1) + my / 2 - bottom, y0 - top - 8);
         else if (y0 < top + my) dy = Math.min(rTop, y0) - my / 2 - top;
-        var how = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
-        if (dx > 0.5 || dx < -0.5) view.scrollBy({ left: dx, behavior: how });
-        if (dy > 0.5 || dy < -0.5) {
-          if (view.scrollHeight > view.clientHeight + 1) view.scrollBy({ top: dy, behavior: how });
-          else window.scrollBy({ top: dy, behavior: how });
-        }
+        scrollByPx(dx, dy);
       }
 
       function closeRoom() {
@@ -1158,7 +1204,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         if (!pen) setErasing(false);
         if (editor && editor.root) editor.root.classList.toggle("se-inking", pen);
         canvas.style.pointerEvents = pen ? "auto" : "none";
-        if (pen) openRoom(); else closeRoom();
+        if (pen) { openRoom(); centerRoom(); } else closeRoom();
         if (!pen) hideDown();
         syncCover();
         if (!strokes.length) say(idle(), !canRead);
@@ -1343,7 +1389,11 @@ SympyEditor.registerAddon("handwriting", (function () {
           return true;
         },
         onSelect: function () {         // the room follows what is selected
-          if (pen && !strokes.length) { closeRoom(); openRoom(); }
+          // Only when that changed: the editor says so after every scroll
+          // too, and closing and opening the room at each of them pulled the
+          // view back (its space went for a moment) - a loop of scrolls.
+          var key = targetKey();
+          if (pen && !strokes.length && key !== roomKey) { closeRoom(); openRoom(); centerRoom(); }
           if (strokes.length) redraw();
           syncCover();
         },
