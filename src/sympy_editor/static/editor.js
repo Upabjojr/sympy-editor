@@ -2695,7 +2695,11 @@ var SympyEditor = (function () {
     _captureRendering() {
       var prev = this._shown;      // {snap, nodes} of the rendering on screen
       this._shown = { snap: this.state, nodes: this.state.nodes || {} };
+      // Opening the last session at start is no change of the user's: the
+      // stand-in it replaces was never shown (mount, se-restoring), and a
+      // ghost of it fading out would show it after all.
       if (!this.opts.animate || !prev || !prev.snap || !this.annotated ||
+          this.root.classList.contains("se-restoring") ||
           (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches)) {
         this._committedCapture = null;
         return null;
@@ -7419,6 +7423,22 @@ var SympyEditor = (function () {
     var backend = make(cfg);       // it keeps the sessions too, when it can (Keep.of: the editor's own keeper)
     var editor = new Editor(host, backend, options);
     editor.mountConfig = cfg;      // what a fresh one is mounted from (a tour played again)
+    // With sessions the page's own expression is only a stand-in: the last
+    // session replaces it a moment later.  Drawn meanwhile, it flashed on
+    // every launch of the apps before the real formula came, so the
+    // rendering stays hidden (its place kept) until the sessions have
+    // answered - or for a few seconds at most, should a keeper never answer.
+    var restoring = !!(options.sessions && backend.openDocument && !backend.givenDocument);
+    var shown = false, reveal = function () {
+      if (shown) return;
+      shown = true;
+      editor.root.classList.remove("se-restoring");
+      if (editor._applySelection) editor._applySelection();
+    };
+    if (restoring) {
+      editor.root.classList.add("se-restoring");
+      setTimeout(reveal, 5000);
+    }
     editor.setState(cfg.snapshot).then(function () {
       var warm = Promise.resolve();
       if (backend.warmup && editor.opts.preload !== false) {
@@ -7434,6 +7454,7 @@ var SympyEditor = (function () {
         });
       }
       warm.then(function () { return editor._initSessions(); })
+        .then(reveal, reveal)
         .then(function () { return editor._restoreAddons(); })
         .then(function () { editorReady(editor); }, function () { editorReady(editor); });
     });

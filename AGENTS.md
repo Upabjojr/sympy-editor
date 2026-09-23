@@ -424,6 +424,13 @@ Two conventions between printer, document and front end:
   committed), a copy of the current expression, or an example
   (`sympy_editor.examples.EXAMPLES`, carried as `cfg.examples` →
   `options.examples` when `sessions` is on).  The mobile bundle turns it on.
+  At start the page's own expression is only a stand-in for the last
+  session, which `_initSessions` opens a moment later: `mount` keeps the
+  rendering, the source line and the add-on panels hidden (`se-restoring`,
+  `visibility`, so nothing moves) until the sessions have answered - five
+  seconds at most - and the change animation is skipped meanwhile, or its
+  ghost would show the stand-in fading out.  Not for a backend handed an
+  expression of its own (`givenDocument`), whose expression is the work.
 - **Wrap.**  `{"action": "wrap", "path", "func"[, "args", "children"]}` →
   `Document.wrap` puts the node (or range) inside a function - the inverse of
   unwrap: `cos`, `sqrt`, `Integral` with `args="x"` (or `func="Integral(x)"`).

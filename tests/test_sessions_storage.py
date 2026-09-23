@@ -389,3 +389,43 @@ def test_two_views_of_one_widget_number_their_requests_apart(browser):
     ids = [m["_req"] for m in page.evaluate("window.__sent") if "_req" in m]
     assert len(ids) >= 2 and len(set(ids)) == len(ids), ids
     assert page.errors == []
+
+
+def test_the_page_s_own_expression_does_not_flash_before_the_last_session(browser, serving):
+    """Bug: the apps drew the bundle's own expression at every launch and
+    only then opened the last session over it - the wrong formula for a
+    moment.  Now the rendering stays hidden, its place kept, until the
+    sessions have answered: what is ever seen is the session's formula."""
+    doc = Document(x + y)
+    srv = serving(doc, store=False)
+    last = _session("last", "the last one", ["Symbol('z')", "Pow(Symbol('z'), Integer(2))"], 1)
+    cfg = build_config(doc, backend="native", options=dict(KATEX, sessions=True))
+    page = _open(browser, srv.url)
+    page.evaluate(_NATIVE_HOST, [srv.url.rstrip("/") + "/api", srv.token])
+    page.evaluate("(s) => localStorage.setItem('sympy-editor:sessions', JSON.stringify(s))",
+                  {"current": "last", "list": [last]})
+    # every frame, what the view shows where it can be seen
+    page.evaluate("""() => {
+        window.__seen = [];
+        const look = () => {
+            const view = document.querySelector('#native-host .se-view');
+            const shown = view && [...view.children].filter(c => c.querySelector('.katex')
+                && getComputedStyle(c).visibility === 'visible');
+            if (shown && shown.length) {
+                const text = shown.map(c => c.textContent.replace(/[\\s\\u200b]/g, '')).join('|');
+                if (window.__seen[window.__seen.length - 1] !== text) window.__seen.push(text);
+            }
+            if (!window.__stopLooking) requestAnimationFrame(look);
+        };
+        requestAnimationFrame(look);
+    }""")
+    page.evaluate("(cfg) => { window.__nativeEditor = SympyEditor.mount(document.getElementById('native-host'), cfg); }", cfg)
+    _ready(page, NATIVE)
+    page.wait_for_function(NATIVE + ".state.src === 'z**2'", timeout=10000)
+    page.wait_for_timeout(300)
+    page.evaluate("window.__stopLooking = true")
+    seen = page.evaluate("window.__seen")
+    assert seen and all("x+y" not in s for s in seen), seen
+    assert "z2" in seen[-1], seen
+    assert not page.locator("#native-host .sympy-editor.se-restoring").count()
+    assert page.errors == []

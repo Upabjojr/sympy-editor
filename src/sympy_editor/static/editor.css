@@ -304,6 +304,12 @@
 .se-fn-buttons button { font: inherit; padding: 0.2rem 0.6rem; border: 1px solid var(--se-border); border-radius: 0.3rem; background: transparent; color: inherit; cursor: pointer; }
 .se-fn-apply { background: rgba(var(--se-accent), 0.15) !important; border-color: rgba(var(--se-accent), 0.8) !important; font-weight: 600; }
 
+/* at start, while the last session is being opened: the page's own
+ * expression is a stand-in, not shown (mount, se-restoring) */
+.sympy-editor.se-restoring .se-view > *,
+.sympy-editor.se-restoring .se-source,
+.sympy-editor.se-restoring .se-addons { visibility: hidden; }
+
 /* loading overlay: in front of the whole editor while Python loads */
 .se-loading {
   position: absolute;
