@@ -78,18 +78,28 @@ mpmath (wheel)        BSD-3     https://mpmath.org
 #: the add-ons' requirements (SymPy is SYMPY_WHEEL, the rest Pyodide's own).
 PROVIDED = {"sympy", "mpmath", "micropip", "packaging"}
 
-#: A page inside the app: the Python is Chaquopy's, and the rest is Java.
-NOTICE_NATIVE = """The Python beside this bundle, and what the app is built on:
+#: A page inside an app: the bundle is the same for Android, iOS and the
+#: Mac, so it lists what each of them runs its Python on.
+NOTICE_NATIVE = """The Python beside this bundle, and what each app is built on.
+In every app:
+SymPy {sympy}, mpmath, lark, sympy-matching, omnimatch, multiset  BSD-3 / MIT
+CPython  PSF-2.0  https://www.python.org, built with OpenSSL (Apache-2.0),
+  libffi (MIT), XZ/liblzma (0BSD), bzip2 (bzip2 licence), and SQLite (public
+  domain) on Android, mpdecimal (BSD-2-Clause) on iOS and the Mac
+Android:
 Chaquopy 16.1 (the Python runtime and its plugin)  MIT  https://chaquo.com/chaquopy/
   LLVM libc++ (chaquopy-libcxx)   Apache-2.0 with LLVM Exception
   OpenBLAS (chaquopy-openblas)    BSD-3     https://www.openblas.net
   GCC libgfortran (chaquopy-libgfortran)  GPL-3.0 with GCC Runtime Library Exception
-SymPy {sympy}, mpmath, lark, NumPy, sympy-matching, omnimatch, multiset  BSD-3 / MIT
+NumPy  BSD-3  https://numpy.org
 ONNX Runtime for Android 1.29 (the handwriting model runs on it)  MIT  https://onnxruntime.ai
-androidx.appcompat 1.7, androidx.webkit 1.11   Apache-2.0
+androidx.appcompat 1.7, androidx.webkit 1.11 and what they depend on   Apache-2.0
+Kotlin standard library  Apache-2.0
 The handwriting model, when the build carries one, is not part of this project:
 it comes with a NOTICE of its own, beside the app's Python, which states the
 terms it is distributed under.
+iOS and the Mac:
+Python-Apple-support 3.13 (BeeWare's build of CPython)  MIT  https://github.com/beeware/Python-Apple-support
 """
 
 

@@ -19,7 +19,12 @@ A WYSIWYG editor for SymPy expressions.  Requirements set by the project owner:
 - **Dependencies compatible with AGPL-3.0-or-later**, this project's licence:
   BSD, MIT, Apache-2.0, MPL-2.0, and LGPL/GPL version 3 or later are;
   GPL-2.0-only is not.  Check the licence of anything you add: runtime,
-  optional or vendored, Python or JavaScript.
+  optional or vendored, Python or JavaScript.  And credit it, in the same change: a row in
+  `THIRD-PARTY.md` (the section of every build that carries it), the
+  README's table, the bundle's NOTICE (`mobile/build_www.py`: `NOTICE_*`,
+  `ASSET_LICENCES`, or the wheels' own metadata) and the "Credits and
+  licences" section of `HELP_HTML`.  `tests/test_credits.py` refuses a
+  declared dependency that THIRD-PARTY.md does not name.
 - Must work both **integrated in Jupyter** and as **standalone HTML**.
 - **No npx / node.js package dependencies.**  No bundler, no `package.json`,
   no build step.  JavaScript is plain, hand-written and shipped as static

@@ -611,7 +611,9 @@ follow.
 | Pyodide (+ CPython, micropip) | MPL-2.0 / PSF-2.0 | loaded from a CDN by the browser, standalone HTML and the web bundle only |
 | SymPy wheel (PyPI) | BSD-3 | loaded by the browser into Pyodide (the newest SymPy, ahead of Pyodide's own package) |
 | lark, sympy-matching, NumPy, onnxruntime, Plotly.js | MIT / BSD-3 | the add-ons' own: LaTeX, rewrite rules, plot, handwriting |
-| Chaquopy, ONNX Runtime for Android, androidx | MIT / Apache-2.0 | the Android app is built on them |
+| Chaquopy, ONNX Runtime for Android, androidx, Kotlin | MIT / Apache-2.0 | the Android app is built on them |
+| Python-Apple-support (BeeWare) | MIT | the iOS and Mac apps' CPython |
+| CPython, with OpenSSL, libffi, XZ, bzip2, SQLite, mpdecimal | PSF-2.0 / Apache-2.0 / MIT / 0BSD / bzip2 / public domain / BSD-2 | the apps' Python interpreter |
 
 [`THIRD-PARTY.md`](THIRD-PARTY.md) has the whole of it - every component each
 build carries, with its terms and what it is used for - and each bundle carries

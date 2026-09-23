@@ -22,6 +22,15 @@ are those the projects state for those versions.
 | [KaTeX](https://katex.org) (0.16.22, with its fonts) | MIT | the formula is rendered with it; `src/sympy_editor/html.py`. From jsDelivr on a page that has the network, vendored into the app and the web bundle (`mobile/build_www.py`) |
 | [Plotly.js](https://plotly.com/javascript/) | MIT | the plot add-on's graphs (`addons/sympy_editor_plot`); from jsDelivr on a page that has the network, vendored into the app and the web bundle (`vendor/addons/`, `mobile/build_www.py`) |
 
+## The Jupyter widget (`pip install sympy-editor[jupyter]`)
+
+Installed by pip beside the editor, never carried by it:
+
+| Component | Licence | Note |
+| --- | --- | --- |
+| [anywidget](https://anywidget.dev) | MIT | the widget's bridge between the kernel and the page; `src/sympy_editor/widget.py` |
+| [ipywidgets](https://github.com/jupyter-widgets/ipywidgets), [traitlets](https://github.com/ipython/traitlets) | BSD-3-Clause | what anywidget is built on |
+
 ## The add-ons' own dependencies
 
 | Component | Licence | Add-on |
@@ -56,12 +65,14 @@ KaTeX as above, vendored in the assets, and:
 | Component | Licence | Note |
 | --- | --- | --- |
 | [Chaquopy](https://chaquo.com/chaquopy/) 16.1 | MIT | the Python runtime and its Gradle plugin; `mobile/android/build.gradle.kts` |
+| CPython (Chaquopy's build) | PSF-2.0 | the interpreter itself, with the libraries built into it: OpenSSL (Apache-2.0), SQLite (public domain), libffi (MIT), XZ/liblzma (0BSD), bzip2 (bzip2 licence) |
 | LLVM libc++ (`chaquopy-libcxx`) | Apache-2.0 with LLVM Exception | carried by Chaquopy's packages |
 | OpenBLAS (`chaquopy-openblas`) | BSD-3-Clause | under NumPy |
 | GCC's libgfortran (`chaquopy-libgfortran`) | GPL-3.0 with GCC Runtime Library Exception | under OpenBLAS |
 | SymPy, mpmath, lark, NumPy, sympy-matching, omnimatch, multiset | as above | the app's Python, installed by Chaquopy |
-| [ONNX Runtime for Android](https://onnxruntime.ai) 1.29 | MIT | the handwriting model runs on it; `mobile/android/app/build.gradle.kts` |
-| androidx.appcompat 1.7, androidx.webkit 1.11 | Apache-2.0 | the shell around the WebView |
+| [ONNX Runtime for Android](https://onnxruntime.ai) 1.29 | MIT | the handwriting model runs on it; `mobile/android/app/build.gradle.kts`.  Its AAR carries the notices of what it is built from (ThirdPartyNotices) |
+| androidx.appcompat 1.7, androidx.webkit 1.11, and the androidx libraries they depend on | Apache-2.0 | the shell around the WebView |
+| Kotlin standard library | Apache-2.0 | the app's Kotlin |
 
 **The handwriting model is not part of this project.**  It is math-ocr's, kept
 out of this repository, and staged into the app at build time together with its
@@ -71,7 +82,20 @@ build warns when an export carries no `NOTICE`, and the add-on's guide shows
 the one it carried (`mobile/build.py`, `stage_ink`).  A build made without the
 model needs none of this.
 
+## The iOS app and the Mac app (`python mobile/build.py ios`, `python desktop/build.py`)
+
+KaTeX and Plotly.js as above, vendored in the bundle, and:
+
+| Component | Licence | Note |
+| --- | --- | --- |
+| [Python-Apple-support](https://github.com/beeware/Python-Apple-support) (BeeWare, 3.13) | MIT | `Python.xcframework` / `Python.framework`: the build of CPython the apps embed; `mobile/build.py`, `desktop/build.py` |
+| CPython (in it) | PSF-2.0 | with the libraries built into it: OpenSSL 3 (Apache-2.0), libffi (MIT), XZ/liblzma (0BSD), bzip2 (bzip2 licence), mpdecimal (BSD-2-Clause) |
+| SymPy, mpmath, lark, sympy-matching, omnimatch, multiset | as above | the app's Python (`app_packages`), installed by pip at build time |
+
+The handwriting add-on is not in these apps.
+
 ## Development only
 
-pytest, Playwright, Pillow and the Android SDK/Gradle toolchain are used to
-build and to test; no build carries them.
+pytest, Playwright, Pillow, XcodeGen, librsvg (`rsvg-convert`, which draws
+the icons), the Android SDK/Gradle toolchain and Xcode are used to build and to
+test; no build carries them.

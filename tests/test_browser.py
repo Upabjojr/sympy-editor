@@ -2572,7 +2572,8 @@ def test_help_button_shows_the_guide(browser, serve_expr):
         assert expected in text, expected
     # the guide is the whole tool: everything the editor grew is in it
     for expected in ("full screen", "slideshow", "save", "sessions", "( ) apply",
-                     "the same thing seen twice", "container", "print or pdf", ".sympy file", "back"):
+                     "the same thing seen twice", "container", "print or pdf", ".sympy file", "back",
+                     "credits and licences", "katex", "sympy", "notice.txt"):
         assert expected in text, expected
     page.keyboard.press("Escape")                     # Esc closes it
     assert page.locator(".se-help-view").count() == 0

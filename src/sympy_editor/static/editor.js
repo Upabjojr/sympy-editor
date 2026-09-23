@@ -185,6 +185,13 @@ var SympyEditor = (function () {
     "<li><kbd>Ctrl</kbd>+wheel, <kbd>Ctrl</kbd>+<kbd>+</kbd>/<kbd>\u2212</kbd>/<kbd>0</kbd>, pinch, or the \u2212/100%/+ buttons.</li>",
     "<li>The faint button in the top-right corner of the editing area gives the formula the whole screen: the tools, the source line and the Symbols panel step aside, the browser\u2019s chrome and, in the app, the system bars go too. The button (or <kbd>Esc</kbd>, with nothing selected) comes back; a selection still brings up the bar of actions under it.</li>",
     "</ul></section>",
+    "<section><h3>Credits and licences</h3><ul>",
+    "<li>SymPy Editor is free software under the GNU Affero General Public License, version 3 or later.</li>",
+    "<li>Built on <b>SymPy</b> and <b>mpmath</b> (BSD) for the mathematics and <b>KaTeX</b> (MIT) for the typesetting; on a page, <b>Pyodide</b> (MPL-2.0) runs Python in the browser; the Jupyter widget uses <b>anywidget</b> (MIT).</li>",
+    "<li>The add-ons use <b>lark</b> (the LaTeX reader), <b>sympy-matching</b> with omnimatch and multiset (the rewrite rules) and <b>Plotly.js</b> (the plot), all MIT, and <b>NumPy</b> (BSD) and <b>ONNX Runtime</b> (MIT) for the handwriting.</li>",
+    "<li>The apps run <b>CPython</b> (PSF licence) through <b>Chaquopy</b> (MIT) on Android and BeeWare\u2019s <b>Python-Apple-support</b> (MIT) on iOS and the Mac, with the libraries built into it (OpenSSL, libffi, XZ, bzip2, SQLite, mpdecimal), and AndroidX and Kotlin (Apache-2.0) on Android.</li>",
+    "<li>Every component with its terms: <code>THIRD-PARTY.md</code> in the source, and <code>vendor/NOTICE.txt</code> in each app\u2019s bundle, which carries the editor\u2019s licence and SymPy\u2019s in full.</li>",
+    "</ul></section>",
     "</div>"
   ].join("");
   var ZOOM_STEP = 1.2;
