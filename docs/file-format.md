@@ -109,7 +109,7 @@ being asked goes through one seam (`Keep` in `editor.js`), under these names:
 | `sessions` | the list of sessions, each with the `session` payload above |
 | `addons` | which add-ons are switched on (`rememberAddons`) |
 | `zoom` | the size the formula is shown at (`rememberZoom`) |
-| `addon:<name>` | what an add-on keeps of its own — the rewrite rules' sets, say (`SympyEditor.keep`) |
+| `addon:<name>` | what an add-on keeps of its own — the rewrite rules' sets, say (`api.keep`, its editor's keeper) |
 
 Where they are kept depends on what is running the page, and the rule is that
 the browser's own storage is the last resort:

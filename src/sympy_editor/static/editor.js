@@ -1149,8 +1149,9 @@ var SympyEditor = (function () {
      *  does not (a write must not be handed to something that drops it).
      *  One per editor: a page-wide one was whichever editor mounted last,
      *  and a notebook view closed long ago kept answering for the others,
-     *  or never answered at all.  With no owner, the editor made last (an
-     *  add-on's SympyEditor.keep), or what setKeeper named. */
+     *  or never answered at all.  With no owner, the editor made last
+     *  (SympyEditor.keep; an add-on has api.keep, which names its editor),
+     *  or what setKeeper named. */
     of: function (owner) {
       var ed = owner || lastEditor;
       if (ed && ed.backend) {
@@ -2119,7 +2120,17 @@ var SympyEditor = (function () {
         status: function (text) { self._setStatus(text); },
         error: function (text) { self._showError(text); },
         showHelp: function (html, title) { self.showHelp(html, title || entry.label); },
-        busy: function () { return self.busy; }
+        busy: function () { return self.busy; },
+        /** What the add-on keeps of its own, by name, through this editor's
+         *  keeper: the app's storage, this editor's backend (the server's or
+         *  the kernel's store), the browser's only on a page that has neither.
+         *  SympyEditor.keep asks the editor made last, which on a page with
+         *  several - a notebook, a read-only view beside this one - may be
+         *  another backend, or one that keeps nothing. */
+        keep: {
+          read: function (key) { return Keep.read("addon:" + key, self); },
+          write: function (key, text) { return Keep.write("addon:" + key, String(text), self); }
+        }
       };
     }
 
@@ -7440,9 +7451,10 @@ var SympyEditor = (function () {
     ensureCss: ensureCss,
     h: h,
     registerAddon: registerAddon,
-    /** Where an add-on keeps what should outlive the page - its rule sets,
-     *  its choices - by name: the same keeper the editor uses for its own
-     *  (the app's storage, the server's store, or the browser's). */
+    /** Where something outside an editor keeps what should outlive the page,
+     *  by name: the keeper of the editor made last.  An add-on uses its own
+     *  api.keep instead, which is its editor's (the app's storage, the
+     *  server's or the kernel's store, the browser's on a page alone). */
     keep: {
       read: function (key) { return Keep.read("addon:" + key); },
       write: function (key, text) { return Keep.write("addon:" + key, String(text)); }

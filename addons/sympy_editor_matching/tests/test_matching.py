@@ -236,7 +236,7 @@ def test_rules_travel_with_a_session_and_come_back_from_the_browsers_storage():
     rules = again.addon_state["matching"]["rules"]
     assert len(rules) == 1 and isinstance(rules[0].pattern.args[0].args[0], WildSymbol)
     assert again.addon_state["matching"]["name"] == "trig" and list(again.addon_state["matching"]["library"]) == ["trig"]
-    # the browser's storage at mount: its library joins, its current set fills an empty document
+    # the keeper's copy at mount: its library joins, its current set fills an empty document
     fresh = Document(x, addons=[ADDON])
     res = _q(fresh, "restore", state={"name": "trig", "rules": ["x -> x**2"], "library": {"trig": ["sin(a_)**2 -> 1 - cos(a_)**2"], "bad": ["no arrow"]}})
     assert [r["text"] for r in res["rules"]] == ["x -> x**2"] and res["name"] == "trig"

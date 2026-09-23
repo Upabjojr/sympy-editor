@@ -205,3 +205,43 @@ def test_rule_sets_are_kept_and_come_back_after_a_reload(tmp_path):
         browser.close()
     srv.shutdown()
     srv.server_close()
+
+
+def test_rule_sets_go_to_their_own_editor_s_keeper(tmp_path):
+    """A page with a second editor made after the rules panel's - a read-only
+    view beside it, which keeps nothing - still keeps the sets in the store of
+    the panel's own editor, the server's: not in the browser, where the page
+    used to put them once the last editor made could not keep."""
+    doc = Document(sin(x) ** 2, addons=[ADDON])
+    srv = EditorServer(doc, port=0, store=tmp_path)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    with playwright.sync_playwright() as p:
+        try:
+            browser = p.chromium.launch()
+        except Exception as exc:
+            pytest.skip(f"chromium not available: {exc}")
+        page = browser.new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(srv.url)
+        page.wait_for_selector(".se-addon-matching .mt-field", timeout=30000)
+        page.evaluate("""() => {
+            const host = document.createElement('div');
+            host.id = 'second';
+            document.body.appendChild(host);
+            SympyEditor.mount(host, {backend: 'readonly', snapshot: {latex: 'y', nodes: {}, spans: {}},
+                                     options: {}});
+        }""")
+        page.wait_for_selector("#second .se-view", timeout=10000)
+        page.locator(".mt-field").fill("sin(a_)**2 -> 1 - cos(a_)**2")
+        page.locator(".mt-field").press("Enter")
+        page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1")
+        page.locator(".mt-name").fill("trig")
+        page.locator(".mt-name").press("Enter")
+        kept = tmp_path / "addon_matching.json"
+        assert _wait(lambda: kept.is_file() and "trig" in json.loads(kept.read_text(encoding="utf-8"))["library"])
+        assert page.evaluate("localStorage.getItem('sympy-editor:addon:matching')") is None
+        assert errors == []
+        browser.close()
+    srv.shutdown()
+    srv.server_close()

@@ -908,7 +908,9 @@ editor can load a front end it has not seen.  `Addon.export_state(doc)` /
 `Document.export()["addon_state"]` (a session; `Document(addon_state=)`
 gives it back when the add-on is on; `w.addon_state` in the widget is the
 live dict); what must outlive a session the add-on keeps through
-`SympyEditor.keep` from its panel (the rules panel's library).
+`api.keep` from its panel (the rules panel's library) - its own editor's
+keeper; `SympyEditor.keep` asks the editor made last, which on a page with
+several may be one that keeps nothing.
 An add-on is a *folder* with `addon.json` (`name`, `label`, `module`,
 `version`, `requires`) beside its package - the layout of a checkout of its
 repository; `scan_addons(dir)` finds such folders and puts them on

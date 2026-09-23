@@ -25,9 +25,11 @@ sets) and compiled again only when it changes; a query walks the compiled
 matcher once, whatever the number of rules.  In Jupyter the same dict is
 ``w.addon_state["matching"]``, live.  It travels with a session
 (``export_state``/``restore_state``, as texts a document parses back), and
-the panel mirrors the library and the current set to the browser's
-storage, so they are there again after a reload - in a page, in the
-apps' web views and in JupyterLab alike.
+the panel mirrors the library and the current set to the editor's keeper
+(``api.keep``), so they are there again after a reload: the app's own
+storage on Android, iOS and the Mac, the server's store under ``serve()``,
+the kernel's store in Jupyter (:class:`sympy_editor.store.Store` both), and
+the browser's only on a standalone page.
 """
 
 from __future__ import annotations
@@ -218,7 +220,7 @@ class MatchingAddon(Addon):
 
     def _changed(self, doc) -> None:
         """After any change to the rules: a named set saves itself into the
-        library (the panel mirrors the library to the browser's storage)."""
+        library (the panel mirrors the library to the editor's keeper)."""
         state = self._state(doc)
         state["compiled"] = None
         if state["name"]:
@@ -350,7 +352,7 @@ class MatchingAddon(Addon):
         return {"rules": out, "name": state["name"], "library": sorted(state["library"]),
                 "dirty": self._texts(state["rules"]) != self._texts(state["checkpoint"]),   # Revert has something to go back to
                 "can_restore": state["reverted"] is not None,
-                "state": self.export_state(doc)}      # what the panel mirrors to the browser's storage
+                "state": self.export_state(doc)}      # what the panel mirrors to the editor's keeper
 
     def describe(self, method: str, payload: Dict[str, Any]) -> Optional[str]:
         if method == "rewrite":
@@ -419,7 +421,7 @@ class MatchingAddon(Addon):
                 state["name"] = None
             return self._rules_answer(doc)
         if method == "restore":
-            # The browser's storage, at mount: the library it kept joins this
+            # The keeper's copy, at mount: the library it kept joins this
             # document's (a set kept in Python wins over the stored one of
             # the same name), and the stored current set fills an empty one.
             data = payload.get("state") or {}

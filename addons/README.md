@@ -190,6 +190,10 @@ api.call(method, payload[, {quiet: true}])   // → Promise: the query's result,
 api.send(msg)                // any editor message ({action: "apply", ...})
 api.status(text), api.error(text)
 api.h(tag, attrs, children)  // the editor's element helper; api.katex(); api.loadScript(url)
+api.keep.read(name)          // → Promise of the text kept under `name` (or null); api.keep.write(name, text):
+                             // this editor's keeper - the app's storage, the server's or the kernel's store,
+                             // the browser's only on a standalone page.  Not SympyEditor.keep, which asks
+                             // the editor made last: on a page with several it may be another backend
 api.editor                   // the Editor itself, for what the above does not cover
 ```
 
@@ -250,7 +254,7 @@ are the part that must not change for it.
 | Jupyter widget (`edit(expr, addons=[...])`) | the kernel: whatever is installed (`pip install`, or a folder named in `SYMPY_EDITOR_ADDONS`); the Add-ons menu lists it all, `w.addon_state` is the live state |
 | `serve()` | the same process |
 | standalone HTML (Pyodide) | the add-on's package is written into the page beside the editor's modules (`cfg["packages"]`, from `Addon.python_sources()`), and what it `requires` is `micropip`-installed first (`cfg["micropip"]`).  The tree and plot add-ons need nothing; matching needs `sympy-matching`, pure Python since 0.0.4. |
-| the mobile apps | `mobile/build.py` stages every add-on folder of `addons/` beside the app's Python (`addons/<folder>/`, manifest and package, no tests), one folder each; `sympy_editor_app.py` registers that directory at start, so every document lists them and the page switches them on and off; the app's pip step installs what the manifests `require` (Chaquopy's `pip { install(...) }` on Android - a test keeps it in step with the manifests -, `app_packages` on iOS).  The bundle starts with every add-on off and `rememberAddons` on: the switches are kept in the WebView's storage between launches. |
+| the mobile apps | `mobile/build.py` stages every add-on folder of `addons/` beside the app's Python (`addons/<folder>/`, manifest and package, no tests), one folder each; `sympy_editor_app.py` registers that directory at start, so every document lists them and the page switches them on and off; the app's pip step installs what the manifests `require` (Chaquopy's `pip { install(...) }` on Android - a test keeps it in step with the manifests -, `app_packages` on iOS).  The bundle starts with every add-on off and `rememberAddons` on: the switches are kept in the app's own storage between launches (`SympyEditorApp.keepWrite`), as is what an add-on keeps through `api.keep`. |
 
 `Document(addons=[...])` accepts `Addon` objects, entry-point names (an
 installed add-on registers under the `sympy_editor.addons` group: `tree`,

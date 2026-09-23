@@ -41,9 +41,11 @@ w = edit(sin(x)**2 + cos(x)**2, addons=["matching"])
   from the menu, delete the current one.  *Revert* goes back to the rules as
   they were when the set was named, loaded or restored last, and *Restore*
   brings back what Revert discarded.  The
-  library and the current set are kept in the browser's storage, so they are
-  there again after a reload - in a page, in the apps and in JupyterLab
-  alike - and a set is saved with the editor's sessions.  In Jupyter the same
+  library and the current set are kept where the editor keeps its sessions
+  (`api.keep`): the app's own storage on Android, iOS and the Mac, the
+  server's store under `serve()`, the kernel's in Jupyter, and the browser's
+  only on a standalone page - so they are there again after a reload, and a
+  set is saved with the editor's sessions too.  In Jupyter the same
   state is Python, live: `w.addon_state["matching"]["rules"]` is the list of
   `Rule` objects, `["library"]` the named sets, `["name"]` the current name;
   `MatchingAddon(rules=[...])` starts a document with a set.
