@@ -229,8 +229,17 @@ def test_the_selection_written_over_is_hidden_until_the_writing_is_discarded():
             assert _wait(lambda: page.evaluate(hidden) == {"y": "visible", "box": True})
             page.locator(pen).click()
             view = page.locator(".se-view").bounding_box()
+            # every frame from the stroke to its reading: the pause between
+            # them (0.7 s) showed y again for a moment
+            page.evaluate("""() => { window.__shown = 0; const look = () => {
+                const el = [...document.querySelectorAll('.se-view [data-path]')]
+                    .find(e => e.textContent.replace(/[\\s\\u200b]/g, '') === 'y');
+                if (el && getComputedStyle(el).visibility === 'visible') window.__shown++;
+                if (!window.__stop) requestAnimationFrame(look); }; requestAnimationFrame(look); }""")
             _drag(page, view["x"] + 40, view["y"] + 90, view["x"] + 110, view["y"] + 120)
             assert _wait(lambda: page.locator(".hw-apply").is_visible(), 15)
+            page.evaluate("window.__stop = true")
+            assert page.evaluate("window.__shown") == 0
             assert page.evaluate(hidden)["y"] == "hidden"
             # the place is kept: the formula did not close up around the hole
             assert page.evaluate("document.querySelector('.se-view .katex').getBoundingClientRect().width") >= width - 1
@@ -250,6 +259,40 @@ def test_the_selection_written_over_is_hidden_until_the_writing_is_discarded():
             assert _wait(lambda: str(doc.expr) == "x + z", 15), str(doc.expr)
             assert _wait(lambda: page.evaluate("document.querySelectorAll('.se-view .hw-covered').length") == 0), \
                 page.evaluate("[...document.querySelectorAll('.se-view .hw-covered')].map(e => e.textContent)")
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
+def test_writing_at_the_edge_of_the_screen_scrolls_the_room_into_sight():
+    """A stroke that ends by the right edge of the view opens space ahead of
+    it and scrolls: the blue box to write in is in sight again, the stroke
+    too, and there is room to go on writing."""
+    doc = Document(x + y, addons=[HandwritingAddon(MuteRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc, pen=False)
+        try:
+            page.set_viewport_size({"width": 420, "height": 800})
+            r = page.evaluate(TEXT_RECT, "y")
+            page.mouse.click((r["left"] + r["right"]) / 2, (r["top"] + r["bottom"]) / 2)
+            assert _wait(lambda: page.locator(".se-view .se-selected").count() == 1)
+            page.locator('[data-cmd="addon:handwriting:pen"]').click()
+            view = page.locator(".se-view").bounding_box()
+            assert page.evaluate("document.querySelector('.se-view').scrollLeft") == 0
+            r = page.evaluate(TEXT_RECT, "y")
+            y0 = (r["top"] + r["bottom"]) / 2
+            # from beside y to a few pixels short of the view's right edge
+            _drag(page, r["right"] + 10, y0, view["x"] + view["width"] - 6, y0 + 10)
+            page.wait_for_function("document.querySelector('.se-view').scrollLeft > 20", timeout=5000)
+            page.wait_for_timeout(600)                                   # the smooth scroll settles
+            shown = page.evaluate("""() => {
+                const v = document.querySelector('.se-view').getBoundingClientRect();
+                return {left: v.left, right: v.right};
+            }""")
+            # what is left of the view on the right is space to write in
+            ink_right = view["x"] + view["width"] - 6 - page.evaluate("document.querySelector('.se-view').scrollLeft")
+            assert shown["right"] - ink_right > 0.2 * view["width"], (shown, ink_right)
+            assert ink_right > shown["left"]                              # the stroke itself still in sight
             assert page.errors == []
         finally:
             _close(srv, browser)

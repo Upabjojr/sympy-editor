@@ -26,7 +26,8 @@ replaced by the node - never the piece's LaTeX read back, which would make
 readings show the piece's LaTeX (`display`).
 
 While the Pen is on, the formula opens a space where what is written will go,
-and it widens as you write; a tap still selects a piece or puts the cursor
+and it widens as you write (a stroke that ends by the edge of the screen
+opens more space ahead and scrolls the box back into sight); a tap still selects a piece or puts the cursor
 between two, so where to write is chosen as it always was.
 
 The strip under the editor holds only what came of it: the readings, to pick

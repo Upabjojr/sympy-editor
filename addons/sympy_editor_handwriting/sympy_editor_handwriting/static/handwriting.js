@@ -130,7 +130,7 @@ SympyEditor.registerAddon("handwriting", (function () {
   function HELP(status) {
     return "<section><h3>Writing on the formula</h3><ul>"
       + "<li>" + toolIcon("pen", 16) + " <b>Write</b>, among the editor's tools, takes the pointer; with it off the editor is the editor it was - the formula is tapped, selected and edited in the usual way.</li>"
-      + "<li>The formula itself makes room: the area grows, and it opens a space where what is written will go - after the selection, at the cursor, or by the piece the ink is written against - drawn as a box in light dashes, which widens as you write. Nothing is sent while it is open: it closes when the ink goes.</li>"
+      + "<li>The formula itself makes room: the area grows, and it opens a space where what is written will go - after the selection, at the cursor, or by the piece the ink is written against - drawn as a box in light dashes, which widens as you write. A stroke that ends by the edge of the screen opens more space ahead and scrolls the box back into sight. Nothing is sent while it is open: it closes when the ink goes.</li>"
       + "<li>A tap, with nothing written yet, still selects a piece or puts the cursor between two, the Pen on or off: choose where to write, then write there. (Once there is ink on the formula a tap is a dot.)</li>"
       + "<li>A moment after the pen lifts what is written is read, and the readings are offered under the formula, the best first. <b>Apply to the formula</b> puts the one picked in - nothing changes before that. Once one is in, picking another changes the formula to it instead (the one before is taken back, so they never pile up).</li>"
       + "<li>The choices come in the order one makes them: first the piece of the formula what is written goes with (writing freely, with nothing selected), then the reading, then the ways its LaTeX can be read - and then Apply.</li>"
@@ -572,6 +572,7 @@ SympyEditor.registerAddon("handwriting", (function () {
           var b = boxOf(all);
           want = Math.max(least, b.maxX - edge + 0.6 * em());
         }
+        want += room.lead || 0;             // space ahead, opened when the ink reached the screen's edge
         want = Math.round(Math.max(0, want));
         if (want === room.px) return;
         room.px = want;
@@ -594,7 +595,9 @@ SympyEditor.registerAddon("handwriting", (function () {
         if (applied || mine) return [];
         if (!(pen || strokes.length || current || held || readings.length)) return [];
         var a = aim && (aim.kind === "selection" || aim.kind === "range") ? aim : null;
-        if (!a && !held && !strokes.length) {              // nothing written yet: what is selected now
+        // Until a reading names where it goes (aim), what is selected now: the
+        // pause between a stroke and its reading used to show it again.
+        if (!a && !(aim && aim.kind)) {
           var r = api.range && api.range(), sel = api.selected && api.selected();
           if (r) a = { kind: "range", path: r.parent, children: editor._rangeIndices ? editor._rangeIndices() : [] };
           else if (sel) a = { kind: "selection", path: sel };
@@ -611,6 +614,47 @@ SympyEditor.registerAddon("handwriting", (function () {
         want.forEach(function (el) { el.classList.add("hw-covered"); });
         covered = want;
         if (editor && editor.root) editor.root.classList.toggle("hw-covering", want.length > 0);
+      }
+
+      /** After a stroke that ends near an edge of what is on the screen: open
+       *  space ahead of it (the room grows on that side) and scroll so the
+       *  room - the blue box to write in - is in sight again, with room to
+       *  go on.  Sideways the formula's view scrolls; up and down the view
+       *  when it scrolls itself (full screen), the page otherwise.  The ink
+       *  keeps the formula's own pixels, so it moves with the scroll. */
+      function revealRoom(stroke) {
+        if (!stroke || !stroke.length || !view) return;
+        var c = canvas.getBoundingClientRect(), o = offset(), b = boxOf([stroke]);
+        var x0 = b.minX - o.x + c.left, x1 = b.maxX - o.x + c.left;
+        var y0 = b.minY - o.y + c.top, y1 = b.maxY - o.y + c.top;
+        var v = view.getBoundingClientRect(), vv = window.visualViewport;
+        var left = Math.max(v.left, 0), right = Math.min(v.right, window.innerWidth);
+        var top = Math.max(v.top, vv ? vv.offsetTop : 0);
+        var bottom = Math.min(v.bottom, vv ? vv.offsetTop + vv.height : window.innerHeight);
+        if (right <= left || bottom <= top) return;
+        var mx = Math.max(32, 0.12 * (right - left)), my = Math.max(32, 0.12 * (bottom - top));
+        var dx = 0, dy = 0;
+        if (x1 > right - mx) {
+          if (room && room.side === "right") {               // space to go on writing in
+            room.lead = Math.round(0.35 * (right - left));
+            sizeRoom();
+          }
+          var r = roomRect(), far = r ? r.x + r.w - o.x + c.left : x1 + mx;
+          dx = far + 8 - right;
+          dx = Math.min(dx, x0 - left - 8);                   // never past the stroke just written
+        } else if (x0 < left + mx) {
+          dx = Math.max(x0 - mx - left, -view.scrollLeft);
+        }
+        var rr = roomRect();
+        var rTop = rr ? rr.y - o.y + c.top : y0, rBottom = rr ? rr.y + rr.h - o.y + c.top : y1;
+        if (y1 > bottom - my) dy = Math.min(Math.max(rBottom, y1) + my / 2 - bottom, y0 - top - 8);
+        else if (y0 < top + my) dy = Math.min(rTop, y0) - my / 2 - top;
+        var how = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+        if (dx > 0.5 || dx < -0.5) view.scrollBy({ left: dx, behavior: how });
+        if (dy > 0.5 || dy < -0.5) {
+          if (view.scrollHeight > view.clientHeight + 1) view.scrollBy({ top: dy, behavior: how });
+          else window.scrollBy({ top: dy, behavior: how });
+        }
       }
 
       function closeRoom() {
@@ -1236,11 +1280,13 @@ SympyEditor.registerAddon("handwriting", (function () {
           return;
         }
         if (current) {
+          var done = current;
           strokes.push(current);
           taken = [];              // written on: there is no stroke to put back any more
           current = null;
           updateTools();
           redraw();
+          revealRoom(done);
         }
         if (!strokes.length) return;
         clearTimeout(timer);
