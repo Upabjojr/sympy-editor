@@ -527,6 +527,10 @@ SympyEditor.registerAddon("handwriting", (function () {
         var j = editor && editor.junction;
         if (j && j.el && j.el.isConnected) return { el: j.el, side: "right" };
         var c = api.caret && api.caret();
+        // Between two arguments the operator stands in the gap, and the caret
+        // is drawn at one end of it: the room opens where the caret is - after
+        // the "+" a margin on the right-hand term, not on the left-hand one.
+        if (c && c.leftEl && c.rightEl && !caretBeforeGap(c)) return { el: c.rightEl, side: "left" };
         if (c && c.leftEl) return { el: c.leftEl, side: "right" };
         if (c && c.rightEl) return { el: c.rightEl, side: "left" };
         var r = api.range && api.range();
@@ -546,6 +550,15 @@ SympyEditor.registerAddon("handwriting", (function () {
           if (q) return { el: q, side: "right" };
         }
         return null;
+      }
+      // Is the caret drawn at the near end of its gap, before the operator?
+      // Measured now, from the caret and its neighbours on the screen.
+      function caretBeforeGap(c) {
+        var line = editor && editor.caretEl;
+        if (!line || !line.isConnected) return false;
+        var box = function (el) { return editor._visualRect ? editor._visualRect(el) : el.getBoundingClientRect(); };
+        var x = line.getBoundingClientRect().left + 1;
+        return x - box(c.leftEl).right < box(c.rightEl).left - x;
       }
       /** What the room is opened by: the selection, the range, the caret. */
       var roomKey = null;
@@ -702,7 +715,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         var mx = Math.max(32, 0.12 * (right - left)), my = Math.max(32, 0.12 * (bottom - top));
         var dx = 0, dy = 0;
         if (x1 > right - mx) {
-          if (room && room.side === "right") {               // space to go on writing in
+          if (room) {                                        // space to go on writing in (either margin grows rightwards)
             room.lead = Math.round(0.35 * (right - left));
             sizeRoom();
           }

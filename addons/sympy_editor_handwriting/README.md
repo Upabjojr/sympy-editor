@@ -29,8 +29,9 @@ replaced by the node - never the piece's LaTeX read back, which would make
 `f(x)` a product, `x_1` a symbol `x_{1}` and `e` Euler's number.  The
 readings show the piece's LaTeX (`display`).
 
-While the Pen is on, the formula opens a space where what is written will go,
-and it widens as you write (a box that opens past the edge of the screen is
+While the Pen is on, the formula opens a space where what is written will go -
+at the cursor, on the side of an operator the cursor is drawn on (after the
+`+` of `a + b` when the cursor stands after it) - and it widens as you write (a box that opens past the edge of the screen is
 scrolled towards the middle, and a stroke that ends by the edge opens more
 space ahead and scrolls the box back into sight); a tap still selects a piece or puts the cursor
 between two, so where to write is chosen as it always was.

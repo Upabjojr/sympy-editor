@@ -369,6 +369,60 @@ def test_a_room_opened_past_the_edge_is_scrolled_towards_the_middle():
             _close(srv, browser)
 
 
+@pytest.mark.parametrize("src", ["a + b", "a - 2*b", "Mul(2, 3, evaluate=False)", "a & b", "a | b",
+                                 "Eq(x, y)"])
+def test_the_room_opens_where_the_caret_is_drawn(src):
+    """Bug: with the cursor after the + of a + b, the box to write in opened
+    before the + (a margin on a), though the reading went after it.  The
+    room opens on the side of the operator the caret is drawn on - for every
+    caret beside an operator glyph."""
+    from sympy import sympify
+    doc = Document(sympify(src), addons=[HandwritingAddon(MuteRecognizer()), LATEX])
+    ed = "document.querySelector('.sympy-editor').__sympyEditor"
+    pen = '[data-cmd="addon:handwriting:pen"]'
+    # every caret position that touches an operator glyph, and on which side
+    beside = """() => { const ed = %s, out = [];
+        const ops = [...document.querySelectorAll('.se-view .mbin, .se-view .mrel')]
+            .map(o => o.getBoundingClientRect()).filter(r => r.width);
+        ed._caretPositions().forEach((p, k) => ops.forEach(o => {
+            if (Math.abs(p.x - o.right) < 6) out.push({k, after: true});
+            else if (Math.abs(p.x - o.left) < 6) out.push({k, after: false});
+        }));
+        return out; }""" % ed
+    measure = """() => {
+        const el = [...document.querySelectorAll('.se-view [data-path]')].find(e => e.style.marginLeft || e.style.marginRight);
+        if (!el) return null;
+        const q = el.getBoundingClientRect(), ml = parseFloat(el.style.marginLeft) || 0;
+        return ml ? {left: q.left - ml, right: q.left} : {left: q.right, right: q.right + parseFloat(el.style.marginRight)};
+    }"""
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc, pen=False)
+        try:
+            spots = page.evaluate(beside)
+            assert any(s["after"] for s in spots), (src, spots)
+            for spot in spots:
+                page.evaluate(f"""() => {{ const ed = {ed}; ed.select(null);
+                    const p = ed._caretPositions()[{spot["k"]}]; ed._showCaret(p.gap, p.x); }}""")
+                assert _wait(lambda: page.evaluate(f"!!{ed}.caret"))
+                page.locator(pen).click()
+                assert _wait(lambda: page.evaluate(measure)), (src, spot)
+                room = page.evaluate(measure)
+                # the room's margin moves the glyphs after it: the operators
+                # where they are now, one of them beside the room
+                glyph = page.evaluate("""() => [...document.querySelectorAll('.se-view .mbin, .se-view .mrel')]
+                    .map(o => o.getBoundingClientRect()).filter(r => r.width)
+                    .map(o => ({left: o.left, right: o.right}))""")
+                if spot["after"]:
+                    assert any(abs(g["right"] - room["left"]) < 8 for g in glyph), (src, spot, room, glyph)
+                else:
+                    assert any(abs(g["left"] - room["right"]) < 8 for g in glyph), (src, spot, room, glyph)
+                page.locator(pen).click()                       # the pen off: the room closes
+                assert _wait(lambda: not page.evaluate(measure))
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
 class LeqRecognizer(FakeRecognizer):
     """Reads anything as a less-or-equal sign (and a letter after it)."""
 
