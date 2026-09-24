@@ -7513,12 +7513,18 @@ var SympyEditor = (function () {
           // switch to restore - a first install - and the Add-ons menu went
           // on without them until the first edit.  Ask the Python now.
           if (editor.state !== cfg.snapshot || editor.opts.readOnly || editor.closed) return null;
-          // what start-up had to say (a session that could not be opened)
-          // stays said: the refresh is no answer to it
-          var said = editor.error && !editor.error.hidden ? editor.error.textContent : "";
-          return editor.send({ action: "snapshot" }, { quiet: true }).then(function () {
-            if (said && editor.error.hidden) { editor.error.textContent = said; editor.error.hidden = false; }
-          });
+          // a page that starts Python only at the first edit (preload off) is left so
+          if (backend.warmup && editor.opts.preload === false) return null;
+          // Only the catalogue is taken from the answer: applying the whole
+          // snapshot re-rendered the formula and wrote the source line again,
+          // wiping what the user had started typing, and cleared what start-up
+          // had to say (a session that could not be opened).
+          return editor.backend.send({ action: "snapshot" }).then(function (snap) {
+            if (!snap || !snap.addons_available || editor.state !== cfg.snapshot) return;   // replaced meanwhile
+            editor.state.addons_available = snap.addons_available;
+            editor.state.addons = snap.addons;
+            editor._syncAddons(editor.state);
+          }, function () {});
         })
         .then(function () { editorReady(editor); }, function () { editorReady(editor); });
     });
