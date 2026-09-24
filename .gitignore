@@ -49,3 +49,18 @@ mobile/android/.kotlin/
 # add-on drafts: the demo page is built, not committed
 addons/*.html
 addons/*/build/
+
+# what macOS Finder leaves in folders it opens: view settings, resource forks
+# copied onto other file systems, and the volume-level indexes
+.DS_Store
+._*
+.AppleDouble
+.LSOverride
+.Spotlight-V100
+.Trashes
+.fseventsd
+.DocumentRevisions-V100
+.TemporaryItems
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.apdisk
