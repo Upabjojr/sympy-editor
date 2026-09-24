@@ -2044,6 +2044,36 @@ def test_diff_marks_the_integrand_not_the_differential(browser, serve_expr):
     assert page.errors == []
 
 
+def test_diff_marks_only_the_part_of_a_fraction_that_changed(browser, serve_expr):
+    """Bug: a denominator a becoming a*x marked the whole fraction, red and
+    green: the Mul has one argument more (a/b -> Mul(num, 1/a, 1/x)), and the
+    diff counted arguments.  A fraction draws its numerator and denominator
+    whatever the arguments behind them: only the part that changed is marked,
+    either way - and the fraction itself only when its bar comes or goes."""
+    from sympy import Eq
+    a, c = symbols("a c")
+    srv, doc = serve_expr(x)
+    page = _open(browser, srv.url)
+    ed = "document.querySelector('.sympy-editor').__sympyEditor"
+
+    def diff(old, new):
+        before, after = Document(old).snapshot()["nodes"], Document(new).snapshot()["nodes"]
+        got = page.evaluate(f"([a, b]) => {ed}._diffNodes(a, b)", [before, after])
+        return ({p for p, kept in got["oldKept"].items() if not kept},
+                {p for p, kept in got["newKept"].items() if not kept}, after)
+
+    num = sin(x) + y
+    gone, came, after = diff(num / a, num / (a * c))                  # only the denominator
+    assert gone == {"/d"} and all(p.startswith("/d") for p in came), (gone, came)
+    gone, came, after = diff((sin(x) + y) / a, (sin(x) + 2) / a)      # only the numerator
+    assert "/" not in gone and "/d" not in gone and all(p.startswith("/n") for p in gone | came), (gone, came)
+    gone, came, _ = diff(Eq(y, num / a), Eq(y, num / (a * c)))        # inside an equation, as in the app
+    assert all(p.startswith("/1/d") for p in gone | came), (gone, came)
+    gone, came, _ = diff(num / a, num * a)                            # the bar goes: the fraction changed
+    assert "/" in gone and "/" in came
+    assert page.errors == []
+
+
 def test_unevaluated_toggle(browser, serve_expr):
     """With "unevaluated" on, the Determinant of a matrix is built, not computed."""
     from sympy import Determinant, Matrix

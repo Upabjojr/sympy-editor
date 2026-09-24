@@ -643,7 +643,11 @@ Two conventions between printer, document and front end:
   the leading minus of a product is the same).  When that count changes the
   node draws itself differently, so `align` marks the node even though its
   arguments still line up - the radical goes red while the radicand stays
-  black through `rep-kept` / `se-diff-kept`.  Do not make `align` keep a node
+  black through `rep-kept` / `se-diff-kept`.  A node drawn as its virtual
+  parts (`n`/`d`, `neg`) is compared by those parts instead (`shape`): a
+  denominator `a` becoming `a*x` adds a SymPy argument to the fraction's
+  `Mul` but not a place in its drawing, and counting arguments marked the
+  whole fraction; the bar coming or going still marks it.  Do not make `align` keep a node
   unconditionally again: that is exactly the bug where a vanished sqrt sign
   was drawn as unchanged.
 - **No image is committed.**  `*.png` is ignored; `mobile/make_icons.py`

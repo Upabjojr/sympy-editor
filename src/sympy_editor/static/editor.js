@@ -429,8 +429,23 @@ var SympyEditor = (function () {
     // "kept" class paints them normally inside the marked node.)  The
     // leading minus of a product is the same story.
     var folded = function (tree, nodes, p) { return nodes[p].nargs - tree[p].children.length; };
+    // A node drawn as its virtual parts - a fraction's numerator and
+    // denominator, the product after a leading minus - draws exactly those,
+    // whatever the number of SymPy arguments behind them: a/b becoming
+    // a/(b*x) is Mul(a, 1/b) -> Mul(a, 1/b, 1/x), one argument more, yet the
+    // same bar over the same two places.  Counting arguments there marked
+    // the whole fraction when only its denominator changed.  Its ink is the
+    // same when the parts are; it changes when the bar comes or goes.
+    var shape = function (tree, nodes, p) {
+      var kids = tree[p].children, parts = [];
+      for (var i = 0; i < kids.length; i++) {
+        var step = kids[i].slice(kids[i].lastIndexOf("/") + 1);
+        if (step in PART_ORDER) parts.push(step);
+      }
+      return parts.length ? "parts:" + parts.sort().join(",") : "folded:" + folded(tree, nodes, p);
+    };
     var align = function (op, np) {
-      var sameInk = folded(ot, oldNodes, op) === folded(nt, newNodes, np);
+      var sameInk = shape(ot, oldNodes, op) === shape(nt, newNodes, np);
       oldKept[op] = sameInk;
       newKept[np] = sameInk;
       map[op] = np;
