@@ -46,7 +46,7 @@
  * and on "the readings" while it waits to be pressed.  One colour, not a
  * gradient: it says "live", like a recording light, and nothing more. */
 .sympy-editor, .hw-down { --hw-signal: 15, 118, 110; }
-@media (prefers-color-scheme: dark) { .sympy-editor, .hw-down { --hw-signal: 45, 190, 170; } }
+@media (prefers-color-scheme: dark) { .sympy-editor { --hw-signal: 45, 190, 170; } }
 .sympy-editor[data-theme="dark"] { --hw-signal: 45, 190, 170; }
 @keyframes hw-signal {
   0%, 100% { background-color: rgba(var(--hw-signal), 0.06); border-color: rgba(var(--hw-signal), 0.45); }
@@ -88,7 +88,16 @@
   transition: opacity 180ms ease, transform 180ms ease;
 }
 .hw-down.hw-down-on { opacity: 1; transform: translate(-50%, 0);
-  animation: hw-bob 1.2s ease-in-out 220ms 2, hw-signal 1.6s ease-in-out infinite; }
+  animation: hw-bob 1.2s ease-in-out 220ms 2, hw-signal-solid 1.6s ease-in-out infinite; }
+/* "the readings" floats over the page: opaque white, whatever the theme (the
+ * text dark on it), its pulse a teal tint mixed into the white - never a
+ * translucent colour the page shows through. */
+.hw-down { background-color: #fff; color: #1f2328; }
+@keyframes hw-signal-solid {
+  0%, 100% { background-color: #fff; border-color: rgba(var(--hw-signal), 0.45); }
+  50%      { background-color: #fff; background-color: color-mix(in srgb, rgb(var(--hw-signal)) 22%, #fff);
+             border-color: rgba(var(--hw-signal), 1); }
+}
 .hw-down .se-icon { width: 1.1em; height: 1.1em; }
 @keyframes hw-bob {
   0%, 100% { transform: translate(-50%, 0); }

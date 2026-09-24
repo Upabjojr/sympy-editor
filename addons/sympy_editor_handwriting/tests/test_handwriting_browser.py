@@ -475,6 +475,17 @@ def test_the_pen_button_pulses_in_one_colour_while_writing():
             down = page.locator(".hw-down")
             page.wait_for_function("document.querySelector('.hw-down').classList.contains('hw-down-on')", timeout=15000)
             assert "hw-signal" in page.evaluate(look, ".hw-down")["name"]
+            # opaque and white: the page never shows through it, pulse or not
+            import re as _re
+            for _ in range(8):
+                colour = page.evaluate(look, ".hw-down")["colour"]
+                parts = [float(v) for v in _re.findall(r"-?[\d.]+(?:e-?\d+)?", colour)]
+                if colour.startswith("oklab"):                            # the mix, as Chromium reports it
+                    assert "/" not in colour and parts[0] > 0.85, colour  # opaque, and light
+                else:
+                    assert len(parts) == 3 or parts[3] == 1, colour       # rgb(...), or rgba(..., 1)
+                    assert min(parts[:3]) > 170, colour                   # white, a teal tint at most
+                page.wait_for_timeout(120)
             page.locator(pen).click()
             assert page.evaluate(look, pen)["name"] == "none"               # off again: plain
             assert page.errors == []
