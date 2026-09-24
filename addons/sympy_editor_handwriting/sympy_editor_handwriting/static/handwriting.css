@@ -41,6 +41,25 @@
   background: rgba(var(--se-accent), 0.14);
   border-color: rgba(var(--se-accent), 0.65);
 }
+/* The Pen, while it is on: a gradient that drifts through its colours, so
+ * that writing mode is plain at a glance - the formula answers the pen,
+ * not the finger, until it is pressed again. */
+@keyframes hw-pen-drift {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+.sympy-editor .se-tools button.hw-tool.hw-pen-on {
+  background-image: linear-gradient(115deg,
+    rgba(var(--se-accent), 0.38), rgba(168, 85, 247, 0.38), rgba(20, 184, 166, 0.38), rgba(var(--se-accent), 0.38));
+  background-size: 300% 300%;
+  border-color: rgba(var(--se-accent), 0.85);
+  box-shadow: 0 0 0 2px rgba(var(--se-accent), 0.25);
+  animation: hw-pen-drift 3.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sympy-editor .se-tools button.hw-tool.hw-pen-on { animation: none; background-position: 50% 50%; }
+}
 
 /* ---- the way down to the readings ----
  * A moment after the pen rests it rises at the foot of the screen, and a press

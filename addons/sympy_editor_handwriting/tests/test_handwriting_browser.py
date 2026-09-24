@@ -443,6 +443,33 @@ def test_keep_scrolls_back_to_the_formula():
             _close(srv, browser)
 
 
+def test_the_pen_button_drifts_through_colours_while_writing():
+    """Writing mode is plain at a glance: the Pen's button wears a gradient
+    that moves over time while it is on - and only the Pen's, only then."""
+    doc = Document(x + y, addons=[HandwritingAddon(LetterRecognizer()), LATEX])
+    pen = '[data-cmd="addon:handwriting:pen"]'
+    look = """(sel) => { const cs = getComputedStyle(document.querySelector(sel));
+        return {name: cs.animationName, image: cs.backgroundImage, pos: cs.backgroundPosition}; }"""
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc, pen=False)
+        try:
+            off = page.evaluate(look, pen)
+            assert off["name"] == "none" and "168, 85, 247" not in off["image"]    # the buttons' own surface only
+            page.locator(pen).click()
+            on = page.evaluate(look, pen)
+            assert on["name"] == "hw-pen-drift" and "168, 85, 247" in on["image"]
+            page.wait_for_timeout(700)
+            assert page.evaluate(look, pen)["pos"] != on["pos"]            # it moves
+            erase = '[data-cmd="addon:handwriting:erase"]'
+            page.locator(erase).click()                                      # the eraser is pressed, plainly
+            assert page.evaluate(look, erase)["name"] == "none"
+            page.locator(pen).click()
+            assert page.evaluate(look, pen)["name"] == "none"               # off again: plain
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
 def test_what_is_written_over_a_selection_takes_its_place_when_applied():
     """A piece selected in the editor, then written on: the reading waits to be
     applied - the formula is not touched until then - and takes that piece's
