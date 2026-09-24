@@ -129,7 +129,7 @@ SympyEditor.registerAddon("handwriting", (function () {
   // strip under the formula.
   function HELP(status) {
     return "<section><h3>Writing on the formula</h3><ul>"
-      + "<li>" + toolIcon("pen", 16) + " <b>Write</b>, among the editor's tools, takes the pointer - its button shifts through colours for as long as it is on, so writing mode is plain at a glance; with it off the editor is the editor it was - the formula is tapped, selected and edited in the usual way.</li>"
+      + "<li>" + toolIcon("pen", 16) + " <b>Write</b>, among the editor's tools, takes the pointer - its button pulses in one quiet colour for as long as it is on (and so does <i>the readings</i>, the button that takes you down to what was read), so writing mode is plain at a glance; with it off the editor is the editor it was - the formula is tapped, selected and edited in the usual way.</li>"
       + "<li>The formula itself makes room: the area grows, and it opens a space where what is written will go - after the selection, at the cursor, or by the piece the ink is written against - drawn as a box in light dashes, which widens as you write. A box that opens past the edge of the screen is scrolled towards the middle (wider, when it is at the end of the formula), and a stroke that ends by the edge opens more space ahead and scrolls the box back into sight. Nothing is sent while it is open: it closes when the ink goes.</li>"
       + "<li>A tap, with nothing written yet, still selects a piece or puts the cursor between two, the Pen on or off: choose where to write, then write there. (Once there is ink on the formula a tap is a dot.)</li>"
       + "<li>A moment after the pen lifts what is written is read, and the readings are offered under the formula, the best first. <b>Apply to the formula</b> puts the one picked in - nothing changes before that. Once one is in, picking another changes the formula to it instead (the one before is taken back, so they never pile up).</li>"
@@ -1229,7 +1229,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         if (p) {
           p.setAttribute("aria-pressed", pen ? "true" : "false");
           p.classList.toggle("hw-on", pen);
-          p.classList.toggle("hw-pen-on", pen);        // the drifting gradient: writing mode
+          p.classList.toggle("hw-pen-on", pen);        // the pulse: writing mode
         }
         if (e) {
           e.setAttribute("aria-pressed", erasing ? "true" : "false");

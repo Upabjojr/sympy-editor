@@ -443,26 +443,38 @@ def test_keep_scrolls_back_to_the_formula():
             _close(srv, browser)
 
 
-def test_the_pen_button_drifts_through_colours_while_writing():
-    """Writing mode is plain at a glance: the Pen's button wears a gradient
-    that moves over time while it is on - and only the Pen's, only then."""
+def test_the_pen_button_pulses_in_one_colour_while_writing():
+    """Writing mode is plain at a glance: the Pen's button pulses in one colour
+    - no gradient - while it is on, and only the Pen's, only then; "the
+    readings" pulses the same way while it waits to be pressed."""
     doc = Document(x + y, addons=[HandwritingAddon(LetterRecognizer()), LATEX])
     pen = '[data-cmd="addon:handwriting:pen"]'
     look = """(sel) => { const cs = getComputedStyle(document.querySelector(sel));
-        return {name: cs.animationName, image: cs.backgroundImage, pos: cs.backgroundPosition}; }"""
+        return {name: cs.animationName, image: cs.backgroundImage, colour: cs.backgroundColor}; }"""
     with playwright.sync_playwright() as p:
         srv, browser, page = _page(p, doc, pen=False)
         try:
-            off = page.evaluate(look, pen)
-            assert off["name"] == "none" and "168, 85, 247" not in off["image"]    # the buttons' own surface only
+            assert page.evaluate(look, pen)["name"] == "none"
             page.locator(pen).click()
             on = page.evaluate(look, pen)
-            assert on["name"] == "hw-pen-drift" and "168, 85, 247" in on["image"]
-            page.wait_for_timeout(700)
-            assert page.evaluate(look, pen)["pos"] != on["pos"]            # it moves
+            assert on["name"] == "hw-signal" and on["image"] == "none"         # one colour, no gradient
+            colours = set()
+            for _ in range(8):
+                colours.add(page.evaluate(look, pen)["colour"])
+                page.wait_for_timeout(120)
+            assert len(colours) > 2                                          # it fades on and off
+            assert all(c.replace(" ", "").startswith("rgba(15,118,110") for c in colours), colours
             erase = '[data-cmd="addon:handwriting:erase"]'
-            page.locator(erase).click()                                      # the eraser is pressed, plainly
-            assert page.evaluate(look, erase)["name"] == "none"
+            page.locator(erase).click()
+            assert page.evaluate(look, erase)["name"] == "none"             # the eraser: plainly pressed
+            page.locator(erase).click()
+            # "the readings": the same pulse while it waits (the strip out of sight)
+            page.set_viewport_size({"width": 900, "height": 430})
+            view = page.locator(".se-view").bounding_box()
+            _drag(page, view["x"] + 40, view["y"] + 60, view["x"] + 100, view["y"] + 90)
+            down = page.locator(".hw-down")
+            page.wait_for_function("document.querySelector('.hw-down').classList.contains('hw-down-on')", timeout=15000)
+            assert "hw-signal" in page.evaluate(look, ".hw-down")["name"]
             page.locator(pen).click()
             assert page.evaluate(look, pen)["name"] == "none"               # off again: plain
             assert page.errors == []

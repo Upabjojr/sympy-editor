@@ -41,24 +41,25 @@
   background: rgba(var(--se-accent), 0.14);
   border-color: rgba(var(--se-accent), 0.65);
 }
-/* The Pen, while it is on: a gradient that drifts through its colours, so
- * that writing mode is plain at a glance - the formula answers the pen,
- * not the finger, until it is pressed again. */
-@keyframes hw-pen-drift {
-  0%   { background-position: 0% 50%; }
-  50%  { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
+/* Writing mode, signalled: one quiet colour (a deep teal, lighter in dark
+ * mode) fading on and off - on the Pen's button for as long as it is on,
+ * and on "the readings" while it waits to be pressed.  One colour, not a
+ * gradient: it says "live", like a recording light, and nothing more. */
+.sympy-editor, .hw-down { --hw-signal: 15, 118, 110; }
+@media (prefers-color-scheme: dark) { .sympy-editor, .hw-down { --hw-signal: 45, 190, 170; } }
+.sympy-editor[data-theme="dark"] { --hw-signal: 45, 190, 170; }
+@keyframes hw-signal {
+  0%, 100% { background-color: rgba(var(--hw-signal), 0.06); border-color: rgba(var(--hw-signal), 0.45); }
+  50%      { background-color: rgba(var(--hw-signal), 0.30); border-color: rgba(var(--hw-signal), 1); }
 }
 .sympy-editor .se-tools button.hw-tool.hw-pen-on {
-  background-image: linear-gradient(115deg,
-    rgba(var(--se-accent), 0.38), rgba(168, 85, 247, 0.38), rgba(20, 184, 166, 0.38), rgba(var(--se-accent), 0.38));
-  background-size: 300% 300%;
-  border-color: rgba(var(--se-accent), 0.85);
-  box-shadow: 0 0 0 2px rgba(var(--se-accent), 0.25);
-  animation: hw-pen-drift 3.2s ease-in-out infinite;
+  background-image: none;
+  background-color: rgba(var(--hw-signal), 0.18);
+  border-color: rgba(var(--hw-signal), 0.9);
+  animation: hw-signal 1.6s ease-in-out infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  .sympy-editor .se-tools button.hw-tool.hw-pen-on { animation: none; background-position: 50% 50%; }
+  .sympy-editor .se-tools button.hw-tool.hw-pen-on { animation: none; }
 }
 
 /* ---- the way down to the readings ----
@@ -86,7 +87,8 @@
   transform: translate(-50%, 0.8rem);
   transition: opacity 180ms ease, transform 180ms ease;
 }
-.hw-down.hw-down-on { opacity: 1; transform: translate(-50%, 0); animation: hw-bob 1.2s ease-in-out 220ms 2; }
+.hw-down.hw-down-on { opacity: 1; transform: translate(-50%, 0);
+  animation: hw-bob 1.2s ease-in-out 220ms 2, hw-signal 1.6s ease-in-out infinite; }
 .hw-down .se-icon { width: 1.1em; height: 1.1em; }
 @keyframes hw-bob {
   0%, 100% { transform: translate(-50%, 0); }
