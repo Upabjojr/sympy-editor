@@ -250,6 +250,7 @@ adjacent_expressions: (_one_letter_symbol | number) _expression_mul
     | fraction _expression_mul
     | superscript _expression_mul
     | decorated_symbol _expression_mul
+    | multi_letter_symbol _expression_mul   // \mathit{ab} c - the handwriting's stand-in for a piece, too
     | _function _expression_mul   // \ln(x) y: the function may stop at its parentheses (a choice)
 
 _expression_func: _expression_core

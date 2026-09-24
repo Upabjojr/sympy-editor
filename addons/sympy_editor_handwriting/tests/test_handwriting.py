@@ -350,3 +350,16 @@ def test_ink_over_a_selected_operator_is_read_as_an_operator():
     [only] = snap["query"]["result"]["candidates"]
     assert not only["reading"]["ok"] and "Not an operator" in only["reading"]["error"]
     assert operator_of(" {\\geq} ") == ">=" and operator_of(r"\cdot") == "*" and operator_of("xy") is None
+
+
+def test_ink_beside_a_piece_in_a_denominator_multiplies_it():
+    r"""Bug: a d written right of the a of 1/a read "\mathit{nestedpiece} d",
+    which the LaTeX reader refused ("could not be read ... near 'd'"): a named
+    symbol could not be followed by a factor.  It is the product a*d."""
+    a, d = symbols("a d")
+    doc = Document(1 / a, addons=[HandwritingAddon(_InkReader(r"\Delta d"))])
+    snap = doc.handle({"action": "addon", "addon": "handwriting", "method": "write",
+                       "strokes": [[[20, 30, 0], [26, 40, 5]]], "context": [0, 20, 16, 44], "nest": "/d", "beam": 1})
+    best = snap["query"]["result"]["candidates"][0]
+    assert best["nested"] and best["reading"]["ok"], best["reading"]
+    assert best["reading"]["src"] == "a*d"

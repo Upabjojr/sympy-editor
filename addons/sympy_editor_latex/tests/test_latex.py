@@ -57,6 +57,8 @@ READINGS = [
     (r"\vec{v} \cdot \hat{x}", Symbol(r"\vec{v}") * Symbol(r"\hat{x}")),
     (r"\bar x + \mathbf{A}", Symbol(r"\bar{x}") + Symbol(r"\mathbf{A}")),
     (r"\text{foo} + \operatorname{bar}", Symbol("foo") + Symbol("bar")),
+    (r"\mathit{ab} c", Symbol("ab") * c),              # a named symbol, then a factor (was refused)
+    (r"\frac{1}{\mathit{ab}\,d}", 1 / (Symbol("ab") * Symbol("d"))),
     (r"\sigma^2 + \Delta x", Symbol("sigma") ** 2 + Symbol("Delta") * x),
     (r"\frac{1}{2} m v^2", m * Symbol("v") ** 2 / 2),
 ]
