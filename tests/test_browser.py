@@ -2024,6 +2024,26 @@ def test_diff_colours_only_what_changed(browser, serve_expr):
     assert page.errors == []
 
 
+def test_diff_marks_the_integrand_not_the_differential(browser, serve_expr):
+    """Bug: \\int x dx becoming \\int x^3 dx marked the x of dx as removed: the
+    two x's were paired first come, first served.  Equal children in the
+    same place pair first, so the integrand is what went, and dx stays."""
+    from sympy import Integral
+    srv, doc = serve_expr(Integral(x, x))
+    page = _open(browser, srv.url)
+    before = doc.snapshot()["nodes"]
+    after = Document(Integral(x**3, x)).snapshot()["nodes"]
+    integrand = next(k for k, v in before.items() if v["src"] == "x" and k.startswith("/0"))
+    variable = next(k for k, v in before.items() if v["src"] == "x" and k != integrand)
+    diff = page.evaluate("([a, b]) => document.querySelector('.sympy-editor').__sympyEditor._diffNodes(a, b)",
+                         [before, after])
+    assert diff["oldKept"][integrand] is False                        # red: the x that became x^3
+    assert diff["oldKept"][variable] is True and diff["map"][variable] == variable   # dx untouched
+    added = [k for k, kept in diff["newKept"].items() if not kept]
+    assert added and all(after[k]["src"] in ("x**3", "x", "3") and k.startswith("/0") for k in added), added
+    assert page.errors == []
+
+
 def test_unevaluated_toggle(browser, serve_expr):
     """With "unevaluated" on, the Determinant of a matrix is built, not computed."""
     from sympy import Determinant, Matrix

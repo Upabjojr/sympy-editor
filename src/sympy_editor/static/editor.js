@@ -434,8 +434,21 @@ var SympyEditor = (function () {
       oldKept[op] = sameInk;
       newKept[np] = sameInk;
       map[op] = np;
-      var oc = ot[op].children, nc = nt[np].children, used = {}, restOld = [];
-      oc.forEach(function (c) {
+      var oc = ot[op].children, nc = nt[np].children, used = {}, restOld = [], placed = {};
+      // Equal children in the same place first, then equal ones anywhere
+      // (SymPy reorders terms).  In any order at once, the x of \int x dx
+      // was paired with the x of dx in \int x^3 dx - first come, first
+      // served - and the dx's x was drawn as removed instead of the integrand.
+      oc.forEach(function (c, i) {
+        var at = c.slice(op.length);
+        for (var k = 0; k < nc.length; k++) {
+          if (!used[k] && nc[k].slice(np.length) === at && newNodes[nc[k]].src === oldNodes[c].src) {
+            used[k] = true; placed[i] = true; keepPair(c, nc[k]); return;
+          }
+        }
+      });
+      oc.forEach(function (c, i) {
+        if (placed[i]) return;
         for (var k = 0; k < nc.length; k++) {
           if (!used[k] && newNodes[nc[k]].src === oldNodes[c].src) { used[k] = true; keepPair(c, nc[k]); return; }
         }

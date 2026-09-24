@@ -333,7 +333,9 @@ Two conventions between printer, document and front end:
   box; `_animateChange` diffs old and new nodes with `diffNodes`, which
   aligns the two trees (`buildTree`) from the root down: in corresponding
   containers, children with the same `src` are kept with everything inside
-  them (any order: SymPy reorders terms), remaining children that are
+  them - those in the same place first, then in any order (SymPy reorders
+  terms; paired in any order at once, the integrand's `x` of `\int x dx`
+  took the `dx`'s place when it became `x^3`), remaining children that are
   containers of the same `type` are paired in order and aligned in turn,
   the rest goes / comes as a whole - so unwrapping `cos(x)**2` in
   `sin(x)**2 + cos(x)**2` colours `cos(x)**2` (exponent included) and
