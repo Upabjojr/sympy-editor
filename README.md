@@ -1,5 +1,10 @@
 # sympy-editor
 
+<p>
+  <a href="https://apps.apple.com/app/sympy-editor/id6807581349"><img src="https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg" alt="Download on the App Store" height="40" align="middle"></a>
+  <a href="https://play.google.com/store/apps/details?id=org.sympy.editor"><img src="https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png" alt="Get it on Google Play" height="64" align="middle"></a>
+</p>
+
 A click-to-edit, WYSIWYG-style editor for [SymPy](https://www.sympy.org)
 expressions.  Expressions are rendered as LaTeX (with [KaTeX](https://katex.org))
 in HTML; every sub-expression is selectable, and a selection can be replaced by
