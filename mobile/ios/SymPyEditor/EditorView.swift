@@ -39,6 +39,16 @@ extension EditorView {
     static let host = "www"
     static let start = URL(string: "app://www/index.html")!
 
+    /// No network, ever: every http(s) and ws(s) load the page might ask for -
+    /// a script, a stylesheet, a fetch, a socket - is blocked by WebKit
+    /// itself, beside the navigation policy that keeps the page on app://.
+    /// The bundle carries everything; the privacy statement says nothing is
+    /// sent.  (WebKit's filter has no alternation: one rule per scheme.)
+    static let offlineRules = """
+    [{"trigger": {"url-filter": "^https?://"}, "action": {"type": "block"}},
+     {"trigger": {"url-filter": "^wss?://"}, "action": {"type": "block"}}]
+    """
+
     static func webView(for bridge: PythonBridge) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.setURLSchemeHandler(BundleSchemeHandler(), forURLScheme: Self.scheme)
@@ -65,7 +75,19 @@ extension EditorView {
         // Start the interpreter while the page loads, so the first edit does
         // not wait for it (importing SymPy takes a moment).
         bridge.warmUp()
-        web.load(URLRequest(url: Self.start))
+        // The page loads once the rules are in: nothing it asks for may reach
+        // the network, not even before they compile.
+        WKContentRuleListStore.default().compileContentRuleList(
+            forIdentifier: "sympy-editor-offline", encodedContentRuleList: Self.offlineRules) { list, error in
+            DispatchQueue.main.async {
+                if let list = list {
+                    web.configuration.userContentController.add(list)
+                } else {
+                    NSLog("sympy-editor: the offline rules did not compile: \(String(describing: error))")
+                }
+                web.load(URLRequest(url: Self.start))
+            }
+        }
         return web
     }
 }

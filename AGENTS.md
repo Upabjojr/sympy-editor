@@ -1117,6 +1117,18 @@ pip package.  The rule is minimal wrapping and maximal sharing:
   own.  `mobile/app/sympy_editor_app.py` is that Python, shared: `build.py`
   stages it and a fresh `src/sympy_editor` into each platform's tree, so add a
   bridge method in three places or none - Kotlin, Swift, and the module.
+- **The apps have no network.**  The privacy statement says nothing leaves
+  the device, and the apps are built so that nothing can: Android's manifest
+  removes `INTERNET` and `ACCESS_NETWORK_STATE` (`tools:node="remove"` - ONNX
+  Runtime's library adds both, and a `TelemetryInitializer` provider that
+  uploads to Microsoft at launch, removed too), opts out of the WebView's
+  metrics and Safe Browsing, and `MainActivity` sets `ORT_DISABLE_TELEMETRY`;
+  iOS and the Mac compile a WebKit content rule list blocking every
+  `http(s)`/`ws(s)` load before the page loads.  `mobile/build.py --cdn` is
+  refused.  The handwriting add-on sets `ORT_DISABLE_TELEMETRY` before any
+  import of onnxruntime on the desktop too.  A new dependency is checked for
+  what it connects to (`test_the_apps_have_no_network`, and
+  `aapt2 dump permissions` on a built APK lists none).
 - **Glyphs a platform may lack are drawn, not typed.**  iOS has no character
   for the arrows, the keyboard, the hamburger or ✕: the arrows, the
   full-screen brackets and the keyboard are SVG (`arrowSvg`, `expandSvg`,

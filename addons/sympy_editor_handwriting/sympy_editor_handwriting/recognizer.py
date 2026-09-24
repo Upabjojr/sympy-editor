@@ -37,6 +37,23 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+#: ONNX Runtime's official builds send telemetry to Microsoft - over HTTPS
+#: from Linux, macOS, Android and iOS (the 1DS client), through ETW on Windows -
+#: unless told not to.  Read when it starts, so it is set here, before any
+#: import of it: no uploader, no events, no device identifier.  One set to
+#: something else by whoever runs this Python is left as it is.
+os.environ.setdefault("ORT_DISABLE_TELEMETRY", "1")
+
+
+def quiet_onnxruntime(ort) -> None:
+    """Switch off the telemetry events of an onnxruntime already imported
+    (by the user's own code, say, before the variable above could count)."""
+    try:
+        ort.disable_telemetry_events()
+    except Exception:  # noqa: BLE001 - an older build without the call
+        pass
+
+
 DEFAULT_MODEL = "export/stroke_b_sib2_int8"
 MAX_POINTS = 20000        # more ink than a formula needs: refused rather than slowed down on
 MAX_TOKENS = 150          # the decoder's position table holds 168: never run past it
@@ -178,6 +195,10 @@ class _JavaSession:
     def __init__(self, model: bytes, threads: int = 1) -> None:
         from java import jarray, jbyte, jclass
         self._env = jclass("ai.onnxruntime.OrtEnvironment").getEnvironment()
+        try:
+            self._env.setTelemetry(False)    # the app has no network either (its manifest)
+        except Exception:  # noqa: BLE001
+            pass
         opts = jclass("ai.onnxruntime.OrtSession$SessionOptions")()
         opts.setIntraOpNumThreads(max(1, int(threads)))
         self._session = self._env.createSession(jarray(jbyte)(model), opts)
@@ -507,6 +528,7 @@ class StrokeRecognizer:
             inkml = importlib.import_module("mathocr.data.inkml")
             tokenizer = importlib.import_module("mathocr.tokenizer")
             import onnxruntime as ort
+            quiet_onnxruntime(ort)
             opts = ort.SessionOptions()
             # One thread: math-ocr measured more of them to be many times
             # slower on a busy CPU (MATHOCR_THREADS overrides, as there).

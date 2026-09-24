@@ -904,3 +904,34 @@ def test_the_bundle_carries_what_its_add_ons_load_from_a_cdn(tmp_path):
     page = (out / "index.html").read_text(encoding="utf-8")
     assert '"localAssets"' in page and PLOTLY_JS in page
     assert "Plotly.js (the plot add-on)" in (out / "vendor" / "NOTICE.txt").read_text(encoding="utf-8")
+
+
+def test_the_apps_have_no_network():
+    """The privacy statement says the apps send nothing, and they must not be
+    able to: ONNX Runtime's Android library asks for INTERNET and starts a
+    telemetry uploader to Microsoft at launch.  Android takes both
+    permissions and the uploader out of the merged manifest, opts out of the
+    WebView's metrics and Safe Browsing, and tells ONNX Runtime to send
+    nothing; iOS and the Mac block every http(s)/ws(s) load in WebKit; the
+    handwriting Python disables ONNX Runtime's telemetry before importing
+    it; and no app build may load from a CDN."""
+    manifest = (ROOT / "mobile/android/app/src/main/AndroidManifest.xml").read_text(encoding="utf-8")
+    for removed in ('android:name="android.permission.INTERNET" tools:node="remove"',
+                    'android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove"',
+                    'android:name="ai.onnxruntime.TelemetryInitializer"'):
+        assert removed in manifest, removed
+    assert manifest.count('tools:node="remove"') == 3
+    assert '<uses-permission android:name="android.permission.INTERNET" />' not in manifest
+    assert 'android.webkit.WebView.MetricsOptOut" android:value="true"' in manifest
+    assert 'android.webkit.WebView.EnableSafeBrowsing" android:value="false"' in manifest
+    kotlin = (ROOT / "mobile/android/app/src/main/java/org/sympy/editor/MainActivity.kt").read_text(encoding="utf-8")
+    assert 'Os.setenv("ORT_DISABLE_TELEMETRY", "1", true)' in kotlin
+    swift = (ROOT / "mobile/ios/SymPyEditor/EditorView.swift").read_text(encoding="utf-8")
+    assert '"^https?://"' in swift and '"^wss?://"' in swift and "compileContentRuleList" in swift
+    recognizer = (ROOT / "addons/sympy_editor_handwriting/sympy_editor_handwriting/recognizer.py").read_text(encoding="utf-8")
+    assert recognizer.index('setdefault("ORT_DISABLE_TELEMETRY", "1")') < recognizer.index("import onnxruntime")
+    assert "setTelemetry(False)" in recognizer and "disable_telemetry_events" in recognizer
+    import subprocess
+    out = subprocess.run([sys.executable, str(ROOT / "mobile/build.py"), "android", "--cdn"],
+                         capture_output=True, text=True, timeout=60)
+    assert out.returncode != 0 and "never use the network" in out.stderr

@@ -107,6 +107,10 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
+        // ONNX Runtime reads this when it starts (the handwriting model, later):
+        // no telemetry uploader, no events, no device identifier.  The
+        // manifest already keeps its provider and the network out.
+        try { android.system.Os.setenv("ORT_DISABLE_TELEMETRY", "1", true) } catch (_: Exception) {}
         super.onCreate(savedInstanceState)
         // Before anything else: the dialogs that keep and open a file must be
         // registered while the activity is being created (AndroidX insists).

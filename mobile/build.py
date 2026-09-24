@@ -510,10 +510,18 @@ def main(argv=None) -> int:
     ap.add_argument("--release", action="store_true", help="Android: release APK + AAB instead of a debug APK")
     ap.add_argument("--simulator", action="store_true", help="iOS: build a simulator .app instead of an .ipa")
     ap.add_argument("--run", action="store_true", help="iOS: install the simulator .app and launch it")
-    ap.add_argument("--cdn", action="store_true", help="bundle without vendored assets (needs network at run time)")
+    ap.add_argument("--cdn", action="store_true",
+                    help="refused: the apps never use the network (their manifests forbid it); "
+                         "build_www.py --cdn makes a CDN page for a browser")
     ap.add_argument("--method", default=os.environ.get("IOS_EXPORT_METHOD", "development"),
                     help="iOS export method: development, ad-hoc, app-store-connect")
     args = ap.parse_args(argv)
+    if args.cdn:
+        # The apps have no network: Android's manifest takes the permission out,
+        # iOS's web view refuses every address outside the bundle.  A bundle
+        # that loads KaTeX from a CDN would be a blank page there.
+        sys.exit("--cdn: the apps never use the network, so their bundle carries everything; "
+                 "use mobile/build_www.py --cdn for a page to open in a browser")
     made = (android_build(args.release, args.cdn) if args.platform == "android"
             else ios_build(args.simulator, args.cdn, args.method, args.run))
     print("\nBuilt:" if made else "\nNo artifacts found.")
