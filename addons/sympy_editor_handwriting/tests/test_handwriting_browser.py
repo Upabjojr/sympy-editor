@@ -493,6 +493,29 @@ def test_the_pen_button_pulses_in_one_colour_while_writing():
             _close(srv, browser)
 
 
+def test_the_pieces_to_read_with_are_typeset():
+    """The pieces offered after "What is written goes with:" are drawn as the
+    formula draws them - typeset - not as their SymPy source."""
+    from sympy import sin
+    rec = LetterRecognizer()
+    rec.latex = r"\Delta^{2}"
+    doc = Document(sin(x), addons=[HandwritingAddon(rec), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc)
+        try:
+            r = page.evaluate(TEXT_RECT, "sin(x)")
+            ht = r["bottom"] - r["top"]
+            _drag(page, r["right"] + 3, r["top"] - 0.3 * ht, r["right"] + 13, r["top"] + 0.15 * ht)
+            pieces = page.locator(".hw-with-option[data-path]")
+            assert _wait(lambda: pieces.count() >= 1, 15)
+            assert _wait(lambda: all(pieces.nth(i).locator(".katex").count() == 1 for i in range(pieces.count())), 10)
+            texs = [pieces.nth(i).get_attribute("data-tex") for i in range(pieces.count())]
+            assert any("\\sin" in t for t in texs), texs
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
 def test_what_is_written_over_a_selection_takes_its_place_when_applied():
     """A piece selected in the editor, then written on: the reading waits to be
     applied - the formula is not touched until then - and takes that piece's

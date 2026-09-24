@@ -908,18 +908,32 @@ SympyEditor.registerAddon("handwriting", (function () {
         withRow.appendChild(h("span", { class: "hw-with-label" }, ["What is written goes with:"]));
         // A few pieces, as they come (the one written by, then the others there,
         // then what holds them): more than that is a wall, not a choice.
-        aim.options.slice(0, 4).forEach(function (q) {
+        var shown = aim.options.slice(0, 4);
+        var buttons = {};
+        shown.forEach(function (q) {
           var node = api.node ? api.node(q.path) : null, text = (node && node.src) || q.path;
           text = text.replace(/\s+/g, " ").trim();
           var short = text.length > 16 ? text.slice(0, 15) + "\u2026" : text;
           var b = h("button", { type: "button", class: "hw-with-option", "data-path": q.path,
                                 title: "Read the ink together with " + text }, [short]);
+          buttons[q.path] = b;
           var on = aim.kind === "nest" && q.path === aim.path;
           b.classList.toggle("hw-chosen", on);
           b.setAttribute("aria-pressed", on ? "true" : "false");
           b.addEventListener("click", function () { picked = q.path; read(); });
           withRow.appendChild(b);
         });
+        // the pieces typeset, as the formula draws them: their text until the answer comes
+        var asked = aim;
+        api.call("latex_of", { paths: shown.map(function (q) { return q.path; }) }, { quiet: true })
+          .then(function (res) {
+            if (aim !== asked) return;                       // another reading since
+            var tex = (res && res.latex) || {};
+            Object.keys(tex).forEach(function (path) {
+              var b = buttons[path];
+              if (b && b.isConnected) { b.setAttribute("data-tex", tex[path]); typeset(b, tex[path], b.textContent); }
+            });
+          }, function () {});
         var alone = h("button", { type: "button", class: "hw-with-option hw-alone",
                                   title: "Read the ink alone, after the formula" }, ["alone"]);
         alone.classList.toggle("hw-chosen", aim.kind === "end");

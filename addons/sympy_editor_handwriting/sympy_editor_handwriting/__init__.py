@@ -291,6 +291,16 @@ class HandwritingAddon(Addon):
             for cand in result["candidates"]:
                 cand["reading"] = self._reading(doc, cand["latex"])
             return result
+        if method == "latex_of":
+            # The pieces offered to read the ink with, typeset on their
+            # buttons: the LaTeX of each, as the editor draws it.
+            out = {}
+            for path in payload.get("paths") or []:
+                try:
+                    out[str(path)] = sympy.latex(doc.get(str(path)), **dict(doc.printer_settings))
+                except Exception:  # noqa: BLE001 - a path gone with an edit: its button keeps its text
+                    continue
+            return {"latex": out}
         if method == "read":
             return {"reading": self._reading(doc, str(payload.get("latex", "")), self._picks(payload),
                                              payload.get("nest"), payload.get("children"))}
