@@ -210,6 +210,8 @@ _one_letter_symbol: SYMBOL
 // seem to be the same on the surface. We allow both styles.
 multi_letter_symbol: CMD_MATHIT L_BRACE MULTI_LETTER_SYMBOL R_BRACE
     | CMD_MATHIT L_BRACE MULTI_LETTER_SYMBOL R_BRACE /'+/
+    | CMD_MATHIT L_BRACE MULTI_LETTER_SYMBOL R_BRACE NAME_SUBSCRIPT   // \mathit{ab}_d, named ab_{d} as x_d is x_{d}
+NAME_SUBSCRIPT: /_([A-Za-z0-9]|\{([A-Za-z0-9]+|[a-zA-Z]+'*)\})/
 number: /\d+(\.\d*)?/ | CMD_IMAGINARY_UNIT
 
 _atomic_expr: _one_letter_symbol

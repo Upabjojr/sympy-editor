@@ -363,3 +363,30 @@ def test_ink_beside_a_piece_in_a_denominator_multiplies_it():
     best = snap["query"]["result"]["candidates"][0]
     assert best["nested"] and best["reading"]["ok"], best["reading"]
     assert best["reading"]["src"] == "a*d"
+
+
+def test_ink_at_the_foot_of_a_piece_is_its_subscript():
+    r"""Bug: a d written at the foot of the a of 1/a read
+    "\mathit{nestedpiece}_{d}", which the LaTeX reader refused.  The piece's
+    own name takes the subscript: a_{d}.  A piece with no name says so."""
+    a, x = symbols("a x")
+    def write(expr, nest):
+        doc = Document(expr, addons=[HandwritingAddon(_InkReader(r"\Delta_{d}"))])
+        snap = doc.handle({"action": "addon", "addon": "handwriting", "method": "write",
+                           "strokes": [[[20, 40, 0], [24, 48, 5]]], "context": [0, 20, 16, 44], "nest": nest, "beam": 1})
+        return snap["query"]["result"]["candidates"][0]["reading"]
+    reading = write(1 / a, "/d")
+    assert reading["ok"] and reading["src"] == "a_{d}", reading
+    reading = write(1 / (x + 1), "/d")
+    assert not reading["ok"] and "subscript goes on a name" in reading["error"]
+
+
+def test_the_pieces_to_read_with_come_as_latex():
+    """latex_of: the LaTeX of each piece the page offers to read the ink with;
+    a path that is gone is left out."""
+    from sympy import sin
+    doc = Document(sin(x) + 1 / y, addons=[HandwritingAddon(_InkReader("x"))])
+    paths = [p for p, n in doc.snapshot()["nodes"].items() if n["src"] in ("sin(x)", "1/y")]
+    snap = doc.handle({"action": "addon", "addon": "handwriting", "method": "latex_of", "paths": paths + ["/9/9"]})
+    got = snap["query"]["result"]["latex"]
+    assert sorted(got.values()) == sorted([r"\sin{\left(x \right)}", r"\frac{1}{y}"]) and "/9/9" not in got

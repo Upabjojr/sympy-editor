@@ -58,6 +58,8 @@ READINGS = [
     (r"\bar x + \mathbf{A}", Symbol(r"\bar{x}") + Symbol(r"\mathbf{A}")),
     (r"\text{foo} + \operatorname{bar}", Symbol("foo") + Symbol("bar")),
     (r"\mathit{ab} c", Symbol("ab") * c),              # a named symbol, then a factor (was refused)
+    (r"\mathit{ab}_d", Symbol("ab_{d}")),              # ... with a subscript, named as x_d is
+    (r"\mathit{ab}_{d}^{2} c", Symbol("ab_{d}") ** 2 * c),
     (r"\frac{1}{\mathit{ab}\,d}", 1 / (Symbol("ab") * Symbol("d"))),
     (r"\sigma^2 + \Delta x", Symbol("sigma") ** 2 + Symbol("Delta") * x),
     (r"\frac{1}{2} m v^2", m * Symbol("v") ** 2 / 2),

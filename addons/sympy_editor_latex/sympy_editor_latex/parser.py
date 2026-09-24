@@ -200,7 +200,10 @@ class _Transformer:
                 return Symbol(str(token))
 
             def multi_letter_symbol(self, tokens):
-                return Symbol(str(tokens[2]) + (str(tokens[4]) if len(tokens) == 5 else ""))
+                tail = str(tokens[4]) if len(tokens) == 5 else ""
+                if tail.startswith("_"):                   # a subscript, written as x_d is: ab_{d}
+                    tail = "_{" + tail[1:].strip("{}") + "}"
+                return Symbol(str(tokens[2]) + tail)
 
             def function_applied(self, tokens):
                 head = tokens[0]
@@ -490,6 +493,16 @@ class LatexReader:
 
         expr, consts = self._apply_constants(expr, constants or {})
         swap = {Symbol(str(k)): v for k, v in (pieces or {}).items() if isinstance(v, Basic)}
+        # A subscript on a placeholder (ink written at the foot of a piece):
+        # the piece's own name takes it - a_{d} for the a of the formula.  A
+        # piece with no name to carry it (x + 1) cannot take one.
+        for s in expr.free_symbols:
+            name = getattr(s, "name", "")
+            for k, v in (pieces or {}).items():
+                if isinstance(v, Basic) and name.startswith(str(k) + "_{"):
+                    if not isinstance(v, Symbol):
+                        return {"ok": False, "error": f"A subscript goes on a name, and {v} is not one"}
+                    swap[s] = Symbol(v.name + name[len(str(k)):], **v.assumptions0)
         put = (lambda e: e.xreplace(swap)) if swap else (lambda e: e)          # noqa: E731
         try:
             expr = self._reuse_known(put(expr), known)
