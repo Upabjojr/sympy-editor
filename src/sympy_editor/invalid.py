@@ -31,7 +31,7 @@ import re
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 import sympy
-from sympy import Add, Basic, Expr, Function, sympify
+from sympy import Add, Basic, Expr, Function, Order, sympify
 from sympy.core.function import UndefinedFunction
 from sympy.core.numbers import Integer
 from sympy.core.symbol import Str
@@ -144,7 +144,12 @@ def _rebuild_unevaluated(node: Basic, args) -> Basic:
     """``rebuild(node, args)`` under ``evaluate(False)``.  A matrix sum or
     product is built by its constructor alone: ``rebuild`` canonicalises
     those (``doit``), which unevaluated recurses without end on an explicit
-    matrix term (``Matrix([[1, 2], [3, 4]]) + B``)."""
+    matrix term (``Matrix([[1, 2], [3, 4]]) + B``).  An ``Order`` is built
+    evaluated: unevaluated, ``Order.__new__`` recurses without end too, and
+    the O(x**7) of every series was refused."""
+    if isinstance(node, Order):
+        with sympy.evaluate(True):
+            return rebuild(node, list(args))
     with sympy.evaluate(False):
         if isinstance(node, (MatAdd, MatMul)):
             return node.func(*args)

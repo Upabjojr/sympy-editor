@@ -141,3 +141,15 @@ def test_the_expression_given_is_kept():
     doc = Document(srepr(invalid("MatMul")(A, B)))
     assert doc.expr == invalid("MatMul")(A, B)
     assert Document(Add(2, B)).expr == invalid("Add")(2, B)
+
+
+def test_a_series_is_valid_and_can_be_edited():
+    """``Order`` built unevaluated recurses without end in SymPy, so the check
+    of every commit refused the O(x**7) of any series as invalid."""
+    from sympy import O, exp, series
+    assert first_problem(series(exp(x), x, 0, 7)) is None
+    doc = Document(exp(x))
+    snap = doc.handle({"action": "call", "path": "/", "func": "series(x, 0, 7)"})
+    assert snap["error"] is None and doc.expr == series(exp(x), x, 0, 7)
+    doc.handle({"action": "set", "src": "1 + x + O(x**2)"})
+    assert doc.expr == 1 + x + O(x**2)
