@@ -30,6 +30,15 @@ It has two tabs:
     - There is no menu inside a string, a comment or a number.
   - <kbd>↑</kbd>/<kbd>↓</kbd> recall earlier inputs, which are kept between
     visits.
+  - Before the console is first used, the prompt offers `editor.expr`:
+    <kbd>Enter</kbd> shows the formula.
+  - The transcript is kept between visits too, as text: the inputs and what
+    they showed, never the Python objects. While the Python it ran in is
+    alive (a server outlives a reload of its page) it comes back as it was.
+    Once that Python is gone (the app started afresh, a page's Pyodide, a
+    **Reset**) it comes back faded, *not run in this Python*, with **Run all
+    again** to run its inputs once more, in order, stopping at the first
+    error. **Clear** forgets it.
   - `display(obj)` shows a value typeset in the middle of the output.
   - A tap on an output (an `Out[n]` or a `display`) copies its text into the
     input at the cursor; a tap on an earlier input puts it back.
@@ -41,7 +50,8 @@ It has two tabs:
   the way `python script.py` runs it: in a namespace of its own, with
   `__name__ == "__main__"`. Afterwards, as with IPython's `%run`, what the
   script defined is available in the console.
-  - The script is kept between visits.
+  - The script is kept between visits, as text, with its name and the tab
+    last open: after a restart it is there to run again.
   - **Save .py** writes it out through the platform's own save or share
     sheet, or as a download in a browser.
 
@@ -105,7 +115,7 @@ behaviour is built on the standard library (`ast`, `codeop`, `rlcompleter`).
 | `script` | `code`, `name`, `path`, `children` | `{items, changed, select?, next, token}` |
 | `complete` | `code`, `pos` | `{start, word, matches, kinds, total}`: `kinds[i]` says what `matches[i]` is (`function`, `method`, `property`, `class`, or a value's type) |
 | `use` | `n`, `path`, `children` | a change: `Out[n]` in the formula |
-| `reset` | none | `{next, token}` |
+| `reset` | none | `{next, token}`: a new namespace, and a new `token` - the panel's cells from before are only text now |
 
 `items` is the output, in order: `{kind: "stdout" \| "stderr" \| "error",
 text}` and `{kind: "display", text, latex?}`. When a run changed the formula

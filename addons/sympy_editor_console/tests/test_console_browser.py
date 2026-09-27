@@ -334,3 +334,74 @@ def test_a_name_opens_the_menu_only_when_few_names_begin_so():
         field.press("Tab")                                          # Tab: as far as they agree, then the menu
         page.wait_for_function("document.querySelector('.se-addon-console .pc-input').value === 'simplify'")
         assert "simplify_logic" in _menu_names(page)
+
+
+def _reload(page):
+    page.reload()
+    page.wait_for_selector(".se-addon-console .pc-panel", timeout=30000)     # whichever tab was kept
+    page.wait_for_function(f"{ED} && {ED}.state && !{ED}.busy")
+
+
+def test_the_first_input_is_the_formula_and_the_transcript_comes_back_as_text():
+    """Before the console is first used its prompt offers editor.expr.  What
+    was run is kept as text and shown the next time: as it was while the
+    Python it ran in lives (a server outlives a reload of its page), and
+    faded, "not run in this Python", once that is gone - the variables are
+    not kept, no Python object is - until "Run all again" runs the inputs
+    once more.  Clear forgets it."""
+    with _page(Document(sin(x) + y, addons=[ADDON])) as page:
+        field = page.locator(".se-addon-console .pc-input")
+        page.wait_for_function("document.querySelector('.se-addon-console .pc-input').value === 'editor.expr'")
+        field.press("Enter")                                            # the offer, taken as it is
+        page.wait_for_selector(".se-addon-console .pc-entry .pc-out")
+        assert "sin" in page.locator(".se-addon-console .pc-entry").last.inner_text()
+        _enter(page, "a = 41")
+        _enter(page, "a + 1")
+
+        # the same Python after a reload: the cells as they were, live
+        _reload(page)
+        page.wait_for_function("document.querySelectorAll('.se-addon-console .pc-entry').length === 3")
+        assert page.locator(".se-addon-console .pc-restored").count() == 0
+        assert page.locator(".se-addon-console .pc-entry").last.locator(".pc-use").count() == 1
+        assert field.input_value() == ""                                  # used before: no offer
+        assert "42" in _enter(page, "a + 1").inner_text()
+
+        # a new Python (Reset here; an app started afresh): faded, not defined
+        page.locator(".se-addon-console .pc-btn", has_text="Reset").click()
+        page.wait_for_selector(".se-addon-console .pc-note-new")
+        _reload(page)
+        page.wait_for_selector(".se-addon-console .pc-restored-head")
+        restored = page.locator(".se-addon-console .pc-entry.pc-restored")
+        assert restored.count() == 4
+        assert "a + 1" in restored.last.inner_text() and "42" in restored.last.inner_text()
+        assert restored.locator(".pc-use").count() == 0                   # its Out[n] is text now
+        assert "NameError" in _enter(page, "a").inner_text()              # the variables did not come back
+        before = page.locator(".se-addon-console .pc-entry:not(.pc-restored)").count()
+        page.locator(".se-addon-console .pc-rerun").click()
+        page.wait_for_function(f"document.querySelectorAll('.se-addon-console .pc-entry:not(.pc-restored)').length === {before + 4}")
+        page.wait_for_function(f"!{ED}.busy")
+        assert "42" in page.locator(".se-addon-console .pc-entry").last.inner_text()
+        assert "42" in _enter(page, "a + 1").inner_text()                 # and they are defined again
+
+        page.locator(".se-addon-console .pc-btn", has_text="Clear").click()
+        _reload(page)
+        page.wait_for_timeout(500)
+        assert page.locator(".se-addon-console .pc-entry").count() == 0
+
+
+def test_the_script_is_kept_as_text_and_runs_again_after_a_reload():
+    """The Script tab's file - its text and its name - is kept between
+    visits (the editor's keeper: the app's files, the server's store), as
+    the text it is: after a reload it is there to run again."""
+    with _page(Document(sin(x) + y, addons=[ADDON])) as page:
+        page.locator(".se-addon-console .pc-tab", has_text="Script").click()
+        script = page.locator(".se-addon-console .pc-script")
+        script.fill("k = 6 * 7\nprint('k is', k)\n")
+        page.locator(".se-addon-console .pc-name").fill("answer.py")
+        page.wait_for_timeout(700)                                      # kept 400 ms after the last key
+        _reload(page)
+        assert page.locator(".se-addon-console .pc-scripting").is_visible()   # the tab last used, too
+        page.wait_for_function("document.querySelector('.se-addon-console .pc-script').value.startsWith('k = 6 * 7')")
+        assert page.locator(".se-addon-console .pc-name").input_value() == "answer.py"
+        page.locator(".se-addon-console .pc-btn", has_text="Run script").click()
+        page.wait_for_function("document.querySelector('.se-addon-console .pc-script-out').innerText.includes('k is 42')")

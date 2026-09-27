@@ -129,3 +129,8 @@
   .se-addon-console .pc-complete { font-size: 15px; max-height: 11em; }
   .se-addon-console .pc-comp-item { padding: 0.45rem 0.6rem; min-height: 28px; }
 }
+
+/* Last time's transcript: text only, its Python gone until it runs again. */
+.se-addon-console .pc-restored { opacity: 0.55; }
+.se-addon-console .pc-restored-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.se-addon-console .pc-rerun { font-style: normal; }

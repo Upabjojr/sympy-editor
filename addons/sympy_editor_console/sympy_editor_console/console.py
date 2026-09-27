@@ -289,9 +289,6 @@ class Console:
         self._running_ns: Optional[Dict[str, Any]] = None
         #: Changes to the formula since the last run began (``on_change``).
         self.changed = False
-        #: Tells the panel it is speaking to another namespace (a session
-        #: switch, a page reloaded): a new one is a new console.
-        self.token = secrets.token_hex(6)
         doc.on_change(self._on_change)
         self.reset()
 
@@ -302,6 +299,10 @@ class Console:
 
     def reset(self) -> None:
         """A fresh namespace: SymPy's names, ``editor``, and the formula's symbols."""
+        #: Names the namespace, for the panel: another one (a session switch,
+        #: a Python started afresh, a reset) means the variables it showed
+        #: are gone - and last time's cells, kept as text, are only text.
+        self.token = secrets.token_hex(6)
         self.count = 1
         self.inputs: List[str] = [""]
         self.outputs: Dict[int, Any] = {}

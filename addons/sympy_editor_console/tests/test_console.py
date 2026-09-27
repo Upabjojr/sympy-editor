@@ -192,6 +192,8 @@ def test_every_snapshot_names_the_namespace():
     assert doc.snapshot()["console"]["next"] == 2
     other = Document(x, addons=[ADDON])
     assert run(other, "", method="hello")["token"] != hello["token"]      # each document its own
+    fresh = run(doc, "", method="reset")                                   # a reset is a new namespace:
+    assert fresh["token"] != hello["token"] and fresh["next"] == 1          # the panel's cells from before are text
 
 
 def test_unknown_method():

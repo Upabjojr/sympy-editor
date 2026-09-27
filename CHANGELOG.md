@@ -38,7 +38,11 @@
   the caret - after a ``.`` it lists the methods and properties of the
   object in memory, and while a name is typed it opens when only a few
   names begin that way, your own first - and its
-  script tab runs a whole file at once. ``editor`` reads and changes the
+  script tab runs a whole file at once. The transcript and the script
+  are kept between launches, as text: last time's cells come back faded,
+  *not run in this Python*, with **Run all again** (no Python object is
+  stored). Before the console is first used, the prompt offers
+  ``editor.expr``. ``editor`` reads and changes the
   formula - ``editor.selection = expand(editor.selection)`` - each change a
   step of the history.
 

@@ -4,7 +4,9 @@
  * server's, Pyodide's - with `editor` there to read and change the formula.
  *
  * What the user types outlives the page through the editor's keeper
- * (api.keep): the script and its name, the inputs for ↑/↓, the tab last used.
+ * (api.keep): the script and its name, the inputs for ↑/↓, the tab last used,
+ * and the transcript - as text, never Python objects: it comes back faded,
+ * "not run in this session", with a button that runs its inputs again.
  */
 (function () {
   var HELP = [
@@ -29,6 +31,7 @@
     "<li><code>factor?</code> describes <code>factor</code>, <code>factor??</code> shows its source.</li>",
     "<li><code>%who</code> and <code>%whos</code> list your variables, <code>%time</code> times a statement, <code>%reset</code> (or <b>Reset</b>) starts afresh.</li>",
     "<li>Completion: after a <code>.</code> a menu lists what the object in memory has (methods, properties), and while a name is typed it opens when only a few names begin that way - yours first. <kbd>↑</kbd> / <kbd>↓</kbd> choose, <kbd>Enter</kbd>, <kbd>Tab</kbd> or a tap take one, <kbd>Esc</kbd> closes it; <kbd>Tab</kbd> also opens it with every name that fits.</li>",
+    "<li>The transcript is kept between visits, as text. Where the Python it ran in is gone (the app started afresh) it comes back faded, <i>not run in this Python</i> - the variables are not kept, only what was typed and shown - and <b>Run all again</b> runs its inputs once more. <b>Clear</b> forgets it. Before the console is first used, the prompt offers <code>editor.expr</code>.</li>",
     "<li><kbd>↑</kbd> / <kbd>↓</kbd> bring back earlier inputs (kept between visits), a tap on an earlier input puts it back and a tap on an output copies it into the input at the cursor, <kbd>Ctrl</kbd>+<kbd>L</kbd> or <b>Clear</b> clears the screen.</li>",
     "<li><code>display(obj)</code> shows a value typeset in the middle of the output.</li>",
     "</ul></section>",
@@ -42,6 +45,9 @@
     mount: function (api) {
       var h = api.h;
       var HISTORY_MAX = 200;
+      var TRANSCRIPT_MAX = 60;          // cells kept between visits
+      var TEXT_MAX = 20000;             // characters of one output kept
+      var FIRST_INPUT = "editor.expr";   // what the prompt offers before the console is first used
 
       /** A field for code: no capitals, no corrections, no spelling marks - what
        *  a phone keyboard would do to Python otherwise. */
@@ -86,7 +92,7 @@
 
       var element = h("div", { class: "pc-panel" }, [tabs, consolePane, scriptPane]);
 
-      var state = { mode: "console", history: [], pos: 0, draft: "", token: null, next: 1, running: false };
+      var state = { mode: "console", history: [], pos: 0, draft: "", token: null, next: 1, running: false, transcript: [] };
 
       var EXAMPLE = [
         "# A script runs as a file does; what it defines stays in the console.",
@@ -125,6 +131,30 @@
         try { var list = text ? JSON.parse(text) : null; if (Array.isArray(list)) state.history = list.concat(state.history).slice(-HISTORY_MAX); }
         catch (e) { /* not ours */ }
         state.pos = state.history.length;
+        // Never used yet: the prompt offers the formula itself, Enter away.
+        if (!state.history.length && !input.value) { input.value = FIRST_INPUT; autosize(); }
+      });
+      // Which namespace is behind the panel decides how last time's cells
+      // come back: the one they ran in may still be alive (a server's Python
+      // outlives a reload of its page), or gone (an app started afresh).
+      var hello = api.call("hello", {}, { quiet: true }).then(function (res) {
+        if (res && res.token) state.token = res.token;
+        if (res && res.next) setNext(res.next);
+        return state.token;
+      }, function () { return state.token; });
+      Promise.all([keepRead("console-transcript"), hello]).then(function (got) {
+        var cells = null;
+        try { cells = got[0] ? JSON.parse(got[0]) : null; } catch (e) { /* not ours */ }
+        if (!Array.isArray(cells) || !cells.length) return;
+        state.transcript = cells.concat(state.transcript).slice(-TRANSCRIPT_MAX);
+        var token = got[1];
+        var gone = cells.filter(function (c) { return !token || !c || c.token !== token; });
+        var alive = cells.filter(function (c) { return token && c && c.token === token; });
+        var first = log.firstChild;                      // anything already run in this visit stays below
+        if (gone.length) drawRestored(gone, first);
+        alive.forEach(function (c) {
+          if (typeof c.code === "string") drawCell(c.code, { n: c.n, items: c.items || [], out: c.out || null }, false, first);
+        });
       });
       keepRead("console-mode").then(function (mode) { if (mode === "script" || mode === "console") setMode(mode, true); });
 
@@ -219,9 +249,9 @@
         return b;
       }
 
-      function drawCell(code, res) {
+      function drawCell(code, res, restored, where_) {
         var n = res && res.n != null ? res.n : "?";
-        var entry = h("div", { class: "pc-entry" });
+        var entry = h("div", { class: "pc-entry" + (restored ? " pc-restored" : "") });
         var codeEl = h("pre", { class: "pc-code", title: "Tap to put it back in the input" }, [code]);
         codeEl.addEventListener("click", function () { input.value = code; autosize(); input.focus(); });
         entry.appendChild(h("div", { class: "pc-in" }, [h("span", { class: "pc-prompt pc-prompt-in" }, ["In [" + n + "]:"]), codeEl]));
@@ -231,10 +261,56 @@
             var math = h("div", { class: "pc-math", title: "Tap to copy it into the input" });
             typeset(math, res.out.latex, res.out.text);
             reusable(math, res.out.text);
-            entry.appendChild(h("div", { class: "pc-out" }, [h("span", { class: "pc-prompt pc-prompt-out" }, ["Out[" + n + "]:"]), math, useButton(n)]));
+            // (a restored Out[n] is only text now: no Use - that number means another value in this namespace)
+            entry.appendChild(h("div", { class: "pc-out" }, [h("span", { class: "pc-prompt pc-prompt-out" }, ["Out[" + n + "]:"]), math]
+              .concat(restored ? [] : [useButton(n)])));
           }
         }
-        log.appendChild(entry);
+        if (where_) log.insertBefore(entry, where_); else log.appendChild(entry);
+        scrollDown(log);
+      }
+
+      /* ---- the transcript, kept as text between visits ---- */
+      function clip(text) {
+        text = String(text == null ? "" : text);
+        return text.length > TEXT_MAX ? text.slice(0, TEXT_MAX) + "\n…" : text;
+      }
+      function keepCell(code, res, error) {
+        var cell = { code: code, n: res && res.n != null ? res.n : null, token: (res && res.token) || state.token, items: [] };
+        (res && res.items || []).forEach(function (it) {
+          var item = { kind: it.kind, text: clip(it.text) };
+          if (it.latex && it.latex.length <= TEXT_MAX) item.latex = it.latex;
+          cell.items.push(item);
+        });
+        if (error) cell.items.push({ kind: "error", text: clip(error) });
+        if (res && res.out) cell.out = { text: clip(res.out.text), latex: res.out.latex && res.out.latex.length <= TEXT_MAX ? res.out.latex : null };
+        state.transcript.push(cell);
+        if (state.transcript.length > TRANSCRIPT_MAX) state.transcript = state.transcript.slice(-TRANSCRIPT_MAX);
+        keepWrite("console-transcript", JSON.stringify(state.transcript));
+      }
+      /** Last time's cells, faded, above anything run in this visit: their
+       *  inputs as they were typed and their outputs as text - the Python
+       *  objects are gone, and "Run all again" brings them back. */
+      function drawRestored(cells, first) {
+        var head = h("div", { class: "pc-note pc-restored-head" }, [
+          "From last time: shown, not run in this Python - its variables are not defined now. "]);
+        var again = button("Run all again", "Run these inputs again, in order, in this session's Python (stops at the first error)", "pc-rerun");
+        head.appendChild(again);
+        log.insertBefore(head, first);
+        cells.forEach(function (c) {
+          if (!c || typeof c.code !== "string") return;
+          drawCell(c.code, { n: c.n != null ? c.n : "?", items: c.items || [], out: c.out || null }, true, first);
+        });
+        again.addEventListener("click", function () {
+          if (state.running) return;
+          again.disabled = true;
+          var codes = cells.map(function (c) { return c && c.code; }).filter(function (c) { return typeof c === "string" && c.trim(); });
+          var chain = Promise.resolve(true);
+          codes.forEach(function (code) {
+            chain = chain.then(function (ok) { return ok ? execute(code, true) : false; });
+          });
+          chain.then(function () { again.disabled = false; input.focus({ preventScroll: true }); });
+        });
         scrollDown(log);
       }
 
@@ -300,26 +376,36 @@
         closeMenu();
         var code = input.value;
         if (!code.trim()) { input.value = ""; autosize(); return; }
+        execute(code, force, true).then(function () { input.focus({ preventScroll: true }); });
+      }
+      /** Run `code` as a cell; true when it ran without an error.  From the
+       *  prompt (`typed`) an unfinished block asks for its next line and the
+       *  input is emptied; "Run all again" leaves the input alone. */
+      function execute(code, force, typed) {
         var msg = where();
         msg.code = code;
         msg.interactive = !force;
         state.running = true;
         hint.textContent = "";
-        holdPrompt(function () {
+        return holdPrompt(function () {
           return api.call("run", msg).then(function (res) {
             state.running = false;
-            if (res && res.incomplete) { newline(input); return; }
+            if (res && res.incomplete) { newline(input); return false; }
             remember(code);
-            input.value = "";
-            autosize();
+            if (typed) { input.value = ""; autosize(); }
             drawCell(code, res);
-            return followUp(res);
+            keepCell(code, res);
+            return Promise.resolve(followUp(res)).then(function () {
+              return !(res && (res.items || []).some(function (i) { return i.kind === "error"; }));
+            });
           }, function (e) {
             state.running = false;
             drawCell(code, null);
             failed(log, e);
+            keepCell(code, null, String((e && e.message) || e));
+            return false;
           });
-        }).then(function () { input.focus({ preventScroll: true }); });
+        });
       }
 
       function recall(step) {
@@ -559,7 +645,11 @@
 
       function clear() {
         if (state.mode === "script") scriptOut.textContent = "";
-        else log.textContent = "";
+        else {
+          log.textContent = "";
+          state.transcript = [];                         // and it does not come back next time
+          keepWrite("console-transcript", "[]");
+        }
         hint.textContent = "";
       }
       clearBtn.addEventListener("click", clear);
@@ -624,11 +714,6 @@
         api.saveFile(name, "text/x-python", script.value);
       });
 
-      // The namespace behind the panel, and its next input number.
-      api.call("hello", {}, { quiet: true }).then(function (res) {
-        if (res && res.token) state.token = res.token;
-        if (res && res.next) setNext(res.next);
-      }, function () {});
 
       return {
         element: element,
