@@ -63,6 +63,7 @@ checkout — and restart the kernel:
 ```
 pip install -e addons/sympy_editor_plot -e addons/sympy_editor_latex
 pip install -e addons/sympy_editor_tree -e addons/sympy_editor_matching
+pip install -e addons/sympy_editor_console
 ```
 
 Every installed add-on is then listed at the top of the drawer the **≡**
@@ -555,17 +556,20 @@ The editor can be extended from outside: an add-on is a package of its own
 that gives a document node types from another library, transformations,
 data beside every snapshot and methods of its own, and a panel of HTML and
 JavaScript under the formula - through one contract,
-`sympy_editor.addons.Addon`, and one message.  Four drafts live in
+`sympy_editor.addons.Addon`, and one message.  Five drafts live in
 [`addons/`](addons/README.md): the expression tree as an editable graph,
 the graph of the selection drawn by Plotly.js, rewrite rules with
 wildcards matched many-to-one by
-[sympy-matching](https://github.com/Upabjojr/sympy-matching), and LaTeX
+[sympy-matching](https://github.com/Upabjojr/sympy-matching), LaTeX
 import - a box under the formula that reads LaTeX with an Earley parser
 (through [Lark](https://github.com/lark-parser/lark)), offers a menu for
 every ambiguous part (`f(x)` applied or multiplied, how far `\sin x \cos y`
 reaches) and a switch for every constant name (`\pi` the constant, or a
 symbol called `pi`), and puts the reading over the selection or in place of
-the whole expression.
+the whole expression; and a Python console - input and output as in IPython,
+or a whole script run at once - in the same Python as the editor (the app's
+own on a phone, the server's, Pyodide in a standalone page), where `editor`
+reads and changes the formula: `editor.selection = expand(editor.selection)`.
 
 An add-on is a package of its own, made by anyone, found by the editor
 once it is installed (`pip install -e addons/sympy_editor_tree` for a
@@ -583,7 +587,7 @@ serve(expr, addons=["matching"])                                       # the loc
 The **Add-ons** section at the top of the **≡** drawer switches any installed add-on on or off
 while editing.  Not installed?  A module name (`addons=["sympy_editor_tree"]`)
 or the object itself (`addons=[ADDON]`) work too; `python addons/demo.py`
-builds a page with the four drafts straight from the checkout.
+builds a page with the drafts straight from the checkout.
 `addons/README.md` describes the architecture, and `addons/template/` is
 an add-on to copy when writing your own.
 

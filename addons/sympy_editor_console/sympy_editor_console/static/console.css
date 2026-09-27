@@ -1,0 +1,83 @@
+/* The console add-on: a panel under the formula, in two tabs. */
+.se-addon-console .pc-panel { display: flex; flex-direction: column; gap: 0.35rem; min-width: 0; }
+.se-addon-console .pc-pane[hidden] { display: none; }
+.se-addon-console .pc-pane { display: flex; flex-direction: column; gap: 0.35rem; min-width: 0; }
+.se-addon-console .pc-tabs, .se-addon-console .pc-script-bar,
+.se-addon-console .pc-input-row { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; min-width: 0; }
+.se-addon-console .pc-fill { flex: 1 1 auto; }
+
+.se-addon-console .pc-btn, .se-addon-console .pc-tab {
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--se-border);
+  border-radius: 0.3rem;
+  background: var(--se-btn);
+  box-shadow: var(--se-btn-edge), var(--se-btn-shadow);
+  color: inherit;
+  cursor: pointer;
+}
+.se-addon-console .pc-btn:active, .se-addon-console .pc-tab:active { background: var(--se-btn-down); box-shadow: var(--se-btn-shadow-down); }
+.se-addon-console .pc-btn:focus-visible, .se-addon-console .pc-tab:focus-visible { outline: 2px solid rgba(var(--se-accent), 0.55); outline-offset: 1px; }
+.se-addon-console .pc-tab.pc-on { border-color: rgba(var(--se-accent), 0.7); background: rgba(var(--se-accent), 0.12); font-weight: 600; }
+.se-addon-console .pc-run { border-color: rgba(var(--se-accent), 0.6); }
+
+/* The transcript: code as code, output as the terminal shows it. */
+.se-addon-console .pc-log {
+  max-height: 22em;
+  overflow: auto;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--se-rule);
+  border-radius: 0.3rem;
+  background: var(--se-surface);
+  font-family: var(--se-mono);
+  font-size: 12.5px;
+}
+.se-addon-console .pc-log:empty { display: none; }
+.se-addon-console .pc-entry { padding: 0.15rem 0; border-bottom: 1px dashed var(--se-rule); }
+.se-addon-console .pc-entry:last-child { border-bottom: none; }
+.se-addon-console .pc-in, .se-addon-console .pc-out { display: flex; align-items: baseline; gap: 0.4rem; min-width: 0; }
+.se-addon-console .pc-prompt { flex: 0 0 auto; font-family: var(--se-mono); font-size: 12px; white-space: nowrap; }
+.se-addon-console .pc-prompt-in { color: rgb(var(--se-accent)); }
+.se-addon-console .pc-prompt-out { color: #b42318; }
+.se-addon-console pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: inherit; min-width: 0; }
+.se-addon-console .pc-code { cursor: pointer; flex: 1 1 auto; }
+.se-addon-console .pc-stream { padding-left: 0.2rem; }
+.se-addon-console .pc-stderr, .se-addon-console .pc-error { color: var(--se-error); }
+.se-addon-console .pc-math, .se-addon-console .pc-display { font-family: inherit; font-size: 1.1em; overflow-x: auto; min-width: 0; flex: 1 1 auto; }
+.se-addon-console .pc-display { padding: 0.1rem 0.2rem; }
+.se-addon-console .pc-use { flex: 0 0 auto; font-size: 11px; padding: 0.05rem 0.4rem; }
+.se-addon-console .pc-note { color: var(--se-muted); font-style: italic; font-family: inherit; font-size: 12px; padding: 0.15rem 0; }
+.se-addon-console .pc-note-new { color: rgb(var(--se-accent)); }
+.se-addon-console .pc-note-bad { color: var(--se-error); }
+
+/* The fields: sunken, monospaced, as long as the text. */
+.se-addon-console .pc-code-field, .se-addon-console .pc-name {
+  font-family: var(--se-mono);
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--se-border);
+  border-radius: 0.3rem;
+  background: var(--se-field);
+  color: inherit;
+  box-sizing: border-box;
+  tab-size: 4;
+}
+.se-addon-console .pc-code-field:focus, .se-addon-console .pc-name:focus { outline: 2px solid rgba(var(--se-accent), 0.5); outline-offset: -1px; }
+.se-addon-console .pc-input { flex: 1 1 12rem; min-width: 0; resize: none; overflow-x: auto; }
+.se-addon-console .pc-script { width: 100%; min-height: 12em; resize: vertical; overflow: auto; }
+.se-addon-console .pc-name { width: 12rem; max-width: 50%; }
+.se-addon-console .pc-hint { color: var(--se-muted); font-family: var(--se-mono); font-size: 11.5px; min-height: 1em; word-break: break-word; }
+.se-addon-console .pc-hint:empty { display: none; }
+
+@media (prefers-color-scheme: dark) {
+  .se-addon-console .pc-prompt-out { color: #f97066; }
+}
+/* A finger's targets. */
+@media (any-pointer: coarse) {
+  .se-addon-console .pc-btn, .se-addon-console .pc-tab { font-size: 14px; padding: 0.45rem 0.7rem; min-height: 36px; }
+  .se-addon-console .pc-code-field, .se-addon-console .pc-name { font-size: 16px; }   /* iOS zooms into anything smaller */
+  .se-addon-console .pc-log { font-size: 13px; }
+}

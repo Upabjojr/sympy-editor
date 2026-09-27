@@ -14,10 +14,11 @@ addons/
   sympy_editor_plot/        the graph of the selection, drawn by Plotly.js (numpy optional)
   sympy_editor_matching/    rewrite rules matched many-to-one              (sympy-matching)
   sympy_editor_latex/       LaTeX in: a first reading, every ambiguity a choice, constants as switches (lark)
-  demo.py                   a page with the four, to try them in a browser
+  sympy_editor_console/     a Python console and script runner, with `editor` for the formula (no dependency)
+  demo.py                   a page with the five, to try them in a browser
 ```
 
-All four are **drafts**: they work end to end (each has tests, and the
+All five are **drafts**: they work end to end (each has tests, and the
 editor's browser test drives a panel), but their interfaces are the first
 version of an idea, not a promise.  They live in this repository for
 convenience only: an add-on is an **external project** - any package, in
@@ -59,7 +60,7 @@ entry point, the way pytest learns of its plugins.
    share one add-on object; state is kept per document.
 
 3. **Or try the page**: `python addons/demo.py` writes `addons/demo.html`
-   with the three drafts (no install needed, it reads them from the
+   with the drafts (no install needed, it reads them from the
    checkout), `python addons/demo.py --serve` runs them on the local server.
 
 4. **Switch them while editing.**  The **Add-ons** section at the top of the **≡** drawer lists
@@ -194,6 +195,10 @@ api.keep.read(name)          // → Promise of the text kept under `name` (or nu
                              // this editor's keeper - the app's storage, the server's or the kernel's store,
                              // the browser's only on a standalone page.  Not SympyEditor.keep, which asks
                              // the editor made last: on a page with several it may be another backend
+api.openFile(accept)         // → Promise of {name, text} the user picked (null for none): the host app's picker,
+                             // a file input in a browser
+api.saveFile(name, mime, text)   // offer text as a file, as the editor saves its own: the host app, the kernel,
+                             // the share sheet, or a download
 api.editor                   // the Editor itself, for what the above does not cover
 ```
 
@@ -310,7 +315,7 @@ fixes, reproduced - not in the editor's.  `pytest addons/` runs them all,
 `addons/tests/test_demo_page.py` included, which refuses a stale
 `demo.html`.
 
-## The three drafts
+## The drafts
 
 **`sympy_editor_tree`** - *new interface + custom widget*.  `contribute` puts
 the real argument tree in the snapshot (`snap["tree"]`, capped at 400 nodes),
@@ -345,6 +350,20 @@ document compiled into **one** many-to-one matcher by sympy-matching's
 matching the selection with their bindings, and *Rewrite* / *Rewrite all*
 both as buttons and as ops in the Transform menu (`context=True`: they read
 the document's rules).
+
+**`sympy_editor_console`** - *a Python console beside the formula*.  Two
+tabs: a console that behaves as IPython (`In [n]` / `Out[n]` typeset, `_`,
+`obj?`, `%who`, `%time`, Tab completion, an unfinished block asking for the
+next line) and a script editor that runs a whole file as `python file.py`
+does, then leaves its names in the console (IPython's `%run`).  Both run in
+the document's Python - the app's own interpreter, the server's process,
+Pyodide - with SymPy imported, the formula's symbols in scope, and `editor`
+to read and change the formula (`editor.expr`, `editor.selection`,
+`editor["/1"]`, `editor.apply(...)`), each change a step of the history.
+Nothing but the standard library: no IPython.  A run that changed the formula
+answers as a query with `changed: true`, and the panel then asks for a fresh
+snapshot - an add-on method answers either a query or a change, and a run is
+both (its output and a new formula).
 
 ## Open questions
 

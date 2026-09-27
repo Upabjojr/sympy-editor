@@ -2168,6 +2168,12 @@ var SympyEditor = (function () {
         error: function (text) { self._showError(text); },
         showHelp: function (html, title) { self.showHelp(html, title || entry.label); },
         busy: function () { return self.busy; },
+        /** A file the user picks, as {name, text} (null for none): the host
+         *  app's picker, a file input in a browser. */
+        openFile: function (accept) { return openFileText(accept || ""); },
+        /** Offer `text` as a file named `name`, as the editor saves its own:
+         *  the host app, the kernel, the share sheet, or a download. */
+        saveFile: function (name, mime, text) { return self._exportFile(name, mime || "text/plain", String(text), name); },
         /** What the add-on keeps of its own, by name, through this editor's
          *  keeper: the app's storage, this editor's backend (the server's or
          *  the kernel's store), the browser's only on a page that has neither.

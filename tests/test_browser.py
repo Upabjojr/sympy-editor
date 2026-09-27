@@ -4707,6 +4707,13 @@ def test_addon_panel_tools_and_calls(browser):
         rejected = page.evaluate("document.querySelector('.sympy-editor').__sympyEditor._addonCall('demo', 'nope', {}).then(() => 'resolved', e => e.message)")
         assert "ValueError: nope" in rejected
         assert page.locator(".se-error").get_attribute("hidden") is not None
+        # files, as the editor opens and saves its own (the console's scripts)
+        api = "document.querySelector('.sympy-editor').__sympyEditor._addons[0].api"
+        assert page.evaluate(f"typeof {api}.openFile") == "function"
+        with page.expect_download() as download:
+            page.evaluate(f"{api}.saveFile('mine.py', 'text/x-python', 'print(1)\\n')")
+        assert download.value.suggested_filename == "mine.py"
+        assert open(download.value.path(), encoding="utf-8").read() == "print(1)\n"
         # a toolbar button of the add-on: a change like any edit
         page.locator('.se-toolbar [data-cmd="addon:demo:boxit"]').click()
         page.wait_for_function("document.querySelector('.se-source').textContent.startsWith('Box(')")
