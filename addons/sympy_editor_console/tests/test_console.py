@@ -158,6 +158,24 @@ def test_completion():
     assert run(doc, "editor.fi", method="complete")["matches"] == ["editor.find"]
 
 
+def test_completion_says_what_each_name_is_and_puts_the_users_first():
+    doc = Document(x + y, addons=[ADDON])
+    run(doc, "xs = [1]; e = x**2")
+    res = run(doc, "x", method="complete")
+    assert res["matches"][:2] == ["x", "xs"] and res["total"] == len(res["matches"])
+    kinds = dict(zip(res["matches"], res["kinds"]))
+    assert kinds["x"] == "Symbol" and kinds["xs"] == "list"
+    res = run(doc, "e.", method="complete")                      # attributes, the private ones left out
+    kinds = dict(zip(res["matches"], res["kinds"]))
+    assert kinds["e.expand"] == "method" and kinds["e.args"] == "property" and "e.adjoint" in kinds
+    assert not any(m.startswith("e._") for m in res["matches"])
+    assert run(doc, "wh", method="complete")["matches"] == ["while"]
+    assert run(doc, "f", method="complete")["total"] > 20        # many: the panel keeps its menu shut
+    for code in ["'e.", "print('x", "# e.", "1.", "3.e"]:        # a string, a comment, a number
+        assert run(doc, code, method="complete")["matches"] == [], code
+    assert "e.expand" in run(doc, "s = 'a'; e.", method="complete")["matches"]
+
+
 def test_output_is_bounded():
     doc = Document(x, addons=[ADDON])
     res = run(doc, "for i in range(100000):\n    print('0123456789')\n")

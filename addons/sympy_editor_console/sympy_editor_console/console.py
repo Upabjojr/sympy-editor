@@ -17,6 +17,7 @@ import builtins
 import codeop
 import inspect
 import io
+import keyword
 import linecache
 import re
 import secrets
@@ -534,34 +535,102 @@ class Console:
         return None
 
     def complete(self, code: str, pos: Optional[int] = None) -> Dict[str, Any]:
-        """Names that complete the word before ``pos``: ``{"start", "matches"}``
-        (``start`` is where the completed word begins in ``code``)."""
+        """Names that complete the word before ``pos``: ``{"start", "word",
+        "matches", "kinds", "total"}``.
+
+        ``start`` is where the completed word begins in ``code``; ``word``
+        may be dotted (``editor.fi``), and then the matches are the
+        attributes of the object already in the namespace (``editor.find``).
+        ``kinds`` says what each one is (``function``, ``class``, ``module``,
+        ``property``, or the type of a value), and the user's own names and
+        the formula's come first.  ``total`` counts them all, ``matches``
+        stops at ``MAX_COMPLETIONS``.  Inside a string or a comment, or after
+        a number, there is nothing to complete."""
         import rlcompleter
 
         pos = len(code) if pos is None else max(0, min(int(pos), len(code)))
         head = code[:pos]
         m = re.search(r"[A-Za-z_][\w.]*$|[A-Za-z_]?$", head)
         word = m.group(0) if m else ""
+        empty = {"start": pos - len(word), "word": word, "matches": [], "kinds": [], "total": 0}
+        line = head[head.rfind("\n") + 1:]
+        if not word or _in_string_or_comment(line) or re.search(r"\d\.?$", head[:m.start()]):
+            return empty
         self._sync_names(self.ns)
         completer = rlcompleter.Completer(self.ns)
-        matches: List[str] = []
+        found: List[str] = []
         seen = set()
-        if word:
-            i = 0
-            while len(matches) < MAX_COMPLETIONS:
-                try:
-                    item = completer.complete(word, i)
-                except Exception:  # noqa: BLE001 - an attribute that raises when looked at
-                    break
-                if item is None:
-                    break
+        i = 0
+        while True:
+            try:
+                item = completer.complete(word, i)
+            except Exception:  # noqa: BLE001 - an attribute that raises when looked at
+                break
+            if item is None:
+                break
+            i += 1
+            item = re.sub(r"(\(\)?|:| )$", "", item)   # rlcompleter's "f(", "g()", "while ", "try:"
+            if item not in seen and not item.split(".")[-1].startswith("__"):
+                seen.add(item)
+                found.append(item)
+        own = set(self.user_names()) | set(self._injected)
+        found.sort(key=lambda s: (s not in own, s.split(".")[-1].startswith("_"), s.lower()))
+        matches = found[:MAX_COMPLETIONS]
+        return {"start": pos - len(word), "word": word, "matches": matches,
+                "kinds": [self._kind_of(name) for name in matches], "total": len(found)}
+
+    def _kind_of(self, dotted: str) -> str:
+        """What a completion is, looked at without running anything of its
+        own: a property is named, not read."""
+        *base, last = dotted.split(".")
+        try:
+            if base:
+                owner = self.ns[base[0]] if base[0] in self.ns else getattr(builtins, base[0])
+                for part in base[1:]:
+                    owner = inspect.getattr_static(owner, part)
+                    if isinstance(owner, (property, staticmethod, classmethod)):
+                        return ""
+                value = inspect.getattr_static(owner, last)
+                if isinstance(value, property):
+                    return "property"
+                if isinstance(value, (staticmethod, classmethod)):
+                    return "method"
+            elif last in self.ns:
+                value = self.ns[last]
+            elif keyword.iskeyword(last):
+                return "keyword"
+            else:
+                value = getattr(builtins, last)
+        except Exception:  # noqa: BLE001 - it is only a hint
+            return ""
+        if inspect.ismodule(value):
+            return "module"
+        if inspect.isclass(value):
+            return "class"
+        if inspect.isroutine(value) or type(value).__name__ in ("method_descriptor", "wrapper_descriptor"):
+            return "method" if base else "function"
+        return type(value).__name__
+
+
+def _in_string_or_comment(line: str) -> bool:
+    """Whether the end of a line of code is inside a string or a comment."""
+    quote = None
+    i = 0
+    while i < len(line):
+        c = line[i]
+        if quote:
+            if c == "\\":
                 i += 1
-                item = item.rstrip("(")
-                if item not in seen and not item.split(".")[-1].startswith("__"):
-                    seen.add(item)
-                    matches.append(item)
-        matches.sort(key=lambda s: (s.split(".")[-1].startswith("_"), s.lower()))
-        return {"start": pos - len(word), "word": word, "matches": matches}
+            elif line.startswith(quote, i):
+                i += len(quote) - 1
+                quote = None
+        elif c == "#":
+            return True
+        elif c in "'\"":
+            quote = line[i:i + 3] if line[i:i + 3] in ("'''", '"""') else c
+            i += len(quote) - 1
+        i += 1
+    return quote is not None
 
 
 def _seconds(s: float) -> str:

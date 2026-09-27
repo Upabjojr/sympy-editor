@@ -17,7 +17,17 @@ It has two tabs:
   - `_`, `__`, `___`, `_n`, `Out` and `In` are there.
   - `obj?` describes an object and `obj??` shows its source.
   - The line magics `%who`, `%whos`, `%time` and `%reset` work.
-  - <kbd>Tab</kbd> completes names.
+  - Completion comes in a menu at the caret. After a `.` it lists what the
+    object already in memory has, marked method, property and so on (the
+    private `_` names only once you type `_`). Nothing is called to find
+    them. While a plain name is typed, the menu opens by itself when at most
+    a dozen names begin that way, with your own names and the formula's
+    first. <kbd>Tab</kbd> completes as far as every match agrees and shows
+    them all.
+    - <kbd>↑</kbd>/<kbd>↓</kbd> choose; <kbd>Enter</kbd>, <kbd>Tab</kbd> or a
+      tap take one; <kbd>Esc</kbd> closes the menu.
+    - <kbd>Enter</kbd> on a name already typed in full runs the input.
+    - There is no menu inside a string, a comment or a number.
   - <kbd>↑</kbd>/<kbd>↓</kbd> recall earlier inputs, which are kept between
     visits.
   - `display(obj)` shows a value typeset in the middle of the output.
@@ -93,7 +103,7 @@ behaviour is built on the standard library (`ast`, `codeop`, `rlcompleter`).
 |---|---|---|
 | `run` | `code`, `path`, `children`, `interactive` | `{n, items, out?, changed, select?, next, token}`, or `{incomplete: true}` when `interactive` and the block is unfinished |
 | `script` | `code`, `name`, `path`, `children` | `{items, changed, select?, next, token}` |
-| `complete` | `code`, `pos` | `{start, word, matches}` |
+| `complete` | `code`, `pos` | `{start, word, matches, kinds, total}`: `kinds[i]` says what `matches[i]` is (`function`, `method`, `property`, `class`, or a value's type) |
 | `use` | `n`, `path`, `children` | a change: `Out[n]` in the formula |
 | `reset` | none | `{next, token}` |
 

@@ -28,7 +28,8 @@
     "<li><code>_</code>, <code>__</code>, <code>___</code>, <code>_3</code>, <code>Out[3]</code>, <code>In[3]</code>.</li>",
     "<li><code>factor?</code> describes <code>factor</code>, <code>factor??</code> shows its source.</li>",
     "<li><code>%who</code> and <code>%whos</code> list your variables, <code>%time</code> times a statement, <code>%reset</code> (or <b>Reset</b>) starts afresh.</li>",
-    "<li><kbd>Tab</kbd> completes a name, <kbd>↑</kbd> / <kbd>↓</kbd> bring back earlier inputs (kept between visits), a tap on an earlier input puts it back and a tap on an output copies it into the input at the cursor, <kbd>Ctrl</kbd>+<kbd>L</kbd> or <b>Clear</b> clears the screen.</li>",
+    "<li>Completion: after a <code>.</code> a menu lists what the object in memory has (methods, properties), and while a name is typed it opens when only a few names begin that way - yours first. <kbd>↑</kbd> / <kbd>↓</kbd> choose, <kbd>Enter</kbd>, <kbd>Tab</kbd> or a tap take one, <kbd>Esc</kbd> closes it; <kbd>Tab</kbd> also opens it with every name that fits.</li>",
+    "<li><kbd>↑</kbd> / <kbd>↓</kbd> bring back earlier inputs (kept between visits), a tap on an earlier input puts it back and a tap on an output copies it into the input at the cursor, <kbd>Ctrl</kbd>+<kbd>L</kbd> or <b>Clear</b> clears the screen.</li>",
     "<li><code>display(obj)</code> shows a value typeset in the middle of the output.</li>",
     "</ul></section>",
     "<section><h3>Good to know</h3><ul>",
@@ -68,7 +69,7 @@
       var input = codeField("pc-input", 1, "Python - Enter runs, Shift+Enter a new line");
       var runBtn = button("Run", "Run the input (Enter; Ctrl+Enter runs an unfinished block too)", "pc-run");
       var hint = h("div", { class: "pc-hint" });
-      var inputRow = h("div", { class: "pc-input-row" }, [prompt, input, runBtn]);
+      var inputRow = h("div", { class: "pc-input-row" }, [prompt, input, runBtn]);   // and the completion menu
       var consolePane = h("div", { class: "pc-pane pc-console" }, [log, inputRow, hint]);
 
       /* ---- the script ---- */
@@ -296,6 +297,7 @@
 
       function run(force) {
         if (state.running) return;
+        closeMenu();
         var code = input.value;
         if (!code.trim()) { input.value = ""; autosize(); return; }
         var msg = where();
@@ -322,6 +324,7 @@
 
       function recall(step) {
         if (!state.history.length) return false;
+        closeMenu();
         if (state.pos === state.history.length) state.draft = input.value;
         var pos = Math.max(0, Math.min(state.history.length, state.pos + step));
         if (pos === state.pos) return false;
@@ -332,26 +335,200 @@
         return true;
       }
 
+      /* ---- completion: a menu at the caret ----
+       * It opens by itself after a "." (the attributes of what is already in
+       * memory: nothing is called to find them) and while a name is typed
+       * that few names begin with (AUTO_MAX); Tab opens it with everything
+       * that fits.  ↑/↓ choose, Enter or Tab take one, Esc closes it, and
+       * typing on narrows it. */
+      var AUTO_MAX = 12;
+      var menu = h("div", { class: "pc-complete", role: "listbox", "aria-label": "Completions" });
+      menu.hidden = true;
+      inputRow.appendChild(menu);
+      var comp = { items: [], shown: [], index: 0, start: 0, word: "", total: 0, auto: false, seq: 0, timer: null };
+
+      function wordBeforeCaret() {
+        var pos = input.selectionStart;
+        if (input.selectionEnd !== pos) return null;
+        var m = /[A-Za-z_][\w.]*$/.exec(input.value.slice(0, pos));
+        return m ? { start: m.index, word: m[0], pos: pos } : null;
+      }
+      function lastPart(name) { return name.slice(name.lastIndexOf(".") + 1); }
+      function closeMenu() {
+        clearTimeout(comp.timer);
+        comp.seq++;
+        if (menu.hidden) return;
+        menu.hidden = true;
+        menu.textContent = "";
+        comp.shown = [];
+        input.removeAttribute("aria-activedescendant");
+      }
+      function menuOpen() { return !menu.hidden && comp.shown.length > 0; }
+
+      /** Show the matches of `w` (the word at the caret) among what came back. */
+      function showMatches(w) {
+        var shown = comp.items.filter(function (it) { return it.name.lastIndexOf(w.word, 0) === 0; });
+        var dotted = w.word.indexOf(".") >= 0;
+        // Typing a plain name opens it only for a handful; a finished word closes it.
+        if (!shown.length || (shown.length === 1 && shown[0].name === w.word)
+            || (comp.auto && !dotted && (comp.total > comp.items.length ? comp.total : shown.length) > AUTO_MAX)) {
+          closeMenu();
+          return;
+        }
+        comp.shown = shown;
+        comp.start = w.start;
+        drawMenu(w);
+        // The name as typed, when it is one, is the one Enter takes: Enter then runs.
+        for (var i = 0; i < shown.length; i++) if (shown[i].name === w.word) highlight(i);
+      }
+      function drawMenu(w) {
+        menu.textContent = "";
+        var typed = lastPart(w.word);
+        comp.shown.forEach(function (it, i) {
+          var part = lastPart(it.name);
+          var row = h("div", { class: "pc-comp-item", role: "option", id: "pc-comp-" + i, "data-name": it.name }, [
+            h("span", { class: "pc-comp-name" }, [h("b", {}, [part.slice(0, typed.length)]), part.slice(typed.length)]),
+            h("span", { class: "pc-comp-kind" }, [it.kind || ""])]);
+          // A tap takes it and leaves the keyboard where it is.
+          row.addEventListener("pointerdown", function (ev) { ev.preventDefault(); });
+          row.addEventListener("mousedown", function (ev) { ev.preventDefault(); });
+          row.addEventListener("click", function () { comp.index = i; accept(); });
+          menu.appendChild(row);
+        });
+        var more = comp.total - comp.items.length;
+        if (more > 0 && comp.shown.length === comp.items.length) {
+          menu.appendChild(h("div", { class: "pc-comp-more" }, ["… " + more + " more: keep typing"]));
+        }
+        menu.hidden = false;
+        highlight(0);
+        placeMenu();
+      }
+      function highlight(i) {
+        var rows = menu.querySelectorAll(".pc-comp-item");
+        if (!rows.length) return;
+        comp.index = (i + rows.length) % rows.length;
+        for (var r = 0; r < rows.length; r++) rows[r].classList.toggle("pc-comp-on", r === comp.index);
+        var on = rows[comp.index];
+        input.setAttribute("aria-activedescendant", on.id);
+        if (on.offsetTop < menu.scrollTop) menu.scrollTop = on.offsetTop;
+        else if (on.offsetTop + on.offsetHeight > menu.scrollTop + menu.clientHeight) menu.scrollTop = on.offsetTop + on.offsetHeight - menu.clientHeight;
+      }
+      /** Take the highlighted completion; false when it was already typed. */
+      function accept() {
+        var it = comp.shown[comp.index];
+        var pos = input.selectionStart;
+        closeMenu();
+        if (!it) return false;
+        var typed = input.value.slice(comp.start, pos);
+        input.value = input.value.slice(0, comp.start) + it.name + input.value.slice(pos);
+        input.selectionStart = input.selectionEnd = comp.start + it.name.length;
+        autosize();
+        input.focus({ preventScroll: true });
+        return typed !== it.name;
+      }
+
+      /** The caret's place in the row: the field is monospaced, so a column
+       *  and a line say where it is drawn. */
+      var charWidth = 0;
+      function placeMenu() {
+        var cs = getComputedStyle(input);
+        if (!charWidth) {
+          var probe = h("span", { style: "position:absolute;visibility:hidden;white-space:pre;font:" + cs.font }, ["0000000000"]);
+          inputRow.appendChild(probe);
+          charWidth = probe.getBoundingClientRect().width / 10 || 8;
+          inputRow.removeChild(probe);
+        }
+        var before = input.value.slice(0, comp.start);
+        var line = before.split("\n").length - 1;
+        var col = before.length - before.lastIndexOf("\n") - 1;
+        var lh = parseFloat(cs.lineHeight) || 18;
+        var rowBox = inputRow.getBoundingClientRect();
+        var box = input.getBoundingClientRect();
+        var x = box.left - rowBox.left + (parseFloat(cs.paddingLeft) || 0) + col * charWidth - input.scrollLeft;
+        var lineTop = box.top - rowBox.top + (parseFloat(cs.paddingTop) || 0) + line * lh - input.scrollTop;
+        menu.style.left = Math.max(0, Math.min(x, rowBox.width - menu.offsetWidth)) + "px";
+        // Under the line when there is room - above it next to a phone's keyboard.
+        var vv = window.visualViewport;
+        var bottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
+        var below = bottom - (rowBox.top + lineTop + lh);
+        if (below >= Math.min(menu.offsetHeight, 160) || below > rowBox.top + lineTop) {
+          menu.style.top = (lineTop + lh + 2) + "px";
+          menu.style.bottom = "";
+        } else {
+          menu.style.top = "";
+          menu.style.bottom = (rowBox.height - lineTop + 2) + "px";
+        }
+      }
+
+      /** Ask Python for what completes the word at the caret. `auto`: the
+       *  menu opened by itself, so a long list of plain names stays shut. */
+      function askCompletions(auto) {
+        var w = wordBeforeCaret();
+        if (!w) { closeMenu(); return; }
+        var seq = ++comp.seq;
+        api.call("complete", { code: input.value, pos: w.pos }, { quiet: true }).then(function (res) {
+          if (seq !== comp.seq || !res) return;
+          var now = wordBeforeCaret();
+          if (!now || now.start !== res.start || now.word.lastIndexOf(res.word, 0) !== 0) return;
+          comp.items = (res.matches || []).map(function (name, i) { return { name: name, kind: (res.kinds || [])[i] || "" }; });
+          comp.word = res.word;
+          comp.total = res.total != null ? res.total : comp.items.length;
+          comp.auto = auto;
+          if (!auto) {
+            if (!comp.items.length) { hint.textContent = "No completion."; return; }
+            comp.start = res.start;
+            if (comp.items.length === 1) { comp.shown = comp.items; comp.index = 0; accept(); return; }
+            var prefix = comp.items.map(function (it) { return it.name; }).filter(function (name) {
+              return name.lastIndexOf(now.word, 0) === 0;
+            }).reduce(function (a, b) { var i = 0; while (a != null && i < a.length && a[i] === b[i]) i++; return a == null ? b : a.slice(0, i); }, null);
+            if (prefix && prefix.length > now.word.length) {
+              input.value = input.value.slice(0, now.start) + prefix + input.value.slice(now.pos);
+              input.selectionStart = input.selectionEnd = now.start + prefix.length;
+              autosize();
+              now = wordBeforeCaret();
+            }
+          }
+          showMatches(now);
+        }, function () {});
+      }
+      /** After each change to the input: open, narrow or close the menu. */
+      function completeAsTyped() {
+        var pos = input.selectionStart;
+        var w = wordBeforeCaret();
+        if (state.running || !w || !/[\w.]/.test(input.value.charAt(pos - 1))) { closeMenu(); return; }
+        var narrowing = !menu.hidden && w.start === comp.start && w.word.lastIndexOf(comp.word, 0) === 0
+          && w.word.lastIndexOf(".") === comp.word.lastIndexOf(".") && comp.items.length === comp.total;
+        if (narrowing) { showMatches(w); return; }
+        closeMenu();
+        clearTimeout(comp.timer);
+        var dot = w.word.charAt(w.word.length - 1) === ".";
+        comp.timer = setTimeout(function () { askCompletions(true); }, dot ? 0 : 150);
+      }
+      input.addEventListener("blur", function () { setTimeout(function () { if (document.activeElement !== input) closeMenu(); }, 150); });
+      input.addEventListener("scroll", function () { if (!menu.hidden) placeMenu(); });
+
+      /** Tab: complete as far as every match agrees, then show the menu. */
       function complete(field) {
         var pos = field.selectionStart;
         if (field.selectionEnd !== pos || !/[A-Za-z0-9_.]$/.test(field.value.slice(0, pos))) return false;
-        api.call("complete", { code: field.value, pos: pos }, { quiet: true }).then(function (res) {
-          var list = (res && res.matches) || [];
-          if (!list.length) { hint.textContent = "No completion."; return; }
-          var prefix = list.reduce(function (a, b) { var i = 0; while (i < a.length && a[i] === b[i]) i++; return a.slice(0, i); });
-          if (prefix.length > res.word.length) {
-            field.value = field.value.slice(0, res.start) + prefix + field.value.slice(pos);
-            field.selectionStart = field.selectionEnd = res.start + prefix.length;
-          }
-          hint.textContent = list.length > 1 ? list.slice(0, 60).join("  ") + (list.length > 60 ? "  …" : "") : "";
-        }, function () {});
+        askCompletions(false);
         return true;
       }
 
-      input.addEventListener("input", function () { autosize(); hint.textContent = ""; });
+      input.addEventListener("input", function () { autosize(); hint.textContent = ""; completeAsTyped(); });
       input.addEventListener("keydown", function (ev) {
         var k = ev.key;
         var mod = ev.ctrlKey || ev.metaKey;
+        if (menuOpen() && !mod && !ev.altKey) {
+          if (k === "ArrowDown" || k === "ArrowUp") { ev.preventDefault(); highlight(comp.index + (k === "ArrowDown" ? 1 : -1)); return; }
+          if (k === "Tab" && !ev.shiftKey) { ev.preventDefault(); accept(); return; }
+          if (k === "Enter" && !ev.shiftKey) {
+            // A completion taken, or - when it was typed already - Enter as ever.
+            if (accept()) { ev.preventDefault(); return; }
+          }
+          if (k === "Escape") { ev.preventDefault(); ev.stopPropagation(); closeMenu(); return; }
+          if (k === "ArrowLeft" || k === "ArrowRight" || k === "Home" || k === "End") closeMenu();
+        }
         if (k === "Enter" && mod) { ev.preventDefault(); run(true); return; }
         if (k === "Enter" && ev.shiftKey) { ev.preventDefault(); newline(input); return; }
         if (k === "Enter") {

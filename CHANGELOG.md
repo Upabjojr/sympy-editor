@@ -13,7 +13,10 @@
   the formula in the same Python as the editor - the app's own on a phone,
   the server's, Pyodide in a standalone page. Its console works as IPython
   does (``In [n]``/``Out[n]`` typeset, ``_``, ``obj?``, ``%who``, ``%time``,
-  Tab completion; a tap on an output copies it into the input), and its
+  a tap on an output copies it into the input) with a completion menu at
+  the caret - after a ``.`` it lists the methods and properties of the
+  object in memory, and while a name is typed it opens when only a few
+  names begin that way, your own first - and its
   script tab runs a whole file at once. ``editor`` reads and changes the
   formula - ``editor.selection = expand(editor.selection)`` - each change a
   step of the history.

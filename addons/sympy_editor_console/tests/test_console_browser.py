@@ -256,3 +256,75 @@ def test_a_standalone_page_runs_the_console_in_pyodide(tmp_path):
         assert page.locator(".se-addon-console .pc-script-out .pc-stdout").inner_text().strip() == "2"
         assert errors == []
         browser.close()
+
+
+def _menu(page):
+    return page.locator(".se-addon-console .pc-complete")
+
+
+def _menu_names(page):
+    page.wait_for_selector(".se-addon-console .pc-complete:not([hidden]) .pc-comp-item")
+    return page.eval_on_selector_all(".se-addon-console .pc-comp-item", "els => els.map(e => e.dataset.name)")
+
+
+def test_a_dot_opens_the_menu_of_what_is_in_memory():
+    with _page(Document(sin(x) + y, addons=[ADDON])) as page:
+        _enter(page, "rows = [1, 2]")
+        field = page.locator(".se-addon-console .pc-input")
+        field.click()
+        field.press_sequentially("rows.")
+        names = _menu_names(page)
+        assert "rows.append" in names and "rows.count" in names and not any(n.startswith("rows._") for n in names)
+        field.press_sequentially("ap")                              # typing narrows it
+        page.wait_for_function("document.querySelectorAll('.se-addon-console .pc-comp-item').length === 1")
+        kind = page.locator(".se-addon-console .pc-comp-on .pc-comp-kind").inner_text()
+        assert kind == "method"
+        field.press("Enter")                                        # takes it, runs nothing
+        assert field.input_value() == "rows.append" and _menu(page).is_hidden()
+        assert page.locator(".se-addon-console .pc-entry").count() == 1
+        field.press_sequentially("(3); rows")
+        field.press("Enter")
+        page.wait_for_function(f"document.querySelectorAll('.se-addon-console .pc-entry').length === 2 && !{ED}.busy")
+        assert "[1, 2, 3]" in page.locator(".se-addon-console .pc-entry").last.inner_text()
+
+        field.fill("")
+        field.press_sequentially("editor.")                          # the formula's own API
+        names = _menu_names(page)
+        assert {"editor.expr", "editor.selection", "editor.find"} <= set(names)
+        field.press("ArrowDown")
+        field.press("ArrowDown")
+        chosen = page.locator(".se-addon-console .pc-comp-on").get_attribute("data-name")
+        field.press("Escape")                                       # closes the menu, nothing else
+        assert _menu(page).is_hidden() and field.input_value() == "editor."
+        field.press_sequentially("ex")
+        page.locator(".se-addon-console .pc-comp-item[data-name='editor.expr']").click()   # a tap takes one
+        assert field.input_value() == "editor.expr" and chosen
+        assert page.evaluate("document.activeElement.classList.contains('pc-input')")
+
+
+def test_a_name_opens_the_menu_only_when_few_names_begin_so():
+    with _page(Document(x, addons=[ADDON])) as page:
+        _enter(page, "velocity = 3; volume = 2")
+        field = page.locator(".se-addon-console .pc-input")
+        field.click()
+        field.press_sequentially("s")                               # hundreds of SymPy names: no menu
+        page.wait_for_timeout(600)
+        assert _menu(page).is_hidden()
+        field.fill("")
+        field.press_sequentially("v")
+        names = _menu_names(page)
+        assert names[:2] == ["velocity", "volume"]                  # the user's own first
+        field.press_sequentially("el")
+        page.wait_for_function("document.querySelectorAll('.se-addon-console .pc-comp-item').length === 1")
+        field.press("Tab")
+        assert field.input_value() == "velocity" and _menu(page).is_hidden()
+        field.press("Enter")                                        # a finished name runs
+        page.wait_for_function(f"document.querySelectorAll('.se-addon-console .pc-entry').length === 2 && !{ED}.busy")
+        assert "Out[2]" in page.locator(".se-addon-console .pc-entry").last.inner_text()
+        field.press_sequentially("'volume.")                        # inside a string: nothing
+        page.wait_for_timeout(600)
+        assert _menu(page).is_hidden()
+        field.fill("simpl")
+        field.press("Tab")                                          # Tab: as far as they agree, then the menu
+        page.wait_for_function("document.querySelector('.se-addon-console .pc-input').value === 'simplify'")
+        assert "simplify_logic" in _menu_names(page)

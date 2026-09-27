@@ -98,3 +98,34 @@
   .se-addon-console .pc-code-field, .se-addon-console .pc-name { font-size: 16px; }   /* iOS zooms into anything smaller */
   .se-addon-console .pc-log { font-size: 13px; }
 }
+
+/* The completion menu, at the caret. */
+.se-addon-console .pc-input-row { position: relative; }
+.se-addon-console .pc-complete {
+  position: absolute;
+  z-index: 30;
+  min-width: 12rem;
+  max-width: min(26rem, 100%);
+  max-height: 13.5em;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.15rem 0;
+  border: 1px solid var(--se-border);
+  border-radius: 0.3rem;
+  background: var(--se-field);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  font-family: var(--se-mono);
+  font-size: 12.5px;
+}
+.se-addon-console .pc-complete[hidden] { display: none; }
+.se-addon-console .pc-comp-item { display: flex; align-items: baseline; gap: 0.8rem; padding: 0.12rem 0.5rem; cursor: pointer; white-space: nowrap; }
+.se-addon-console .pc-comp-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
+.se-addon-console .pc-comp-name b { color: rgb(var(--se-accent)); }
+.se-addon-console .pc-comp-kind { flex: 0 0 auto; color: var(--se-muted); font-size: 11px; font-style: italic; }
+.se-addon-console .pc-comp-on { background: rgba(var(--se-accent), 0.16); }
+@media (hover: hover) { .se-addon-console .pc-comp-item:hover { background: rgba(var(--se-accent), 0.09); } .se-addon-console .pc-comp-on:hover { background: rgba(var(--se-accent), 0.16); } }
+.se-addon-console .pc-comp-more { padding: 0.12rem 0.5rem; color: var(--se-muted); font-style: italic; font-family: inherit; font-size: 11.5px; }
+@media (any-pointer: coarse) {
+  .se-addon-console .pc-complete { font-size: 15px; max-height: 11em; }
+  .se-addon-console .pc-comp-item { padding: 0.45rem 0.6rem; min-height: 28px; }
+}
