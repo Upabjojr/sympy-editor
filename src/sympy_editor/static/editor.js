@@ -5728,8 +5728,40 @@ var SympyEditor = (function () {
       if (!this._sessionSaveTimer) return false;       // nothing waiting: nothing to wait for
       clearTimeout(this._sessionSaveTimer);
       this._sessionSaveTimer = null;
+      this._keepCommittedNow();
       this._saveSession();
       return true;
+    }
+
+    /** The session as far as the page knows it, kept at once: the history
+     *  last saved with the committed formula as its next step (or, after an
+     *  undo or a redo, as the step it moved to).  A save asks Python for the
+     *  exact history, and a page being closed or reloaded never gets the
+     *  answer - the last edit was lost.  When the answer does come, it
+     *  replaces this. */
+    _keepCommittedNow() {
+      var snap = this.committed;
+      if (!this._sessionsReady || !snap || !snap.srepr || snap.error) return;
+      var store = this._sessionStore || this._loadSessions();
+      var cur = store.list.filter(function (s) { return s.id === store.current; })[0];
+      var st = cur && cur.state;
+      if (!st || !Array.isArray(st.history) || !st.history.length) return;
+      var index = Math.min(st.index || 0, st.history.length - 1);
+      if (st.history[index] === snap.srepr) return;                          // nothing new
+      var next = Object.assign({}, st);
+      var at = st.history.indexOf(snap.srepr);
+      if (at >= 0) {
+        next.index = at;                                                     // an undo, a redo
+      } else {
+        next.history = st.history.slice(0, index + 1).concat([snap.srepr]);
+        next.labels = (st.labels || []).slice(0, index + 1).concat([null]);
+        next.index = index + 1;
+      }
+      cur.state = next;
+      if (cur.empty) cur.empty = false;
+      if (!cur.title) cur.name = (snap.src || "").slice(0, 60);
+      cur.updated = Date.now();
+      this._saveSessions(store);
     }
 
     /** What the system's Back does (Android's button or gesture, through the

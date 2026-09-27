@@ -8,6 +8,10 @@
   so a page from a plain ``pip install`` had no way to them. Every editor
   that edits has it now.
 
+* **The last edit survives a closed tab.** A session was saved by asking
+  Python for its history, an answer a page being closed or reloaded never
+  got: an edit made in the second before was lost. It is now kept at once.
+
 * **Fixes.** In a standalone page and the web app: the add-ons are
   switched on at start without an error (the switch reached a fresh
   document before it knew its add-ons by name, and the formula flickered

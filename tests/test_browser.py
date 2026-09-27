@@ -4479,6 +4479,34 @@ def test_the_new_session_chooser_survives_a_refresh_of_the_list(browser, serve_e
     assert page.errors == []
 
 
+def test_an_edit_right_before_the_page_goes_is_kept(browser, serve_expr):
+    """A session is saved 800 ms after the last change, by asking Python for
+    its history - an answer a page being closed or reloaded never gets.  The
+    edit made just before used to be lost; flush() keeps it at once, as the
+    next step of what was saved."""
+    srv, doc = serve_expr(x + y, options={"sessions": True}, store=False)   # kept in the browser
+    page = _open(browser, srv.url)
+    ed = "document.querySelector('.sympy-editor').__sympyEditor"
+    page.wait_for_function(ed + "._sessionsReady", timeout=10000)
+    _wait(lambda: page.evaluate(ed + "._sessionSaveTimer") is None, timeout=5)
+    page.evaluate(ed + ".send({action: 'set', src: '2*x + y'})")
+    page.wait_for_function(ed + ".state.src === '2*x + y' && !" + ed + ".busy")
+    page.route(srv.url.rstrip("/") + "/api", lambda route: route.abort())   # the export never answers,
+    assert page.evaluate("SympyEditor.flush()")                       # as when the page is going (pagehide)
+    page.wait_for_timeout(300)
+    store = page.evaluate("JSON.parse(localStorage.getItem('sympy-editor:sessions'))")
+    cur = [s for s in store["list"] if s["id"] == store["current"]][0]
+    assert cur["name"] == "2*x + y"
+    assert cur["state"]["history"][cur["state"]["index"]] == doc.export()["history"][-1], cur["state"]
+    assert len(cur["state"]["history"]) == 2 and page.errors == []
+    # and the page opened again opens it, the step undoable
+    page.unroute(srv.url.rstrip("/") + "/api")
+    page.reload()
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    page.wait_for_function(ed + ".state && " + ed + ".state.src === '2*x + y'", timeout=10000)
+    assert page.evaluate(ed + ".state.can_undo") and page.errors == []
+
+
 def test_a_session_can_be_given_a_name(browser, tmp_path):
     """A session was labelled with its formula, which is no help once there
     are several: the name can be the user's own, and then nothing overwrites

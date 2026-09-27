@@ -731,7 +731,9 @@ Two conventions between printer, document and front end:
   selection, full screen, one per press, and false with nothing open, when
   the app goes to the background), `SympyEditor.flush()` (on pause /
   resign-active: the session save waiting in `_scheduleSessionSave` goes at
-  once; `pagehide` and `visibilitychange` do the same in any browser) and
+  once - and, since that save waits for Python's answer, which a page being
+  closed never gets, `_keepCommittedNow` first keeps the committed formula
+  as the next step of the saved history, synchronously; `pagehide` and `visibilitychange` do the same in any browser) and
   `SympyEditor.openText(name, text)` (a `.sympy` opened with the app - an
   Android VIEW/SEND intent, `onOpenURL` on iOS and the Mac -, queued in
   `pendingOpen` until `editorReady`; the hosts queue it too until the page
