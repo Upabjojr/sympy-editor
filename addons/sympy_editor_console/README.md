@@ -21,6 +21,10 @@ It has two tabs:
   - <kbd>↑</kbd>/<kbd>↓</kbd> recall earlier inputs, which are kept between
     visits.
   - `display(obj)` shows a value typeset in the middle of the output.
+  - A tap on an output (an `Out[n]` or a `display`) copies its text into the
+    input at the cursor; a tap on an earlier input puts it back.
+  - Run leaves you at the prompt, with the keyboard up. Once the transcript is
+    long, it scrolls in its own box, with a scroll bar that stays visible.
   - **Use** beside an `Out[n]` puts that value in the formula. It goes over
     the selection, or replaces the whole formula when nothing is selected.
 - **Script** runs a whole file, typed in the panel or opened with **Open…**,

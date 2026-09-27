@@ -109,8 +109,11 @@ signing asks for the keychain in a dialog; *Always Allow* answers it for
 good.  (`security import` refuses a `.p12` written by a recent OpenSSL:
 `openssl pkcs12 -in it.p12 -nodes | openssl pkcs12 -export -legacy -out legacy.p12` re-encodes it.)
 
-`CFBundleVersion`, which the store wants new at every upload, is the number
-of commits in the checkout (`IOS_BUILD_NUMBER` overrides it).  Two modules of
+`CFBundleVersion`, which the store wants new at every upload of a version, is
+`BUILD_NUMBER` in `mobile/build.py`: 1 for the first upload of a new version
+(`CFBundleShortVersionString`), one more for each further upload of the same
+version; the Mac app uses the same number (`IOS_BUILD_NUMBER` and
+`MACOS_BUILD_NUMBER` override it).  Two modules of
 the standard library are left out of the app, `_ssl` and `_hashlib`: they carry
 OpenSSL, which App Store review treats as a third-party SDK owing a privacy
 manifest (ITMS-91061).  The app opens no socket, and `hashlib` falls back on

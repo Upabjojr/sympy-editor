@@ -25,8 +25,9 @@
 
 /* The transcript: code as code, output as the terminal shows it. */
 .se-addon-console .pc-log {
-  max-height: 22em;
+  max-height: min(22em, 45vh);     /* then it scrolls, and says so with its bar */
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 0.3rem 0.4rem;
   border: 1px solid var(--se-rule);
   border-radius: 0.3rem;
@@ -35,6 +36,20 @@
   font-size: 12.5px;
 }
 .se-addon-console .pc-log:empty { display: none; }
+/* Scroll bars that stay: a phone's overlay bar only shows while one scrolls,
+ * so a transcript that had grown past its box looked like the whole of it. */
+.se-addon-console .pc-log::-webkit-scrollbar, .se-addon-console .pc-code-field::-webkit-scrollbar { width: 8px; height: 8px; }
+.se-addon-console .pc-log::-webkit-scrollbar-thumb, .se-addon-console .pc-code-field::-webkit-scrollbar-thumb {
+  background: rgba(var(--se-accent), 0.45);
+  border-radius: 4px;
+}
+.se-addon-console .pc-log::-webkit-scrollbar-track, .se-addon-console .pc-code-field::-webkit-scrollbar-track {
+  background: rgba(var(--se-accent), 0.08);
+  border-radius: 4px;
+}
+@supports not selector(::-webkit-scrollbar) {
+  .se-addon-console .pc-log, .se-addon-console .pc-code-field { scrollbar-width: thin; scrollbar-color: rgba(var(--se-accent), 0.45) rgba(var(--se-accent), 0.08); }
+}
 .se-addon-console .pc-entry { padding: 0.15rem 0; border-bottom: 1px dashed var(--se-rule); }
 .se-addon-console .pc-entry:last-child { border-bottom: none; }
 .se-addon-console .pc-in, .se-addon-console .pc-out { display: flex; align-items: baseline; gap: 0.4rem; min-width: 0; }
@@ -47,6 +62,8 @@
 .se-addon-console .pc-stderr, .se-addon-console .pc-error { color: var(--se-error); }
 .se-addon-console .pc-math, .se-addon-console .pc-display { font-family: inherit; font-size: 1.1em; overflow-x: auto; min-width: 0; flex: 1 1 auto; }
 .se-addon-console .pc-display { padding: 0.1rem 0.2rem; }
+.se-addon-console .pc-reusable { cursor: pointer; border-radius: 0.25rem; }
+@media (hover: hover) { .se-addon-console .pc-reusable:hover { background: rgba(var(--se-accent), 0.08); } }
 .se-addon-console .pc-use { flex: 0 0 auto; font-size: 11px; padding: 0.05rem 0.4rem; }
 .se-addon-console .pc-note { color: var(--se-muted); font-style: italic; font-family: inherit; font-size: 12px; padding: 0.15rem 0; }
 .se-addon-console .pc-note-new { color: rgb(var(--se-accent)); }

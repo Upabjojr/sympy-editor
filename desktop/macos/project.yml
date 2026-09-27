@@ -42,7 +42,7 @@ targets:
       path: SymPyEditor/Info.plist
       properties:
         CFBundleDisplayName: SymPy Editor
-        CFBundleShortVersionString: "0.1.1"
+        CFBundleShortVersionString: "0.1.2"
         CFBundleVersion: ${MACOS_BUILD_NUMBER}
         LSApplicationCategoryType: public.app-category.education
         NSHighResolutionCapable: true

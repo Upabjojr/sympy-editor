@@ -763,13 +763,13 @@ def test_the_ios_app_leaves_openssl_behind():
     assert "CFBundleVersion: ${IOS_BUILD_NUMBER}" in project
 
 
-def test_the_ios_build_number_counts_the_commits():
+def test_the_apple_build_number_is_set_by_hand():
     # by path, as the other tests load it: `mobile` is a directory of scripts,
     # not an importable package, so an installed checkout has no such module
     spec = importlib.util.spec_from_file_location("mobile_build", ROOT / "mobile" / "build.py")
     build = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(build)
-    assert build.build_number().isdigit()
+    assert build.build_number() == str(build.BUILD_NUMBER) and int(build.BUILD_NUMBER) >= 1
 
 
 def test_the_apps_bundle_the_addons_one_folder_each(tmp_path):

@@ -14,7 +14,7 @@ Environment for signing:
   iOS:              IOS_TEAM_ID (Apple developer team), optional IOS_EXPORT_METHOD (development, ad-hoc, app-store-connect);
                     without an Apple ID in Xcode, IOS_API_KEY_ID + IOS_API_ISSUER_ID (App Store Connect API key) and,
                     to sign with a certificate of the keychain, IOS_PROVISIONING_PROFILE (the name of an installed profile);
-                    IOS_BUILD_NUMBER (CFBundleVersion, default: the number of commits)
+                    IOS_BUILD_NUMBER (CFBundleVersion, default: BUILD_NUMBER in this file)
 """
 
 from __future__ import annotations
@@ -465,14 +465,18 @@ def export_options(method: str, team: str, profile: str | None = None) -> bytes:
     return plistlib.dumps(options)
 
 
+#: Apple's build number (CFBundleVersion) of this version: it counts the
+#: uploads of one CFBundleShortVersionString, so it starts again at 1 with each
+#: new version and goes up by one for each further upload of the same version,
+#: iOS and macOS alike.  (Android's versionCode, in build.gradle.kts, never
+#: starts again: Google Play wants it higher than every earlier upload.)
+BUILD_NUMBER = 1
+
+
 def build_number() -> str:
-    """CFBundleVersion: the store wants every upload's to be new, and the
-    count of commits only grows (1 outside a checkout: set IOS_BUILD_NUMBER)."""
-    try:
-        out = subprocess.run(["git", "rev-list", "--count", "HEAD"], cwd=HERE, capture_output=True, text=True, check=True).stdout
-        return str(int(out.strip()))
-    except (OSError, subprocess.CalledProcessError, ValueError):
-        return "1"
+    """CFBundleVersion for iOS and macOS: :data:`BUILD_NUMBER`, unless
+    ``IOS_BUILD_NUMBER`` / ``MACOS_BUILD_NUMBER`` say otherwise."""
+    return str(BUILD_NUMBER)
 
 
 def api_key_arguments() -> list[str]:

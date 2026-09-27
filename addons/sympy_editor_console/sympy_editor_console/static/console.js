@@ -21,13 +21,14 @@
     "<li><code>editor[\"/1\"]</code> is the piece at a path, <code>editor.paths()</code> lists them, <code>editor.find(cos(x))</code> finds one, <code>editor.select(\"/1\")</code> selects it.</li>",
     "<li><code>editor.apply(\"factor\", \"/0\")</code> runs one of the editor's transformations (<code>editor.ops</code>), <code>editor.undo()</code> / <code>editor.redo()</code> walk the history.</li>",
     "<li>Every change is a step of the formula's history: the editor's Undo takes it back.</li>",
+      "<li>Run leaves you at the prompt; the transcript above it scrolls in its own box once it is long.</li>",
     "<li><b>Use</b> beside an <code>Out[n]</code> puts that value in the formula - over the selection, or as the whole formula.</li>",
     "</ul></section>",
     "<section><h3>What IPython adds</h3><ul>",
     "<li><code>_</code>, <code>__</code>, <code>___</code>, <code>_3</code>, <code>Out[3]</code>, <code>In[3]</code>.</li>",
     "<li><code>factor?</code> describes <code>factor</code>, <code>factor??</code> shows its source.</li>",
     "<li><code>%who</code> and <code>%whos</code> list your variables, <code>%time</code> times a statement, <code>%reset</code> (or <b>Reset</b>) starts afresh.</li>",
-    "<li><kbd>Tab</kbd> completes a name, <kbd>↑</kbd> / <kbd>↓</kbd> bring back earlier inputs (kept between visits), a tap on an earlier input puts it back, <kbd>Ctrl</kbd>+<kbd>L</kbd> or <b>Clear</b> clears the screen.</li>",
+    "<li><kbd>Tab</kbd> completes a name, <kbd>↑</kbd> / <kbd>↓</kbd> bring back earlier inputs (kept between visits), a tap on an earlier input puts it back and a tap on an output copies it into the input at the cursor, <kbd>Ctrl</kbd>+<kbd>L</kbd> or <b>Clear</b> clears the screen.</li>",
     "<li><code>display(obj)</code> shows a value typeset in the middle of the output.</li>",
     "</ul></section>",
     "<section><h3>Good to know</h3><ul>",
@@ -153,8 +154,9 @@
       function drawItems(box, items) {
         (items || []).forEach(function (item) {
           if (item.kind === "display") {
-            var math = h("div", { class: "pc-display" });
+            var math = h("div", { class: "pc-display", title: "Tap to copy it into the input" });
             typeset(math, item.latex, item.text);
+            reusable(math, item.text);
             box.appendChild(math);
           } else {
             box.appendChild(h("pre", { class: "pc-stream pc-" + (item.kind === "error" ? "error" : item.kind) }, [item.text]));
@@ -162,6 +164,45 @@
         });
       }
       function scrollDown(box) { box.scrollTop = box.scrollHeight; }
+
+      /** A value shown in the transcript, tapped: its text goes into the
+       *  input where the cursor was, to be used in the next line. */
+      function reusable(el, text) {
+        el.classList.add("pc-reusable");
+        el.addEventListener("click", function () {
+          if (window.getSelection && String(window.getSelection()).length) return;   // selecting text to copy it
+          setMode("console");
+          insertAtCaret(input, text);
+          input.focus({ preventScroll: true });
+        });
+      }
+
+      /** Keep the prompt where it is on the screen while `work` adds to the
+       *  transcript above it: the transcript grows until its own scroll bar
+       *  takes over, and the page would carry the prompt off the bottom -
+       *  away from the keyboard, the field and the Run button just pressed. */
+      function holdPrompt(work) {
+        var before = inputRow.getBoundingClientRect().top;
+        var adjust = function () {
+          if (consolePane.hidden || !inputRow.isConnected) return;
+          var d = inputRow.getBoundingClientRect().top - before;
+          if (Math.abs(d) < 1) return;
+          var box = inputRow.parentNode;
+          while (box && box !== document.body && box.nodeType === 1) {
+            var oy = getComputedStyle(box).overflowY;
+            if ((oy === "auto" || oy === "scroll") && box.scrollHeight > box.clientHeight) break;
+            box = box.parentNode;
+          }
+          if (box && box !== document.body && box.nodeType === 1) box.scrollTop += d;
+          else window.scrollBy(0, d);
+        };
+        return Promise.resolve(work()).then(function (v) {
+          adjust();
+          requestAnimationFrame(adjust);            // the typeset output, a moment later
+          setTimeout(adjust, 250);
+          return v;
+        });
+      }
       function note(box, text, cls) {
         box.appendChild(h("div", { class: "pc-note" + (cls ? " " + cls : "") }, [text]));
         scrollDown(box);
@@ -186,8 +227,9 @@
         if (res) {
           drawItems(entry, res.items);
           if (res.out) {
-            var math = h("div", { class: "pc-math" });
+            var math = h("div", { class: "pc-math", title: "Tap to copy it into the input" });
             typeset(math, res.out.latex, res.out.text);
+            reusable(math, res.out.text);
             entry.appendChild(h("div", { class: "pc-out" }, [h("span", { class: "pc-prompt pc-prompt-out" }, ["Out[" + n + "]:"]), math, useButton(n)]));
           }
         }
@@ -261,18 +303,20 @@
         msg.interactive = !force;
         state.running = true;
         hint.textContent = "";
-        api.call("run", msg).then(function (res) {
-          state.running = false;
-          if (res && res.incomplete) { newline(input); return; }
-          remember(code);
-          input.value = "";
-          autosize();
-          drawCell(code, res);
-          return followUp(res);
-        }, function (e) {
-          state.running = false;
-          drawCell(code, null);
-          failed(log, e);
+        holdPrompt(function () {
+          return api.call("run", msg).then(function (res) {
+            state.running = false;
+            if (res && res.incomplete) { newline(input); return; }
+            remember(code);
+            input.value = "";
+            autosize();
+            drawCell(code, res);
+            return followUp(res);
+          }, function (e) {
+            state.running = false;
+            drawCell(code, null);
+            failed(log, e);
+          });
         }).then(function () { input.focus({ preventScroll: true }); });
       }
 
@@ -333,6 +377,8 @@
         if (mod && (k === "l" || k === "L")) { ev.preventDefault(); clear(); }
       });
       runBtn.addEventListener("click", function () { run(false); });
+      // Pressing Run leaves the focus - and a phone's keyboard - in the field.
+      runBtn.addEventListener("mousedown", function (ev) { ev.preventDefault(); });
 
       function clear() {
         if (state.mode === "script") scriptOut.textContent = "";

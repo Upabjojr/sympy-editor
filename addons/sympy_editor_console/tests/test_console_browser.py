@@ -39,16 +39,16 @@ pytestmark = pytest.mark.skipif(not _online(default_urls()["katexJs"]), reason="
 
 
 @contextmanager
-def _page(doc):
+def _page(doc, launch=None, **context):
     srv = EditorServer(doc, port=0)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
         with playwright.sync_playwright() as p:
             try:
-                browser = p.chromium.launch()
+                browser = p.chromium.launch(**(launch or {}))
             except Exception as exc:
                 pytest.skip(f"chromium not available: {exc}")
-            page = browser.new_page()
+            page = browser.new_page(**context)
             errors = []
             page.on("pageerror", lambda e: errors.append(str(e)))
             page.goto(srv.url)
@@ -158,6 +158,52 @@ def test_a_script_runs_and_leaves_its_names():
         page.locator(".se-addon-console .pc-tab[data-mode='console']").click()
         entry = _enter(page, "twice(x)")                                    # the script's function, in the console
         assert entry.locator(".pc-math").get_attribute("title") == "2*x"
+
+
+def test_run_on_a_phone_stays_at_the_prompt_and_the_transcript_scrolls():
+    """Tapping Run leaves the prompt where it was on the screen, with the
+    focus (and a phone's keyboard) in the field; the transcript grows until it
+    scrolls in a box of its own, with a bar that stays."""
+    doc = Document(sin(x) + x, addons=[ADDON])
+    # Playwright hides scroll bars unless told not to: the bar is what is measured
+    with _page(doc, launch={"ignore_default_args": ["--hide-scrollbars"]},
+               viewport={"width": 384, "height": 437}, has_touch=True, is_mobile=True) as page:
+        field = page.locator(".se-addon-console .pc-input")
+        run = page.locator(".se-addon-console .pc-input-row .pc-run")
+        top = "() => Math.round(document.querySelector('.se-addon-console .pc-input-row').getBoundingClientRect().top)"
+        field.tap()
+        field.scroll_into_view_if_needed()
+        where = page.evaluate(top)
+        for i in range(12):
+            field.fill(f"print('line'); {i} if {i} % 3 else editor.expr * {i + 1}")
+            before = page.locator(".se-addon-console .pc-entry").count()
+            run.tap()
+            page.wait_for_function(f"document.querySelectorAll('.se-addon-console .pc-entry').length > {before}")
+            page.wait_for_function(f"!{ED}.busy")
+            page.wait_for_timeout(300)
+            assert abs(page.evaluate(top) - where) <= 1, f"the prompt moved after run {i}"
+            assert page.evaluate("document.activeElement.classList.contains('pc-input')")
+        log = page.locator(".se-addon-console .pc-log").first
+        assert log.evaluate("l => l.scrollHeight > l.clientHeight + 50 && getComputedStyle(l).overflowY === 'auto'")
+        assert log.evaluate("l => l.scrollTop + l.clientHeight >= l.scrollHeight - 2")          # the latest in sight
+        assert log.evaluate("l => l.offsetWidth - l.clientWidth") >= 8          # a bar of its own, drawn - not a phone's overlay
+
+
+def test_tapping_an_output_copies_it_into_the_input():
+    doc = Document(x, addons=[ADDON])
+    with _page(doc) as page:
+        entry = _enter(page, "factor(x**2 - 1)")
+        field = page.locator(".se-addon-console .pc-input")
+        field.fill("expand()")
+        field.evaluate("f => { f.selectionStart = f.selectionEnd = 7; }")          # the cursor between the parentheses
+        entry.locator(".pc-math").click()
+        assert field.input_value() == "expand((x - 1)*(x + 1))"
+        assert page.evaluate("document.activeElement.classList.contains('pc-input')")
+        entry = _enter(page, "display(x**3)")                                  # display() output too
+        field.fill("")
+        entry.locator(".pc-display").click()
+        assert field.input_value() == "x**3"
+        assert doc.expr == x                                                   # copying changes nothing
 
 
 def test_the_guide():

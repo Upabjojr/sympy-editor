@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.1.2 — September 2026
+
+* **A Python console.** A new add-on, *Python console*, runs Python beside
+  the formula in the same Python as the editor - the app's own on a phone,
+  the server's, Pyodide in a standalone page. Its console works as IPython
+  does (``In [n]``/``Out[n]`` typeset, ``_``, ``obj?``, ``%who``, ``%time``,
+  Tab completion; a tap on an output copies it into the input), and its
+  script tab runs a whole file at once. ``editor`` reads and changes the
+  formula - ``editor.selection = expand(editor.selection)`` - each change a
+  step of the history.
 
 * **Handwriting among siblings.** Ink written by one factor of a product
   or one term of a sum - a bar and a theta under ``cos(y)`` in
