@@ -22,7 +22,8 @@ android {
 
     // Release signing from the environment (see mobile/README.md); without a
     // keystore the release APK/AAB is built unsigned and can be signed later.
-    val keystore = System.getenv("ANDROID_KEYSTORE")
+    // (blank as well as unset: a workflow passes an absent secret as "")
+    val keystore = System.getenv("ANDROID_KEYSTORE")?.takeIf { it.isNotBlank() }
     signingConfigs {
         if (keystore != null) {
             create("release") {

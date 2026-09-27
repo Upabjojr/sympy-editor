@@ -4521,7 +4521,8 @@ def test_a_session_can_be_given_a_name(browser, tmp_path):
     field.wait_for()
     field.fill("")
     field.press("Enter")
-    assert _wait(lambda: page.locator(".se-session:not(.se-session-add)").first.locator(".se-session-row > code").inner_text() == "2*x + y")
+    label = page.locator(".se-session:not(.se-session-add)").first.locator(".se-session-row > code")
+    assert _wait(lambda: label.inner_text() == "2*x + y", timeout=15), label.inner_text()
     assert errors == []
     page.close()
 

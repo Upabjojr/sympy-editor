@@ -10,6 +10,7 @@ see - every add-on method then said "No answer" in a notebook: the plot drew
 nothing and the LaTeX reader never read.  Needs Playwright with Chromium and
 the KaTeX CDN (skipped otherwise)."""
 import http.server
+import importlib.util
 import json
 import sys
 import threading
@@ -157,6 +158,7 @@ def test_an_addon_method_is_answered_in_the_widget(widget_page):
     assert page.errors == []
 
 
+@pytest.mark.skipif(importlib.util.find_spec("lark") is None, reason="the LaTeX add-on needs lark")
 def test_the_latex_reader_reads_and_inserts_in_the_widget(widget_page):
     """Read and insert are both add-on methods: the reading has to come back
     to the strip, and applying has to reach the formula - in a notebook as
