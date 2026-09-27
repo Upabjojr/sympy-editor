@@ -110,7 +110,10 @@ def test_implicit_parser():
         Document(x, parser="weird")
 
 
-def test_listeners_and_custom_ops():
+def test_listeners_and_custom_ops(monkeypatch):
+    from collections import OrderedDict
+    import sympy_editor.ops as ops_module
+    monkeypatch.setattr(ops_module, "_REGISTRY", OrderedDict(ops_module._REGISTRY))   # "double" goes with the test
     seen = []
     doc = Document(x)
     doc.on_change(seen.append)
@@ -753,8 +756,11 @@ def test_isolate():
     assert doc.expr == cos(t)
     doc.undo()
     assert doc.expr == x * cos(t) + y
-    doc.handle({"action": "isolate", "path": "/", "children": [0, 1]})   # a range
-    assert doc.expr == doc.expr and len(doc.expr.args) == 2
+    doc = Document(x + y**2 + cos(t))
+    kids = [v["src"] for k, v in sorted(doc.snapshot()["nodes"].items()) if k.count("/") == 1 and k != "/"]
+    pair = [i for i, src in enumerate(kids) if src in ("x", "y**2")]
+    snap = doc.handle({"action": "isolate", "path": "/", "children": pair})   # a range: two of the three terms
+    assert snap["error"] is None and doc.expr == x + y**2
 
 
 def test_function_signatures_for_prompts():

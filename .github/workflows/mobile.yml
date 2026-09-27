@@ -15,6 +15,7 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: "17" }
       - uses: android-actions/setup-android@v3
+        with: { packages: platform-tools }   # its default adds 'tools', which the SDK no longer has: sdkmanager failed
       - run: sudo apt-get update && sudo apt-get install -y librsvg2-bin   # the icons are drawn, not committed
       - run: pip install -e .
       - name: Build debug APK and release APK/AAB

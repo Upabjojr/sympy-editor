@@ -198,8 +198,10 @@ Two conventions between printer, document and front end:
   is prevented for touch (Android would open its menu and cancel the
   touch), the non-passive `touchmove` listener keeps a held drag from the
   browser, and the click after a held drag is suppressed as after a moved
-  one.  `touch-action: pan-y pinch-zoom` keeps vertical scrolling and
-  pinch-zoom on phones, and `@media (pointer: coarse)` enlarges targets.
+  one.  `touch-action: pan-x pan-y` lets one finger scroll the formula
+  sideways and the page up and down; two fingers zoom the formula, never the
+  page (no `pinch-zoom`: iOS took it up), and `@media (pointer: coarse)`
+  enlarges targets.
 - **Source line.**  `AnnotatedStrPrinter` (same mixin as the LaTeX printer,
   markers instead of `\htmlData`) gives `snapshot["spans"]`: the character
   span of every node in `str(expr)` (empty if the marked output would not
@@ -809,7 +811,7 @@ Two conventions between printer, document and front end:
   gap cache and the caret and redraws the selection; sources: the −/100%/+
   buttons, Ctrl+wheel, Ctrl+plus/minus/0 and a two-pointer pinch
   (`_pointers`/`_pinch`; a non-passive `touchstart` listener prevents the
-  browser's own pinch when two fingers land, so `touch-action: pan-y` can
+  browser's own pinch when two fingers land, so `touch-action: pan-x pan-y` can
   stay for one-finger page scrolling).  The pinch also scrolls: the
   fingers' centre drags the content along (`_pinch.cx/cy`, applied to
   `scrollLeft`/`scrollTop` before the zoom, which is anchored at the

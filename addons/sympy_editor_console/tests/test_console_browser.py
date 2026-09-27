@@ -110,7 +110,8 @@ def test_an_unfinished_block_asks_for_more():
         field.press("Enter")
         page.wait_for_selector(".se-addon-console .pc-entry")
         assert page.locator(".se-addon-console .pc-entry .pc-stdout").inner_text().split() == ["0", "1", "2"]
-        # ↑ brings it back
+        assert field.input_value() == ""                                    # the run cleared it...
+        # ...and ↑ brings it back
         field.press("ArrowUp")
         assert page.evaluate("document.querySelector('.se-addon-console .pc-input').value").startswith("for i in range(3):")
 
@@ -240,22 +241,24 @@ def test_a_standalone_page_runs_the_console_in_pyodide(tmp_path):
             browser = p.chromium.launch()
         except Exception as exc:
             pytest.skip(f"chromium not available: {exc}")
-        page = browser.new_page()
-        errors = []
-        page.on("pageerror", lambda e: errors.append(str(e)))
-        page.goto(path.as_uri())
-        page.wait_for_selector(".se-addon-console .pc-input", timeout=60000)
-        page.wait_for_function("document.querySelector('.se-loading').hidden", timeout=240000)
-        entry = _enter(page, "import sys\nprint(sys.platform)\neditor.expr = expand(editor.expr)")
-        assert entry.locator(".pc-stdout").inner_text().strip() == "emscripten"      # Python in the page itself
-        page.wait_for_function("document.querySelector('.se-source').textContent.trim() === 'x**2 + 2*x + 1'")
-        page.locator(".se-addon-console .pc-tab[data-mode='script']").click()
-        page.locator(".se-addon-console .pc-script").fill("print(editor.expr.coeff(x))\n")
-        page.locator(".se-addon-console .pc-scripting .pc-run").click()
-        page.wait_for_function("document.querySelector('.se-addon-console .pc-script-out .pc-stdout')", timeout=60000)
-        assert page.locator(".se-addon-console .pc-script-out .pc-stdout").inner_text().strip() == "2"
-        assert errors == []
-        browser.close()
+        try:
+            page = browser.new_page()
+            errors = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.goto(path.as_uri())
+            page.wait_for_selector(".se-addon-console .pc-input", timeout=60000)
+            page.wait_for_function("document.querySelector('.se-loading').hidden", timeout=240000)
+            entry = _enter(page, "import sys\nprint(sys.platform)\neditor.expr = expand(editor.expr)")
+            assert entry.locator(".pc-stdout").inner_text().strip() == "emscripten"      # Python in the page itself
+            page.wait_for_function("document.querySelector('.se-source').textContent.trim() === 'x**2 + 2*x + 1'")
+            page.locator(".se-addon-console .pc-tab[data-mode='script']").click()
+            page.locator(".se-addon-console .pc-script").fill("print(editor.expr.coeff(x))\n")
+            page.locator(".se-addon-console .pc-scripting .pc-run").click()
+            page.wait_for_function("document.querySelector('.se-addon-console .pc-script-out .pc-stdout')", timeout=60000)
+            assert page.locator(".se-addon-console .pc-script-out .pc-stdout").inner_text().strip() == "2"
+            assert errors == []
+        finally:
+            browser.close()
 
 
 def _menu(page):
@@ -291,14 +294,17 @@ def test_a_dot_opens_the_menu_of_what_is_in_memory():
         field.press_sequentially("editor.")                          # the formula's own API
         names = _menu_names(page)
         assert {"editor.expr", "editor.selection", "editor.find"} <= set(names)
+        on = lambda: page.eval_on_selector_all(".se-addon-console .pc-comp-on", "els => els.map(e => e.dataset.name)")
+        first = on()
+        start = names.index(first[0]) if first else -1
         field.press("ArrowDown")
         field.press("ArrowDown")
-        chosen = page.locator(".se-addon-console .pc-comp-on").get_attribute("data-name")
+        assert on() == [names[(start + 2) % len(names)]]            # ↓ moved the highlight, twice
         field.press("Escape")                                       # closes the menu, nothing else
         assert _menu(page).is_hidden() and field.input_value() == "editor."
         field.press_sequentially("ex")
         page.locator(".se-addon-console .pc-comp-item[data-name='editor.expr']").click()   # a tap takes one
-        assert field.input_value() == "editor.expr" and chosen
+        assert field.input_value() == "editor.expr"
         assert page.evaluate("document.activeElement.classList.contains('pc-input')")
 
 

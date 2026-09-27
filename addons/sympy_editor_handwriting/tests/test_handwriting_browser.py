@@ -800,7 +800,6 @@ def test_the_formula_zooms_while_writing_and_the_ink_zooms_with_it():
                   " let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 40) n++; return n; }"
             was = page.evaluate(ink)
             assert was > 0
-            zoom = lambda: page.evaluate("document.querySelector('.sympy-editor').__se ? 0 : 0")
             page.locator('[data-cmd="zoomin"]').click()
             page.locator('[data-cmd="zoomin"]').click()
             assert _wait(lambda: page.evaluate(ink) > was * 1.2, 5)     # the ink grew with the formula
@@ -1000,7 +999,7 @@ def test_the_space_to_write_in_follows_the_formula():
                 v.style.maxWidth = '120px'; v.scrollLeft = 40; v.dispatchEvent(new Event('scroll')); }""")
             page.wait_for_timeout(300)
             moved = page.evaluate(left)
-            assert moved < was, (was, moved)             # it went left with the formula
+            assert 0 <= moved < was, (was, moved)        # it went left with the formula (-1: nothing drawn at all)
             assert page.errors == []
         finally:
             _close(srv, browser)

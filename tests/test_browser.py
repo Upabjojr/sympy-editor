@@ -968,9 +968,10 @@ def scenario(request, browser, serve_expr, tmp_path):
         return Scenario(page, expr)
 
     yield make
+    errors = [e for page in pages for e in page.errors]
     for page in pages:
-        assert page.errors == []
         page.close()
+    assert errors == []
 
 
 def test_arrow_navigation_remembers_and_crosses_levels(scenario):
@@ -1127,7 +1128,7 @@ def test_source_line_is_linked_to_the_rendering(browser, serve_expr):
     srv, doc = serve_expr(x**2 + sin(y) / 3)
     page = _open(browser, srv.url)
     src = page.locator(".se-source")
-    assert src.get_attribute("contenteditable") in ("plaintext-only", "true")
+    assert src.get_attribute("contenteditable") == "true"     # plaintext-only: a drag over it selects nothing in Chromium
     text = src.inner_text()
     # selecting "sin(y)" in the source selects that node in the rendering
     start = text.index("sin(y)")
@@ -1157,7 +1158,7 @@ def test_source_line_is_linked_to_the_rendering(browser, serve_expr):
     page.keyboard.type("x*y + 1")
     page.keyboard.press("Enter")
     page.wait_for_function("document.querySelector('.se-source').textContent === 'x*y + 1'")
-    assert doc.expr == x * y + 1
+    assert _wait(lambda: doc.expr == x * y + 1)          # what was typed reads so at once: wait for the commit
     assert page.locator(".se-view .katex:not(.se-ghost *)").count() == 1       # still rendered
     assert page.errors == []
 
@@ -1549,7 +1550,7 @@ def test_source_line_previews_while_typing(browser, serve_expr):
     src.click()
     page.keyboard.press("Control+a")
     page.keyboard.type("cos(x)*3")
-    _wait(lambda: page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.src") == "3*cos(x)")
+    assert _wait(lambda: page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.src") == "3*cos(x)")
     assert page.locator('.se-view [data-path="/"]').count() == 1
     assert "3" in page.locator(".se-view .katex").inner_text()     # rendered
     assert doc.expr == x**2 + sin(y)                                 # not committed
@@ -1562,16 +1563,16 @@ def test_source_line_previews_while_typing(browser, serve_expr):
     assert page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.src") == "3*cos(x)"
     page.keyboard.press("Backspace")
     page.keyboard.press("Backspace")
-    _wait(lambda: "se-invalid" not in src.get_attribute("class"))
+    assert _wait(lambda: "se-invalid" not in src.get_attribute("class"))
     # Esc reverts to what is committed
     page.keyboard.press("Escape")
-    _wait(lambda: page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.src") == "x**2 + sin(y)")
+    assert _wait(lambda: page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.src") == "x**2 + sin(y)")
     assert src.inner_text() == "x**2 + sin(y)" and doc.expr == x**2 + sin(y)
     # Enter commits the previewed text
     src.click()
     page.keyboard.press("Control+a")
     page.keyboard.type("y**3")
-    _wait(lambda: page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.src") == "y**3")
+    assert _wait(lambda: page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.src") == "y**3")
     assert doc.expr == x**2 + sin(y)
     _next_state(page, lambda: page.keyboard.press("Enter"))
     assert doc.expr == y**3 and "se-dirty" not in src.get_attribute("class")
@@ -1595,11 +1596,11 @@ def test_long_computation_shows_spinner_and_can_be_interrupted(browser):
         page = _open(browser, srv.url)
         _pick(page, ".se-ops", "forever")
         overlay = page.locator(".se-loading")
-        _wait(lambda: overlay.is_visible())
+        assert _wait(lambda: overlay.is_visible())
         assert "Take forever" in overlay.inner_text() and page.locator(".se-spinner").is_visible()
         button = page.locator(".se-interrupt")
         assert not button.is_visible()                         # not yet: only after interruptAfter
-        _wait(lambda: button.is_visible(), timeout=5)
+        assert _wait(lambda: button.is_visible(), timeout=5)
         _next_state(page, lambda: button.click())
         assert "Interrupted" in page.locator(".se-error").inner_text()
         assert not overlay.is_visible() and doc.expr == x + 1
@@ -1686,7 +1687,7 @@ def test_delete_button_empties_the_whole_expression(browser, serve_expr):
     assert "se-empty" in page.locator(".se-view").get_attribute("class")
     assert page.locator(".se-view .katex").is_hidden()
     page.keyboard.type("z")
-    _wait(lambda: "se-empty" not in page.locator(".se-view").get_attribute("class"))   # previewed as it is typed
+    assert _wait(lambda: "se-empty" not in page.locator(".se-view").get_attribute("class"))   # previewed as it is typed
     assert page.locator(".se-source").inner_text() == "z"                              # the line follows
     assert page.evaluate("document.activeElement.className") == "se-inline se-inline-empty"   # still typing there
     page.keyboard.type("**2")
@@ -1983,7 +1984,7 @@ def test_change_animation_red_to_green(browser, serve_expr):
     page.locator(".se-source").click()
     page.keyboard.press("End")
     page.keyboard.type(" + 1")
-    _wait(lambda: page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.src") == "x**2 + cos(y) + 1")
+    assert _wait(lambda: page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.src") == "x**2 + cos(y) + 1")
     assert page.locator(".se-ghost").count() == 0
     _next_state(page, lambda: page.keyboard.press("Enter"))
     assert page.locator(".se-ghost").count() == 2 and "1" in page.locator(".se-ghost-new .se-added").first.inner_text()
@@ -1992,7 +1993,7 @@ def test_change_animation_red_to_green(browser, serve_expr):
     page.locator(".se-source").click()
     page.keyboard.press("End")
     page.keyboard.type(" + 2")
-    _wait(lambda: page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.src") == "x**2 + cos(y) + 3")
+    assert _wait(lambda: page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.src") == "x**2 + cos(y) + 3")
     page.keyboard.press("Escape")
     page.wait_for_timeout(200)
     assert page.locator(".se-ghost").count() == 0 and doc.expr == x**2 + cos(y) + 1
@@ -2457,7 +2458,7 @@ def test_pyodide_worker_interrupt_and_sessions(browser, tmp_path):
     try:
         page.goto(f"http://127.0.0.1:{httpd.server_address[1]}/sessions.html")
         page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
-        _wait(lambda: page.locator(".se-loading").is_hidden(), timeout=180)
+        assert _wait(lambda: page.locator(".se-loading").is_hidden(), timeout=180)
         ed = "document.querySelector('.sympy-editor').__sympyEditor"
         assert page.evaluate(f"{ed}.backend.canInterrupt()")
         # the long computation: the page stays alive (the spinner animates in the DOM), Interrupt stops it
@@ -2804,9 +2805,9 @@ def test_the_tools_are_laid_out_in_columns(browser, serve_expr):
     starts at the left edge, the right one ends at the right edge, the middle
     one is centred.  One long strip of buttons, or rows each ending wherever
     their content happens to stop, read as a mess."""
-    # Nothing else installed in this Python may join the strip: with an add-on
-    # available the drawer's button takes a column of its own, and the layout
-    # under test is the one a page without add-ons has.
+    # Nothing else installed in this Python may join the strip: an add-on's
+    # own tools would add blocks.  The drawer's button is there without any
+    # (it holds File), a block of its own at the right end of the first row.
     srv, doc = serve_expr(x + y, available=[])
     page = browser.new_page(viewport={"width": 1100, "height": 800})
     page.goto(srv.url)
@@ -2824,18 +2825,18 @@ def test_the_tools_are_laid_out_in_columns(browser, serve_expr):
         return out;
     }""")
     by = {b["name"]: b for b in blocks}
-    assert {"session", "zoom", "nav", "edit", "clip", "apply"} <= set(by), blocks
+    assert {"session", "zoom", "sessions", "nav", "edit", "clip", "apply"} <= set(by), blocks
     rows = sorted({b["top"] for b in blocks})
     assert len(rows) == 3, blocks                                  # two rows of three, then the wide one
     # a block never breaks apart: what belongs together stays on one line
-    assert by["session"]["top"] == by["zoom"]["top"] == by["nav"]["top"]
-    assert by["edit"]["top"] == by["clip"]["top"]
+    assert by["session"]["top"] == by["zoom"]["top"] == by["sessions"]["top"] == rows[0]
+    assert by["nav"]["top"] == by["edit"]["top"] == by["clip"]["top"] == rows[1]
     assert by["apply"]["top"] == rows[2] and by["apply"]["wide"]
     # left column flush left, right column flush right, middle centred
-    assert by["session"]["left"] <= 1 and by["edit"]["left"] <= 1, blocks
-    assert by["nav"]["right"] <= 1, blocks
+    assert by["session"]["left"] <= 1 and by["nav"]["left"] <= 1, blocks
+    assert by["sessions"]["right"] <= 1 and by["clip"]["right"] <= 1, blocks
     assert abs(by["zoom"]["left"] - by["zoom"]["right"]) <= 2, blocks
-    assert abs(by["clip"]["left"] - by["clip"]["right"]) <= 2, blocks
+    assert abs(by["edit"]["left"] - by["edit"]["right"]) <= 2, blocks
     assert by["apply"]["left"] <= 1 and by["apply"]["right"] <= 1, blocks
     page.close()
 
@@ -3352,6 +3353,7 @@ def test_the_sessions_button_sits_on_the_side_the_drawer_opens(browser, tmp_path
     page = browser.new_page(viewport={"width": 1100, "height": 800})
     page.goto(path.as_uri())
     page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    assert _wait(lambda: page.locator(".se-loading").is_hidden(), timeout=180)   # Python in the page, add-ons on
     row = page.evaluate("""() => {
         const drawer = document.querySelector('.se-tools [data-cmd="drawer"]').getBoundingClientRect();
         const strip = document.querySelector('.se-tools').getBoundingClientRect();
@@ -4042,7 +4044,7 @@ def test_a_caret_in_the_source_line_is_a_caret_in_the_formula(browser, serve_exp
             return {selected: e.selected, range: !!e.range,
                     caret: e.caret ? [e.caret.path, e.caret.extend || null] : null};
         }""")
-        _wait(lambda: state()["caret"] is not None)
+        assert _wait(lambda: state()["caret"] is not None)
         return state()
 
     at = caret_at(text.index("y"))                            # right before the denominator
@@ -4454,6 +4456,29 @@ def test_the_history_close_button_sits_in_the_corner(browser, serve_expr):
     page.close()
 
 
+def test_the_new_session_chooser_survives_a_refresh_of_the_list(browser, serve_expr):
+    """The chooser lives in the sessions list, which a snapshot arriving in
+    the background rebuilds (the session saved after a change, a Python
+    restarted after an interruption): it vanished under the finger, and a
+    tap on an example met nothing.  It stays open until a choice is made."""
+    srv, doc = serve_expr(x + y, options={"sessions": True}, store=False)
+    page = _open(browser, srv.url)
+    ed = "document.querySelector('.sympy-editor').__sympyEditor"
+    page.locator('[data-cmd="drawer"]').click()
+    assert _wait(lambda: page.locator(".se-session-new").is_enabled())
+    page.locator(".se-session-new").click()
+    assert page.locator(".se-session-picker").is_visible()
+    page.evaluate(ed + "._fillSessions()")                          # what a background refresh does
+    picker = page.locator(".se-session-picker")
+    assert picker.count() == 1 and picker.is_visible()
+    sessions = page.locator(".se-session:not(.se-session-add)").count()
+    _next_state(page, lambda: picker.locator(".se-choice", has_text="Quadratic formula").click())
+    assert _wait(lambda: page.locator(".se-session:not(.se-session-add)").count() == sessions + 1)
+    assert page.evaluate(ed + ".state.src") == "Eq(x, (-b + sqrt(-4*a*c + b**2))/(2*a))"
+    assert page.locator(".se-session-picker").count() == 0            # chosen: the chooser is gone
+    assert page.errors == []
+
+
 def test_a_session_can_be_given_a_name(browser, tmp_path):
     """A session was labelled with its formula, which is no help once there
     are several: the name can be the user's own, and then nothing overwrites
@@ -4465,6 +4490,7 @@ def test_a_session_can_be_given_a_name(browser, tmp_path):
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.goto(path.as_uri())
     page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    assert _wait(lambda: page.locator(".se-loading").is_hidden(), timeout=180)   # Python in the page, add-ons on
     page.locator('[data-cmd="drawer"]').click()
     row = page.locator(".se-session:not(.se-session-add)").first   # "New session…" leads the list now
     assert _wait(lambda: row.locator(".se-session-row > code").inner_text() == "x + y")
@@ -4479,7 +4505,8 @@ def test_a_session_can_be_given_a_name(browser, tmp_path):
     # the formula changes; the name the user gave stays
     page.keyboard.press("Escape")                            # close the drawer (its backdrop covers the tools)
     assert _wait(lambda: page.locator(".se-drawer").is_hidden())
-    _next_state(page, lambda: _pick(page, ".se-ops", "expand"))
+    _next_state(page, lambda: page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.send({action: 'set', src: '2*x + y'})"))
+    assert page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.src") == "2*x + y"
     page.locator('[data-cmd="drawer"]').click()
     assert _wait(lambda: page.locator(".se-session:not(.se-session-add)").first.locator(".se-session-row > code").inner_text() == "Simplifying the Hamiltonian")
     # it survives a reload, like the sessions themselves
@@ -4494,7 +4521,7 @@ def test_a_session_can_be_given_a_name(browser, tmp_path):
     field.wait_for()
     field.fill("")
     field.press("Enter")
-    assert _wait(lambda: page.locator(".se-session:not(.se-session-add)").first.locator(".se-session-row > code").inner_text() != "Simplifying the Hamiltonian")
+    assert _wait(lambda: page.locator(".se-session:not(.se-session-add)").first.locator(".se-session-row > code").inner_text() == "2*x + y")
     assert errors == []
     page.close()
 
@@ -4509,10 +4536,12 @@ def test_the_history_strip_opens_in_its_final_shape(browser, serve_expr):
     _next_state(page, lambda: _pick(page, ".se-ops", "expand"))     # two steps: there is a player
     GEOM = """() => {
         const out = {};
-        for (const el of document.querySelectorAll('.se-history-head button, .se-history-head select, .se-history-head .se-play-count')) {
+        // keyed by position in the strip: the paired buttons (- and + of the
+        // size, the two steps) share their class, and one hid the other
+        document.querySelectorAll('.se-history-head button, .se-history-head select, .se-history-head .se-play-count').forEach((el, i) => {
             const r = el.getBoundingClientRect();
-            out[(el.className || el.tagName).split(' ')[0]] = [Math.round(r.x), Math.round(r.y), Math.round(r.width)];
-        }
+            out[i + ':' + (el.className || el.tagName).split(' ')[0]] = [Math.round(r.x), Math.round(r.y), Math.round(r.width)];
+        });
         return out;
     }"""
     page.locator('.se-toolbar [data-cmd="history"]').click()
@@ -4591,6 +4620,7 @@ def test_naming_a_session_owns_the_row_until_it_is_done(browser, tmp_path):
     }));""")
     page.goto(path.as_uri())
     page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    assert _wait(lambda: page.locator(".se-loading").is_hidden(), timeout=180)   # Python in the page, add-ons on
     page.locator('[data-cmd="drawer"]').click()
     row = page.locator(".se-session[data-id]").last               # not the current session
     assert _wait(lambda: row.locator("code").first.inner_text() == "an older one")
@@ -4809,17 +4839,22 @@ def test_addons_can_be_switched_on_and_off_while_editing(browser):
         srv.server_close()
 
 
-def test_the_drawer_button_shows_only_with_something_to_hold(browser, tmp_path):
-    """Without sessions the drawer holds the add-ons alone: with none to
-    switch there is no button - the strip as it always was - and a read-only
-    editor has no drawer at all."""
+def test_the_drawer_button_is_there_with_no_sessions_and_no_addons(browser, tmp_path):
+    """Every editor that edits has the drawer: without sessions and without
+    add-ons it still holds the File section - open, save, the history
+    written out - which a plain ``pip install`` page needs as much as any
+    (its button used to wait for an add-on, and File was out of reach).
+    A read-only editor has no drawer at all."""
     doc_none = Document(x + y, available=[])
     srv2 = EditorServer(doc_none, port=0)
     threading.Thread(target=srv2.serve_forever, daemon=True).start()
     try:
         page = _open(browser, srv2.url)
-        assert page.locator('.se-toolbar [data-cmd="drawer"]').count() == 0      # not even hidden: the columns count blocks
+        page.locator('.se-toolbar [data-cmd="drawer"]').click()
+        page.wait_for_selector(".se-drawer .se-file-action", state="visible", timeout=5000)
+        assert page.locator(".se-drawer .se-file-action").count() == 5
         assert page.locator('.se-toolbar [data-cmd="addons"]').count() == 0
+        assert page.locator(".se-drawer-addons").is_hidden()          # nothing to switch
         assert page.errors == []
     finally:
         srv2.shutdown()
@@ -5176,10 +5211,10 @@ def test_arrows_move_through_a_matrix_as_it_is_drawn(browser, serve_expr):
     caret = lambda: page.evaluate("(() => { const c = document.querySelector('.sympy-editor').__sympyEditor.caret; return c && c.path + ':' + (c.extend || c.index); })()")
     assert caret() and caret().startswith(at("5"))
     page.keyboard.press("ArrowUp")                                    # the row above, not out of the grid
-    page.wait_for_function("document.querySelector('.se-status').textContent.includes('Symbol') || document.querySelector('.se-caret')")
-    assert caret().startswith(at("2")) and page.locator(".se-selected").count() == 0
+    assert _wait(lambda: (caret() or "").startswith(at("2")))
+    assert page.locator(".se-selected").count() == 0
     page.keyboard.press("ArrowRight")
-    assert caret().startswith(at("2")) or caret().startswith(at("3"))  # along the row, never down to the next
+    assert _wait(lambda: (caret() or "").startswith((at("2"), at("3"))))   # along the row, never down to the next
     assert page.errors == []
 
 

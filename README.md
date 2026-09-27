@@ -512,6 +512,14 @@ page instead, without interruption); the local server and the Jupyter widget
 interrupt the thread doing the work (`interrupt_thread`), so nothing else is
 lost.
 
+### Files
+
+Every editor that edits has the **≡** button, with or without sessions and
+add-ons.  Its **File** section opens a formula kept in a file (**Open
+formula…**: a `.sympy` file, or a line of SymPy source), keeps this one with
+its whole history (**Save formula…**), and writes the history out as a
+Python script, as a web page that works offline, or to the printer.
+
 ### Sessions and history (mobile app, or `options={"sessions": True}`)
 
 The **≡** button opens a lateral drawer, out of the widget, listing your

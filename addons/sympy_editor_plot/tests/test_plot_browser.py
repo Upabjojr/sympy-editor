@@ -41,93 +41,103 @@ LAYOUT = """(() => { const a = document.querySelector('.plot-area').getBoundingC
     b = document.querySelector('.se-addon-plot .plot-bar').getBoundingClientRect();
     return Math.round(a.top - b.top); })()"""
 
+def _launch(p):
+    """Chromium, or a skip when it is not installed - as every other
+    browser module does; an error here said nothing about the plot."""
+    try:
+        return p.chromium.launch()
+    except Exception as exc:
+        pytest.skip(f"chromium not available: {exc}")
+
+
 def test_fields_values_zoom_and_guide():
     doc = Document(a * sin(x), addons=[ADDON])
     srv = EditorServer(doc, port=0)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    with playwright.sync_playwright() as p:
-        try:
-            browser = p.chromium.launch()
-        except Exception as exc:
-            pytest.skip(f"chromium not available: {exc}")
-        page = browser.new_page()
-        errors = []
-        page.on("pageerror", lambda e: errors.append(str(e)))
-        page.goto(srv.url)
-        page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
-        # two free symbols: no curve, a message naming the one that needs a value
-        page.wait_for_selector(".se-addon-plot .plot-note.error", timeout=15000)
-        note = page.locator(".se-addon-plot .plot-note").inner_text()
-        assert "2 free symbols" in note and "give a value to x" in note      # a is first alphabetically: on the axis
-        assert page.locator(".plot-area *").count() == 0
-        assert page.locator(".plot-sliders label.plot-unset").count() == 1
-        # and every number field - the range's, a slider's value - asks for the
-        # ordinary keyboard: the phones' decimal and numeric pads have no
-        # minus sign, and "from" is negative to begin with
-        modes = page.evaluate("Array.from(document.querySelectorAll('.se-addon-plot .plot-num')).map(e => e.getAttribute('inputmode'))")
-        assert len(modes) >= 3 and all(m in (None, "text") for m in modes), modes
-        # the range fields are text: selectable like any text
-        frm = page.locator(".se-addon-plot .plot-bar .plot-num").first
-        frm.click()
-        page.keyboard.press("Control+a")
-        assert page.evaluate("(e => [e.selectionStart, e.selectionEnd])(document.querySelector('.se-addon-plot .plot-bar .plot-num'))") == [0, 2]
-        # the variable can be changed, and a value given to the other one: then it draws
-        page.locator(".se-addon-plot select").select_option("x")
-        page.wait_for_function("document.querySelector('.plot-sliders label') && document.querySelector('.plot-sliders label').getAttribute('data-sym') === 'a'")
-        page.locator(".plot-sliders .plot-value").fill("2")
-        page.wait_for_selector(".plot-area svg.main-svg, .plot-area svg.plot-svg", timeout=30000)
-        assert page.locator(".se-addon-plot .plot-bar .plot-num").first.input_value() == "-6"
-        assert page.locator(".plot-sliders label.plot-unset").count() == 0
-        # a zoom in the picture: the fields follow
-        page.wait_for_function("document.querySelector('.plot-area')._seRelayout === true")   # Plotly's event API is up
-        page.evaluate("Plotly.relayout(document.querySelector('.plot-area'), {'xaxis.range': [0, 1]})")
-        page.wait_for_function("document.querySelector('.se-addon-plot .plot-bar .plot-num').value === '0'")
-        assert page.locator(".se-addon-plot .plot-bar .plot-num").nth(1).input_value() == "1"
-        # the gestures a person uses: a drag moves the picture, the wheel zooms
-        box = page.locator(".plot-area .nsewdrag").first.bounding_box()
-        x0, ym = box["x"] + box["width"] * 0.5, box["y"] + box["height"] * 0.5
-        span = page.evaluate("() => { const ax = document.querySelector('.plot-area')._fullLayout.xaxis; return [ax._length, ax.range[1] - ax.range[0]]; }")
-        by = box["width"] * 0.2
-        page.mouse.move(x0, ym); page.mouse.down(); page.mouse.move(x0 - by, ym, steps=10); page.mouse.up()
-        # pushed left by that many pixels, and the picture goes with it: the
-        # left end moves right by exactly what those pixels are worth
-        want = by / span[0] * span[1]
-        near = "(() => { const v = parseFloat(document.querySelector('.se-addon-plot .plot-bar .plot-num').value); return Math.abs(v - %s) < 0.06; })()"
-        page.wait_for_function(near % round(want, 4))
-        fields = lambda: [page.locator(".se-addon-plot .plot-bar .plot-num").nth(i).input_value() for i in (0, 1)]
-        shown = fields()
-        lay = page.evaluate(LAYOUT)
-        wide = page.evaluate("() => { const r = document.querySelector('.plot-area')._fullLayout.xaxis.range; return r[1] - r[0]; }")
-        page.mouse.move(box["x"] + box["width"] * 0.5, ym)
-        for _ in range(3):                                                     # three notches: zooms in around the pointer
-            page.mouse.wheel(0, -120)
-            page.wait_for_timeout(200)
-        page.wait_for_function("(w) => { const r = document.querySelector('.plot-area')._fullLayout.xaxis.range; return (r[1] - r[0]) < w * 0.9; }", arg=wide)
-        page.wait_for_function("(s) => document.querySelector('.se-addon-plot .plot-bar .plot-num').value !== s", arg=shown[0])
-        assert fields() != shown
-        assert page.evaluate(LAYOUT) == lay                                   # the zoom moved nothing on the page
-        page.mouse.dblclick(x0, ym)                                            # back to the whole span
-        page.wait_for_function("(() => { const f = document.querySelectorAll('.se-addon-plot .plot-bar .plot-num'); return f[0].value === '-6' && f[1].value === '6'; })()")
-        # a plot cleared for a missing value and drawn again still follows a zoom
-        # (Plotly's purge took the listener away once, and the fields stayed at -6 … 6)
-        page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.send({action: 'set', src: 'a*sin(x) + b'})")
-        page.wait_for_selector(".se-addon-plot .plot-note.error", timeout=15000)
-        page.locator('.plot-sliders [data-sym="b"] .plot-value').fill("1")
-        page.wait_for_selector(".plot-area svg.main-svg", timeout=30000)
-        page.wait_for_function("document.querySelector('.plot-area')._seRelayout === true")
-        box = page.locator(".plot-area .nsewdrag").first.bounding_box()
-        x0, ym = box["x"] + box["width"] * 0.5, box["y"] + box["height"] * 0.5
-        page.mouse.move(x0, ym); page.mouse.down(); page.mouse.move(x0 - box["width"] * 0.25, ym, steps=10); page.mouse.up()
-        page.wait_for_function("document.querySelector('.se-addon-plot .plot-bar .plot-num').value !== '-6'")
-        assert float(page.locator(".se-addon-plot .plot-bar .plot-num").first.input_value()) > -6
-        # the guide
-        page.locator(".se-addon-plot .se-addon-help").click()
-        assert "zoom" in page.locator(".se-help-view").inner_text().lower()
-        page.keyboard.press("Escape")
-        assert errors == []
-        browser.close()
-    srv.shutdown()
-    srv.server_close()
+    try:
+        with playwright.sync_playwright() as p:
+            browser = _launch(p)
+            try:
+                page = browser.new_page()
+                errors = []
+                page.on("pageerror", lambda e: errors.append(str(e)))
+                page.goto(srv.url)
+                page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+                # two free symbols: no curve, a message naming the one that needs a value
+                page.wait_for_selector(".se-addon-plot .plot-note.error", timeout=15000)
+                note = page.locator(".se-addon-plot .plot-note").inner_text()
+                assert "2 free symbols" in note and "give a value to x" in note      # a is first alphabetically: on the axis
+                assert page.locator(".plot-area *").count() == 0
+                assert page.locator(".plot-sliders label.plot-unset").count() == 1
+                # and every number field - the range's, a slider's value - asks for the
+                # ordinary keyboard: the phones' decimal and numeric pads have no
+                # minus sign, and "from" is negative to begin with
+                modes = page.evaluate("Array.from(document.querySelectorAll('.se-addon-plot .plot-num')).map(e => e.getAttribute('inputmode'))")
+                assert len(modes) >= 3 and all(m in (None, "text") for m in modes), modes
+                # the range fields are text: selectable like any text
+                frm = page.locator(".se-addon-plot .plot-bar .plot-num").first
+                frm.click()
+                page.keyboard.press("Control+a")
+                assert page.evaluate("(e => [e.selectionStart, e.selectionEnd])(document.querySelector('.se-addon-plot .plot-bar .plot-num'))") == [0, 2]
+                # the variable can be changed, and a value given to the other one: then it draws
+                page.locator(".se-addon-plot select").select_option("x")
+                page.wait_for_function("document.querySelector('.plot-sliders label') && document.querySelector('.plot-sliders label').getAttribute('data-sym') === 'a'")
+                page.locator(".plot-sliders .plot-value").fill("2")
+                page.wait_for_selector(".plot-area svg.main-svg, .plot-area svg.plot-svg", timeout=30000)
+                assert page.locator(".se-addon-plot .plot-bar .plot-num").first.input_value() == "-6"
+                assert page.locator(".plot-sliders label.plot-unset").count() == 0
+                # a zoom in the picture: the fields follow
+                page.wait_for_function("document.querySelector('.plot-area')._seRelayout === true")   # Plotly's event API is up
+                page.evaluate("Plotly.relayout(document.querySelector('.plot-area'), {'xaxis.range': [0, 1]})")
+                page.wait_for_function("document.querySelector('.se-addon-plot .plot-bar .plot-num').value === '0'")
+                assert page.locator(".se-addon-plot .plot-bar .plot-num").nth(1).input_value() == "1"
+                # the gestures a person uses: a drag moves the picture, the wheel zooms
+                box = page.locator(".plot-area .nsewdrag").first.bounding_box()
+                x0, ym = box["x"] + box["width"] * 0.5, box["y"] + box["height"] * 0.5
+                span = page.evaluate("() => { const ax = document.querySelector('.plot-area')._fullLayout.xaxis; return [ax._length, ax.range[1] - ax.range[0]]; }")
+                by = box["width"] * 0.2
+                page.mouse.move(x0, ym); page.mouse.down(); page.mouse.move(x0 - by, ym, steps=10); page.mouse.up()
+                # pushed left by that many pixels, and the picture goes with it: the
+                # left end moves right by exactly what those pixels are worth
+                want = by / span[0] * span[1]
+                near = "(() => { const v = parseFloat(document.querySelector('.se-addon-plot .plot-bar .plot-num').value); return Math.abs(v - %s) < 0.06; })()"
+                page.wait_for_function(near % round(want, 4))
+                fields = lambda: [page.locator(".se-addon-plot .plot-bar .plot-num").nth(i).input_value() for i in (0, 1)]
+                shown = fields()
+                lay = page.evaluate(LAYOUT)
+                wide = page.evaluate("() => { const r = document.querySelector('.plot-area')._fullLayout.xaxis.range; return r[1] - r[0]; }")
+                page.mouse.move(box["x"] + box["width"] * 0.5, ym)
+                for _ in range(3):                                                     # three notches: zooms in around the pointer
+                    page.mouse.wheel(0, -120)
+                    page.wait_for_timeout(200)
+                page.wait_for_function("(w) => { const r = document.querySelector('.plot-area')._fullLayout.xaxis.range; return (r[1] - r[0]) < w * 0.9; }", arg=wide)
+                page.wait_for_function("(s) => document.querySelector('.se-addon-plot .plot-bar .plot-num').value !== s", arg=shown[0])
+                assert fields() != shown
+                assert page.evaluate(LAYOUT) == lay                                   # the zoom moved nothing on the page
+                page.mouse.dblclick(x0, ym)                                            # back to the whole span
+                page.wait_for_function("(() => { const f = document.querySelectorAll('.se-addon-plot .plot-bar .plot-num'); return f[0].value === '-6' && f[1].value === '6'; })()")
+                # a plot cleared for a missing value and drawn again still follows a zoom
+                # (Plotly's purge took the listener away once, and the fields stayed at -6 … 6)
+                page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.send({action: 'set', src: 'a*sin(x) + b'})")
+                page.wait_for_selector(".se-addon-plot .plot-note.error", timeout=15000)
+                page.locator('.plot-sliders [data-sym="b"] .plot-value').fill("1")
+                page.wait_for_selector(".plot-area svg.main-svg", timeout=30000)
+                page.wait_for_function("document.querySelector('.plot-area')._seRelayout === true")
+                box = page.locator(".plot-area .nsewdrag").first.bounding_box()
+                x0, ym = box["x"] + box["width"] * 0.5, box["y"] + box["height"] * 0.5
+                page.mouse.move(x0, ym); page.mouse.down(); page.mouse.move(x0 - box["width"] * 0.25, ym, steps=10); page.mouse.up()
+                page.wait_for_function("document.querySelector('.se-addon-plot .plot-bar .plot-num').value !== '-6'")
+                assert float(page.locator(".se-addon-plot .plot-bar .plot-num").first.input_value()) > -6
+                # the guide
+                page.locator(".se-addon-plot .se-addon-help").click()
+                assert "zoom" in page.locator(".se-help-view").inner_text().lower()
+                page.keyboard.press("Escape")
+                assert errors == []
+            finally:
+                browser.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
 
 
 def test_two_fingers_pinch_the_axis():
@@ -142,7 +152,7 @@ def test_two_fingers_pinch_the_axis():
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
         with playwright.sync_playwright() as p:
-            browser = p.chromium.launch()
+            browser = _launch(p)
             ctx = browser.new_context(has_touch=True, is_mobile=True, viewport={"width": 420, "height": 820})
             page = ctx.new_page()
             errors = []
@@ -218,7 +228,7 @@ def test_one_finger_drags_the_plot_along():
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
         with playwright.sync_playwright() as p:
-            browser = p.chromium.launch()
+            browser = _launch(p)
             ctx = browser.new_context(has_touch=True, is_mobile=True, viewport={"width": 420, "height": 820})
             page = ctx.new_page()
             errors = []
@@ -276,7 +286,7 @@ def test_a_trackpad_pinch_zooms_both_axes():
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
         with playwright.sync_playwright() as p:
-            browser = p.chromium.launch()
+            browser = _launch(p)
             page = browser.new_page()
             errors = []
             page.on("pageerror", lambda e: errors.append(str(e)))
@@ -316,7 +326,7 @@ def test_a_gesture_redraws_by_the_frame_not_by_the_move():
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
         with playwright.sync_playwright() as p:
-            browser = p.chromium.launch()
+            browser = _launch(p)
             ctx = browser.new_context(has_touch=True, is_mobile=True, viewport={"width": 420, "height": 900})
             page = ctx.new_page()
             errors = []
@@ -371,7 +381,7 @@ def test_the_picture_stops_following_when_sampling_is_too_slow():
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
         with playwright.sync_playwright() as p:
-            browser = p.chromium.launch()
+            browser = _launch(p)
             page = browser.new_page()
             errors = []
             page.on("pageerror", lambda e: errors.append(str(e)))

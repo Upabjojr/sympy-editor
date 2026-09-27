@@ -48,7 +48,9 @@ def test_vendored_bundle_is_self_contained(tmp_path):
 
     handler = type("H", (http.server.SimpleHTTPRequestHandler,), {"log_message": lambda *a: None})
     handler.extensions_map.update({".wasm": "application/wasm", ".whl": "application/zip", ".mjs": "text/javascript"})
-    srv = socketserver.TCPServer(("127.0.0.1", 0), lambda *a, **k: handler(*a, directory=str(out), **k))
+    # threads: Chromium opens a connection ahead of need and may leave it
+    # idle, which held a one-at-a-time server - and Pyodide's files behind it
+    srv = socketserver.ThreadingTCPServer(("127.0.0.1", 0), lambda *a, **k: handler(*a, directory=str(out), **k))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     external = []
     try:
@@ -64,6 +66,13 @@ def test_vendored_bundle_is_self_contained(tmp_path):
             page.goto(f"http://127.0.0.1:{srv.server_address[1]}/index.html")
             page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
             page.wait_for_function("document.querySelector('.se-loading').hidden", timeout=240000)
+            # then the add-ons are switched on (every one starts on) and their
+            # panels ask their first questions, one request after another for
+            # a few seconds: the editor takes keys once it has stayed idle
+            page.wait_for_function("""() => { const ed = document.querySelector('.sympy-editor').__sympyEditor;
+                if (ed.busy) { window.__idleSince = null; return false; }
+                window.__idleSince = window.__idleSince || performance.now();
+                return performance.now() - window.__idleSince > 1000; }""", timeout=120000, polling=100)
             assert page.evaluate("document.fonts.check('12px KaTeX_Main')")
             page.locator('[data-path="/"]').click(force=True)   # selects the glyph under the centre
             page.keyboard.press("Escape")                        # clear it...
@@ -389,7 +398,8 @@ def test_the_app_interrupts_a_long_message_from_another_thread():
 
     mod._documents["slow"].handle = forever
     out = {}
-    worker = threading.Thread(target=lambda: out.update(snap=json.loads(mod.handle("slow", '{"action": "snapshot"}'))))
+    worker = threading.Thread(target=lambda: out.update(snap=json.loads(mod.handle("slow", '{"action": "snapshot"}'))),
+                              daemon=True)                          # an interrupt that fails must not hang the run
     worker.start()
     assert started.wait(10)
     assert json.loads(mod.interrupt()) is True

@@ -97,6 +97,11 @@ def test_examples_are_valid_and_reach_pages_with_sessions():
     for (name, expr), r in zip(EXAMPLES, records):
         rebuilt = Document(r["srepr"]).expr                            # rebuilds in a Pyodide document
         assert rebuilt == expr or srepr(rebuilt) == srepr(expr), name  # (SymPy 1.14 orders a rebuilt MatAdd differently)
+        # a new session from it reads the record unevaluated, as saved text:
+        # SymPy's own srepr split -4*a*c into Mul(-1, 4, a, c), which came back
+        # as that, and the quadratic formula opened as sqrt(-1*4*a*c + b**2)
+        session = Document(x, history=[r["srepr"]], index=0)
+        assert session.expr == expr and session.snapshot()["src"] == str(expr), name
         tex, nodes = annotate(expr)
         assert strip_annotations(tex) == latex(expr) and () in nodes, name
     cfg = build_config(Document(x), options={"sessions": True})

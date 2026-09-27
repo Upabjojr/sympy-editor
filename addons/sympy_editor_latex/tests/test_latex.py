@@ -319,4 +319,6 @@ def test_a_fraction_over_a_differential_that_is_no_derivative_divides(reader):
     assert again["expr"] == Derivative(b, t)
     got = reader.read(r"\frac{d^2 y}{dx^2}")
     assert got["expr"] == Derivative(y, (x, 2)) and any(p["key"].startswith("derivative@") for p in got["ambiguities"])
-    assert reader.read(r"\frac{dy}{dx}")["expr"] == Derivative(y, x)                       # no choice there
+    plain = reader.read(r"\frac{dy}{dx}")
+    assert plain["expr"] == Derivative(y, x)
+    assert not any(p["key"].startswith("derivative@") for p in plain["ambiguities"])     # no choice there

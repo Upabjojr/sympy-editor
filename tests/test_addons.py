@@ -415,3 +415,20 @@ def test_a_failing_addon_method_reaches_only_the_caller():
     assert snap["error"] is None
     assert snap["query"]["addon"] == "demo" and "no such method" in snap["query"]["error"]
     assert doc.expr == x + y
+
+
+def test_an_addon_switched_on_by_name_before_any_snapshot(tmp_path, monkeypatch):
+    """A page lists its add-ons by module (``available=["sympy_editor_console"]``)
+    and switches them by name.  A session opened and set to the editor's
+    add-ons at once sent the switch before any snapshot had named the modules;
+    where nothing is installed by name - Pyodide - "console" was refused, the
+    formula flickered red and a moment's keys were lost."""
+    import sympy_editor.addons as addons_module
+    (tmp_path / "a_module_addon.py").write_text(
+        "from sympy_editor import Addon\nclass A(Addon):\n    name = 'by_name'\nADDON = A()\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setattr(addons_module, "installed", lambda: {})                    # as in Pyodide
+    monkeypatch.setattr(addons_module, "_entry_points", lambda group: [])
+    doc = Document(x, available=["a_module_addon"])
+    snap = doc.handle({"action": "addons", "enable": ["by_name"]})                  # the first message it gets
+    assert snap["error"] is None and snap["addons"] == ["by_name"]

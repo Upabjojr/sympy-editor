@@ -99,8 +99,8 @@ def test_the_guard_is_honoured_and_the_transform_menu_rewrites_inside():
     with pytest.raises(ValueError, match="did not settle"):
         doc.apply("/", "rewrite_all")                 # it never settles: refused, nothing changed
     assert doc.expr == 1 / x + x ** 5 / 20
-    n = len(doc.snapshot()["ops"])
-    assert n > 3
+    names = {op["name"] for op in doc.snapshot()["ops"]}
+    assert {"rewrite", "rewrite_all"} <= names          # the Transform menu offers both
 
 
 def test_the_guide_s_wildcard_examples_hold():

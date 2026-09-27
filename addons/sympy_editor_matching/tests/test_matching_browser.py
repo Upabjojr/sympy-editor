@@ -40,95 +40,103 @@ def test_a_rule_can_be_edited_as_text_and_in_the_editor():
     doc = Document(sin(x) ** 2, addons=[ADDON])
     srv = EditorServer(doc, port=0)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    with playwright.sync_playwright() as p:
-        try:
-            browser = p.chromium.launch()
-        except Exception as exc:
-            pytest.skip(f"chromium not available: {exc}")
-        page = browser.new_page()
-        errors = []
-        page.on("pageerror", lambda e: errors.append(str(e)))
-        page.goto(srv.url)
-        page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
-        page.wait_for_selector(".se-addon-matching .mt-field", timeout=10000)
-        page.locator(".mt-field").fill("sin(a_)**2 -> 1 - cos(a_)**2")
-        page.locator(".mt-field").press("Enter")
-        page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1")
-        # the rule is drawn as a formula (KaTeX), the wildcard underlined - not shown as Rule(...)
-        page.wait_for_selector(".mt-rules li .mt-formula .katex", timeout=10000)
-        assert "Rule(" not in page.locator(".mt-rules li .mt-formula").inner_text()
-        assert page.locator(".mt-rules li .mt-formula .underline").count() >= 1
-        # an optional wildcard: a dotted underline (dots set under the letter), no brackets
-        page.locator(".mt-field").fill("_c_*x -> z")
-        page.locator(".mt-field").press("Enter")
-        page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 2")
-        second = page.locator(".mt-rules li").nth(1).locator(".mt-formula")
-        assert second.locator(".katex").count() == 1 and "…" in second.inner_text() and "[" not in second.inner_text()
-        page.locator(".mt-rules li").nth(1).locator(".mt-del").click()
-        page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1")
-        # in place: the pencil shows the text form, Enter saves it
-        page.locator(".mt-rules li .mt-edit").click()
-        field = page.locator(".mt-rules li input")
-        assert field.input_value() == "sin(a_)**2 -> 1 - cos(a_)**2"
-        field.fill("sin(a_)**2 -> 1/2 - cos(2*a_)/2")
-        field.press("Enter")
-        page.wait_for_function("document.querySelector('.mt-rules li .mt-formula') !== null")
-        page.wait_for_function("document.querySelector('.mt-hit .mt-result') && document.querySelector('.mt-hit .mt-result').textContent.includes('cos(2*x)')")
-        assert "cos(2*a_)" in ADDON.rules(doc)[0].__str__()
-        # in the editor: the rule becomes the formula, its side is edited there, Save puts it back
-        page.locator(".mt-rules li .mt-open").click()
-        page.wait_for_function("document.querySelector('.se-source').textContent.startsWith('Rule(')")
-        assert isinstance(doc.expr, RewriteRule)
-        page.wait_for_function("document.querySelector('.se-addon-matching .mt-head button').textContent === 'Save as rule 1'")
-        page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.send({action: 'set', src: 'Rule(sin(a_)**2, 1 - cos(a_)**2)'})")
-        page.wait_for_function("document.querySelector('.se-source').textContent === 'Rule(sin(a_)**2, 1 - cos(a_)**2)'")
-        page.locator(".se-addon-matching .mt-head button", has_text="Save as rule 1").click()
-        page.wait_for_function("document.querySelector('.se-addon-matching .mt-head button').textContent === 'Use selection as rule'")
-        assert str(ADDON.rules(doc)[0]) == "Rule(sin(a_)**2, 1 - cos(a_)**2)"
-        page.locator('.se-toolbar [data-cmd="undo"]').click()   # the formula comes back (two steps: open, set)
-        page.wait_for_function("document.querySelector('.se-source').textContent.startsWith('Rule(sin(a_)**2, 1/2')")
-        page.locator('.se-toolbar [data-cmd="undo"]').click()
-        page.wait_for_function("document.querySelector('.se-source').textContent === 'sin(x)**2'")
-        # the panel's "?" opens the add-on's guide in the editor's help overlay
-        page.locator(".se-addon-matching .se-addon-help").click()
-        guide = page.locator(".se-help-view")
-        assert guide.is_visible() and "wildcard" in guide.inner_text().lower()
-        page.keyboard.press("Escape")
-        assert page.locator(".se-help-view").count() == 0
-        assert errors == []
-        browser.close()
-    srv.shutdown()
-    srv.server_close()
+    try:
+        with playwright.sync_playwright() as p:
+            try:
+                browser = p.chromium.launch()
+            except Exception as exc:
+                pytest.skip(f"chromium not available: {exc}")
+            try:
+                page = browser.new_page()
+                errors = []
+                page.on("pageerror", lambda e: errors.append(str(e)))
+                page.goto(srv.url)
+                page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+                page.wait_for_selector(".se-addon-matching .mt-field", timeout=10000)
+                page.locator(".mt-field").fill("sin(a_)**2 -> 1 - cos(a_)**2")
+                page.locator(".mt-field").press("Enter")
+                page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1")
+                # the rule is drawn as a formula (KaTeX), the wildcard underlined - not shown as Rule(...)
+                page.wait_for_selector(".mt-rules li .mt-formula .katex", timeout=10000)
+                assert "Rule(" not in page.locator(".mt-rules li .mt-formula").inner_text()
+                assert page.locator(".mt-rules li .mt-formula .underline").count() >= 1
+                # an optional wildcard: a dotted underline (dots set under the letter), no brackets
+                page.locator(".mt-field").fill("_c_*x -> z")
+                page.locator(".mt-field").press("Enter")
+                page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 2")
+                second = page.locator(".mt-rules li").nth(1).locator(".mt-formula")
+                assert second.locator(".katex").count() == 1 and "…" in second.inner_text() and "[" not in second.inner_text()
+                page.locator(".mt-rules li").nth(1).locator(".mt-del").click()
+                page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1")
+                # in place: the pencil shows the text form, Enter saves it
+                page.locator(".mt-rules li .mt-edit").click()
+                field = page.locator(".mt-rules li input")
+                assert field.input_value() == "sin(a_)**2 -> 1 - cos(a_)**2"
+                field.fill("sin(a_)**2 -> 1/2 - cos(2*a_)/2")
+                field.press("Enter")
+                page.wait_for_function("document.querySelector('.mt-rules li .mt-formula') !== null")
+                page.wait_for_function("document.querySelector('.mt-hit .mt-result') && document.querySelector('.mt-hit .mt-result').textContent.includes('cos(2*x)')")
+                assert "cos(2*a_)" in ADDON.rules(doc)[0].__str__()
+                # in the editor: the rule becomes the formula, its side is edited there, Save puts it back
+                page.locator(".mt-rules li .mt-open").click()
+                page.wait_for_function("document.querySelector('.se-source').textContent.startsWith('Rule(')")
+                assert isinstance(doc.expr, RewriteRule)
+                page.wait_for_function("document.querySelector('.se-addon-matching .mt-head button').textContent === 'Save as rule 1'")
+                page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.send({action: 'set', src: 'Rule(sin(a_)**2, 1 - cos(a_)**2)'})")
+                page.wait_for_function("document.querySelector('.se-source').textContent === 'Rule(sin(a_)**2, 1 - cos(a_)**2)'")
+                page.locator(".se-addon-matching .mt-head button", has_text="Save as rule 1").click()
+                page.wait_for_function("document.querySelector('.se-addon-matching .mt-head button').textContent === 'Use selection as rule'")
+                assert str(ADDON.rules(doc)[0]) == "Rule(sin(a_)**2, 1 - cos(a_)**2)"
+                page.locator('.se-toolbar [data-cmd="undo"]').click()   # the formula comes back (two steps: open, set)
+                page.wait_for_function("document.querySelector('.se-source').textContent.startsWith('Rule(sin(a_)**2, 1/2')")
+                page.locator('.se-toolbar [data-cmd="undo"]').click()
+                page.wait_for_function("document.querySelector('.se-source').textContent === 'sin(x)**2'")
+                # the panel's "?" opens the add-on's guide in the editor's help overlay
+                page.locator(".se-addon-matching .se-addon-help").click()
+                guide = page.locator(".se-help-view")
+                assert guide.is_visible() and "wildcard" in guide.inner_text().lower()
+                page.keyboard.press("Escape")
+                assert page.locator(".se-help-view").count() == 0
+                assert errors == []
+            finally:
+                browser.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
 
 
 def test_rewrite_is_one_pass_and_rewrite_all_is_refused_when_it_never_settles():
     doc = Document(x + sin(x) / x, addons=[ADDON])
     srv = EditorServer(doc, port=0)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    with playwright.sync_playwright() as p:
-        try:
-            browser = p.chromium.launch()
-        except Exception as exc:
-            pytest.skip(f"chromium not available: {exc}")
-        page = browser.new_page()
-        errors = []
-        page.on("pageerror", lambda e: errors.append(str(e)))
-        page.goto(srv.url)
-        page.wait_for_selector(".se-addon-matching .mt-field", timeout=30000)
-        page.locator(".mt-field").fill("x -> x**2")
-        page.locator(".mt-field").press("Enter")
-        page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1")
-        buttons = page.locator(".se-addon-matching .mt-head button")
-        buttons.filter(has_text="Rewrite").nth(0).click()                       # one pass: every x, once
-        page.wait_for_function("document.querySelector('.se-source').textContent === 'x**2 + sin(x**2)/x**2'")
-        assert doc.expr == x ** 2 + sin(x ** 2) / x ** 2
-        buttons.filter(has_text="Rewrite all").click()                           # never settles: refused
-        page.wait_for_function("!document.querySelector('.se-error').hidden && document.querySelector('.se-error').textContent.includes('did not settle')")
-        assert doc.expr == x ** 2 + sin(x ** 2) / x ** 2
-        assert errors == []
-        browser.close()
-    srv.shutdown()
-    srv.server_close()
+    try:
+        with playwright.sync_playwright() as p:
+            try:
+                browser = p.chromium.launch()
+            except Exception as exc:
+                pytest.skip(f"chromium not available: {exc}")
+            try:
+                page = browser.new_page()
+                errors = []
+                page.on("pageerror", lambda e: errors.append(str(e)))
+                page.goto(srv.url)
+                page.wait_for_selector(".se-addon-matching .mt-field", timeout=30000)
+                page.locator(".mt-field").fill("x -> x**2")
+                page.locator(".mt-field").press("Enter")
+                page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1")
+                buttons = page.locator(".se-addon-matching .mt-head button")
+                buttons.filter(has_text="Rewrite").nth(0).click()                       # one pass: every x, once
+                page.wait_for_function("document.querySelector('.se-source').textContent === 'x**2 + sin(x**2)/x**2'")
+                assert doc.expr == x ** 2 + sin(x ** 2) / x ** 2
+                buttons.filter(has_text="Rewrite all").click()                           # never settles: refused
+                page.wait_for_function("!document.querySelector('.se-error').hidden && document.querySelector('.se-error').textContent.includes('did not settle')")
+                assert doc.expr == x ** 2 + sin(x ** 2) / x ** 2
+                assert errors == []
+            finally:
+                browser.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
 
 
 def _wait(check, timeout=5.0):
@@ -151,60 +159,64 @@ def test_rule_sets_are_kept_and_come_back_after_a_reload(tmp_path):
     doc = Document(sin(x) ** 2, addons=[ADDON])
     srv = EditorServer(doc, port=0, store=tmp_path)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    with playwright.sync_playwright() as p:
-        try:
-            browser = p.chromium.launch()
-        except Exception as exc:
-            pytest.skip(f"chromium not available: {exc}")
-        page = browser.new_page()
-        errors = []
-        page.on("pageerror", lambda e: errors.append(str(e)))
-        page.goto(srv.url)
-        page.wait_for_selector(".se-addon-matching .mt-field", timeout=30000)
-        page.locator(".mt-field").fill("sin(a_)**2 -> 1 - cos(a_)**2")
-        page.locator(".mt-field").press("Enter")
-        page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1")
-        page.locator(".mt-name").fill("trig")
-        page.locator(".mt-name").press("Enter")                       # the name is the saving: no Save button
-        assert page.locator(".se-addon-matching .mt-sets button", has_text="Save").count() == 0
-        page.wait_for_function("document.querySelector('.mt-lib').options.length === 2")
-        assert doc.addon_state["matching"]["name"] == "trig"
-        kept = tmp_path / "addon_matching.json"
-        assert _wait(lambda: kept.is_file())
-        stored = json.loads(kept.read_text(encoding="utf-8"))
-        assert stored["name"] == "trig" and stored["library"] == {"trig": ["sin(a_)**2 -> 1 - cos(a_)**2"]}
-        assert page.evaluate("localStorage.getItem('sympy-editor:addon:matching')") is None
-        # the document forgets everything (a kernel restarted, say); the page is
-        # loaded again: the library is there, and so is the last current set -
-        # the server kept them, so another browser would find them too
-        doc.addon_state["matching"] = {}
-        page.goto(srv.url)
-        page.wait_for_selector(".se-addon-matching .mt-field", timeout=30000)
-        page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1", timeout=10000)
-        assert page.locator(".mt-name").input_value() == "trig"
-        assert [o.text_content() for o in page.locator(".mt-lib option").all()][1:] == ["trig"]
-        assert [str(r) for r in doc.addon_state["matching"]["rules"]] == ["Rule(sin(a_)**2, 1 - cos(a_)**2)"]
-        # a change to the named set saves itself; Revert steps back, Restore forward
-        assert page.locator(".mt-revert").is_disabled() and page.locator(".mt-restore").is_disabled()
-        page.locator(".mt-field").fill("x -> x**2")
-        page.locator(".mt-field").press("Enter")
-        page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 2")
-        assert _wait(lambda: json.loads(kept.read_text(encoding="utf-8"))["library"]["trig"] and
-                 len(json.loads(kept.read_text(encoding="utf-8"))["library"]["trig"]) == 2)
-        page.locator(".mt-revert").click()
-        page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1")
-        assert _wait(lambda: len(json.loads(kept.read_text(encoding="utf-8"))["library"]["trig"]) == 1)
-        page.locator(".mt-restore").click()
-        page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 2")
-        page.locator(".mt-revert").click()
-        page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1")
-        page.locator(".mt-lib-del").click()                            # delete it: gone from the store too
-        page.wait_for_function("document.querySelector('.mt-lib').options.length === 1")
-        assert _wait(lambda: json.loads(kept.read_text(encoding="utf-8"))["library"] == {})
-        assert errors == []
-        browser.close()
-    srv.shutdown()
-    srv.server_close()
+    try:
+        with playwright.sync_playwright() as p:
+            try:
+                browser = p.chromium.launch()
+            except Exception as exc:
+                pytest.skip(f"chromium not available: {exc}")
+            try:
+                page = browser.new_page()
+                errors = []
+                page.on("pageerror", lambda e: errors.append(str(e)))
+                page.goto(srv.url)
+                page.wait_for_selector(".se-addon-matching .mt-field", timeout=30000)
+                page.locator(".mt-field").fill("sin(a_)**2 -> 1 - cos(a_)**2")
+                page.locator(".mt-field").press("Enter")
+                page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1")
+                page.locator(".mt-name").fill("trig")
+                page.locator(".mt-name").press("Enter")                       # the name is the saving: no Save button
+                assert page.locator(".se-addon-matching .mt-sets button", has_text="Save").count() == 0
+                page.wait_for_function("document.querySelector('.mt-lib').options.length === 2")
+                assert doc.addon_state["matching"]["name"] == "trig"
+                kept = tmp_path / "addon_matching.json"
+                assert _wait(lambda: kept.is_file())
+                stored = json.loads(kept.read_text(encoding="utf-8"))
+                assert stored["name"] == "trig" and stored["library"] == {"trig": ["sin(a_)**2 -> 1 - cos(a_)**2"]}
+                assert page.evaluate("localStorage.getItem('sympy-editor:addon:matching')") is None
+                # the document forgets everything (a kernel restarted, say); the page is
+                # loaded again: the library is there, and so is the last current set -
+                # the server kept them, so another browser would find them too
+                doc.addon_state["matching"] = {}
+                page.goto(srv.url)
+                page.wait_for_selector(".se-addon-matching .mt-field", timeout=30000)
+                page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1", timeout=10000)
+                assert page.locator(".mt-name").input_value() == "trig"
+                assert [o.text_content() for o in page.locator(".mt-lib option").all()][1:] == ["trig"]
+                assert [str(r) for r in doc.addon_state["matching"]["rules"]] == ["Rule(sin(a_)**2, 1 - cos(a_)**2)"]
+                # a change to the named set saves itself; Revert steps back, Restore forward
+                assert page.locator(".mt-revert").is_disabled() and page.locator(".mt-restore").is_disabled()
+                page.locator(".mt-field").fill("x -> x**2")
+                page.locator(".mt-field").press("Enter")
+                page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 2")
+                assert _wait(lambda: json.loads(kept.read_text(encoding="utf-8"))["library"]["trig"] and
+                         len(json.loads(kept.read_text(encoding="utf-8"))["library"]["trig"]) == 2)
+                page.locator(".mt-revert").click()
+                page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1")
+                assert _wait(lambda: len(json.loads(kept.read_text(encoding="utf-8"))["library"]["trig"]) == 1)
+                page.locator(".mt-restore").click()
+                page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 2")
+                page.locator(".mt-revert").click()
+                page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1")
+                page.locator(".mt-lib-del").click()                            # delete it: gone from the store too
+                page.wait_for_function("document.querySelector('.mt-lib').options.length === 1")
+                assert _wait(lambda: json.loads(kept.read_text(encoding="utf-8"))["library"] == {})
+                assert errors == []
+            finally:
+                browser.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
 
 
 def test_rule_sets_go_to_their_own_editor_s_keeper(tmp_path):
@@ -215,36 +227,40 @@ def test_rule_sets_go_to_their_own_editor_s_keeper(tmp_path):
     doc = Document(sin(x) ** 2, addons=[ADDON])
     srv = EditorServer(doc, port=0, store=tmp_path)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    with playwright.sync_playwright() as p:
-        try:
-            browser = p.chromium.launch()
-        except Exception as exc:
-            pytest.skip(f"chromium not available: {exc}")
-        page = browser.new_page()
-        errors = []
-        page.on("pageerror", lambda e: errors.append(str(e)))
-        page.goto(srv.url)
-        page.wait_for_selector(".se-addon-matching .mt-field", timeout=30000)
-        page.evaluate("""() => {
-            const host = document.createElement('div');
-            host.id = 'second';
-            document.body.appendChild(host);
-            SympyEditor.mount(host, {backend: 'readonly', snapshot: {latex: 'y', nodes: {}, spans: {}},
-                                     options: {}});
-        }""")
-        page.wait_for_selector("#second .se-view", timeout=10000)
-        page.locator(".mt-field").fill("sin(a_)**2 -> 1 - cos(a_)**2")
-        page.locator(".mt-field").press("Enter")
-        page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1")
-        page.locator(".mt-name").fill("trig")
-        page.locator(".mt-name").press("Enter")
-        kept = tmp_path / "addon_matching.json"
-        assert _wait(lambda: kept.is_file() and "trig" in json.loads(kept.read_text(encoding="utf-8"))["library"])
-        assert page.evaluate("localStorage.getItem('sympy-editor:addon:matching')") is None
-        assert errors == []
-        browser.close()
-    srv.shutdown()
-    srv.server_close()
+    try:
+        with playwright.sync_playwright() as p:
+            try:
+                browser = p.chromium.launch()
+            except Exception as exc:
+                pytest.skip(f"chromium not available: {exc}")
+            try:
+                page = browser.new_page()
+                errors = []
+                page.on("pageerror", lambda e: errors.append(str(e)))
+                page.goto(srv.url)
+                page.wait_for_selector(".se-addon-matching .mt-field", timeout=30000)
+                page.evaluate("""() => {
+                    const host = document.createElement('div');
+                    host.id = 'second';
+                    document.body.appendChild(host);
+                    SympyEditor.mount(host, {backend: 'readonly', snapshot: {latex: 'y', nodes: {}, spans: {}},
+                                             options: {}});
+                }""")
+                page.wait_for_selector("#second .se-view", timeout=10000)
+                page.locator(".mt-field").fill("sin(a_)**2 -> 1 - cos(a_)**2")
+                page.locator(".mt-field").press("Enter")
+                page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1")
+                page.locator(".mt-name").fill("trig")
+                page.locator(".mt-name").press("Enter")
+                kept = tmp_path / "addon_matching.json"
+                assert _wait(lambda: kept.is_file() and "trig" in json.loads(kept.read_text(encoding="utf-8"))["library"])
+                assert page.evaluate("localStorage.getItem('sympy-editor:addon:matching')") is None
+                assert errors == []
+            finally:
+                browser.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
 
 
 def test_the_rename_button_gives_the_saved_set_a_new_name(tmp_path):
@@ -253,44 +269,48 @@ def test_the_rename_button_gives_the_saved_set_a_new_name(tmp_path):
     doc = Document(sin(x) ** 2, addons=[ADDON])
     srv = EditorServer(doc, port=0, store=tmp_path)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    with playwright.sync_playwright() as p:
-        try:
-            browser = p.chromium.launch()
-        except Exception as exc:
-            pytest.skip(f"chromium not available: {exc}")
-        page = browser.new_page()
-        errors = []
-        page.on("pageerror", lambda e: errors.append(str(e)))
-        page.goto(srv.url)
-        page.wait_for_selector(".se-addon-matching .mt-field", timeout=30000)
-        rename = page.locator(".mt-lib-rename")
-        assert rename.is_disabled()                                    # nothing saved yet
-        page.locator(".mt-field").fill("sin(a_)**2 -> 1 - cos(a_)**2")
-        page.locator(".mt-field").press("Enter")
-        page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1")
-        page.locator(".mt-name").fill("trig")
-        page.locator(".mt-name").press("Enter")
-        page.wait_for_function("document.querySelector('.mt-lib').options.length === 2")
-        assert not rename.is_disabled()
-        # Esc: the old name stays
-        rename.click()
-        assert page.evaluate("document.activeElement.classList.contains('mt-renaming')")
-        page.keyboard.type("other")
-        page.keyboard.press("Escape")
-        assert page.locator(".mt-name").input_value() == "trig"
-        assert sorted(doc.addon_state["matching"]["library"]) == ["trig"]
-        # Enter: renamed, not copied
-        rename.click()
-        page.keyboard.type("identities")
-        page.keyboard.press("Enter")
-        page.wait_for_function("[...document.querySelectorAll('.mt-lib option')].map(o => o.value).join() === ',identities'")
-        assert page.locator(".mt-name").input_value() == "identities"
-        assert sorted(doc.addon_state["matching"]["library"]) == ["identities"]
-        assert doc.addon_state["matching"]["name"] == "identities"
-        kept = tmp_path / "addon_matching.json"
-        assert _wait(lambda: kept.is_file() and list(json.loads(kept.read_text(encoding="utf-8"))["library"]) == ["identities"])
-        assert not page.locator(".mt-name.mt-renaming").count()
-        assert errors == []
-        browser.close()
-    srv.shutdown()
-    srv.server_close()
+    try:
+        with playwright.sync_playwright() as p:
+            try:
+                browser = p.chromium.launch()
+            except Exception as exc:
+                pytest.skip(f"chromium not available: {exc}")
+            try:
+                page = browser.new_page()
+                errors = []
+                page.on("pageerror", lambda e: errors.append(str(e)))
+                page.goto(srv.url)
+                page.wait_for_selector(".se-addon-matching .mt-field", timeout=30000)
+                rename = page.locator(".mt-lib-rename")
+                assert rename.is_disabled()                                    # nothing saved yet
+                page.locator(".mt-field").fill("sin(a_)**2 -> 1 - cos(a_)**2")
+                page.locator(".mt-field").press("Enter")
+                page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1")
+                page.locator(".mt-name").fill("trig")
+                page.locator(".mt-name").press("Enter")
+                page.wait_for_function("document.querySelector('.mt-lib').options.length === 2")
+                assert not rename.is_disabled()
+                # Esc: the old name stays
+                rename.click()
+                assert page.evaluate("document.activeElement.classList.contains('mt-renaming')")
+                page.keyboard.type("other")
+                page.keyboard.press("Escape")
+                assert page.locator(".mt-name").input_value() == "trig"
+                assert sorted(doc.addon_state["matching"]["library"]) == ["trig"]
+                # Enter: renamed, not copied
+                rename.click()
+                page.keyboard.type("identities")
+                page.keyboard.press("Enter")
+                page.wait_for_function("[...document.querySelectorAll('.mt-lib option')].map(o => o.value).join() === ',identities'")
+                assert page.locator(".mt-name").input_value() == "identities"
+                assert sorted(doc.addon_state["matching"]["library"]) == ["identities"]
+                assert doc.addon_state["matching"]["name"] == "identities"
+                kept = tmp_path / "addon_matching.json"
+                assert _wait(lambda: kept.is_file() and list(json.loads(kept.read_text(encoding="utf-8"))["library"]) == ["identities"])
+                assert not page.locator(".mt-name.mt-renaming").count()
+                assert errors == []
+            finally:
+                browser.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()

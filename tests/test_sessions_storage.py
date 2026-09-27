@@ -99,7 +99,10 @@ _NATIVE_HOST = """([api, token]) => {
         },
         handle(req, id, message) {
             window.__calls.push(['handle', id, JSON.parse(message).action]);
-            if (!created[id]) { window.__sympyEditorNative(req, false, "KeyError: Unknown document '" + id + "'"); return; }
+            if (!created[id]) {
+                window.__calls.push(['unknown', id, JSON.parse(message).action]);
+                window.__sympyEditorNative(req, false, "KeyError: Unknown document '" + id + "'"); return;
+            }
             post(JSON.parse(message)).then(t => window.__sympyEditorNative(req, true, t));
         },
         close(req, id) { window.__calls.push(['close', id]); delete created[id]; window.__sympyEditorNative(req, true, 'null'); }
@@ -153,7 +156,7 @@ def test_a_session_that_cannot_be_opened_does_not_break_the_editor(browser, serv
     assert page.evaluate(NATIVE + ".openSession('bad')") is False
     page.evaluate(NATIVE + ".send({action: 'replace', path: '/', src: 'sin(x)'})")
     page.wait_for_function(NATIVE + ".state.src === 'sin(x)'", timeout=10000)
-    assert not any("Unknown document" in (c[2] if len(c) > 2 else "") for c in page.evaluate("window.__calls"))
+    assert not [c for c in page.evaluate("window.__calls") if c[0] == "unknown"]      # nothing sent to a document never made
     assert page.errors == []
 
 

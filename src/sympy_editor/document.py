@@ -934,6 +934,13 @@ class Document:
             if isinstance(got, Exception):
                 raise got
             return got
+        if isinstance(spec, str) and spec not in self._catalog and any(isinstance(v, str) for v in self._catalog.values()):
+            # An add-on's name ("console") while the catalogue still knows it
+            # by the module it was given ("sympy_editor_console"): renamed by
+            # the first snapshot, but a switch can come first - a session
+            # opened and set to the editor's add-ons at once.  Where nothing
+            # is installed by name (Pyodide) the name was refused.
+            self.available_addons()
         if isinstance(spec, str) and spec in self._catalog and not isinstance(self._catalog[spec], str):
             return self._catalog[spec]
         try:

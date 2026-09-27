@@ -328,5 +328,6 @@ def test_a_late_interrupt_still_lets_the_answer_out(monkeypatch):
     w.document.handle = late
     w._on_msg(w, {"action": "replace", "path": "/", "src": "x + 1", "_req": 1}, [])
     w.wait(5)
+    assert entered.is_set()                  # the interrupt was delivered late, or the race never happened
     assert got and got[-1]["_req"] == 1
     assert w._running is None and w.expr == x + 1

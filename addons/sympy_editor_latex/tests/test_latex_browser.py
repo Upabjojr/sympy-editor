@@ -372,13 +372,24 @@ def test_the_piece_being_replaced_makes_way_for_the_field():
             page.wait_for_selector(".se-view .ltx-field", timeout=10000)
             page.locator(".se-view .ltx-field").fill(r"\cos p")
             assert _wait(lambda: not page.locator(".ltx-apply").is_disabled(), 15)
-            page.locator(".se-view .ltx-field").press("Enter")
             # while the change goes in, the piece it replaces stays off the
             # screen: showing it again for that moment is a flicker of
-            # something already spent
-            while doc.expr == b ** i + 1:
-                assert page.evaluate(shown, path) is not True, "the old exponent came back mid-change"
+            # something already spent.  Watched frame by frame in the page,
+            # up to the frame that draws the new exponent - the moment it
+            # could flicker is after Python has committed, while the answer
+            # is on its way and being drawn.
+            page.evaluate("""p => { window.__shown = 0; window.__drawn = false;
+                const look = () => {
+                    const el = document.querySelector(`.se-view [data-path="${p}"]`);
+                    const text = el ? el.textContent.replace(/[\\s\\u200b]/g, '') : '';
+                    if (el && text.includes('cos')) { window.__drawn = true; return; }
+                    if (el && text === 'i' && getComputedStyle(el).display !== 'none') window.__shown++;
+                    requestAnimationFrame(look); };
+                requestAnimationFrame(look); }""", path)
+            page.locator(".se-view .ltx-field").press("Enter")
             assert _wait(lambda: doc.expr == b ** cos(p_) + 1, 15), str(doc.expr)
+            assert _wait(lambda: page.evaluate("window.__drawn"), 15), "the new exponent was never drawn"
+            assert page.evaluate("window.__shown") == 0, "the old exponent came back mid-change"
             assert page.locator(".se-view .ltx-field").count() == 0
             assert page.errors == []
         finally:
@@ -416,10 +427,19 @@ def test_the_field_keeps_its_taps_and_keys_to_itself():
             assert page.locator(".se-view .ltx-field").count() == 1
             assert page.evaluate("document.activeElement.className") == "ltx-field"
 
-            # the editor's keys are the field's while it is open: Delete types
-            # a character, it does not delete the selection
-            page.locator(".se-view .ltx-field").press("End")
-            page.locator(".se-view .ltx-field").type("+1")
+            # the editor's keys are the field's while it is open: Backspace and
+            # Delete edit the text, they do not delete the selection
+            field = page.locator(".se-view .ltx-field")
+            field.press("End")
+            field.press("Backspace")
+            assert field.input_value() == r"\sqrt{2"
+            field.press("Home")
+            field.press("Delete")
+            assert field.input_value() == r"sqrt{2"
+            assert str(doc.expr) == "x + y"
+            field.fill(r"\sqrt{2}")
+            field.press("End")
+            field.type("+1")
             assert _wait(lambda: page.locator(".ltx-src").inner_text() == "1 + sqrt(2)", 15)
             assert str(doc.expr) == "x + y"                         # and nothing has happened to the formula
             assert page.errors == []

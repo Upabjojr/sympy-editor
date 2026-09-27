@@ -122,7 +122,12 @@ def test_the_command_line_builds_a_page_and_refuses_a_bad_script(tmp_path, capsy
 
 # ---- the player, on a real editor ----------------------------------------
 
-playwright = pytest.importorskip("playwright.sync_api")
+# Only the tests that drive a page need Playwright: a module-level
+# importorskip took every test of this file with it, the Python ones above too.
+try:
+    from playwright import sync_api as playwright
+except ImportError:
+    playwright = None
 
 
 def _online(url):
@@ -175,7 +180,7 @@ def _apart(a, b):
     return a["right"] <= b["left"] or b["right"] <= a["left"] or a["bottom"] <= b["top"] or b["bottom"] <= a["top"]
 
 
-@pytest.mark.skipif(not _online(default_urls()["katexJs"]), reason="KaTeX CDN not reachable")
+@pytest.mark.skipif(playwright is None or not _online(default_urls()["katexJs"]), reason="needs Playwright and the KaTeX CDN")
 def test_the_player_plays_a_script_on_a_real_editor():
     doc = Document(x**2 / y - sin(x))
     srv = EditorServer(doc, port=0)
@@ -280,7 +285,7 @@ def test_a_part_of_the_script_can_be_left_out_and_the_stop_button_turned_off():
         load_tutorial({"steps": [{"wait": True, "part": ""}]})
 
 
-@pytest.mark.skipif(not _online(default_urls()["katexJs"]), reason="KaTeX CDN not reachable")
+@pytest.mark.skipif(playwright is None or not _online(default_urls()["katexJs"]), reason="needs Playwright and the KaTeX CDN")
 def test_the_stop_button_stops_the_tour_and_leaves_the_editor_usable():
     """Stopped mid-way: the overlay goes, nothing after it is pressed or
     changed, and the editor is there to use."""
@@ -323,7 +328,7 @@ def test_the_stop_button_stops_the_tour_and_leaves_the_editor_usable():
     assert selected == "/1/d"
 
 
-@pytest.mark.skipif(not _online(default_urls()["katexJs"]), reason="KaTeX CDN not reachable")
+@pytest.mark.skipif(playwright is None or not _online(default_urls()["katexJs"]), reason="needs Playwright and the KaTeX CDN")
 def test_a_link_or_a_scroll_past_stops_the_tour_and_the_play_button_plays_it_again():
     """A reader gone elsewhere - a link followed, the page scrolled on past
     the editor - is not watching: the tour stops.  The page's Play button,

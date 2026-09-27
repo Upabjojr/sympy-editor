@@ -2,6 +2,23 @@
 
 ## 0.1.2 — September 2026
 
+* **File is always within reach.** The **≡** drawer - with *Open
+  formula…*, *Save formula…* and the history as Python, a web page or on
+  paper - used to show its button only when there were sessions or add-ons,
+  so a page from a plain ``pip install`` had no way to them. Every editor
+  that edits has it now.
+
+* **Fixes.** In a standalone page and the web app: the add-ons are
+  switched on at start without an error (the switch reached a fresh
+  document before it knew its add-ons by name, and the formula flickered
+  red); after an Interrupt, the "Loading Python runtime…" overlay of the
+  restarted Python goes away once it is ready, instead of covering the page;
+  the Interrupt button no longer vanishes when the function list arrives
+  while a long call is computing. Everywhere: the *New session* chooser
+  stays open while the list is refreshed in the background, and an example
+  started as a new session opens as written (the quadratic formula came
+  back as ``sqrt(-1*4*a*c + b**2)``).
+
 * **Add-ons are on, for the whole app.** Every add-on starts switched on,
   and switching one off (or on again) holds for every session - opening
   another session no longer brings back the add-ons that one was saved

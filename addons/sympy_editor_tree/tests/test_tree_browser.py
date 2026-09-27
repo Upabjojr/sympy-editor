@@ -4,7 +4,7 @@ Playwright with Chromium and the KaTeX CDN (skipped otherwise)."""
 import sys
 import threading
 import urllib.request
-from contextlib import closing
+from contextlib import closing, contextmanager
 from pathlib import Path
 
 import pytest
@@ -33,27 +33,40 @@ def _online(url):
 pytestmark = pytest.mark.skipif(not _online(default_urls()["katexJs"]), reason="KaTeX CDN not reachable")
 
 
+@contextmanager
+def _served(doc):
+    """A page showing ``doc`` with its tree, and the server behind it: both
+    stopped however the test ends - a failure or a skip included, which
+    used to leave the server serving for the rest of the run."""
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with playwright.sync_playwright() as p:
+            try:
+                browser = p.chromium.launch()
+            except Exception as exc:
+                pytest.skip(f"chromium not available: {exc}")
+            try:
+                page = browser.new_page()
+                errors = []
+                page.on("pageerror", lambda e: errors.append(str(e)))
+                page.goto(srv.url)
+                page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+                page.wait_for_selector(".se-addon-tree .tree-node", timeout=10000)
+                page.errors = errors
+                yield page
+            finally:
+                browser.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 @pytest.fixture
 def page_and_doc():
     doc = Document(x + y * z, addons=[ADDON])
-    srv = EditorServer(doc, port=0)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    with playwright.sync_playwright() as p:
-        try:
-            browser = p.chromium.launch()
-        except Exception as exc:
-            pytest.skip(f"chromium not available: {exc}")
-        page = browser.new_page()
-        errors = []
-        page.on("pageerror", lambda e: errors.append(str(e)))
-        page.goto(srv.url)
-        page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
-        page.wait_for_selector(".se-addon-tree .tree-node", timeout=10000)
-        page.errors = errors
+    with _served(doc) as page:
         yield page, doc
-        browser.close()
-    srv.shutdown()
-    srv.server_close()
 
 
 def _node(page, label):
@@ -114,18 +127,10 @@ def test_the_factors_of_a_fraction_select_its_pieces():
     the whole fraction."""
     from sympy import cos
     doc = Document(cos(x) ** 2 + sin(x) ** 2 / x, addons=[ADDON])
-    srv = EditorServer(doc, port=0)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    with playwright.sync_playwright() as p:
-        try:
-            browser = p.chromium.launch()
-        except Exception as exc:
-            pytest.skip(f"chromium not available: {exc}")
-        page = browser.new_page()
-        page.goto(srv.url)
-        page.wait_for_selector(".se-addon-tree .tree-node", timeout=30000)
+    with _served(doc) as page:
         pows = page.locator(".tree-node").filter(has_text="Pow")
         sel = lambda: page.locator(".se-selected[data-path]").first.get_attribute("data-path")
+        seen = set()
         for i in range(pows.count()):
             node = pows.nth(i)
             src = node.locator("title").text_content()
@@ -135,10 +140,10 @@ def test_the_factors_of_a_fraction_select_its_pieces():
                 assert doc.get(sel()) == sin(x) ** 2 and sel().endswith("/n")
             elif src == "1/x":
                 assert doc.get(sel()) == x and sel().endswith("/d")
+            seen.add(src)
             page.keyboard.press("Escape")
-        browser.close()
-    srv.shutdown()
-    srv.server_close()
+        assert {"sin(x)**2", "1/x"} <= seen, seen      # both pieces were there to click
+        assert page.errors == []
 
 
 def test_the_history_view_shows_a_tree_under_every_step(page_and_doc):
@@ -192,18 +197,7 @@ def test_quick_actions_drag_verdicts_and_the_red_flicker():
     flickers the panel red; Delete on a needed node is refused."""
     from sympy import cos
     doc = Document(sin(x) + y * z, addons=[ADDON])
-    srv = EditorServer(doc, port=0)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    with playwright.sync_playwright() as p:
-        try:
-            browser = p.chromium.launch()
-        except Exception as exc:
-            pytest.skip(f"chromium not available: {exc}")
-        page = browser.new_page()
-        errors = []
-        page.on("pageerror", lambda e: errors.append(str(e)))
-        page.goto(srv.url)
-        page.wait_for_selector(".se-addon-tree .tree-node", timeout=30000)
+    with _served(doc) as page:
         # the quick actions
         _node(page, "Mul").click()
         bar = page.locator(".tree-quick")
@@ -230,19 +224,27 @@ def test_quick_actions_drag_verdicts_and_the_red_flicker():
         page.mouse.up()
         page.wait_for_function("document.querySelector('.se-source').textContent === 'y*z*sin(x)'")
         assert doc.expr == y * z * sin(x)
-        # a drop Python refuses (sin takes one argument) flickers too
+        # a drop Python refuses (sin takes one argument) flickers too: the flash
+        # of the drop before gone first, so that this one is not taken for it
+        page.wait_for_selector(".tree-panel.tree-flash", state="detached", timeout=5000)
+        page.wait_for_function("!document.querySelector('.sympy-editor').__sympyEditor.busy")   # a drop sent while busy waits
+        page.evaluate("document.querySelector('.se-error').textContent = ''")
+        # the flash lasts 600 ms, which a busy machine can see through: it is
+        # recorded as it happens rather than looked for afterwards
+        page.evaluate("""() => { window.__flashed = false;
+            new MutationObserver(() => { if (document.querySelector('.tree-panel.tree-flash')) window.__flashed = true; })
+                .observe(document.body, {subtree: true, attributes: true, attributeFilter: ['class']}); }""")
         _drag(page, _node(page, "z"), _node(page, "sin"))
+        page.wait_for_selector(".tree-node.tree-drop, .tree-node.tree-drop-no", timeout=2000)   # over the target
         page.mouse.up()
-        page.wait_for_selector(".tree-panel.tree-flash", timeout=5000)
+        page.wait_for_function("window.__flashed", timeout=5000)
+        page.wait_for_function("!document.querySelector('.se-error').hidden && document.querySelector('.se-error').textContent !== ''")
         assert doc.expr == y * z * sin(x)
         # the quick bar's Delete does delete
         _node(page, "z").click()
         page.locator(".tree-quick button", has_text="Delete").click()
         page.wait_for_function("document.querySelector('.se-source').textContent === 'y*sin(x)'")
-        assert errors == []
-        browser.close()
-    srv.shutdown()
-    srv.server_close()
+        assert page.errors == []
 
 
 def _gesture_page(p, doc, **ctx_args):

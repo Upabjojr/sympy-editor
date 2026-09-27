@@ -160,7 +160,7 @@ var SympyEditor = (function () {
     "</ul></section>",
     "<section><h3>Applying functions</h3><ul>",
     "<li>The four menus at the foot of the tools are one kind of box: it lists everything it offers when it takes the focus, narrows the list as you type, and \u2191/\u2193 + <kbd>Enter</kbd> (or a click) pick. The first group holds the <b>actions</b>: <b>Transform \u25be</b> for the general operations, and a second menu with the operations for the selection's type (Matrix, Integral, Equation\u2026). Picking one applies it at once, to the selection or, with nothing selected, to the whole expression.</li>",
-    "<li><b>Add-ons</b>, at the top of what <b>\u2261</b> opens, switches on or off the add-ons installed beside the editor \u2014 a panel under the formula, tools, node types from other packages \u2014 without restarting anything; what an add-on kept waits for it to come back. In the apps every add-on is on until switched off, and a switch holds for every session and is remembered between launches. (With the sessions drawer off there is no \u2261, and the switches keep a button of their own on the strip.)</li>",
+    "<li><b>Add-ons</b>, at the top of what <b>\u2261</b> opens, switches on or off the add-ons installed beside the editor \u2014 a panel under the formula, tools, node types from other packages \u2014 without restarting anything; what an add-on kept waits for it to come back. In the apps every add-on is on until switched off, and a switch holds for every session and is remembered between launches. (A read-only editor has no \u2261, and there the switches keep a button of their own on the strip.)</li>",
     "<li>In a <b>matrix</b> or an <b>array</b> the four arrows move as it is drawn: <kbd>\u2190</kbd>/<kbd>\u2192</kbd> along the row, <kbd>\u2191</kbd>/<kbd>\u2193</kbd> between the rows \u2014 for the selection and for the caret alike. At the edge the usual meaning takes over: <kbd>\u2191</kbd> in the top row selects the matrix itself (again, its own parent), <kbd>\u2190</kbd>/<kbd>\u2192</kbd> step out of it. An array of any rank works the same way, because the rule follows the drawing: a rank-3 array is a row of matrices, so <kbd>\u2192</kbd> at the right edge of one block enters the next on the same line.</li>",
     "<li>In a <b>matrix</b> (the matrix, or anything in one of its entries) the bar under the selection adds <b>+ row</b>, <b>+ col</b>, <b>\u2212 row</b>, <b>\u2212 col</b>: a new row or column of empty slots after the selected one (after the last, for the matrix itself), or the selected one taken away. The grip at the matrix\u2019s bottom-right corner <b>reshapes</b> it: the same entries laid out another way (SymPy\u2019s reshape, in reading order), so it snaps to the shapes that hold them all \u2014 12 entries go 1\u00d712, 2\u00d76, 3\u00d74, 4\u00d73, 6\u00d72, 12\u00d71 and nowhere else. Nothing is added or lost; the outline shows the shape it will take. To grow or shrink the matrix, use + row / + col / \u2212 row / \u2212 col.</li>",
     "<li>The second group is the <b>library</b>: <b>Methods \u25be</b> lists everything the selected object's class can do \u2014 .det(), .T, .diff()\u2026 \u2014 one pick calls it. A Lambda is itself a function: <b>( ) apply</b> evaluates it at the arguments you give.</li>",
@@ -173,7 +173,8 @@ var SympyEditor = (function () {
     "<li>The strip above plays the history as a slideshow \u2014 a step and the change that produced it on one screen \u2014 and its <b>\u25c0 \u25b6</b> walk the steps one at a time when it is not playing; the two dials halve and double the speed, which is written between them (<kbd>,</kbd> and <kbd>.</kbd> while it plays), and <b>\u2212 / +</b> set the size of the formulas (Ctrl+wheel and two fingers too).</li>",
     "<li><b>Save \u25be</b> writes it out: a self-contained web page that works offline and plays on its own, or a Python script that rebuilds every step with SymPy \u2014 or sends it to the printer (<i>print or PDF</i>; <i>Print history\u2026</i> under <b>\u2261</b> too).</li>",
     "<li>A formula saved to a <b>.sympy</b> file opens with the app from a file manager or a mail, in a session of its own; in a notebook, files are saved next to the notebook.</li>",
-    "<li><b>\u2261</b> lists the sessions, where the page keeps several. A session is labelled with its formula until you give it a name of your own (the pencil beside it, or a double-click), which nothing overwrites.</li>",
+    "<li><b>\u2261</b> holds <b>File</b> in every editor: <i>Open formula\u2026</i>, <i>Save formula\u2026</i> (a <b>.sympy</b> file with the whole history), and the history as Python, as a web page or on paper.</li>",
+    "<li><b>\u2261</b> also lists the sessions, where the page keeps several. A session is labelled with its formula until you give it a name of your own (the pencil beside it, or a double-click), which nothing overwrites.</li>",
     "</ul></section>",
     "<section><h3>On a phone or tablet</h3><ul>",
     "<li>Tap to select; tap the selected node again to edit it.</li>",
@@ -1450,8 +1451,8 @@ var SympyEditor = (function () {
       var o = this.opts;
       // Settled before the strip is built.  Every editor that edits has the
       // drawer: the sessions and their history when o.sessions is on, the
-      // add-ons' switches always (its button shows once there are add-ons to
-      // switch, see _fillAddonsMenu); they go on the strip only for a
+      // File section and the add-ons' switches always; the switches go on
+      // the strip only for a
       // read-only editor, which has no drawer (see where addonsMenu is made).
       this._drawerWanted = !o.readOnly;
       var root = h("div", { class: "sympy-editor" });
@@ -1516,22 +1517,14 @@ var SympyEditor = (function () {
       //    in from the right, so the tap and what it opens are on one side
       if (!o.readOnly) {
         this.drawerBlock = block("sessions");
-        btn("drawer", "\u2261", o.sessions ? "Sessions and history" : "Add-ons: panels and tools from other packages");
+        btn("drawer", "\u2261", o.sessions ? "Sessions, history, files and add-ons" : "Files and add-ons");
         // On a narrow screen the blocks pack into lines: this ends the first
         // one, so nothing can slip to the right of the drawer's button.
         this.drawerBreak = h("span", { class: "se-linebreak" });
         this.tools.appendChild(this.drawerBreak);
-        // Without sessions it holds the add-ons alone, and is not on the
-        // strip until there are some (_fillAddonsMenu): a marker keeps its
-        // place, so that an editor without either has the strip it always
-        // had.  Hidden would not do: the strip's columns are counted with
-        // :nth-of-type, and a hidden block still counts, moving every block
-        // after it.
-        if (!o.sessions) {
-          this.drawerSpot = document.createComment(" the drawer's button, once there are add-ons ");
-          this.tools.replaceChild(this.drawerSpot, this.drawerBlock);
-          this.tools.removeChild(this.drawerBreak);
-        }
+        // Always there, sessions or not, add-ons or not: the drawer holds
+        // the File section (open, save, the history written out), which a
+        // plain page with neither needs as much as any.
       }
       if (!o.readOnly) {
         // 4. moving the selection
@@ -1803,9 +1796,12 @@ var SympyEditor = (function () {
             this.addonsMenu
           ]);
         }
-        var heading = o.sessions ? "Sessions" : "Add-ons";
+        // Without sessions the heading names what comes first: the add-ons'
+        // switches when there are some (_fillAddonsMenu), else File.
+        var heading = o.sessions ? "Sessions" : "File";
+        this.drawerHeading = h("strong", {}, [heading]);
         this.drawer = h("aside", { class: "se-drawer", hidden: "", role: "dialog", "aria-label": heading }, [
-          h("div", { class: "se-drawer-head" }, [h("strong", {}, [heading]), close])
+          h("div", { class: "se-drawer-head" }, [this.drawerHeading, close])
         ].concat(this.addonsPane ? [this.addonsPane] : [])
          .concat(this.filesPane ? [this.filesPane] : [])
          .concat(this.sessionsBody ? [this.sessionsBody] : []));
@@ -2123,18 +2119,10 @@ var SympyEditor = (function () {
     _fillAddonsMenu(available) {
       var host = this.addonsBlock || this.addonsPane;
       if (host) host.hidden = !available.length;
-      // Without sessions the drawer holds these switches alone: no add-ons,
-      // no drawer button - the strip as it was.
-      if (this.drawerSpot) {
-        var on = !!available.length, there = !!this.drawerBlock.parentNode;
-        if (on && !there) {
-          this.drawerSpot.parentNode.insertBefore(this.drawerBlock, this.drawerSpot);
-          this.drawerSpot.parentNode.insertBefore(this.drawerBreak, this.drawerSpot);
-        } else if (!on && there) {
-          this.closeDrawer();
-          this.drawerBlock.parentNode.removeChild(this.drawerBlock);
-          this.drawerBreak.parentNode.removeChild(this.drawerBreak);
-        }
+      if (this.drawer && !this.opts.sessions) {
+        var heading = available.length ? "Add-ons" : "File";
+        this.drawerHeading.textContent = heading;
+        this.drawer.setAttribute("aria-label", heading);
       }
       if (!this.addonsMenu) return;
       var self = this;
@@ -3886,6 +3874,7 @@ var SympyEditor = (function () {
     /** Progress from a backend: loading messages block the UI behind an overlay. */
     _report(text) {
       if (text && /loading|waiting/i.test(text)) this._showLoading(text);
+      else if (!text && this.busy && this._workingLabel) this._showLoading(this._workingLabel);   // still computing
       else if (!text) this._hideLoading();
       else this._setStatus(text);
     }
@@ -4004,10 +3993,14 @@ var SympyEditor = (function () {
       if (this._functionsLoaded || this._functionsRequested || !this.backend) return;
       this._functionsRequested = true;
       var self = this;
+      // Sent beside whatever else runs: a call typed at once (factorial())
+      // may be computing when this answers, and its overlay - the spinner and
+      // the Interrupt button - is not this one's to take down.
+      var done = function () { if (!self.busy) self._hideLoading(); };
       Promise.resolve(this.backend.send({ action: "functions" }, function (text) { self._report(text); })).then(function (snap) {
-        self._hideLoading();
+        done();
         if (snap) self.setState(snap);   // the widget backend answers through its trait instead
-      }, function () { self._hideLoading(); self._functionsRequested = false; });
+      }, function () { done(); self._functionsRequested = false; });
     }
 
     /** The node the function box acts on: the range's parent, the selection or the root. */
@@ -5526,7 +5519,11 @@ var SympyEditor = (function () {
       // A request that takes a while dims the formula and gets the spinner
       // overlay, and after a few seconds the offer to interrupt it (where the
       // backend can).  A quick one shows nothing at all, nor a quiet one.
-      var working = quiet ? null : setTimeout(function () { self.root.classList.add("se-busy"); self._showLoading(self._workingText(msg)); }, this.opts.workingAfter);
+      var working = quiet ? null : setTimeout(function () {
+        self.root.classList.add("se-busy");
+        self._workingLabel = self._workingText(msg);
+        self._showLoading(self._workingLabel);
+      }, this.opts.workingAfter);
       var offer = quiet ? null : setTimeout(function () {
         if (self.backend.interrupt && (!self.backend.canInterrupt || self.backend.canInterrupt())) self.interruptBtn.hidden = false;
       }, this.opts.interruptAfter);
@@ -5545,6 +5542,7 @@ var SympyEditor = (function () {
       } finally {
         clearTimeout(working);
         clearTimeout(offer);
+        this._workingLabel = null;
         this.interruptBtn.hidden = true;
         this.interruptBtn.disabled = false;
         this._hideLoading();
@@ -6402,7 +6400,10 @@ var SympyEditor = (function () {
       var choice = function (label, detail, start, isDefault) {
         var b = h("button", { type: "button", class: "se-choice" + (isDefault ? " se-choice-default" : ""), "data-start": start }, [
           h("span", { class: "se-choice-name" }, [label]), h("code", { class: "se-choice-src" }, [detail || ""])]);
-        b.addEventListener("click", function () { self.newSession(start); });
+        b.addEventListener("click", function () {
+          if (picker.parentNode) picker.parentNode.removeChild(picker);   // chosen: the chooser has done its job
+          self.newSession(start);
+        });
         picker.appendChild(b);
       };
       choice("Empty formula", "type the expression in the source line", "empty", true);
@@ -6447,6 +6448,10 @@ var SympyEditor = (function () {
       var self = this;
       var store = this._sessionStore || this._loadSessions();
       var body = this.sessionsBody;
+      // The New session chooser, if open, stays open: a background refresh
+      // (the session saved after a change, a Python restarted after an
+      // interruption) took it away under the finger.
+      var picker = body.querySelector(".se-session-picker");
       body.textContent = "";
       var list = store.list.slice().sort(function (a, b) { return b.updated - a.updated; });
       if (this.buttons.drawer) this.buttons.drawer.title = "Sessions (" + list.length + ") and history";
@@ -6457,6 +6462,7 @@ var SympyEditor = (function () {
       var addRow = h("div", { class: "se-session se-session-add" }, [add]);
       add.addEventListener("click", function () { self._showSessionPicker(addRow); });
       body.appendChild(addRow);
+      if (picker) body.appendChild(picker);
       list.forEach(function (sess) {
         var current = sess.id === store.current;
         var when = new Date(sess.updated || 0);
@@ -7185,7 +7191,16 @@ var SympyEditor = (function () {
           }
         }
         rt.inPage = await pyodideInPage(Object.assign({}, cfg, { packages: packagesOf(), micropip: micropipOf() }), rt.report);
-      })().catch(function (e) { rt.ready = null; throw e; });
+      })().then(function () {
+        // A restart (the next request after an interruption) reports its
+        // progress to the editor that started the runtime - "Loading Python
+        // runtime…", the blocking overlay - and must say when it is done: a
+        // session saved in the background was often that next request, and
+        // nothing else took the overlay down.  The first start is the
+        // backend's to finish (report("") once its document exists).
+        if (rt.startedOnce) rt.report("");
+        rt.startedOnce = true;
+      }).catch(function (e) { rt.ready = null; throw e; });
       return rt.ready;
     };
 

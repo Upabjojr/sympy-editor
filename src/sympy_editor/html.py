@@ -30,7 +30,7 @@ from typing import Any, Dict, List, Optional, Union
 from sympy import Basic
 
 from .document import Document
-from .printer import exact_srepr as srepr   # srepr that reads back unchanged (SymPy's reorders MatAdd)
+from .document import srepr   # reads back unchanged: SymPy's reorders a MatAdd and splits a product's coefficient
 from .examples import examples
 from .history import History
 
