@@ -107,7 +107,7 @@ being asked goes through one seam (`Keep` in `editor.js`), under these names:
 | Name | What it holds |
 | --- | --- |
 | `sessions` | the list of sessions, each with the `session` payload above |
-| `addons` | which add-ons are switched on (`rememberAddons`) |
+| `addons` | which add-ons are switched off, for the editor as a whole: `{"off": [names]}` — every other one is on (`rememberAddons`) |
 | `zoom` | the size the formula is shown at (`rememberZoom`) |
 | `addon:<name>` | what an add-on keeps of its own — the rewrite rules' sets, say (`api.keep`, its editor's keeper) |
 

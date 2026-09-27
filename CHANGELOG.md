@@ -2,6 +2,13 @@
 
 ## 0.1.2 — September 2026
 
+* **Add-ons are on, for the whole app.** Every add-on starts switched on,
+  and switching one off (or on again) holds for every session - opening
+  another session no longer brings back the add-ons that one was saved
+  with. The choice is remembered between launches, in the app's own
+  storage (the server's store under ``serve()``, the browser's on a
+  standalone page); an add-on new in an update starts on.
+
 * **A Python console.** A new add-on, *Python console*, runs Python beside
   the formula in the same Python as the editor - the app's own on a phone,
   the server's, Pyodide in a standalone page. Its console works as IPython

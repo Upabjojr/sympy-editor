@@ -243,9 +243,11 @@ The apps carry the add-ons of `addons/` as folders of their own, one each,
 beside the app's Python (`src/main/python/addons/` on Android, `app/addons/`
 on iOS): `mobile/build.py` copies a folder's manifest (`addon.json`) and its
 package, not its tests, and `sympy_editor_app.py` registers the directory at
-start so that every document lists them.  They start off; the toolbar's
-**Add-ons ▾** menu switches them on and off, and the WebView keeps the
-switches between launches (`rememberAddons`).  What an add-on `requires`
+start so that every document lists them.  They are all on until switched
+off in the **Add-ons** section of the **≡** drawer; a switch holds for the
+whole app, every session included, and is kept in the app's own storage
+between launches (`rememberAddons`: the list of those switched off, so an
+add-on new in an update starts on).  What an add-on `requires`
 (its manifest) is installed beside SymPy: `install(...)` lines under
 `chaquopy.pip` in `android/app/build.gradle.kts` - `tests/test_mobile.py`
 checks they match the manifests - and `app_packages` on iOS.  See

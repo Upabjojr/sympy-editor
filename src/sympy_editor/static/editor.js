@@ -42,7 +42,9 @@ var SympyEditor = (function () {
     interruptAfter: 2000, // ms after which the overlay offers to interrupt the computation
     sessions: false,     // a list of sessions (expressions with their own history), kept (see Keep)
     unevaluated: false,  // the "unevaluated" toggle starts on: transformations build Determinant(M), Integral(f, x)... rather than computing
-    rememberAddons: false, // keep which add-ons are on between page loads (the apps do; see Keep)
+    rememberAddons: false, // add-ons are switched on and off for the whole editor, not per session, and the
+                           // switches are kept between page loads (the apps do; see Keep); every add-on is on
+                           // until switched off
     animate: true,       // animate a change: the old parts in red turn into the new ones in green
     animateDuration: 1600 // ms: a quarter to show what goes (red), the rest to move it and fade the new in (green)
   };
@@ -158,7 +160,7 @@ var SympyEditor = (function () {
     "</ul></section>",
     "<section><h3>Applying functions</h3><ul>",
     "<li>The four menus at the foot of the tools are one kind of box: it lists everything it offers when it takes the focus, narrows the list as you type, and \u2191/\u2193 + <kbd>Enter</kbd> (or a click) pick. The first group holds the <b>actions</b>: <b>Transform \u25be</b> for the general operations, and a second menu with the operations for the selection's type (Matrix, Integral, Equation\u2026). Picking one applies it at once, to the selection or, with nothing selected, to the whole expression.</li>",
-    "<li><b>Add-ons</b>, at the top of what <b>\u2261</b> opens, switches on or off the add-ons installed beside the editor \u2014 a panel under the formula, tools, node types from other packages \u2014 without restarting anything; what an add-on kept waits for it to come back. (With the sessions drawer off there is no \u2261, and the switches keep a button of their own on the strip.)</li>",
+    "<li><b>Add-ons</b>, at the top of what <b>\u2261</b> opens, switches on or off the add-ons installed beside the editor \u2014 a panel under the formula, tools, node types from other packages \u2014 without restarting anything; what an add-on kept waits for it to come back. In the apps every add-on is on until switched off, and a switch holds for every session and is remembered between launches. (With the sessions drawer off there is no \u2261, and the switches keep a button of their own on the strip.)</li>",
     "<li>In a <b>matrix</b> or an <b>array</b> the four arrows move as it is drawn: <kbd>\u2190</kbd>/<kbd>\u2192</kbd> along the row, <kbd>\u2191</kbd>/<kbd>\u2193</kbd> between the rows \u2014 for the selection and for the caret alike. At the edge the usual meaning takes over: <kbd>\u2191</kbd> in the top row selects the matrix itself (again, its own parent), <kbd>\u2190</kbd>/<kbd>\u2192</kbd> step out of it. An array of any rank works the same way, because the rule follows the drawing: a rank-3 array is a row of matrices, so <kbd>\u2192</kbd> at the right edge of one block enters the next on the same line.</li>",
     "<li>In a <b>matrix</b> (the matrix, or anything in one of its entries) the bar under the selection adds <b>+ row</b>, <b>+ col</b>, <b>\u2212 row</b>, <b>\u2212 col</b>: a new row or column of empty slots after the selected one (after the last, for the matrix itself), or the selected one taken away. The grip at the matrix\u2019s bottom-right corner <b>reshapes</b> it: the same entries laid out another way (SymPy\u2019s reshape, in reading order), so it snaps to the shapes that hold them all \u2014 12 entries go 1\u00d712, 2\u00d76, 3\u00d74, 4\u00d73, 6\u00d72, 12\u00d71 and nowhere else. Nothing is added or lost; the outline shows the shape it will take. To grow or shrink the matrix, use + row / + col / \u2212 row / \u2212 col.</li>",
     "<li>The second group is the <b>library</b>: <b>Methods \u25be</b> lists everything the selected object's class can do \u2014 .det(), .T, .diff()\u2026 \u2014 one pick calls it. A Lambda is itself a function: <b>( ) apply</b> evaluates it at the arguments you give.</li>",
@@ -2050,9 +2052,6 @@ var SympyEditor = (function () {
       if (clients.length) loadAddons(clients);
       for (var c = 0; c < clients.length; c++) this._addonClients[clients[c].name] = clients[c];
       var on = snap.addons || [];
-      if (this.opts.rememberAddons && !snap.preview && this._addonsRestored) {
-        Keep.write("addons", JSON.stringify(on), this);
-      }
       var mounted = this._addons.slice();
       for (var i = 0; i < mounted.length; i++) if (on.indexOf(mounted[i].name) < 0) this._unmountAddon(mounted[i].name);
       for (var j = 0; j < on.length; j++) {
@@ -2061,30 +2060,64 @@ var SympyEditor = (function () {
       this._fillAddonsMenu(snap.addons_available || []);
     }
 
-    /** With rememberAddons: switch on what was on last time (and off what
-     *  was not), once, when the editor is ready - the page's own choice of
-     *  add-ons is the fallback for a first visit. */
+    /** The add-ons that can be switched on: listed, and loaded without error. */
+    _addonsKnown(snap) {
+      return ((snap || this.state || {}).addons_available || []).filter(function (a) { return !a.error; })
+        .map(function (a) { return a.name; });
+    }
+
+    /** With rememberAddons, the add-ons are switched for the editor as a
+     *  whole: every document it opens - the last session at start, another
+     *  session, a file - gets the same ones, whatever the page or the
+     *  session was made with.  What is kept is the list of those switched
+     *  *off* ({"off": [...]}), so every add-on is on until the user switches
+     *  it off, one added in a later version included.  (An older page kept
+     *  the list of those on, per session: that is read as nothing kept.)
+     *  Read once, when the editor is ready. */
     async _restoreAddons() {
       if (this._addonsRestored) return Promise.resolve();
       this._addonsRestored = true;
       if (!this.opts.rememberAddons || !this.state) return Promise.resolve();
       var self = this;
       return Keep.read("addons", this).then(function (text) {
-        var wanted = null;
-        try { wanted = JSON.parse(text || "null"); } catch (e) { wanted = null; }
-        return Array.isArray(wanted) ? self._wantAddons(wanted) : undefined;
-      }, function () { /* nothing kept: the page's own choice stands */ });
+        var kept = null;
+        try { kept = JSON.parse(text || "null"); } catch (e) { kept = null; }
+        self._addonsOff = kept && Array.isArray(kept.off) ? kept.off.map(String) : [];
+      }, function () { self._addonsOff = []; }).then(function () { return self._enforceAddons(); });
     }
 
-    /** Switch on what was kept and off what was not (see _restoreAddons). */
-    _wantAddons(wanted) {
-      if (!this.state) return Promise.resolve();
-      var known = (this.state.addons_available || []).filter(function (a) { return !a.error; }).map(function (a) { return a.name; });
+    /** Switch the document's add-ons to the editor's own: on, but for those
+     *  switched off.  Nothing until the switches are known (see _restoreAddons),
+     *  nor on a page whose add-ons are the page's choice. */
+    _enforceAddons() {
+      if (!this.state || !this._addonsOff || this.closed) return Promise.resolve();
+      var off = this._addonsOff;
       var on = this.state.addons || [];
-      var enable = wanted.filter(function (n) { return known.indexOf(n) >= 0 && on.indexOf(n) < 0; });
-      var disable = on.filter(function (n) { return wanted.indexOf(n) < 0; });
+      var enable = this._addonsKnown().filter(function (n) { return off.indexOf(n) < 0 && on.indexOf(n) < 0; });
+      var disable = on.filter(function (n) { return off.indexOf(n) >= 0; });
       if (!enable.length && !disable.length) return Promise.resolve();
-      return this.send({ action: "addons", enable: enable, disable: disable });
+      this._enforcingAddons = true;
+      var self = this;
+      return Promise.resolve(this.send({ action: "addons", enable: enable, disable: disable })).then(function (snap) {
+        self._enforcingAddons = false;
+        return snap;
+      }, function () { self._enforcingAddons = false; });
+    }
+
+    /** A switch the user made (the Add-ons menu, or any "addons" message
+     *  sent through the editor): it holds for the editor as a whole, and is
+     *  kept.  The editor's own enforcing is not a choice and changes nothing. */
+    _addonsSwitched(snap) {
+      if (!this.opts.rememberAddons || !this._addonsRestored || this._enforcingAddons) return;
+      if (!snap || snap.error || snap.preview || !Array.isArray(snap.addons)) return;
+      var on = snap.addons;
+      var known = this._addonsKnown(snap);
+      // what is off now, and what was off before and is not listed here (an
+      // add-on this Python cannot load stays off where it can)
+      var off = known.filter(function (n) { return on.indexOf(n) < 0; });
+      (this._addonsOff || []).forEach(function (n) { if (known.indexOf(n) < 0 && off.indexOf(n) < 0) off.push(n); });
+      this._addonsOff = off;
+      Keep.write("addons", JSON.stringify({ off: off }), this);
     }
 
     _fillAddonsMenu(available) {
@@ -5501,6 +5534,7 @@ var SympyEditor = (function () {
       try {
         var snap = await this.backend.send(msg, function (text) { self._report(text); });
         if (snap) await this.setState(snap);
+        if (msg.action === "addons") this._addonsSwitched(snap);
         if ((msg.action === "apply" || msg.action === "call") && snap && !snap.error && snap.srepr === wasSrepr) {
           this._setStatus("No change: " + this._workingText(msg).replace(/^Computing /, "").replace(/…$/, "") + " leaves the expression as it is");
         }
@@ -5665,6 +5699,7 @@ var SympyEditor = (function () {
           if (!opened) throw new Error("No answer");
           if (opened.error) throw new Error(opened.error);
           await this.setState(opened);
+          await this._enforceAddons();                                  // the editor's add-ons, not the session's
           if (cur.empty) this.editSource("");
           delete cur.broken;
         } catch (e) {
@@ -6319,6 +6354,7 @@ var SympyEditor = (function () {
         this.select(null);
         this._hideCaret();
         await this.setState(snap);
+        await this._enforceAddons();                                    // the editor's add-ons, not the session's
         this.closeDrawer();                                             // the session is open: back to its formula
         if (sess.empty) this.editSource("");                            // an empty session: type the formula
       } catch (e) {
@@ -7560,6 +7596,9 @@ var SympyEditor = (function () {
             editor._syncAddons(editor.state);
           }, function () {});
         })
+        // Once more against the running Python's own catalogue: the first
+        // pass saw the page's, which lacks what only the app carries.
+        .then(function () { return editor._enforceAddons(); })
         .then(function () { editorReady(editor); }, function () { editorReady(editor); });
     });
     return editor;

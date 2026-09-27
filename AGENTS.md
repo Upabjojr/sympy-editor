@@ -946,7 +946,14 @@ copies every folder of `addons/` (no tests) beside the app's Python,
 `sympy_editor_app.py` registers the directory at import, `build_www` builds
 the page from a `Document(available=[their modules])` with
 `rememberAddons` on (name `addons` in the keeper, `_restoreAddons` at
-mount), and the manifests' `requires` go to Chaquopy's `pip` list (a test
+mount).  With it the switches are the editor's, not a session's: the keeper
+holds `{"off": [names]}` - every add-on is on until switched off, one new in
+an update too - `_addonsSwitched` records any `addons` message the editor
+sends, and `_enforceAddons` puts the switches on every document opened (the
+last session at start, `openSession`, and once more after the start-up
+catalogue refresh, which brings in what only the app's Python carries); an
+older kept list of those *on* is read as nothing kept.  The manifests'
+`requires` go to Chaquopy's `pip` list (a test
 checks) and iOS's `app_packages`.  Adding an add-on from a repository later
 = cloning it into that directory; keep the folder format and the scan
 stable for that.

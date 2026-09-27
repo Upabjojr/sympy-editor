@@ -4846,31 +4846,62 @@ def _wait_for(check, timeout=5.0):
 
 
 def test_remembered_addons_come_back_after_a_reload(browser, tmp_path):
-    """With rememberAddons, which add-ons are on is kept - and kept where the
-    page is being run from: the server's own store here, as it would be the
-    app's own storage on a phone, and the browser's only on a page that is
-    nothing but itself."""
+    """With rememberAddons, every add-on is on until switched off, and what
+    is switched off is kept - kept where the page is being run from: the
+    server's own store here, as it would be the app's own storage on a phone,
+    and the browser's only on a page that is nothing but itself."""
     addon, Boxed = _demo_addon()
     doc = Document(x + y, available=[addon])
     srv = EditorServer(doc, port=0, options={"rememberAddons": True}, store=tmp_path)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
         page = _open(browser, srv.url)
-        assert page.locator(".se-addon-demo").count() == 0
-        page.locator('.se-toolbar [data-cmd="drawer"]').click()
-        page.locator(".se-drawer-addons input").check()
-        page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)
-        assert _wait_for(lambda: (tmp_path / "addons.json").is_file())
-        assert json.loads((tmp_path / "addons.json").read_text(encoding="utf-8")) == ["demo"]
-        assert page.evaluate("localStorage.getItem('sympy-editor:addons')") is None
-        doc.disable("demo")                                     # the server forgets (an app restarted)
-        page.goto(srv.url)
-        page.wait_for_selector(".se-addon-demo .demo-panel", timeout=15000)     # switched on again from the storage
+        page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)      # nothing kept: on
         assert list(doc.addons) == ["demo"]
         page.locator('.se-toolbar [data-cmd="drawer"]').click()
         page.locator(".se-drawer-addons input").uncheck()
         page.wait_for_function("!document.querySelector('.se-addon-demo')", timeout=10000)
-        assert _wait_for(lambda: json.loads((tmp_path / "addons.json").read_text(encoding="utf-8")) == [])
+        assert _wait_for(lambda: (tmp_path / "addons.json").is_file()
+                         and json.loads((tmp_path / "addons.json").read_text(encoding="utf-8")) == {"off": ["demo"]})
+        assert page.evaluate("localStorage.getItem('sympy-editor:addons')") is None
+        doc.enable("demo")                                      # the server's document has it on (an app restarted)
+        page.goto(srv.url)
+        page.wait_for_function("document.querySelector('.sympy-editor').__sympyEditor.state.addons.length === 0", timeout=15000)
+        assert list(doc.addons) == []                           # switched off again from the storage
+        assert page.locator(".se-addon-demo").count() == 0
+        page.locator('.se-toolbar [data-cmd="drawer"]').click()
+        page.locator(".se-drawer-addons input").check()
+        page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)
+        assert _wait_for(lambda: json.loads((tmp_path / "addons.json").read_text(encoding="utf-8")) == {"off": []})
+        assert page.errors == []
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_addons_are_switched_for_the_editor_not_per_session(browser, tmp_path):
+    """A session opened with other add-ons on - made elsewhere, or by a page
+    of another choice - gets the editor's: the switch holds across sessions."""
+    addon, Boxed = _demo_addon()
+    doc = Document(x + y, available=[addon])
+    srv = EditorServer(doc, port=0, options={"rememberAddons": True, "sessions": True}, store=tmp_path)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    ed = "document.querySelector('.sympy-editor').__sympyEditor"
+    try:
+        page = _open(browser, srv.url)
+        page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)
+        page.evaluate(f"{ed}.send({{action: 'addons', disable: ['demo']}})")     # switched off, while in one session
+        page.wait_for_function("!document.querySelector('.se-addon-demo')", timeout=10000)
+        first = page.evaluate(f"{ed}._sessionStore.current")
+        page.evaluate(f"{ed}.newSession()")
+        page.wait_for_function(f"{ed}._sessionStore.list.length === 2 && {ed}._sessionStore.current !== {json.dumps(first)}", timeout=10000)
+        page.wait_for_function(f"!{ed}.busy")
+        assert list(srv.document.addons) == [] and page.locator(".se-addon-demo").count() == 0     # off in the new one too
+        srv.document.enable("demo")        # the Python behind it has it on: the next session's document starts with it
+        assert page.evaluate(f"{ed}.openSession({json.dumps(first)})")
+        page.wait_for_function(f"!{ed}.busy")
+        assert list(srv.document.addons) == []                   # opening a session puts the editor's switches back
+        assert page.locator(".se-addon-demo").count() == 0
         assert page.errors == []
     finally:
         srv.shutdown()

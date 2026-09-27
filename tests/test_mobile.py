@@ -823,7 +823,7 @@ def test_the_native_bundle_names_the_addons_and_remembers_the_switches(tmp_path)
     assert all(m in page for m in ("sympy_editor_console", "sympy_editor_latex", "sympy_editor_matching", "sympy_editor_plot",
                                    "sympy_editor_tree"))
     assert "sympy_editor_addon_template" not in page                        # the template is not shipped
-    assert '"rememberAddons": true' in page and '"addons": []' in page             # off at start, a click away
+    assert '"rememberAddons": true' in page and '"addons": []' in page             # built with none: switched on at start
 
 
 def test_the_android_app_installs_what_the_addons_require():
