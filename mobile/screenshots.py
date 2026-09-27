@@ -4,6 +4,7 @@
     python mobile/screenshots.py            # -> mobile/ios/build/screenshots/{iphone,ipad}/{raw,framed}/*.png
     python mobile/screenshots.py --set examples   # ... /{iphone,ipad}/examples/{raw,framed}: the app's own examples
     python mobile/screenshots.py --set addons     # ... /{iphone,ipad}/addons/{raw,framed}: the plot, the tree, LaTeX, the rules
+    python mobile/screenshots.py --set console    # ... /{iphone,ipad}/console/{raw,framed}: the Python console
 
 The page is the bundle the apps show (``build_www.build`` with the native
 backend) opened in Playwright's WebKit - the engine of the iOS WebView -
@@ -30,7 +31,7 @@ sys.path[:0] = [str(HERE.parent / "src"), str(HERE / "app"), str(HERE)]
 import build_www  # noqa: E402
 import sympy_editor_app as app  # noqa: E402
 from sympy_editor.examples import EXAMPLES  # noqa: E402
-from sympy import (Derivative, Eq, Function, I, Integral, Limit, Matrix, Sum, cos, erf, exp, log,  # noqa: E402
+from sympy import (Derivative, Eq, Function, I, Integral, Limit, Matrix, Sum, cos, erf, exp, factorial, log,  # noqa: E402
                    oo, pi, sin, sqrt, symbols)
 
 #: points, scale, and how much larger than on the phone a formula may be
@@ -77,7 +78,9 @@ class Screen:
         ctx.add_init_script(BRIDGE)
         self.page = ctx.new_page()
         self.page.on("pageerror", lambda e: print("page error:", e))
-        self.page.goto(f"http://127.0.0.1:{self.srv.server_address[1]}/index.html")
+        # not "load": a slow Plotly makes that miss the timeout now and then, and the editor's own sign follows
+        self.page.goto(f"http://127.0.0.1:{self.srv.server_address[1]}/index.html", wait_until="domcontentloaded",
+                       timeout=120000)
         self.page.wait_for_selector(".sympy-editor .katex", timeout=60000)
         assert self.ev("!!window.SympyEditorPy && !window.pyodide && !window.loadPyodide"), "the page is not on the native backend"
         self.page.wait_for_timeout(600)
@@ -451,6 +454,109 @@ def take_addons(work: Path, out: Path, device: str) -> None:
                 s.close()
 
 
+#: The Python console, many scenes to choose from: (file name, caption, the
+#: formula, what the scene does).  ``inputs`` are run one after another as
+#: typed at the prompt; ``typing`` is left in the field (the completion menu),
+#: ``script`` is run from the Script tab, ``use`` taps the last output's Use.
+CONSOLE_SCENES = [
+    ("01-console-integral", "A Python console, SymPy imported", Integral(exp(-u**2), (u, -oo, oo)),
+     dict(inputs=["integrate(exp(-u**2), (u, -oo, oo))", "summation(1/n**2, (n, 1, oo))"])),
+    ("02-console-formula", "The formula is editor.expr", Integral(exp(-u**2), (u, -oo, oo)),
+     dict(inputs=["f = editor.expr", "f.doit()", "f.function.diff(u)"])),
+    ("03-console-assign", "Assign it, and the formula changes", sin(u)**2,
+     dict(inputs=["editor.expr = sin(u)**2 + cos(u)**2", "simplify(editor.expr)"])),
+    ("04-console-series", "Series, limits, sums", sin(u) / u,
+     dict(inputs=["series(sin(u)/u, u, 0, 8)", "limit(sin(u)/u, u, 0)"])),
+    ("05-console-solve", "Solve equations", Eq(u**2 - 2 * u, 3),
+     dict(inputs=["solve(editor.expr, u)", "solve([u + y - 3, u - y - 1], [u, y])"])),
+    ("06-console-matrix", "Matrices and eigenvalues", Matrix([[a, b], [c, d]]),
+     dict(inputs=["M = Matrix([[2, 1], [1, 2]])", "M.eigenvals()", "M.inv()"])),
+    ("07-console-dsolve", "Differential equations", Eq(Derivative(Function("g")(u), u, 2) + Function("g")(u), 0),
+     dict(inputs=["g = Function('g')", "dsolve(editor.expr, g(u))"])),
+    ("08-console-use", "Use puts a result in the formula", u,
+     dict(inputs=["factor(u**4 - 1)"], use=True)),
+    ("09-console-print", "Loops, print, all of Python", factorial(n),
+     dict(inputs=["for j in range(1, 7):\n    print(j, factorial(j), prime(j))"])),
+    ("10-console-display", "display() draws any formula", Sum(1 / n**2, (n, 1, oo)),
+     dict(inputs=["display(Eq(Sum(1/n**2, (n, 1, oo)), pi**2/6))", "display(Integral(sqrt(1 - u**2), (u, -1, 1)).doit())"])),
+    ("11-console-complete", "Completion after a dot", u**4 - 1,
+     dict(inputs=["f = editor.expr"], typing="f.ex")),
+    ("12-console-names", "And for names as you type", Integral(u * exp(u), u),
+     dict(inputs=[], typing="integ")),
+    ("13-console-error", "Errors, as Python reports them", 1 / u,
+     dict(inputs=["1/0"])),
+    ("14-console-script", "Or write a whole script", sin(u)**2 + cos(u)**2,
+     dict(script="\n".join([
+         "# editor is the formula on screen",
+         "f = editor.expr",
+         "print(\"The formula:\", f)",
+         "print(\"Simplified:\", simplify(f))",
+         "",
+         "for k in range(1, 5):",
+         "    print(k, expand((1 + u)**k))",
+         "",
+         "editor.expr = simplify(f)",
+     ]))),
+]
+CONSOLE_SHOTS = [(name, caption) for name, caption, _expr, _how in CONSOLE_SCENES]
+
+
+def _console(s: "Screen", inputs=(), typing=None, script=None, use=False) -> None:
+    s.addon("console", ".se-addon-console .pc-input")
+    s.page.evaluate("document.querySelectorAll('details.se-addon').forEach(d => d.open = d.classList.contains('se-addon-console'))")
+    s.fit(1.6)
+    s.page.fill(".pc-input", "u, y, n = symbols('u y n')")
+    s.page.click(".pc-console .pc-run")
+    s.page.wait_for_function("document.querySelectorAll('.pc-entry').length >= 1", timeout=30000)
+    s.page.click(".pc-tabs .pc-btn")                       # Clear: the transcript starts with the scene
+    s.page.wait_for_timeout(300)
+    for code in inputs:
+        before = s.page.locator(".pc-entry").count()
+        s.page.fill(".pc-input", code)
+        s.page.click(".pc-console .pc-run")
+        if "\n" in code:                                   # a block waits for an empty line
+            s.page.wait_for_timeout(500)
+            s.page.click(".pc-console .pc-run")
+        s.page.wait_for_function(f"document.querySelectorAll('.pc-entry').length > {before}", timeout=60000)
+        s.page.wait_for_timeout(700)
+    if use:
+        s.page.locator(".pc-use").last.click()
+        s.page.wait_for_function(f"!{ED}.busy")
+        s.page.wait_for_timeout(1200)
+        s.fit(1.6)
+    if script is not None:
+        s.page.click('.pc-tab[data-mode="script"]')
+        s.page.fill(".pc-script", script)
+        s.page.click(".pc-scripting .pc-run")
+        s.page.wait_for_selector(".pc-script-out .pc-note", timeout=60000)
+        s.page.wait_for_timeout(1200)
+        s.fit(1.6)
+    if typing is not None:
+        s.page.click(".pc-input")
+        s.page.locator(".pc-input").press_sequentially(typing, delay=120)
+        s.page.wait_for_selector(".pc-complete:not([hidden]) .pc-comp-item", timeout=30000)
+        s.page.wait_for_timeout(600)
+    if typing is None:                                     # no keyboard focus ring in the picture
+        s.page.evaluate("document.activeElement && document.activeElement.blur()")
+    s.reveal(".pc-complete:not([hidden])" if typing is not None else
+             ".pc-script-out" if script is not None else ".pc-input-row")
+
+
+def take_console(work: Path, out: Path, device: str) -> None:
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as pw:
+        for name, _caption, expr, how in CONSOLE_SCENES:
+            s = Screen(pw, expr, work, out, device)
+            try:
+                _console(s, **how)
+                s.shot(name)
+            except Exception as exc:      # one scene that fails is one picture fewer, not none
+                print(f"   {name}: not taken ({type(exc).__name__}: {str(exc).splitlines()[0]})")
+            finally:
+                s.close()
+
+
 def frame(raw: Path, caption: str, out: Path, device: str) -> None:
     """The screen under its caption, on a green ground, in the store's size."""
     from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -503,12 +609,12 @@ def main(argv=None) -> int:
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--device", choices=sorted(DEVICES), action="append", help="one of them only (default: all)")
-    ap.add_argument("--set", choices=("story", "examples", "addons"), default="story",
+    ap.add_argument("--set", choices=("story", "examples", "addons", "console"), default="story",
                     help="story: famous equations worked (default); examples: the app's own examples, under examples/; "
-                         "addons: the add-ons it ships, under addons/")
+                         "addons: the add-ons it ships, under addons/; console: the Python console, under console/")
     args = ap.parse_args(argv)
     shots, taker = {"story": (SHOTS, take), "examples": (EXAMPLE_SHOTS, take_examples),
-                    "addons": (ADDON_SHOTS, take_addons)}[args.set]
+                    "addons": (ADDON_SHOTS, take_addons), "console": (CONSOLE_SHOTS, take_console)}[args.set]
     out = HERE / "ios" / "build" / "screenshots"
     for device in args.device or sorted(DEVICES):
         base = out / device / ("" if args.set == "story" else args.set)
