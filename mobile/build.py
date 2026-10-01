@@ -67,6 +67,8 @@ ONNXRUNTIME_FORBIDDEN_TEXT = ("events.data.microsoft.com", "OneCollector", "Appl
 #: project that packages the interpreter above).
 IOS_NUMPY = "2.5.2.post1"
 IOS_WHEELS = "https://pypi.anaconda.org/beeware/simple"
+#: Files of a wheel that never go into the app (see ios_ink).
+IOS_WHEEL_JUNK = (".a", ".o", ".lib", ".h", ".c", ".pxd", ".pyx", ".pyi")
 
 #: Where the downloads live, as in build_www.py.
 CACHE = Path.home() / ".cache" / "sympy-editor"
@@ -487,11 +489,27 @@ def ios_ink(simulator: bool) -> Path:
     if not stage_ink(dest, wanted=True):
         return dest
     arch, sdk = (simulator_arch(), "iphonesimulator") if simulator else ("arm64", "iphoneos")
-    run([sys.executable, "-m", "pip", "install", "--quiet", "--target", str(dest), "--no-compile", "--no-deps",
-         "--only-binary=:all:", "--implementation", "cp", "--python-version", PYTHON_APPLE_SUPPORT.split("-")[0],
-         "--platform", f"ios_13_0_{arch}_{sdk}", "--index-url", IOS_WHEELS, f"numpy=={IOS_NUMPY}"])
+    # The wheel is fetched once into the cache and installed from there: the
+    # index is a small server, and a build must not wait on it every time.
+    wheels = CACHE / "ios-wheels" / f"{arch}_{sdk}"
+    target = ["--no-deps", "--only-binary=:all:", "--implementation", "cp",
+              "--python-version", PYTHON_APPLE_SUPPORT.split("-")[0], "--platform", f"ios_13_0_{arch}_{sdk}"]
+    if not list(wheels.glob(f"numpy-{IOS_NUMPY}-*.whl")):
+        run([sys.executable, "-m", "pip", "download", "--quiet", "--dest", str(wheels), *target,
+             "--index-url", IOS_WHEELS, f"numpy=={IOS_NUMPY}"])
+    run([sys.executable, "-m", "pip", "install", "--quiet", "--target", str(dest), "--no-compile", *target,
+         "--no-index", "--find-links", str(wheels), f"numpy=={IOS_NUMPY}"])
     for junk in [d for d in sorted(dest.rglob("*")) if d.is_dir() and d.name in ("tests", "__pycache__")] + [dest / "bin"]:
         shutil.rmtree(junk, ignore_errors=True)
+    # What a wheel carries for building against it - static libraries, headers,
+    # Cython declarations - is no use in an app, and the store refuses a
+    # bundle with a standalone library in it (numpy/random/lib/libnpyrandom.a).
+    for extra in sorted(dest.rglob("*")):
+        if extra.is_file() and extra.suffix in IOS_WHEEL_JUNK:
+            extra.unlink()
+    for folder in sorted((d for d in dest.rglob("*") if d.is_dir()), reverse=True):
+        if not any(folder.iterdir()):
+            folder.rmdir()
     licence = CACHE / "onnxruntime" / ONNXRUNTIME_IOS / "LICENSE"
     if licence.is_file():                       # MIT: the notice travels with the library
         shutil.copyfile(licence, dest / "onnxruntime-LICENSE.txt")
