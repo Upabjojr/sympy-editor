@@ -188,9 +188,9 @@ def test_the_player_plays_a_script_on_a_real_editor():
     script = {"speed": 4, "steps": [
         {"at": 0, "caption": "A formula you can click"},
         {"after": 0.4, "click": {"path": "/1/d"}, "say": "Click a piece to select it"},
-        {"after": 0.4, "click": '.se-toolbar [data-cmd="parent"]', "say": "Up to what holds it"},
+        {"after": 0.4, "click": '.se-keyrow [data-cmd="parent"]', "say": "Up to what holds it"},
         {"after": 0.4, "click": {"path": "/"}, "say": "The whole formula"},
-        {"after": 0.4, "click": '.se-actions [data-cmd="edit"]', "say": "Edit it where it is"},
+        {"after": 0.4, "click": '.se-toolbar [data-cmd="edit"]', "say": "Edit it where it is"},
         {"after": 0.4, "type": {"target": "focused", "text": "(x + 1)**2", "enter": True}},
         {"after": 0.4, "apply": "expand", "say": "Transform it"},
         {"after": 0.4, "undo": True},
@@ -393,3 +393,14 @@ def test_a_link_or_a_scroll_past_stops_the_tour_and_the_play_button_plays_it_aga
     assert scrolled["end"] == {"errors": [], "stopped": True} and scrolled["layers"] == 0 and scrolled["play"]
     assert scrolled["y"] > 3000                                       # and nothing pulled the page back up
     assert doc.expr == x**2 / y - sin(x)                              # no step after a stop ran
+
+
+def test_the_players_options_cannot_close_its_script():
+    """The options went through json.dumps: a button id holding </script>
+    ended the script there, and the rest of it was the page's."""
+    script = {"title": "T", "steps": [{"caption": "hello"}]}
+    evil = "</script><script>alert(1)</script>"
+    page = to_tutorial_html(script, expr="x", play_button=evil, element_id='e"x')
+    assert "<script>alert(1)" not in page and "\\u003c/script>\\u003cscript>alert(1)" in page
+    assert 'getElementById("e\\"x")' in page and 'id="e&quot;x"' in page
+    assert "<title>7</title>" in to_tutorial_html({"title": 7, "steps": [{"caption": "hello"}]}, expr="x")

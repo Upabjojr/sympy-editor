@@ -42,7 +42,6 @@ import platform
 import shutil
 import subprocess
 import sys
-import tarfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -59,17 +58,10 @@ def python_framework() -> Path:
     root = mobile.CACHE / "python-apple-support" / f"{mobile.PYTHON_APPLE_SUPPORT}-macOS"
     framework = root / "Python.xcframework"
     if not framework.is_dir():
-        archive = mobile.download(
+        mobile.unpack(mobile.download(
             f"https://github.com/beeware/Python-Apple-support/releases/download/"
             f"{mobile.PYTHON_APPLE_SUPPORT}/Python-{version}-macOS-support.{build}.tar.gz",
-            mobile.CACHE / "python-apple-support" / f"Python-{version}-macOS-support.{build}.tar.gz")
-        print(f"+ unpacking {archive.name}", flush=True)
-        root.mkdir(parents=True, exist_ok=True)
-        with tarfile.open(archive) as tar:
-            try:
-                tar.extractall(root, filter="tar")
-            except TypeError:                     # no extraction filter before 3.12
-                tar.extractall(root)
+            mobile.CACHE / "python-apple-support" / f"Python-{version}-macOS-support.{build}.tar.gz"), root)
     link = MACOS / "Python.xcframework"
     if link.is_symlink() or link.exists():
         link.unlink() if link.is_symlink() else shutil.rmtree(link)
@@ -157,10 +149,17 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--run", action="store_true", help="open the app once it is built")
     ap.add_argument("--zip", action="store_true", dest="zip_it", help="also write SymPyEditor.zip beside it")
-    ap.add_argument("--cdn", action="store_true", help="bundle without vendored assets (needs network at run time)")
+    ap.add_argument("--cdn", action="store_true",
+                    help="refused: the app never uses the network (WebKit blocks every http(s) load in it); "
+                         "mobile/build_www.py --cdn makes a CDN page for a browser")
     ap.add_argument("--app-store", action="store_true", dest="app_store",
                     help="a sandboxed .pkg for App Store Connect (TestFlight for Mac); see the docstring for what it needs")
     args = ap.parse_args(argv)
+    if args.cdn:
+        # Before anything is built: the bundle is mobile/www, which the next
+        # iOS build shares, and a page loading KaTeX from a CDN is a blank
+        # window in an app whose web view may not reach one.
+        sys.exit(mobile.NO_CDN)
     made = macos_build(args.cdn, args.run, args.zip_it, args.app_store)
     print("\nBuilt:" if made else "\nNo artifacts found.")
     for p in made:

@@ -12,10 +12,12 @@ used.  Nothing here changes the expression: every method is a query.
 from __future__ import annotations
 
 import math
+import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-from sympy import Basic, Expr, Symbol, lambdify
+from sympy import Basic, Expr, Symbol, lambdify, preorder_traversal
+from sympy.core.function import AppliedUndef
 from sympy.core.relational import Relational
 
 from sympy_editor.addons import Addon
@@ -49,7 +51,41 @@ def _span(span):
         raise ValueError(f"The span must be two numbers, not {span!r}") from None
     if not (math.isfinite(a) and math.isfinite(b)) or a == b:
         raise ValueError(f"The span must be two different finite numbers, not {span!r}")
+    if not math.isfinite(b - a):
+        # -1e308 to 1e308: the width is no number, and neither were the points
+        raise ValueError(f"The span is too wide to sample: {span!r}")
     return (a, b) if a < b else (b, a)
+
+
+_PLAIN_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+
+
+def numeric_form(expr: Expr, var: Symbol) -> Tuple[Expr, Symbol]:
+    """``expr`` and ``var`` with every name replaced by one made here.
+
+    ``lambdify`` writes Python and runs it, and the names in the expression
+    go into that text as they are: those of undefined functions and of
+    bound symbols (the index of a sum).  A name is any string - a formula
+    opened from a file may hold ``Function("(lambda: ...)()")`` - so none
+    reaches the text: an undefined function has no value and is refused,
+    every symbol, bound ones included, is replaced by ``v0``, ``v1``..., and
+    anything else carrying a name that is not a plain one is refused."""
+    if expr.atoms(AppliedUndef):
+        raise ValueError("an undefined function has no values")
+    renamed = {}
+    for i, sym in enumerate(sorted(expr.atoms(Symbol) | {var}, key=lambda s: (str(s), s.class_key(), id(s)))):
+        try:
+            renamed[sym] = Symbol(f"v{i}", **getattr(sym, "_assumptions_orig", sym.assumptions0))
+        except Exception:
+            renamed[sym] = Symbol(f"v{i}")
+    out = expr.xreplace(renamed)
+    for node in preorder_traversal(out):
+        name = getattr(node, "name", None)
+        if isinstance(name, str) and not _PLAIN_NAME.match(name):
+            raise ValueError(f"{type(node).__name__} {name!r} has no values")
+        if isinstance(node, Basic) and not _PLAIN_NAME.match(type(node).__name__):
+            raise ValueError(f"{type(node).__name__!r} has no values")
+    return out, renamed[var]
 
 #: Plotly.js (MIT), pinned; override with ``PlotAddon(plotly_js=...)``.  An
 #: offline bundle (mobile/build_www.py) vendors it and its page loads the
@@ -79,6 +115,7 @@ def sample(expr: Expr, var: Symbol, span=(-6.0, 6.0), n: int = 400) -> List[Opti
     a, b = _span(span)
     n = _count(n)
     xs = [a + (b - a) * i / (n - 1) for i in range(n)]
+    expr, var = numeric_form(expr, var)            # no name of the formula's is written into code
     try:
         import numpy as np
     except ImportError:
@@ -111,6 +148,29 @@ def sample(expr: Expr, var: Symbol, span=(-6.0, 6.0), n: int = 400) -> List[Opti
     return out
 
 
+def _value(doc, name, value) -> Tuple[Basic, float]:
+    """The value given to the symbol ``name``: as SymPy has it (``pi/2``
+    stays exact on its way into the expression) and as a float.  It is read
+    as the document reads what is typed, and must be a real number: one
+    naming a symbol would leave a curve of gaps, and so would ``I`` or
+    ``oo``."""
+    text = str(value).strip()
+    try:
+        parsed = doc.parse(text)
+    except Exception:
+        raise ValueError(f"The value of {name} must be a number: {text or 'nothing'} cannot be read as one") from None
+    if getattr(parsed, "free_symbols", None):
+        names = ", ".join(sorted(str(s) for s in parsed.free_symbols))
+        raise ValueError(f"The value of {name} must be a number: {text} names {names}")
+    try:
+        number = float(parsed)
+    except Exception:                               # I, a list, a relation
+        number = math.nan
+    if not math.isfinite(number):
+        raise ValueError(f"The value of {name} must be a real number: {text} is not one")
+    return parsed, number
+
+
 class PlotAddon(Addon):
     name = "plot"
     label = "Plot"
@@ -136,25 +196,35 @@ class PlotAddon(Addon):
         # or not.  Values are matched by name (the sliders know names; the
         # expression may carry assumptions on its symbols).
         free = sorted(node.free_symbols, key=str)
+        if getattr(node, "is_Matrix", False):
+            # A + A*A.T of a matrix symbol A was sampled with A as the axis,
+            # a number in place of the matrix
+            raise ValueError(f"{node} is a matrix expression: it has no curve")
+        odd = [str(s) for s in free if not isinstance(s, Symbol)]
+        if odd:
+            raise ValueError(f"{node} depends on {', '.join(odd)}, which no number can stand for: it has no curve")
         by_name = {str(s): s for s in free}
+        if len(by_name) < len(free):
+            # x and an x that is real, say: two symbols, one name.  The panel
+            # knows names - one of the two went on the axis and the other
+            # was asked a value for, under a name no row could give it.
+            twice = sorted({str(s) for s in free if by_name[str(s)] != s})
+            raise ValueError(f"{node} has two different symbols called {', '.join(twice)} - the same name, other "
+                             "assumptions: the plot tells symbols apart by name, so one of them needs another name")
         var_name = payload.get("var")
         var = by_name.get(str(var_name)) if var_name else None
         if var is None:
             var = free[0] if free else Symbol("x")
-        values = {}
+        values, read = {}, {}
         for name, value in (payload.get("values") or {}).items():
             if str(name) in by_name and by_name[str(name)] != var:
-                # read as the document reads what is typed; a value must be a
-                # number - one naming a symbol would leave a curve of gaps
-                parsed = doc.parse(str(value))
-                if getattr(parsed, "free_symbols", None):
-                    names = ", ".join(sorted(str(s) for s in parsed.free_symbols))
-                    raise ValueError(f"The value of {name} must be a number: {value} names {names}")
-                values[by_name[str(name)]] = parsed
+                values[by_name[str(name)]], read[str(name)] = _value(doc, name, value)
         others = [str(s) for s in free if s != var and s not in values]
         span = _span(payload.get("span") or self.span)
         n = _count(payload.get("n") or self.samples)
-        answer: Dict[str, Any] = {"var": str(var), "free": [str(s) for s in free], "needs": others,
+        # "values": the number each value was read as (pi/2 is 1.57...), for
+        # the panel to put its slider there
+        answer: Dict[str, Any] = {"var": str(var), "free": [str(s) for s in free], "needs": others, "values": read,
                                   "span": [float(span[0]), float(span[1])], "src": str(node), "curves": []}
         if others:
             return answer                            # the panel says which values are missing

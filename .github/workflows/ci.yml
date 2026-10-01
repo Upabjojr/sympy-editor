@@ -4,6 +4,11 @@ on:
   push:
   pull_request:
 
+# The jobs read the repository and nothing else: no job publishes, tags or
+# comments, so the token they are handed can do none of it either.
+permissions:
+  contents: read
+
 jobs:
   tests:
     runs-on: ubuntu-latest
@@ -36,6 +41,10 @@ jobs:
   # Every test that drives a page, not only test_browser.py: the other
   # modules skip without Playwright, so the jobs above never run them.
   # No add-on is installed here, as after a plain `pip install sympy-editor`.
+  # The browser is what this job is for, so a test that would skip for want
+  # of it - no Chromium, the CDN out of reach for the one request made while
+  # the tests are collected - fails instead (tests/conftest.py): the job was
+  # green having run nothing.
   browser:
     runs-on: ubuntu-latest
     steps:
@@ -48,6 +57,7 @@ jobs:
       - run: pytest -q tests/
         env:
           SYMPY_EDITOR_SLOW_TESTS: "1"
+          SYMPY_EDITOR_REQUIRE_BROWSER: "1"
 
   # The add-ons' own suites (unit and Playwright), each add-on a folder of
   # addons/ that its tests put on the path.  The handwriting model lives in
@@ -61,7 +71,19 @@ jobs:
           python-version: "3.12"
       - run: pip install -e ".[jupyter,test]" playwright "lark>=1.1" "sympy-matching>=0.0.4" numpy onnxruntime
       - run: python -m playwright install --with-deps chromium
-      - run: pytest -q addons/
+      # As in the browser job, a browser test that skips must not pass for a
+      # run.  tests/conftest.py, which refuses such a skip, is not read for
+      # addons/: until the conftest at the root does the same, the skips are
+      # listed (-rs) and looked through here.
+      - shell: bash
+        env:
+          SYMPY_EDITOR_REQUIRE_BROWSER: "1"
+        run: |
+          pytest -q -rs addons/ | tee "$RUNNER_TEMP/addons.txt"
+          if grep -iE "^SKIPPED .*(playwright|chromium|CDN)" "$RUNNER_TEMP/addons.txt"; then
+            echo "::error::the add-ons' browser tests were skipped: no browser, or no CDN"
+            exit 1
+          fi
 
   package:
     runs-on: ubuntu-latest

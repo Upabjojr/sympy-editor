@@ -33,6 +33,11 @@ page asks for, and the history they make).
   formula and the expression is untouched. An edit that *reads* but that
   SymPy refuses to build is refused too — unless **allow invalid** is on, and
   then it is kept (§8).
+* **Only an expression is committed.** Text that reads as something else
+  (`[x, 1]`, `None`), or an operation or a call that answers with one, is
+  refused. A result that is text — a symbol's `.name`, `latex(...)` — is
+  refused too, never read back as input: in a file opened from elsewhere
+  that text could be anything.
 * **Where the text is parsed matters.** A string is parsed in the context of
   what it replaces: a new name typed into a matrix slot becomes a
   `MatrixSymbol` of that shape, not a plain `Symbol`.
@@ -85,10 +90,17 @@ editor, rather than being made an argument of whatever happens to be there:
 
 * an operator typed at the junction is used as written;
 * no operator means juxtaposition — a product with the neighbour the cursor
-  belongs to;
+  belongs to, which is the one it is drawn against: after the `+` of
+  `x + 1`, in front of the `1`, a typed `r` gives `x + r` (`x + r*1`), and
+  before the `+`, against the `x`, it gives `r*x + 1`;
 * `+` and `−` bind at the level of the sum: typed into a product they split
   it at the cursor, the halves as drawn (`x*z`, with `+y+` typed between,
-  gives `x + y + z`);
+  gives `x + y + z`), whichever side the cursor belongs to — `+y` multiplies
+  `y` onto the half after it (`x + y*z`), `y+` onto the half before
+  (`x*y + z`);
+* an operator typed alone — `≤`, `≥`, `≠` (`<=`, `>=`, `!=`) included — changes
+  the operator between the two arguments (§5); anything longer, such as `+-`,
+  is spliced as text;
 * `,` makes a new argument;
 * a SymPy object (from an add-on, say) goes in as it is.
 
@@ -113,7 +125,9 @@ the expression around it:
   `/` over the `+` gives `x²/x`, and a product splits between the factors
   drawn on either side;
 * deleting the operator leaves juxtaposition, a product;
-* asking for the operator that is already there changes nothing.
+* asking for the operator that is already there changes nothing;
+* with **unevaluated** on, nothing around the change is evaluated either:
+  `2*3*4` with `+` after the `2` gives `2 + 3*4`, not `14`.
 
 With the pen (the handwriting add-on), ink written over a selected operator
 is read as the operator that takes its place - never as a formula, and
@@ -131,7 +145,13 @@ there already are — nothing is added and nothing is lost. New entries are
 empty slots (`_1`, `_2`…), and the matrix keeps its class, dense or sparse.
 Deleting an entry of a sparse matrix empties the cell (`0`); an empty cell
 of a sparse matrix cannot be selected on its own yet (a click selects the
-matrix).
+matrix). Rows and columns are whole numbers, and a matrix has at most 10000
+entries.
+
+A matrix has nothing to **unwrap**: its arguments are its shape (and a
+matrix symbol's its name), which cannot stand in its place, so none is
+offered and Unwrap says to select an entry. **Move everything to the left**
+of a matrix equation compares with a zero matrix of its shape.
 
 ## 7. Names
 
@@ -142,7 +162,14 @@ the expression* at once, rebuilding the ancestors: a product of two names
 becomes a `MatMul` when both become matrices. The reverse can fail (a matrix
 back to a scalar under a transpose), and the error is reported as any other.
 A retype is a step: undo gives the name back what it meant.  A declaration is
-not a step, and holds in every step.
+not a step, and holds in every step. A name declared or retyped as an
+explicit `Matrix` is saved as its entries, and opens again as that name.
+
+A field shows Greek names as letters (`theta` as θ) and sends them back as
+SymPy's names, and only the names SymPy itself spells that way: `Lambda`,
+`varepsilon` and `infty` stay what they are (`Lambda(x, x**2)` used to come
+back as a function called `Lamda`), and a Greek name followed by `(` is a
+function name, left as typed.
 
 ## 8. Expressions SymPy refuses to build
 
@@ -154,6 +181,11 @@ drawn in red, printed as `Invalid(MatMul, A, B)` (which reads back), and its
 arguments are its children, so they can be edited like any others. Every
 rebuild tries the head again, so the node becomes the expression SymPy builds
 as soon as it builds one.
+
+With **allow invalid** off, only what the edit brings is refused: an invalid
+node already in the expression (from a file, or from before the switch was
+turned off) stays, the rest of the expression can be edited, and an edit
+inside that node must leave it valid.
 
 ## 9. What the add-ons put in
 

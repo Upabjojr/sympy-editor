@@ -130,19 +130,21 @@ SympyEditor.registerAddon("handwriting", (function () {
   function HELP(status) {
     return "<section><h3>Writing on the formula</h3><ul>"
       + "<li>" + toolIcon("pen", 16) + " <b>Write</b>, among the editor's tools, takes the pointer - its button pulses in one quiet colour for as long as it is on (and so does <i>the readings</i>, the button that takes you down to what was read), so writing mode is plain at a glance; with it off the editor is the editor it was - the formula is tapped, selected and edited in the usual way.</li>"
-      + "<li>The formula itself makes room: the area grows, and it opens a space where what is written will go - after the selection, at the cursor, or by the piece the ink is written against - drawn as a box in light dashes, which widens as you write. A box that opens past the edge of the screen is scrolled towards the middle (wider, when it is at the end of the formula), and a stroke that ends by the edge opens more space ahead and scrolls the box back into sight. Nothing is sent while it is open: it closes when the ink goes.</li>"
+      + "<li>The formula itself makes room: the area grows, and it opens a space where what is written will go - after the selection, at the cursor, or by the piece the ink is written against - drawn as a box in light dashes, which widens as you write. A box that opens past the edge of the screen is scrolled towards the middle (wider, when it is at the end of the formula), and a stroke that ends by the edge opens more space ahead and scrolls the box back into sight. Written freely, with nothing selected and no cursor, a stroke that ends by the right or the bottom edge is given space the same way: the area scrolls on, or grows taller, and the formula stays where it is. Nothing is sent while it is open: it closes when the ink goes.</li>"
       + "<li>A tap, with nothing written yet, still selects a piece or puts the cursor between two, the Pen on or off: choose where to write, then write there. (Once there is ink on the formula a tap is a dot.)</li>"
       + "<li>A moment after the pen lifts what is written is read, and the readings are offered under the formula, the best first. <b>Apply to the formula</b> puts the one picked in - nothing changes before that. Once one is in, picking another changes the formula to it instead (the one before is taken back, so they never pile up).</li>"
       + "<li>The choices come in the order one makes them: first the piece of the formula what is written goes with (writing freely, with nothing selected), then the reading, then the ways its LaTeX can be read - and then Apply.</li>"
       + "<li>Writing on a formula that fills the screen leaves the readings out of sight: a moment after the pen rests a button rises at the foot of the screen, and a press goes down to them. Writing again sends it away.</li>"
       + "<li>Written over a selected <b>operator</b> (the = of an equation, a +), the ink is read as the operator that takes its place \u2014 =, &lt;, &gt;, \u2264, \u2265, \u2260, +, \u2212, \u00b7, / \u2026 \u2014 with nothing to read it together with.</li>"
-      + "<li>Where it goes is what the editor says: over the selected sub-expression (or the selected range) - which is hidden, its place kept, while you write over it, and comes back only if the writing is discarded (the ink cleared and the pen put away) -, at the cursor, and - with neither - against the piece of the formula it is written by. That piece is outlined, and it is read <i>together with</i> the ink: a bar under it with ink under the bar is a fraction over it, a small letter at its top-right corner its exponent, a letter beside it a product. <b>Read with</b> offers the other pieces it might be, and <i>alone</i>: the reading by itself, after the formula.</li>"
-      + "<li>" + toolIcon("erase", 16) + " <b>Erase</b> takes away the strokes the pointer passes over (a pen turned round erases too); " + toolIcon("undo", 16) + " and " + toolIcon("redo", 16) + " take back the last stroke and write it again; " + toolIcon("clear", 16) + " <b>Clear ink</b> takes all of it. The editor's own Undo is for the formula, and takes back what a reading did.</li>"
-      + "<li>Two fingers on the formula zoom it while writing, as they do at any other time, and the ink is zoomed with it; so do the \u2212/100%/+ buttons and <kbd>Ctrl</kbd>+wheel.</li>"
+      + "<li>Where it goes is what the editor says: over the selected sub-expression (or the selected range) - which is hidden, its place kept, while you write over it, and comes back only if the writing is discarded (the pen put away) -, at the cursor, and - with neither - against the piece of the formula it is written by. That piece is outlined, and it is read <i>together with</i> the ink: a bar under it with ink under the bar is a fraction over it, a small letter at its top-right corner its exponent, a letter beside it a product. <b>Read with</b> offers the other pieces it might be, and <i>alone</i>: the reading by itself, after the formula.</li>"
+      + "<li>" + toolIcon("erase", 16) + " <b>Erase</b> takes away the strokes the pointer passes over (a pen turned round erases too); " + toolIcon("undo", 16) + " and " + toolIcon("redo", 16) + " take back the last stroke and write it again; " + toolIcon("clear", 16) + " <b>Clear ink</b> takes all of it, and so does putting the pen away: switching it off clears the ink that was not applied; with the last stroke gone, however it went, what was read of the ink goes with it. The editor's own Undo is for the formula, and takes back what a reading did.</li>"
+      + "<li>With a pen, the hand may rest on the screen: a touch while the pen is down, or a moment after it lifts, writes nothing, and the pen takes over from a hand that came down before it. A contact the system takes back (a gesture of its own) leaves nothing on the formula.</li>"
+      + "<li>Two fingers on the formula zoom it while writing, as they do at any other time, and the ink is zoomed with it - it stays by what it was written by; so do the \u2212/100%/+ buttons and <kbd>Ctrl</kbd>+wheel.</li>"
       + "<li>What the reading did is shown under the editor - the formula as it was and as it now is, what went marked red and what came marked green - to <b>Keep</b> (which takes you back up to the formula) or to <b>Undo the change</b>; the editor's own Undo takes it back too.</li>"
       + "<li>Under the readings: what SymPy gets of the one in the formula, with the ways to read each part of the LaTeX that can be read more than one way, typeset, to pick from and a switch for each constant name. <b>\u270e LaTeX</b> opens the reading's own LaTeX to correct where a glyph was read wrong: what is typed there is read and goes into the formula like any other reading, and stays among them to pick again.</li>"
       + "<li>The reading is done by math-ocr's stroke model. It reads one formula at a time, and mixes up look-alike glyphs most (<code>1</code> and <code>|</code>, <code>V</code> and <code>v</code>).</li>"
-      + "<li>Where this device has a reader of its own - the app's (Apple's Vision) or the browser's - it is offered beside the model, in the menu at the top of the strip. It reads <i>text</i>, a line at a time: it knows nothing of fractions, exponents or roots, and what it reads is taken as typed. It is there for a device that carries no model, and for a line of ordinary algebra; the model is what reads mathematics.</li>"
+      + "<li>Where this device has a reader of its own - the app's (Apple's Vision) or the browser's - it is offered beside the model, in the menu at the top of the strip. It reads <i>text</i>, a line at a time: it knows nothing of fractions, exponents or roots, and what it reads is taken as typed. It is there for a device that carries no model, and for a line of ordinary algebra; the model is what reads mathematics. The choice is the document's, kept with its session; where the one chosen cannot read - the device's reader, on a device that has none - the first that can is asked.</li>"
+      + "<li>Where nothing can read - no model beside this Python, or a page that runs its own Python, which carries none - the Pen is off and the strip under the formula says why.</li>"
       + "</ul></section>"
       + (status.notice ? '<section><h3>About the model</h3><p style="white-space: pre-wrap">' + plain(status.notice) + "</p></section>" : "");
   }
@@ -172,9 +174,19 @@ SympyEditor.registerAddon("handwriting", (function () {
       //: What can read strokes, as the add-on's Python lists them, and which
       //: of them is asked.  A "host" engine reads in the page (hostReader).
       var engines = (api.options && api.options.engines) || [];
-      var engine = (api.options && api.options.engine) || (engines[0] && engines[0].name) || "math-ocr";
       var host = hostReader();
       var canRead = false;
+      //: The engine the document asks for - its snapshot says which, the
+      //: choice being the document's own - and the one that reads, which is
+      //: another when that one cannot here (readerFor).
+      var saidWas = engineSaid(api.state && api.state());
+      var wanted = saidWas || (api.options && api.options.engine) || (engines[0] && engines[0].name) || "math-ocr";
+      var engine = wanted;
+
+      function engineSaid(snap) {
+        var mine = snap && snap.handwriting;
+        return (mine && typeof mine.engine === "string" && mine.engine) || null;
+      }
 
       function engineNamed(name) {
         for (var i = 0; i < engines.length; i++) if (engines[i].name === name) return engines[i];
@@ -196,8 +208,37 @@ SympyEditor.registerAddon("handwriting", (function () {
       function usableEngines() {
         return engines.filter(function (e) { return e.name === engine || engineState(e.name).ok; });
       }
+      /** The engine that reads when `name` is asked for: that one when it can
+       *  read here, else the first that can.  A document that had chosen the
+       *  device's own reader, opened on a device without one, had its Pen off
+       *  and its strip hidden - the menu to choose another with it.  With
+       *  none that can read, the one asked for: it says why. */
+      function readerFor(name) {
+        if (engineState(name).ok) return name;
+        for (var i = 0; i < engines.length; i++) if (engineState(engines[i].name).ok) return engines[i].name;
+        return name;
+      }
+      engine = readerFor(wanted);
+      var pickedHere = false;        // an engine was picked in this page: the choice to go by
+      /** What reads, as the Python behind this page says: the options came
+       *  from the Python that built the page, which a page that runs its own
+       *  (Pyodide) is not - that one had the model, this one has not. */
+      function learn(said) {
+        if (!said || !said.engines || !said.engines.length) return;
+        engines = said.engines;
+        if (said.status) status = said.status;
+        if (said.engine && !pickedHere) wanted = said.engine;
+        engine = readerFor(wanted);
+        guide = HELP(status);
+        if (made) made.help = guide;
+        renderEngines();
+        if (!canRead && pen) setPen(false);
+        if (!strokes.length && !readings.length) say(idle(), !canRead);
+        showPanel();
+      }
 
       var guide;                     // the add-on's own page of the help overlay, below
+      var made = null;               // what mount() answers with: the panel, as the editor holds it
 
       /* ---- the strip under the editor: the readings and what came of them ---- */
       var note = h("div", { class: "hw-note", "aria-live": "polite" });
@@ -261,7 +302,12 @@ SympyEditor.registerAddon("handwriting", (function () {
       var strokes = [], taken = [], current = null, currentId = null, t0 = 0, dpr = 1;
       var timer = null, seq = 0, katex = null;
       var touches = {}, blocked = false, pinch = null, down = null;
+      var currentType = "";   // what writes the stroke in progress: "pen", "touch", "mouse"
+      var penId = null;       // the pen that is down, and when one was last lifted: the hand that
+      var penLeft = -1e9;     // holds it rests on the screen around both
+      var PALM = 500;         // ms after the pen lifts in which a touch is still that hand
       var zoomWas = (editor && editor.zoom) || 1;
+      var stood = null;       // where the rendering stood when the ink was last laid out (origin)
       var readings = [], chosen = -1, picks = { choices: {}, constants: {} };
       var aim = null;         // where a reading goes: {kind, path, children, caret, node, options}
       var held = null;        // the ink whose reading is in the formula: {strokes, guess} - the
@@ -278,12 +324,21 @@ SympyEditor.registerAddon("handwriting", (function () {
       /* ---- the ink layer ---- */
       function layout() {
         if (!stage) return;
+        var at = origin();
         if (editor.zoom && editor.zoom !== zoomWas) {   // zoomed: the ink grows with the formula
+          // About the rendering's own corner, not the canvas's: the formula
+          // is centred and grows where it stands, and ink magnified about
+          // the canvas's corner left what it was written by - the line
+          // under the y of x + y was 500 px to its right at twice the size,
+          // and the piece to read it with guessed from there.
           var k = editor.zoom / zoomWas;
-          strokes.forEach(function (s) { s.forEach(function (p) { p[0] *= k; p[1] *= k; }); });
-          if (current) current.forEach(function (p) { p[0] *= k; p[1] *= k; });
+          if (at) place(k, stood || at, at);
           zoomWas = editor.zoom;
-          sizeRoom();                       // and the space it is written in grows too
+          stood = at;
+          sizeRoom();                       // and the space it is written in grows too -
+          var then = origin();              // which moves a centred formula again, the ink with it
+          if (at && then) place(1, at, then);
+          at = then;
         }
         var w = stage.clientWidth, ht = stage.clientHeight;
         dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -291,7 +346,38 @@ SympyEditor.registerAddon("handwriting", (function () {
         canvas.style.height = ht + "px";
         canvas.width = Math.max(1, Math.round(w * dpr));
         canvas.height = Math.max(1, Math.round(ht * dpr));
+        stood = at;
         redraw();
+      }
+      // Where the rendering stands - its top left corner, in the formula's
+      // own pixels: what the ink is kept by when the formula is zoomed.  Of
+      // what is drawn (KaTeX's first .base), not of the block that holds it:
+      // that one is as wide as the view, and stays where it is.
+      function origin() {
+        var el = view && (view.querySelector(".katex-html .base") || view.querySelector(".katex"));
+        if (!el) return null;
+        var c = canvas.getBoundingClientRect(), o = offset(), q = el.getBoundingClientRect();
+        if (!q.width && !q.height) return null;
+        return { x: q.left - c.left + o.x, y: q.top - c.top + o.y };
+      }
+      // All the ink - on the formula, taken back, being written, held for
+      // another reading - magnified k times about `from`, which is now at
+      // `to`.  Each stroke once: the ink held is the ink on the formula.
+      function place(k, from, to) {
+        if (k === 1 && from.x === to.x && from.y === to.y) return;
+        var done = [];
+        var put = function (s) {
+          if (done.indexOf(s) >= 0) return;
+          done.push(s);
+          s.forEach(function (p) {
+            p[0] = Math.round((to.x + (p[0] - from.x) * k) * 10) / 10;
+            p[1] = Math.round((to.y + (p[1] - from.y) * k) * 10) / 10;
+          });
+        };
+        strokes.forEach(put);
+        taken.forEach(put);
+        if (held) held.strokes.forEach(put);
+        if (current) put(current);
       }
       // The view scrolls under the ink: the strokes keep the formula's own pixels.
       function offset() { return { x: view ? view.scrollLeft : 0, y: view ? view.scrollTop : 0 }; }
@@ -611,8 +697,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       // on - or ink, or readings of it, are still waiting - it is hidden, its
       // place kept (visibility, so the formula does not move under the pen),
       // and the editor's outline of it with it.  It comes back only when the
-      // writing is discarded: the ink cleared with the pen down, or the pen
-      // put down with nothing written.  Once a reading is applied it is gone
+      // writing is discarded: the pen put down, which clears the ink (setPen).  Once a reading is applied it is gone
       // for good, replaced.
       var covered = [];
       function childPath(parent, i) { return (parent === "/" ? "" : parent) + "/" + i; }
@@ -718,12 +803,25 @@ SympyEditor.registerAddon("handwriting", (function () {
           if (room) {                                        // space to go on writing in (either margin grows rightwards)
             room.lead = Math.round(0.35 * (right - left));
             sizeRoom();
+          } else {
+            // Written freely, by no selection and no cursor, there is no
+            // room to grow: the view itself is given space past the ink.
+            leadTo(b.maxX + Math.round(0.35 * (right - left)), null);
           }
-          var r = roomRect(), far = r ? r.x + r.w - o.x + c.left : x1 + mx;
+          var r = roomRect(), far = r ? r.x + r.w - o.x + c.left : x1 + Math.round(0.35 * (right - left));
           dx = far + 8 - right;
           dx = Math.min(dx, x0 - left - 8);                   // never past the stroke just written
         } else if (x0 < left + mx) {
           dx = Math.max(x0 - mx - left, -view.scrollLeft);
+        }
+        // Down, likewise: a view that scrolls itself (full screen) is given
+        // space under the ink; one as tall as its formula grows instead -
+        // the page then scrolls to it.  With a room or without one.
+        var vb = view.getBoundingClientRect();
+        if (y1 > Math.min(bottom, vb.bottom) - my) {
+          var more = Math.round(0.35 * Math.max(bottom - top, 120));
+          if (view.scrollHeight > view.clientHeight + 1 || getComputedStyle(view).overflowY === "auto") leadTo(null, b.maxY + more);
+          else growView(y1 - vb.top + more);
         }
         var rr = roomRect();
         var rTop = rr ? rr.y - o.y + c.top : y0, rBottom = rr ? rr.y + rr.h - o.y + c.top : y1;
@@ -732,7 +830,42 @@ SympyEditor.registerAddon("handwriting", (function () {
         scrollByPx(dx, dy);
       }
 
+      /* Space past the ink for writing that has no room of its own (nothing
+       * selected, no cursor): an empty mark placed in the view beyond the
+       * last stroke.  It is positioned, not laid out, so the formula does
+       * not move by a pixel - the view only has further to scroll, sideways
+       * and (where it scrolls itself) down.  The ink's coordinates are the
+       * view's own, scroll included, which is where the mark goes. */
+      var leadEl = null, grown = false;
+      function leadTo(x, y) {
+        if (!view) return;
+        if (!leadEl || leadEl.parentNode !== view) {
+          leadEl = document.createElement("div");
+          leadEl.className = "hw-lead";
+          leadEl.setAttribute("aria-hidden", "true");
+          leadEl.style.cssText = "position:absolute;width:1px;height:1px;left:0;top:0;pointer-events:none;visibility:hidden";
+          view.appendChild(leadEl);
+        }
+        // the canvas lies over the stage, the view inside it: its own corner
+        var cr = canvas.getBoundingClientRect(), vr = view.getBoundingClientRect();
+        if (x !== null) leadEl.style.left = Math.round(Math.max(parseFloat(leadEl.style.left) || 0, x - (vr.left - cr.left) - view.clientLeft)) + "px";
+        if (y !== null) leadEl.style.top = Math.round(Math.max(parseFloat(leadEl.style.top) || 0, y - (vr.top - cr.top) - view.clientTop)) + "px";
+      }
+      /** A view as tall as its formula has nothing to scroll to: it grows. */
+      function growView(height) {
+        if (!view || height <= view.offsetHeight) return;
+        view.style.minHeight = Math.round(height) + "px";
+        grown = true;
+        layout();
+      }
+      function closeLead() {
+        if (leadEl && leadEl.parentNode) leadEl.parentNode.removeChild(leadEl);
+        leadEl = null;
+        if (grown && view) { view.style.minHeight = ""; grown = false; layout(); }
+      }
+
       function closeRoom() {
+        closeLead();
         if (!room) return;
         try { room.el.style[room.side === "right" ? "marginRight" : "marginLeft"] = ""; }
         catch (e) { /* the formula was rendered again: the style went with it */ }
@@ -773,6 +906,8 @@ SympyEditor.registerAddon("handwriting", (function () {
       /* ---- reading ---- */
       function clearReadings() {
         clearTimeout(timer);
+        seq++;                               // a reading still on its way is of ink that went
+        element.classList.remove("hw-busy");
         cands.textContent = "";
         withRow.textContent = "";
         withDivide.hidden = true;
@@ -807,10 +942,12 @@ SympyEditor.registerAddon("handwriting", (function () {
         updateTools();
       }
 
-      /** Ask another reader from now on. */
+      /** Ask another reader from now on: this document's choice, which
+       *  Python keeps with it. */
       function pickEngine(name) {
         if (!engineNamed(name) || name === engine) return;
-        engine = name;
+        wanted = engine = name;
+        pickedHere = true;
         renderEngines();
         var e = engineNamed(engine), state = engineState(engine);
         say(state.ok ? "Read from now on by " + (e.where === "host" && host ? host.label : e.label) +
@@ -820,9 +957,17 @@ SympyEditor.registerAddon("handwriting", (function () {
       }
 
       function idle() {
-        if (!canRead) return engineState(engine).why || status.reason;
+        if (!canRead) return cannot();
         return pen ? "Write on the formula \u2014 a tap still selects a piece, or puts the cursor between two."
                    : "Press Write in the tools, and write on the formula.";
+      }
+      /** Why nothing reads here, when nothing does: what the engine asked
+       *  says, and that the device has no reader of its own to ask instead. */
+      function cannot() {
+        var why = engineState(engine).why || status.reason || "Nothing reads handwriting here";
+        var other = engines.filter(function (e) { return e.where === "host" && e.name !== engine; })[0];
+        if (other && !host) why += " \u2014 and this device offers the page no reader of its own";
+        return why;
       }
       function say(text, bad) {
         note.textContent = text || "";
@@ -830,9 +975,11 @@ SympyEditor.registerAddon("handwriting", (function () {
         showPanel();
       }
       // Nothing written and nothing read: the editor is the editor it was, with
-      // nothing of this add-on under it.
+      // nothing of this add-on under it - unless nothing can read here (no
+      // model, a page that runs its own Python): then the strip is all there
+      // is to say so, the Pen being off, and it stays.
       function showPanel() {
-        element.hidden = !(pen || strokes.length || readings.length || applied);
+        element.hidden = !(pen || strokes.length || readings.length || applied || !canRead);
       }
       function typeset(el, tex, fallback) {
         el.textContent = "";
@@ -1243,6 +1390,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         button.disabled = !!off;
       }
 
+      var penTitle = null;
       function updateTools() {
         var p = toolButton("pen"), e = toolButton("erase"), c = toolButton("clear");
         var u = toolButton("undo"), r = toolButton("redo");
@@ -1254,6 +1402,8 @@ SympyEditor.registerAddon("handwriting", (function () {
         toolOff(e, !pen);
         toolOff(p, !canRead);
         if (p) {
+          if (penTitle === null) penTitle = p.getAttribute("title") || "";
+          p.setAttribute("title", canRead ? penTitle : cannot());      // a Pen that is off says why
           p.setAttribute("aria-pressed", pen ? "true" : "false");
           p.classList.toggle("hw-on", pen);
           p.classList.toggle("hw-pen-on", pen);        // the pulse: writing mode
@@ -1266,8 +1416,13 @@ SympyEditor.registerAddon("handwriting", (function () {
         element.setAttribute("data-strokes", String(strokes.length));
       }
       function setPen(on) {
+        var was = pen;
         pen = !!on && canRead;
-        if (!pen) setErasing(false);
+        if (!pen) { setErasing(false); current = null; currentId = null; penId = null; }
+        // The pen put away takes its ink with it: strokes left on the formula
+        // with nothing to write or erase them with were only in the way, and
+        // what was read of them and not applied goes too.
+        if (was && !pen) clearInk();
         if (editor && editor.root) editor.root.classList.toggle("se-inking", pen);
         canvas.style.pointerEvents = pen ? "auto" : "none";
         if (pen) { openRoom(); centerRoom(); } else closeRoom();
@@ -1308,11 +1463,24 @@ SympyEditor.registerAddon("handwriting", (function () {
             if (Math.abs(s[k][0] - p[0]) <= r && Math.abs(s[k][1] - p[1]) <= r) { strokes.splice(i, 1); gone = true; break; }
           }
         }
-        if (gone) { updateTools(); redraw(); }
+        if (!gone) return;
+        // What was read is of ink that is no more.  With some of it left the
+        // lift reads that; with none, it is as when the last stroke is taken
+        // back: the readings go, and Apply with them - they used to stay,
+        // and Apply put in the reading of ink that was not there.
+        clearTimeout(timer);
+        if (!strokes.length) { forget(); clearReadings(); hideDown(); }
+        sizeRoom();
+        updateTools();
+        redraw();
       }
       canvas.addEventListener("pointerdown", function (ev) {
         if (!pen || !canRead) return;
         if (ev.pointerType === "touch") {
+          // The hand that holds the pen rests on the screen as it writes: a
+          // touch while the pen is down, or a moment after it lifted, is
+          // that hand - not a finger writing, nor one of two zooming.
+          if (penId !== null || ev.timeStamp - penLeft < PALM) return;
           touches[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
           if (Object.keys(touches).length >= 2) {   // a second finger: a pinch, not a stroke
             current = null;
@@ -1324,11 +1492,24 @@ SympyEditor.registerAddon("handwriting", (function () {
           if (blocked) return;
         }
         if (ev.pointerType === "mouse" && ev.button !== 0) return;
+        if (currentId !== null && ev.pointerId !== currentId) {
+          // A stroke is being written, and this is another pointer: it
+          // waits.  It used to take the stroke's place - what had been
+          // written of it was lost, and the rest went unrecorded.  Only a
+          // pen takes over from a touch: the hand came down before it.
+          if (ev.pointerType !== "pen" || currentType !== "touch") return;
+          current = null;
+          touches = {};
+          pinch = null;
+          blocked = false;
+        }
         ev.preventDefault();
         clearTimeout(timer);
         hideDown();
         try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* not capturable */ }
         currentId = ev.pointerId;
+        currentType = ev.pointerType;
+        if (ev.pointerType === "pen") penId = ev.pointerId;
         if (erasing || (ev.pointerType === "pen" && (ev.buttons & 32))) { current = null; eraseAt(point(ev)); return; }
         down = { x: ev.clientX, y: ev.clientY, t: ev.timeStamp, type: ev.pointerType };
         if (!strokes.length) {
@@ -1374,14 +1555,35 @@ SympyEditor.registerAddon("handwriting", (function () {
         sizeRoom();
         redraw();
       });
-      function lift(ev) {
+      /** A contact is over, however it ended: whether it was the one writing. */
+      function release(ev) {
         if (touches[ev.pointerId]) {
           delete touches[ev.pointerId];
           if (Object.keys(touches).length < 2) pinch = null;
           if (!Object.keys(touches).length) blocked = false;
         }
-        if (ev.pointerId !== currentId) return;
+        if (ev.pointerId === penId) { penId = null; penLeft = ev.timeStamp; }
+        if (ev.pointerId !== currentId) return false;
         currentId = null;
+        return true;
+      }
+      /** A contact the system took back - a gesture of its own, a palm it
+       *  made out late - was never a stroke: nothing is kept of it and
+       *  nothing is tapped.  It used to end as a lift does, and stayed on
+       *  the formula as ink, or selected what was under it. */
+      function cancel(ev) {
+        if (!release(ev)) return;
+        current = null;
+        down = null;
+        sizeRoom();
+        updateTools();
+        redraw();
+        if (!strokes.length) return;
+        clearTimeout(timer);
+        timer = setTimeout(read, 700);       // the ink from before still waits to be read
+      }
+      function lift(ev) {
+        if (!release(ev)) return;
         // A tap on the formula, with nothing written yet, is the editor's own:
         // it selects a piece, or puts the cursor between two, and the room to
         // write in opens there.  Once there is ink, a tap is a dot.
@@ -1426,7 +1628,10 @@ SympyEditor.registerAddon("handwriting", (function () {
                                                    clientX: ev.clientX, clientY: ev.clientY, button: 0 }));
       }
       canvas.addEventListener("pointerup", lift);
-      canvas.addEventListener("pointercancel", lift);
+      canvas.addEventListener("pointercancel", cancel);
+      // The capture lost with the contact still writing: no lift will come,
+      // and nothing else could write until one did.
+      canvas.addEventListener("lostpointercapture", cancel);
       if (view) view.addEventListener("scroll", redraw);
       var resizer = window.ResizeObserver ? new ResizeObserver(function () { layout(); }) : null;
       if (resizer && stage) resizer.observe(stage); else window.addEventListener("resize", layout);
@@ -1436,9 +1641,10 @@ SympyEditor.registerAddon("handwriting", (function () {
       setTimeout(dressTools, 0);
       setTimeout(layout, 0);
       clearReadings();
+      api.call("engines", {}, { quiet: true }).then(learn, function () {});
 
       guide = HELP(status);
-      return {
+      made = {
         writing: function () { return pen; },
         erasing: function () { return erasing; },
         setPen: setPen,
@@ -1447,8 +1653,8 @@ SympyEditor.registerAddon("handwriting", (function () {
         undoStroke: undoStroke,
         redoStroke: redoStroke,
         help: guide,
-        /** The system's Back (Android): the pen goes down - the ink stays,
-         *  as when the Pen tool is pressed again. */
+        /** The system's Back (Android): the pen goes down and its ink with
+         *  it, as when the Pen tool is pressed again. */
         onBack: function () {
           if (!pen) return false;
           setPen(false);
@@ -1464,7 +1670,20 @@ SympyEditor.registerAddon("handwriting", (function () {
           syncCover();
         },
         onZoom: function () { layout(); },
-        onState: function () {
+        onState: function (snap) {
+          // The engine is the document's choice: another document (a
+          // session opened), or the same with another choice, says so.  Only
+          // when what it says changes: a choice just made here is ahead of
+          // the snapshots still on their way.
+          var said = engineSaid(snap);
+          if (said && said !== saidWas) {
+            saidWas = wanted = said;
+            if (readerFor(wanted) !== engine) {
+              engine = readerFor(wanted);
+              renderEngines();
+              if (!strokes.length && !readings.length) say(idle(), !canRead);
+            }
+          }
           dressTools();
           room = null;                       // rendered again: the margin went with the old nodes
           covered = [];                      // and what was hidden went with them
@@ -1490,6 +1709,7 @@ SympyEditor.registerAddon("handwriting", (function () {
           if (element.parentNode) element.parentNode.removeChild(element);
         }
       };
+      return made;
     }
   };
 })());

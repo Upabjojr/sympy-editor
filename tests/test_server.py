@@ -369,3 +369,95 @@ def test_an_interrupt_that_comes_late_does_not_kill_the_answer():
         assert srv.working is None
         assert _post(srv, {"action": "snapshot"})["src"] in ("x*y", "x + 1")
         assert not srv.interrupt()                                        # nothing running: nothing hit
+
+
+def test_a_host_header_is_read_whole():
+    """Read piece by piece, `[::1]evil.com` passed for `::1` and
+    `127.0.0.1%evil.com` for a loopback address with a zone: the page, token
+    included, went to whoever asked under such a name."""
+    srv = EditorServer(Document(x), port=0, store=False)
+    try:
+        for host in ("[::1]evil.com", "[::1].evil.com:80", "[::1", "127.0.0.1%evil.com", "[::1%evil.com]",
+                     "localhost.", "evil.com@localhost", "localhost:99999999", "", "localhost:"):
+            assert not srv.accepts_host(host), host
+        for host in ("127.0.0.1", "127.0.0.1:80", "LOCALHOST:8000", "[::1]", "[::1]:9", "127.0.0.2:1"):
+            assert srv.accepts_host(host), host
+    finally:
+        srv.server_close()
+
+
+def test_a_body_nested_past_reading_is_refused(server):
+    """A RecursionError is not a ValueError: the request got no answer at all."""
+    body = b"[" * 200000
+    assert _raw(server, {"Content-Length": str(len(body))}, body, timeout=10)[0] == 400
+    assert _post(server, {"action": "snapshot"})["src"] == "x + 1"
+
+
+def test_done_ends_the_server_when_the_page_is_already_gone():
+    """The shutdown was started after the answer had been written: a page
+    that closed with Done on its way made the write fail, and serve() waited
+    for ever.  And the listening socket closes with it - a server started
+    with block=False went on accepting connections it never answered."""
+    import socket
+    import struct
+    import time
+    srv = EditorServer(Document(x), port=0, store=False)
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    real = srv.RequestHandlerClass._reply
+
+    def gone(handler, status, content_type, body):
+        raise ConnectionResetError("the page has gone")
+
+    srv.RequestHandlerClass._reply = gone
+    try:
+        host, port = srv.server_address[:2]
+        body = json.dumps({"action": "close"}).encode()
+        sock = socket.create_connection((host, port), timeout=5)
+        sock.sendall(b"POST /api HTTP/1.1\r\nHost: 127.0.0.1\r\nX-SymPy-Editor-Token: " + srv.token.encode()
+                     + b"\r\nContent-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+        t.join(timeout=5)
+        sock.close()
+        assert srv.closing and not t.is_alive()
+        deadline = time.time() + 5
+        while srv.socket.fileno() != -1 and time.time() < deadline:
+            time.sleep(0.02)
+        assert srv.socket.fileno() == -1                # closed: a reload fails at once
+    finally:
+        srv.RequestHandlerClass._reply = real
+        srv.server_close()
+
+
+def test_an_interrupt_with_nothing_running_reaches_nobody():
+    """A thread named as running that had ended without clearing its name
+    was interrupted all the same - its ident may be another thread's by then."""
+    from sympy_editor.server import _Running
+    running = _Running()
+    done = threading.Thread(target=lambda: None)
+    done.start()
+    done.join()
+    running.ident = done.ident
+    assert running.interrupt() is False and running.ident is None
+    assert running.run(lambda: 7) == 7 and running.ident is None
+
+
+def test_the_store_answers_whatever_the_file_or_the_text_holds(tmp_path):
+    """A file that is not UTF-8, or a text with half a character in it (a
+    lone surrogate), raised from inside the store: the request got no answer
+    and the page waited."""
+    from sympy_editor.store import Store, default_store
+    store = Store(tmp_path)
+    store.file("sessions").write_bytes(b'{"list": "\xff\xfe"}')
+    got = store.answer({"action": "keep", "key": "sessions"})
+    assert "error" not in got and got["keep"].startswith('{"list": "')
+    assert store.answer({"action": "keep", "key": "k", "value": "a\ud800b"}) == {"keep": None}
+    assert store.answer({"action": "keep", "key": "k"})["keep"] == "a?b"
+    assert not list(tmp_path.glob("*.new"))
+    assert Store(True).folder == default_store()
+
+
+def test_a_relative_state_home_is_ignored(monkeypatch):
+    from sympy_editor.store import default_store
+    monkeypatch.setenv("XDG_STATE_HOME", "relative/dir")
+    assert default_store().is_absolute()

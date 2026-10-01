@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import threading
+from collections import deque
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Union
 
@@ -21,6 +22,13 @@ from .server import _Running, load_session
 from .store import Store, unused_path
 
 __all__ = ["SympyEditorWidget"]
+
+#: What the widget hands to the :class:`Document` it makes.  Every keyword
+#: of ``Document``: one left out went on to the widget's own constructor,
+#: which dropped it with no more than a deprecation warning - ``allow_invalid``
+#: did, and the document refused what it had been told to keep.
+DOCUMENT_KEYWORDS = ("printer_settings", "parser", "ops", "max_history", "symbols", "history", "index", "labels",
+                     "addons", "available", "addon_state", "allow_invalid", "format")
 
 #: Messages whose answer is for the view that asked and nobody else: nothing
 #: in the document changes (a preview, a list, the session to keep, a file).
@@ -77,8 +85,7 @@ class SympyEditorWidget(anywidget.AnyWidget):
         save_dir: Optional[Union[str, Path]] = None,
         **kwargs,
     ):
-        document_kwargs = {k: kwargs.pop(k) for k in ("printer_settings", "parser", "ops", "max_history", "symbols",
-                                                       "addons", "available", "addon_state") if k in kwargs}
+        document_kwargs = {k: kwargs.pop(k) for k in DOCUMENT_KEYWORDS if k in kwargs}
         if isinstance(expr, Document):
             if document_kwargs:   # same rule as to_html(): they would be silently ignored
                 raise TypeError("Document options cannot be combined with an existing Document")
@@ -97,6 +104,9 @@ class SympyEditorWidget(anywidget.AnyWidget):
         self.save_dir: Optional[Path] = Path(save_dir) if save_dir is not None else None
         self._lock = threading.Lock()          # one message at a time
         self._worker: Optional[threading.Thread] = None
+        self._queue: "deque[Dict[str, Any]]" = deque()     # messages waiting, in the order they came
+        self._queue_lock = threading.Lock()
+        self._draining = False
         #: The thread inside ``Document.handle`` right now - the one an
         #: interrupt is for (see ``_running``), set, cleared and interrupted
         #: under a lock of its own.
@@ -123,12 +133,32 @@ class SympyEditorWidget(anywidget.AnyWidget):
             # answer goes back as a message of its own, paired by its request
             # id, so the ``snapshot`` trait only ever holds a snapshot (it is
             # what a second display of this widget draws).
-            answer = self._keep(content) if content["action"] == "keep" else self._write_file(content)
+            try:
+                answer = self._keep(content) if content["action"] == "keep" else self._write_file(content)
+            except Exception as exc:            # an answer goes back whatever happened: the page waits for it
+                answer = {"error": f"{type(exc).__name__}: {exc}"}
             answer["_req"] = content.get("_req")
             self.send(answer)
             return
-        self._worker = threading.Thread(target=self._run, args=(content,), daemon=True)
-        self._worker.start()
+        # One thread takes the messages in the order they came.  With a thread
+        # each, they met at the lock, which is not a queue: of two edits sent
+        # one after the other the second could be applied first.
+        with self._queue_lock:
+            self._queue.append(content)
+            if self._worker is None or not self._draining:
+                self._draining = True
+                self._worker = threading.Thread(target=self._drain, daemon=True)
+                self._worker.start()
+
+    def _drain(self) -> None:
+        """Answer the waiting messages, oldest first, until there is none."""
+        while True:
+            with self._queue_lock:
+                if not self._queue:
+                    self._draining = False
+                    return
+                content = self._queue.popleft()
+            self._run(content)
 
     @property
     def _running(self) -> Optional[int]:
@@ -201,8 +231,8 @@ class SympyEditorWidget(anywidget.AnyWidget):
         try:
             path = unused_path(self.save_dir or Path.cwd(), str(content.get("name") or "formula" + SAVE_EXT))
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(str(content.get("text") or ""), encoding="utf-8")
-        except OSError as exc:
+            path.write_text(str(content.get("text") or ""), encoding="utf-8", errors="replace")
+        except (OSError, ValueError) as exc:
             return {"error": f"The file could not be written: {exc}"}
         return {"saved": str(path)}
 

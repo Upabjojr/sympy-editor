@@ -87,7 +87,10 @@ class LatexAddon(Addon):
         choices = payload.get("choices") or {}
         constants = payload.get("constants") or {}
         pieces = payload.get("pieces")
-        return self.reader.read(str(payload.get("latex", "")), choices=dict(choices) if isinstance(choices, dict) else {},
+        # the text as it came: a page that sends none, or a number, is told
+        # so (str() made "None" of a missing text, and read it as N*n*o*e)
+        latex = payload.get("latex")
+        return self.reader.read("" if latex is None else latex, choices=dict(choices) if isinstance(choices, dict) else {},
                                 constants=dict(constants) if isinstance(constants, dict) else {}, known=self._known(doc),
                                 pieces=dict(pieces) if isinstance(pieces, dict) else None)
 

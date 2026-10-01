@@ -95,3 +95,22 @@ def test_a_history_of_undefined_functions_and_odd_steps_still_renders():
     assert all(s["latex"] for s in pay["steps"])
     with pytest.raises(TypeError):
         to_history_html(h, title="T", actions=["a", "b", "c"])     # options for a ready History
+
+
+def test_a_documents_history_takes_the_keywords_the_page_documents():
+    """printer_settings= raised "multiple values", actions= "3 actions for 0
+    steps": to_history_html(doc, ...) documents both."""
+    from sympy_editor import Document, History, to_history_html
+    from sympy import symbols
+    x = symbols("x")
+    doc = Document(x)
+    doc.set("x + 1")
+    doc.set("x + 2")
+    page = to_history_html(doc, printer_settings={"mul_symbol": "dot"}, actions=["start", None, "the last"], index=1)
+    assert "the last" in page
+    h = History.from_document(doc, actions=["start"], index=0, printer_settings={"mul_symbol": "dot"})
+    assert h.actions[0] == "start" and h.actions[1:] == History.from_document(doc).actions[1:]
+    assert h.index == 0 and h.printer_settings == {"mul_symbol": "dot"}
+    assert History.from_document(doc).index == 2
+    with pytest.raises(ValueError, match="4 actions for 3 steps"):
+        History.from_document(doc, actions=["a", "b", "c", "d"])

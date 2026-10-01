@@ -59,22 +59,27 @@ def _begin(doc_id: str) -> None:
         _delivered = None
 
 
-def _end() -> None:
-    """The message is over: nothing may stop it any more, and an interrupt
-    delivered as it ended - still pending in this thread - is cancelled.
-    Retried if that very exception fires in here: it fires at most once per
-    delivery, and none comes once ``_running`` is cleared."""
+def _idle() -> None:
+    """This thread is starting something that is not a message - a document
+    made, or closed: whatever names it as running is left over from a message
+    that ended without saying so, and an interrupt still pending in it was
+    meant for that one.  Both are taken back before the work starts: Android's
+    Python thread lives as long as the app, and a name left behind there sent
+    the next Interrupt into the opening of a session, which the page then
+    listed as broken.  Its callers catch what fires as it is entered, which
+    no ``try`` of its own could: it is gone once raised, so once more is
+    enough."""
+    _forget(threading.get_ident())
+
+
+def _forget(ident: int) -> None:
     global _running, _delivered
-    while True:
-        try:
-            with _lock:
-                _running = None
-                if _delivered is not None:
-                    cancel_interrupt(_delivered)
-                    _delivered = None
-            return
-        except Interrupted:
-            continue
+    with _lock:
+        if _running is not None and _running[0] == ident:
+            _running = None
+        if _delivered == ident:
+            _delivered = None
+        cancel_interrupt(ident)
 
 
 def cancel_interrupt(ident: int) -> None:
@@ -89,6 +94,10 @@ def new_doc(doc_id: str, srepr: str, settings_json: str) -> str:
     its first snapshot as JSON.  ``settings_json`` holds the Document keyword
     arguments the page carries (printer settings, parser, declared symbols,
     and a session's history and index)."""
+    try:
+        _idle()
+    except Interrupted:            # it fired on the way in: nothing is pending now
+        _idle()
     settings: Dict[str, Any] = json.loads(settings_json or "{}")
     if BUNDLED_ADDONS:
         # The page names the add-ons it was built with; the folders the app
@@ -106,6 +115,7 @@ def handle(doc_id: str, message_json: str) -> str:
     (errors of the edit itself travel inside it, in ``error``).  An interrupt
     always ends in an answer - the document as it stands, with the reason -
     never in an exception the host would take for a failed call."""
+    global _running, _delivered
     doc = _documents.get(doc_id)
     if doc is None:
         raise KeyError(f"Unknown document {doc_id!r}: the page must call new_doc first")
@@ -115,7 +125,26 @@ def handle(doc_id: str, message_json: str) -> str:
             _begin(doc_id)
             answer = json.dumps(doc.handle(json.loads(message_json)))
         finally:
-            _end()
+            # The message is over: nothing may stop it any more, and an
+            # interrupt delivered as it ended - still pending in this thread -
+            # is cancelled.  Written out here, not in a function of its own: a
+            # pending interrupt fires where a function is entered, before any
+            # ``try`` of its own, and one raised there left the message named
+            # as running for good - the next Interrupt, with nothing running,
+            # then stopped whatever this thread did next.  From the ``finally``
+            # to the name being cleared there is no call and no loop, so
+            # nothing can come between them; and none comes once it is
+            # cleared, so the one that fires in here is the last.
+            while True:
+                try:
+                    with _lock:
+                        _running = None
+                        if _delivered is not None:
+                            cancel_interrupt(_delivered)
+                            _delivered = None
+                    break
+                except Interrupted:
+                    pass
     except Interrupted:
         # stopped where Document.handle does not report it itself (or just
         # as it finished: then its answer, computed, still stands)
@@ -135,22 +164,33 @@ def interrupt(doc_id: Optional[str] = None) -> str:
     The bridges call this from a thread of their own, not the Python
     thread: that one is busy with the computation, and lets this in between
     two of its steps (:func:`sympy_editor.document.interrupt_thread`)."""
-    global _delivered
+    global _running, _delivered
     with _lock:
         running = _running
         if running is None:
             return json.dumps(False)
         ident, running_id = running
+        if ident == threading.get_ident():
+            # No message asks for its own end: the name is left over from one
+            # this thread ran before, and there is nothing to stop.
+            _running = None
+            return json.dumps(False)
         if doc_id and running_id != doc_id and not running_id.startswith(doc_id + "/"):
             return json.dumps(False)
         stopped = interrupt_thread(ident)
         if stopped:
             _delivered = ident
+        else:
+            _running = None        # the thread is gone, and its message with it
     return json.dumps(bool(stopped))
 
 
 def close(doc_id: str) -> None:
     """Forget a document (the page left the session)."""
+    try:
+        _idle()
+    except Interrupted:            # it fired on the way in: nothing is pending now
+        _idle()
     _documents.pop(doc_id, None)
 
 

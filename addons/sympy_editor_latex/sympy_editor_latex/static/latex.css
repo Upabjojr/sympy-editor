@@ -35,9 +35,6 @@
 .ltx-preview { font-size: 1.3em; min-height: 1.4em; padding: 0.1rem 0.2rem; }
 .ltx-preview[hidden] { display: none; }
 .ltx-busy .ltx-preview, .ltx-stale .ltx-preview { opacity: 0.5; }
-/* The bar of actions a selection brings up is drawn just under the formula,
- * which is where the field is: it steps aside while one types there. */
-.sympy-editor.se-typing-latex .se-actions { display: none !important; }
 /* the tool stays pressed while the field is open */
 .sympy-editor .se-tools button.ltx-on {
   background: rgba(var(--se-accent), 0.14);
@@ -151,7 +148,31 @@
   color: inherit;
   cursor: pointer;
 }
-.ltx-keep { border-color: rgba(var(--se-accent), 0.65); }
+/* The two answers wear the colours of the change shown above them, the
+ * editor's own (--se-added-rgb / --se-removed-rgb, light and dark): Keep is
+ * the green of what came - filled, the answer one expects to give - and
+ * Undo the red of what went, in its border and its words only: it is the
+ * way back, not a danger, and a solid red would say otherwise. */
+.ltx-applied-ask button { transition: background 120ms ease, border-color 120ms ease; }
+.ltx-applied-ask .ltx-keep {
+  border-color: rgba(var(--se-added-rgb), 0.6);
+  background: rgba(var(--se-added-rgb), 0.14);
+  color: rgb(var(--se-added-rgb));
+  font-weight: 600;
+}
+.ltx-applied-ask .ltx-back {
+  border-color: rgba(var(--se-removed-rgb), 0.4);
+  color: rgb(var(--se-removed-rgb));
+}
+.ltx-applied-ask .ltx-keep:active { background: rgba(var(--se-added-rgb), 0.3); }
+.ltx-applied-ask .ltx-back:active { background: rgba(var(--se-removed-rgb), 0.14); }
+.ltx-applied-ask .ltx-keep:focus-visible { outline: 2px solid rgba(var(--se-added-rgb), 0.6); outline-offset: 1px; }
+.ltx-applied-ask .ltx-back:focus-visible { outline: 2px solid rgba(var(--se-removed-rgb), 0.5); outline-offset: 1px; }
+@media (hover: hover) {
+  .ltx-applied-ask .ltx-keep:hover { background: rgba(var(--se-added-rgb), 0.22); border-color: rgba(var(--se-added-rgb), 0.85); }
+  .ltx-applied-ask .ltx-back:hover { background: rgba(var(--se-removed-rgb), 0.08); border-color: rgba(var(--se-removed-rgb), 0.7); }
+}
+@media (prefers-reduced-motion: reduce) { .ltx-applied-ask button { transition: none; } }
 
 /* what went and what came, marked as the history's own report marks a step */
 .ltx-applied .rep-added, .ltx-applied .rep-removed { font-weight: bold; }

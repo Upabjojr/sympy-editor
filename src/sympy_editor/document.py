@@ -13,6 +13,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple as Typin
 
 import ast
 import builtins
+import contextlib
 import datetime
 import io
 import json
@@ -24,9 +25,12 @@ import sympy
 from sympy import Add, Basic, Dummy, Function, IndexedBase, MatrixSymbol, Mul, Symbol, Tuple, sympify
 from sympy.core.function import AppliedUndef
 from sympy.core.symbol import Str
-from sympy.matrices.expressions import MatrixExpr
+from sympy.core.sympify import SympifyError
+from sympy.matrices.expressions import Identity, MatrixExpr, OneMatrix, ZeroMatrix
+from sympy.matrices.expressions.matexpr import MatrixElement
 from sympy.matrices import MatrixBase
 from sympy.tensor.array import NDimArray
+from sympy.tensor.array.expressions import ArraySymbol, OneArray, ZeroArray
 from sympy.parsing.sympy_parser import (
     convert_xor,
     implicit_multiplication_application,
@@ -61,7 +65,8 @@ from .printer import (
     view_parts,
 )
 from .invalid import (Invalid, InvalidExpr, UnsafeText, allowing_invalid, first_problem, has_invalid, invalid,
-                      read_source, read_srepr, tolerant_parse, tolerate, _is_constructor, _NotSrepr)
+                      node_problem, read_source, read_srepr, tolerant_parse, tolerate, _is_constructor, _NotSrepr,
+                      _post_order)
 from .printer import ExactReprPrinter, exact_srepr
 
 
@@ -112,6 +117,12 @@ SYMBOL_TYPES = ("Symbol", "MatrixSymbol", "Matrix", "Function")
 PathLike = Union[str, Path]
 
 
+#: Nodes whose arguments are their name and shape, not expressions inside
+#: them: nothing of theirs can stand in their place (see Document.unwrap).
+#: An explicit matrix's entries are its children, but one of them keeping
+#: the matrix's place is a replacement, not an unwrap.
+_SHAPED = (MatrixBase, NDimArray, MatrixSymbol, ArraySymbol, ZeroMatrix, OneMatrix, Identity, ZeroArray, OneArray)
+
 #: The order the virtual parts of a node are read in: a fraction's
 #: numerator before its denominator, the product after a minus sign.
 _PART_ORDER = {"neg": 0, "n": 1, "d": 2}
@@ -138,6 +149,43 @@ def _flag(value: Any) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in ("1", "true", "yes", "on")
     return bool(value)
+
+
+def _as_list(value: Any, what: str) -> List[Any]:
+    """A list given in a file or a message - the declared names, the add-ons
+    to switch on -, one item given on its own taken as a list of it.  Text
+    was taken a character at a time: ``"enable": "tree"`` asked for the
+    add-ons ``t``, ``r``, ``e`` and ``e``."""
+    if value is None:
+        return []
+    if isinstance(value, dict):
+        raise ValueError(f"The {what} are not a list")
+    if isinstance(value, (str, bytes)) or not isinstance(value, Iterable):
+        return [value]
+    return list(value)
+
+
+def _whole(value: Any, message: str) -> int:
+    """``value`` as a whole number, or ``ValueError(message)``: ``2.5`` rows
+    were taken as 2, ``True`` as 1."""
+    if isinstance(value, bool):
+        raise ValueError(message)
+    if isinstance(value, str):
+        if not re.fullmatch(r"\s*[+-]?\d+\s*", value):
+            raise ValueError(message)
+        return int(value)
+    try:
+        number = int(value)
+        if number != value:
+            raise ValueError(message)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError(message) from None
+    return number
+
+
+#: The most entries ``Document.edit_matrix`` makes a matrix hold: a resize
+#: to 100000 x 100000 filled memory with placeholders before anything said no.
+MAX_MATRIX_ENTRIES = 10000
 
 
 def _short(text: Any, n: int = 60) -> str:
@@ -248,7 +296,20 @@ def _as_basic(result: Any) -> Any:
         return sympy.FiniteSet(*[_as_basic(r) for r in result])
     if isinstance(result, tuple):
         return Tuple(*[_as_basic(r) for r in result])
-    return sympify(result)
+    return _strict_basic(result)
+
+
+def _strict_basic(result: Any) -> Any:
+    """A number, or an object SymPy knows how to convert, as SymPy's;
+    anything else is refused.  Text above all: ``sympify`` of a string runs
+    it as Python, and a symbol's ``.name`` is whatever a saved file put
+    there - ``__import__('os').system(...) or x`` ran through ``call``."""
+    if isinstance(result, (str, bytes)):
+        raise ValueError(f"The result is text ({_short(result)}), not an expression")
+    try:
+        return sympify(result, strict=True)
+    except SympifyError:
+        raise ValueError(f"The result is a {type(result).__name__}, not an expression") from None
 
 
 def _rebuilt(expr: Basic) -> Basic:
@@ -518,7 +579,6 @@ class _Script:
 
     def __init__(self):
         from sympy.printing.python import PythonPrinter
-        from .printer import ExactReprPrinter
         script = self
         self.var: Dict[Any, str] = {}           # object -> variable
         self.used: List[Any] = []               # in the order first used
@@ -541,7 +601,9 @@ class _Script:
                     return "%s(%s)" % (name_of(expr.func), ", ".join(self._print(a) for a in expr.args))
                 return super()._print_Function(expr)
 
-        class Exact(ExactReprPrinter):
+        # the saved form's writer: a product's factors as the product holds
+        # them (ExactReprPrinter wrote Mul(x, 2) unevaluated as Mul(2, x))
+        class Exact(_SaveReprPrinter):
             def _print_Symbol(self, expr):
                 return name_of(expr)
             _print_Dummy = _print_Symbol
@@ -589,11 +651,33 @@ class _Script:
             text = self.readable.doprint(expr)
             back = read_source(text, self._names(), python_numbers=True, new_name=_no_new_name)
             if isinstance(back, Basic) and back == expr and srepr(back) == srepr(expr):
+                self._import_for(expr, text)
                 return [f"expr = {text}"]
         except Exception:
             pass
         text = self.exact.doprint(expr)
+        self._import_for(expr, text)
+        # The constructors, evaluating, when they give the step back: some
+        # refuse to build unevaluated what they build evaluated - a union
+        # of an interval and a set - and the script raised as it ran.
+        try:
+            back = read_srepr(text, self._names(), evaluate=True)
+            if isinstance(back, Basic) and back == expr and srepr(back) == srepr(expr):
+                return [f"expr = {text}"]
+        except Exception:
+            pass
         return ["with evaluate(False):   # the step as it was, unevaluated", f"    expr = {text}"]
+
+    def _import_for(self, expr: Basic, text: str) -> None:
+        """Import the classes ``text`` names that ``from sympy import *``
+        does not bring (``MatrixElement``, ``PermuteDims``): the script
+        stopped at them with a NameError."""
+        for node in _post_order(expr):
+            cls = type(node)
+            name = cls.__name__
+            if (str(cls.__module__ or "").startswith("sympy.") and re.search(r"\b%s\(" % re.escape(name), text)
+                    and getattr(sympy, name, None) is not cls and name not in self.RESERVED - set(dir(sympy))):
+                self.needs.add(f"from {cls.__module__} import {name}")
 
     def _declaration(self, obj: Any) -> str:
         if isinstance(obj, MatrixSymbol):
@@ -705,7 +789,7 @@ class Document:
         if format is not None and history:
             # A session a page kept in an older format: upgraded as a file is.
             session = upgrade_session({"history": list(history), "index": index, "labels": labels,
-                                       "symbols": list(symbols or ()), "addon_state": addon_state,
+                                       "symbols": _as_list(symbols, "declared names"), "addon_state": addon_state,
                                        "allow_invalid": allow_invalid}, format)
             history, index, labels = session.get("history"), session.get("index"), session.get("labels")
             symbols, addon_state = session.get("symbols") or (), session.get("addon_state")
@@ -751,7 +835,14 @@ class Document:
         self._ready = False
         for spec in addons or ():
             self.enable(spec)
-        self.max_history = max_history
+        try:
+            self.max_history = int(max_history)
+        except (TypeError, ValueError):
+            raise ValueError(f"max_history must be a whole number, not {max_history!r}") from None
+        if self.max_history < 1:
+            # the history holds at least the expression shown: 0 kept nothing,
+            # and the first commit failed with an IndexError
+            raise ValueError("max_history must be at least 1")
         #: Type names whose method lists snapshots have already carried.
         self._methods_sent: set = set()
         self._history: List[Basic] = []
@@ -768,7 +859,7 @@ class Document:
         #: step, and undoing it gives the name back what it was).
         self._decls: List[Dict[str, Any]] = []
         self.last_note: Optional[str] = None
-        for obj in symbols:
+        for obj in _as_list(symbols, "declared names"):
             obj = self._read_symbol(obj)             # srepr text is read, never run
             self.declared[self._symbol_name(obj)] = obj
         if history:
@@ -778,9 +869,9 @@ class Document:
             self._history = steps[-self.max_history:]
             # More labels than steps: the last ones are the steps' own, as
             # open_text reads them - saved data opens rather than failing.
-            given = list(labels or [])[-len(self._history):]
+            given = (list(labels) if isinstance(labels, (list, tuple)) else [])[-len(self._history):]
             self._labels = [None] * (len(self._history) - len(given)) + [None if not l else str(l) for l in given]
-            self._index = self._clamp_index(index, len(self._history))
+            self._index = self._clamp_index(index, len(self._history), len(steps) - len(self._history))
             self._decls = [dict(self.declared) for _ in self._history]
             self._showable(self.expr)
         else:
@@ -794,12 +885,15 @@ class Document:
                 addon.restore_state(self, self._pending_state.pop(name))
 
     @staticmethod
-    def _clamp_index(index: Any, n: int) -> int:
+    def _clamp_index(index: Any, n: int, dropped: int = 0) -> int:
         """A saved history index, made one of the ``n`` steps (the last when
-        there is none, or it is not a number)."""
+        there is none, or it is not a number).  ``dropped``: how many steps
+        before these were left out (a history longer than ``max_history``
+        keeps its last ones) - the index counts from the first that was
+        saved, and unshifted it opened on a step a hundred later."""
         try:
-            return max(0, min(int(index), n - 1))
-        except (TypeError, ValueError):
+            return max(0, min(int(index) - dropped, n - 1))
+        except (TypeError, ValueError, OverflowError):
             return n - 1
 
     def save_text(self, name: Optional[str] = None) -> str:
@@ -856,15 +950,19 @@ class Document:
         # Everything is read and checked before anything here changes: a
         # file that cannot be opened leaves the document as it was.
         declared: Dict[str, Any] = {}
-        for obj in session.get("symbols") or ():
+        for obj in _as_list(session.get("symbols"), "file's declared names"):
             obj = self._read_symbol(obj)                     # read, never run
             declared[self._symbol_name(obj)] = obj
         steps = [self._coerce(e if isinstance(e, str) else str(e), declared) for e in history]
         if not steps:
             raise ValueError("The file holds no expression")
+        saved = len(steps)
         steps = steps[-self.max_history:]
-        labels = list(session.get("labels") or [])[-len(steps):]
-        index = self._clamp_index(session.get("index"), len(steps))
+        labels = session.get("labels")
+        # labels are what the history list says, nothing more: any but a
+        # list are left out (text was taken a character per step)
+        labels = (list(labels) if isinstance(labels, list) else [])[-len(steps):]
+        index = self._clamp_index(session.get("index"), len(steps), saved - len(steps))
         self._showable(steps[index])          # the step shown first must print, or every message would fail
         self.declared = declared
         self._history = steps
@@ -883,8 +981,7 @@ class Document:
         for addon_name, addon in list(self.addons.items()):
             if addon_name in self._pending_state:
                 addon.restore_state(self, self._pending_state.pop(addon_name))
-        for listener in self._listeners:
-            listener(self.expr)
+        self._notify()        # (each in a try: the file is open by now, whatever a callback does)
         return self.expr
 
     def export(self) -> Dict[str, Any]:
@@ -1159,6 +1256,17 @@ class Document:
         self._listeners.append(callback)
         return callback
 
+    def off_change(self, callback: Callable[[Basic], None]) -> bool:
+        """Stop calling ``callback``; whether it was being called.  What
+        listens for as long as something else lives (an add-on's panel, a
+        view) takes itself off when that goes: the document opened in place
+        of this one inherits the listeners (:func:`sympy_editor.server.load_session`)."""
+        try:
+            self._listeners.remove(callback)
+        except ValueError:
+            return False
+        return True
+
     # -- the view tree ------------------------------------------------------
     # The path functions of ``printer`` bound to the printer settings, which
     # decide the virtual parts of the view tree (``root_notation``...), and
@@ -1269,8 +1377,10 @@ class Document:
         n = len(args)
         L = left if left is not None and 0 <= left < n else None
         R = right if right is not None and 0 <= right < n else None
-        if text in OPERATORS and L is not None and R is not None:
-            return self.operator(p, L, R, text)          # just an operator between two arguments: change it
+        if ((len(text) == 1 and text in OPERATORS) or text in RELATION_OPERATORS) and L is not None and R is not None:
+            # just an operator between two arguments: change it (a whole
+            # operator - "+-" is no operator, though its characters are)
+            return self.operator(p, L, R, text)
         is_sum, is_prod = bool(parent.is_Add), bool(parent.is_Mul)
 
         if not (is_sum or is_prod) or (L is None and R is None):
@@ -1317,17 +1427,27 @@ class Document:
         # x*y*z); without one, the text joins the attached neighbour only.
         # "The whole half of a product" is the half drawn on that side of
         # the caret: SymPy's argument order is not the screen's.
+        # A + or - at one end of the text, in a product, splits it at the
+        # caret: the half beyond the other end is multiplied onto the text,
+        # whichever neighbour the caret belongs to ("+y" between x and z is
+        # x + y*z - it was z*(x + y) with the caret on x's side).
         shown = self._display_order(parent)
+        left_half = shown[:shown.index(L) + 1] if L is not None else []
+        right_half = shown[shown.index(R):] if R is not None else []
         if lead in ("+", "-"):
-            left_idx = (shown[:shown.index(L) + 1] if is_prod else [L]) if L is not None else []
+            left_idx = (left_half if is_prod else [L]) if L is not None else []
         elif lead:
             left_idx = [L] if L is not None else []
+        elif is_prod and trail in ("+", "-"):
+            left_idx = left_half
         else:
             left_idx = [L] if L is not None and attach != "right" else []
         if trail in ("+", "-"):
-            right_idx = (shown[shown.index(R):] if is_prod else [R]) if R is not None else []
+            right_idx = (right_half if is_prod else [R]) if R is not None else []
         elif trail:
             right_idx = [R] if R is not None else []
+        elif is_prod and lead in ("+", "-"):
+            right_idx = right_half
         else:
             right_idx = [R] if R is not None and (attach == "right" or not left_idx) else []
         combined = text
@@ -1430,20 +1550,37 @@ class Document:
                     raise
                 return invalid(cls.__name__)(*items)
 
+        # Unevaluated, what is built around the change stays as it was too:
+        # the halves of a split product and the ancestors rebuilt around the
+        # new node were evaluated, and 2 + 3 + 4 with - over the second +
+        # came out as -4 + 5.
+        with (sympy.evaluate(False) if lazy else contextlib.nullcontext()):
+            result = self._operator_result(p, parent, L, R, op, a, b, is_sum, is_prod, whole, build)
+        return self._commit(result)
+
+    def _operator_result(self, p, parent, L, R, op, a, b, is_sum, is_prod, whole, build) -> Basic:
+        """The expression :meth:`operator` commits."""
+        args = parent.args
+
+        def negated(e):
+            # a number negated is the negative number (-4), not (-1)*4 -
+            # which is what an unevaluated product of the two would show
+            return -e if isinstance(e, sympy.Number) else build(Mul, -1, e)
+
         if is_prod and op in ("+", "-"):
             # split where the operator is drawn: the factors shown before it
             # and after it (SymPy's argument order is not the screen's)
             before, after = self._split_shown(parent, L)
             head = rebuild(parent, [args[i] for i in before])
             tail = rebuild(parent, [args[i] for i in after])
-            new = build(Add, head, tail if op == "+" else build(Mul, -1, tail))
-            return self._commit(self._replace_at(self.expr, p, new))
+            new = build(Add, head, tail if op == "+" else negated(tail))
+            return self._replace_at(self.expr, p, new)
         if is_sum and op in ("+", "-"):
-            new = b if op == "+" else build(Mul, -1, b)
-            return self._commit(self._replace_at(self.expr, p + (R,), new))
+            new = b if op == "+" else negated(b)
+            return self._replace_at(self.expr, p + (R,), new)
         first, second = a, b                     # left and right as drawn, whatever the argument order
         if op in ("+", "-"):                     # a power, a relation...: the two become a sum
-            new = build(Add, first, second if op == "+" else build(Mul, -1, second))
+            new = build(Add, first, second if op == "+" else negated(second))
         elif op == "*":
             new = build(Mul, first, second)
         elif op == "/":
@@ -1457,8 +1594,8 @@ class Document:
                 raise ValueError(f"{op!r} needs two sides: it can only replace the operator of a node with two arguments")
             new = build(rel, first, second)
         if whole:
-            return self._commit(self._replace_at(self.expr, p, new))
-        return self._commit(self._replace_range(self.expr, p, sorted(pair), new))
+            return self._replace_at(self.expr, p, new)
+        return self._replace_range(self.expr, p, sorted({L, R}), new)
 
     def apply(self, path: PathLike, op: Union[str, Callable], children=None, args=None,
               lazy: bool = False) -> Basic:
@@ -1505,7 +1642,16 @@ class Document:
             missing = [prm["name"] for prm in spec.params[len(values):] if not prm.get("optional")]
             if missing:
                 raise ValueError(f"{spec.label} needs {', '.join(missing)}")
-        result = sympify(func(target, *values, doc=self) if spec is not None and spec.context else func(target, *values))
+        result = func(target, *values, doc=self) if spec is not None and spec.context else func(target, *values)
+        if not isinstance(result, Basic):
+            # An op of someone else's may answer anything: a number is one,
+            # text is never run (see _strict_basic), and a list is refused.
+            result = _strict_basic(result)
+            if isinstance(result, (MatrixBase, NDimArray)) and hasattr(result, "as_immutable"):
+                result = result.as_immutable()
+            if not isinstance(result, Basic):
+                raise ValueError(f"{spec.label if spec is not None else 'The operation'} returned a "
+                                 f"{type(result).__name__}, not an expression")
         if children is not None:
             return self._commit(self._replace_range(self.expr, p, children, result))
         return self._commit(self._replace_at(self.expr, p, result))
@@ -1669,12 +1815,12 @@ class Document:
             for row in grid:
                 del row[at]
         else:
-            try:
-                nr, nc = int(rows), int(cols)   # type: ignore[arg-type]
-            except (TypeError, ValueError):
-                raise ValueError(f"{op} needs the numbers of rows and columns") from None
+            nr, nc = _whole(rows, f"{op} needs whole numbers of rows and columns"), \
+                _whole(cols, f"{op} needs whole numbers of rows and columns")
             if nr < 1 or nc < 1:
                 raise ValueError("A matrix needs at least one row and one column")
+            if op == "resize" and nr * nc > MAX_MATRIX_ENTRIES:
+                raise ValueError(f"{nr}x{nc} is {nr * nc} entries: a matrix here holds {MAX_MATRIX_ENTRIES} at most")
             if op == "reshape":
                 # The same entries in another shape: only a shape that holds
                 # them all, and no empty slot - what SymPy's reshape does.
@@ -1726,11 +1872,13 @@ class Document:
         of an integral are a ``Tuple``, not something that can stand alone).
         More than one means there is a real choice to offer - ``x**2`` can
         leave the base or the exponent - rather than a natural default."""
+        if isinstance(node, _SHAPED):
+            return []
         parts = self._parts(node) or ()
         source: Iterable[TypingTuple[Union[int, str], Any]] = (
             [(name, value) for name, value in parts] if parts else list(enumerate(node.args)))
         return [(key, value) for key, value in source
-                if isinstance(value, Basic) and not isinstance(value, Tuple)]
+                if isinstance(value, Basic) and not isinstance(value, (Tuple, Str))]
 
     def unwrap(self, path: PathLike, keep: Union[int, str, None] = None) -> Basic:
         """Remove the node at ``path`` but keep one of its arguments in its
@@ -1746,6 +1894,13 @@ class Document:
         node = self._get_at(self.expr, p)
         parts = dict(self._parts(node) or ())
         args = node.args
+        if isinstance(node, _SHAPED):
+            # its arguments are its name and its shape: unwrapping the matrix
+            # [x, y] left its number of rows, 1, in its place
+            if isinstance(node, (MatrixBase, NDimArray)):
+                raise ValueError(f"{type(node).__name__} has no argument to keep in its place: "
+                                 "select an entry to work on it")
+            raise ValueError(f"{node} has nothing inside to keep: its arguments are its name and shape")
         if not args and not parts:
             raise ValueError(f"{node} has nothing inside to keep")
         if keep is None:
@@ -1859,11 +2014,29 @@ class Document:
 
     @staticmethod
     def _symbol_name(obj) -> str:
+        """The name a declared object stands for; ``ValueError`` for one that
+        is no name at all (a file's ``symbols`` holding ``Integer(3)``)."""
         if isinstance(obj, IndexedBase):
             return str(obj.label)
         if isinstance(obj, type):  # undefined function class
             return obj.__name__
-        return str(obj.name)
+        if isinstance(obj, MatrixBase):
+            # A name declared as an explicit Matrix is kept as its entries,
+            # M[0, 0], M[0, 1]...: the name is their matrix symbol's.  It
+            # used to be read as ``.name``, which a matrix has not - the
+            # session was saved and never opened again.
+            parents = {e.parent for e in obj if isinstance(e, MatrixElement)}
+            if len(parents) == 1 and all(isinstance(e, MatrixElement) for e in obj):
+                parent = parents.pop()
+                if isinstance(parent, MatrixSymbol):
+                    return str(parent.name)
+            raise ValueError(f"{_short(obj)} is a matrix, not a name")
+        name = getattr(obj, "name", None) if isinstance(obj, Basic) else None
+        if isinstance(name, (Str, Symbol)):   # an ArraySymbol's is a Symbol
+            name = str(name)
+        if not isinstance(name, str):
+            raise ValueError(f"{_short(obj)} is not a name that can be declared")
+        return name
 
     def parse_saved(self, src: str) -> Basic:
         """Text that was *saved* - an add-on's state in a file or a kept
@@ -2112,8 +2285,7 @@ class Document:
         methods = {}
         for node in nodes.values():
             cls = type(node)
-            if cls.__name__ not in self._methods_sent:
-                self._methods_sent.add(cls.__name__)
+            if cls.__name__ not in self._methods_sent and cls.__name__ not in methods:
                 methods[cls.__name__] = type_methods(cls)
         snap = {
             "seq": self._seq,
@@ -2143,6 +2315,10 @@ class Document:
         }
         for addon in self.addons.values():
             addon.contribute(self, snap, expr)
+        # Marked as sent only now: a snapshot that failed half way (the
+        # printer, an add-on) never reached the page, and the lists it held
+        # were never sent again - the Methods menu stayed empty for good.
+        self._methods_sent.update(methods)
         return snap
 
     def _node_info(self, path: Path, node: Basic, expr: Optional[Basic] = None) -> Dict[str, Any]:
@@ -2192,7 +2368,10 @@ class Document:
         differ: ``a*b + c`` typed over a matrix previewed as a scalar sum
         and committed as a sum of matrix symbols."""
         try:
-            snap = self.snapshot(expr=self.parse(src, context=self.expr))
+            parsed = self.parse(src, context=self.expr)
+            if not isinstance(parsed, Basic):
+                raise ValueError(f"{_short(parsed)} is a {type(parsed).__name__}, not an expression")
+            snap = self.snapshot(expr=parsed)
         except Exception as exc:
             snap = self.snapshot(error=f"{type(exc).__name__}: {exc}")
         snap["preview"] = True
@@ -2247,9 +2426,9 @@ class Document:
                 # Switch add-ons on or off; not a step of the history.  The
                 # answer carries the front ends of the ones that are on, so
                 # the editor can mount what it has not seen yet.
-                for name in message.get("disable") or []:
+                for name in _as_list(message.get("disable"), "add-ons to switch off"):
                     self.disable(str(name))
-                for name in message.get("enable") or []:
+                for name in _as_list(message.get("enable"), "add-ons to switch on"):
                     self.enable(str(name))
                 snap = self.snapshot()
                 snap["addon_clients"] = [addon.client() for addon in self.addons.values()]
@@ -2286,7 +2465,7 @@ class Document:
             if action == "settings":
                 # The document's switches; not a step of the history.
                 if "allow_invalid" in message:
-                    self.allow_invalid = bool(message.get("allow_invalid"))
+                    self.allow_invalid = _flag(message.get("allow_invalid"))
                 return self.snapshot()
             if action == "goto":
                 self.goto(message.get("index", 0))
@@ -2390,7 +2569,13 @@ class Document:
         if addon is None:
             raise ValueError(f"No add-on {name!r} in this document (it has {', '.join(self.addons) or 'none'})")
         payload = {k: v for k, v in message.items() if k not in ("action", "addon", "method", "_req")}
-        self._action_label = addon.describe(method, payload) or f"{addon.label or name}: {method}"
+        try:
+            label = addon.describe(method, payload)
+        except Exception:
+            # only the history's label: a describe that fails must not turn
+            # the method's answer into an error the panel never hears of
+            label = None
+        self._action_label = label or f"{addon.label or name}: {method}"
         try:
             result = addon.handle(self, method, payload)
         except Exception as exc:
@@ -2605,6 +2790,16 @@ class Document:
         if self.allow_invalid:
             return tolerate(expr)
         found = first_problem(expr)
+        if found is not None and self._history:
+            # Only what this edit brings in is refused: an invalid node the
+            # expression already holds (kept while invalid ones were allowed,
+            # or in the expression the document was given) stays, and the
+            # rest of the expression can still be edited - it used to refuse
+            # every edit, anywhere, until that node was put right.  An edit
+            # inside that node makes another node, which must then be valid.
+            before = set(_post_order(self.expr))
+            found = next(((node, problem) for node in _post_order(expr) if node not in before
+                          for problem in (node_problem(node),) if problem is not None), None)
         if found is not None:
             node, problem = found
             raise ValueError(f"{node} is not a valid expression ({problem}); the expression is unchanged"
@@ -2612,6 +2807,15 @@ class Document:
         return expr
 
     def _commit(self, expr: Basic, check: bool = True, declared: Optional[Dict[str, Any]] = None) -> Basic:
+        if isinstance(expr, (MatrixBase, NDimArray)) and hasattr(expr, "as_immutable"):
+            expr = expr.as_immutable()
+        if not isinstance(expr, Basic):
+            # "[x, 1]", "None", "[]" typed, or an op's answer: Python reads
+            # them (a list stays a list - an argument may be one), and the
+            # document committed them - nothing could print it, and every
+            # message after it failed.
+            raise ValueError(f"{_short(expr)} is a {type(expr).__name__}, not an expression; "
+                             "the expression is unchanged")
         if check:
             expr = self._valid(expr)
         self._showable(expr)

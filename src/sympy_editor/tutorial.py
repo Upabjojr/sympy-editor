@@ -231,8 +231,8 @@ def player_html(element_id: str, script, *, full_page: bool = False, stop_button
         opts["playButton"] = play_button
     return ("<script>\nif (!window.SympyEditorTutorial) {\n" + read_static("tutorial.js") + "\n}\n</script>\n"
             "<script>\n"
-            f'SympyEditorTutorial.run(document.getElementById("{element_id}"), {_script_json(script)}, '
-            f"{json.dumps(opts)});\n"
+            f'SympyEditorTutorial.run(document.getElementById({_script_json(str(element_id))}), {_script_json(script)}, '
+            f"{_script_json(opts)});\n"
             "</script>\n")
 
 

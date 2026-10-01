@@ -9,6 +9,8 @@ from __future__ import annotations
 import ctypes
 import ipaddress
 import json
+import re
+import secrets
 import socket
 import threading
 import webbrowser
@@ -29,6 +31,11 @@ __all__ = ["EditorServer", "serve", "load_session"]
 #: any loopback address written out: 127.0.0.2, [::1]).
 _LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
 
+#: A ``Host`` header: a name or an IPv4 address, or an IPv6 address in
+#: brackets, and a port.  Matched whole - read piece by piece,
+#: ``[::1]evil.com`` passed for ``::1``.
+_HOST = re.compile(r"(?:\[(?P<v6>[0-9a-f:.]+)\]|(?P<name>[a-z0-9._-]+))(?::\d{1,5})?\Z")
+
 #: The largest request body read, in bytes: a formula with its whole
 #: history is a few hundred kilobytes; anything near this is not the page.
 MAX_BODY = 64 * 1024 * 1024
@@ -43,7 +50,7 @@ def _loopback(address: str) -> bool:
     if address in _LOOPBACK:
         return True
     try:
-        return ipaddress.ip_address(address.split("%", 1)[0]).is_loopback
+        return ipaddress.ip_address(address).is_loopback
     except ValueError:
         return False
 
@@ -61,8 +68,10 @@ def load_session(document: Document, state: Dict[str, Any]) -> Document:
     history = kwargs.get("history")
     if not isinstance(history, list) or not history or not all(isinstance(h, str) for h in history):
         raise ValueError("a session needs its history: a list of srepr strings")
-    index = kwargs.get("index")
-    at = len(history) - 1 if index is None else max(0, min(int(index), len(history) - 1))
+    try:
+        at = max(0, min(int(kwargs.get("index")), len(history) - 1))
+    except (TypeError, ValueError, OverflowError):
+        at = len(history) - 1
     new = Document(history[at],
                    printer_settings=document.printer_settings, parser=document.parser, ops=document.ops,
                    max_history=document.max_history, addons=list(document.addons.values()),
@@ -93,18 +102,28 @@ class _Running:
 
     def interrupt(self) -> bool:
         with self._lock:
-            return self.ident is not None and interrupt_thread(self.ident)
+            if self.ident is None:
+                return False
+            if not any(t.ident == self.ident for t in threading.enumerate()):
+                self.ident = None      # a thread that ended without clearing: nothing to interrupt
+                return False
+            return interrupt_thread(self.ident)
 
     def run(self, fn: Callable[[], Any]) -> Any:
         """``fn()`` as the running message; raises :class:`Interrupted` if
         it was interrupted and did not say so itself."""
         ident = threading.get_ident()
-        with self._lock:
-            self.ident = ident
         try:
+            # Inside the try: an interrupt delivered the moment the thread is
+            # named used to be raised before it, and the name was never cleared.
+            with self._lock:
+                self.ident = ident
             return fn()
         finally:
-            self._stop(ident)
+            try:
+                self._stop(ident)
+            except Interrupted:        # raised before _stop's own try: clear once more
+                self._stop(ident)
 
     def _stop(self, ident: int) -> None:
         while True:
@@ -139,7 +158,8 @@ class _Handler(BaseHTTPRequestHandler):
             return
         # The token (embedded in the page, sent as a custom header) blocks
         # cross-site requests from other pages open in the browser.
-        if self.headers.get("X-SymPy-Editor-Token") != srv.token:
+        given = self.headers.get("X-SymPy-Editor-Token") or ""
+        if not secrets.compare_digest(given.encode("utf-8", "replace"), srv.token.encode("utf-8")):
             self.send_error(403)
             return
         try:
@@ -159,7 +179,7 @@ class _Handler(BaseHTTPRequestHandler):
             message = json.loads(self.rfile.read(length) or b"{}")
             if not isinstance(message, dict):
                 raise ValueError("expected a JSON object")
-        except ValueError:
+        except (ValueError, RecursionError):   # not JSON, not an object, or nested past reading
             self.send_error(400)
             return
         if message.get("action") == "keep":
@@ -185,9 +205,14 @@ class _Handler(BaseHTTPRequestHandler):
                     snapshot = srv.running.run(lambda: srv.document.handle(message))
                 except Interrupted as exc:     # delivered between two lines of ours, not inside handle
                     snapshot = srv.document.snapshot(error=f"Interrupted: {exc}".rstrip(": "))
-        self._reply(200, "application/json", json.dumps(snapshot).encode("utf-8"))
-        if srv.closing:
-            threading.Thread(target=srv.shutdown, daemon=True).start()
+        try:
+            self._reply(200, "application/json", json.dumps(snapshot).encode("utf-8"))
+        finally:
+            # Also when the answer could not be written (the page closed with
+            # Done still on its way): the server was asked to end, and serve()
+            # is waiting for it.
+            if srv.closing:
+                threading.Thread(target=srv.finish, daemon=True).start()
 
     def _host_ok(self) -> bool:
         """Reject requests whose ``Host`` header does not name this server.
@@ -274,6 +299,13 @@ class EditorServer(ThreadingHTTPServer):
         :func:`~sympy_editor.document.interrupt_thread`)."""
         return self.running.interrupt()
 
+    def finish(self) -> None:
+        """Stop serving and close the listening socket (Done).  Without the
+        close a server started with ``serve(block=False)`` went on accepting
+        connections it never answered, and a reload of the page hung."""
+        self.shutdown()
+        self.server_close()
+
     def load(self, state: Any) -> Dict[str, Any]:
         """Open a session (the ``load`` message): this server's document
         becomes one holding ``state`` (see :func:`load_session`), and the
@@ -292,11 +324,10 @@ class EditorServer(ThreadingHTTPServer):
         bound = self.server_address[0]
         if not _loopback(bound):
             return True
-        name = (host or "").strip().lower()
-        if name.startswith("["):                       # [::1]:port
-            name = name[1:name.find("]")] if "]" in name else name[1:]
-        else:
-            name = name.rsplit(":", 1)[0] if name.count(":") == 1 else name
+        found = _HOST.match((host or "").strip().lower())
+        if not found:                                  # "[::1]evil.com", "[::1", "127.0.0.1%x"...
+            return False
+        name = found.group("v6") or found.group("name")
         return name == bound or _loopback(name)
 
     def render_page(self) -> str:

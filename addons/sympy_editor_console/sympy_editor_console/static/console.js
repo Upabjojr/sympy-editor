@@ -24,16 +24,20 @@
     "<li><code>editor.apply(\"factor\", \"/0\")</code> runs one of the editor's transformations (<code>editor.ops</code>), <code>editor.undo()</code> / <code>editor.redo()</code> walk the history.</li>",
     "<li>Every change is a step of the formula's history: the editor's Undo takes it back.</li>",
       "<li>Run leaves you at the prompt; the transcript above it scrolls in its own box once it is long.</li>",
-    "<li><b>Use</b> beside an <code>Out[n]</code> puts that value in the formula - over the selection, or as the whole formula.</li>",
+    "<li><b>Use</b> beside an <code>Out[n]</code> puts that value in the formula - over the selection, or as the whole formula. ",
+    "It is there while the value is: after a <b>Reset</b> or in another session the outputs above are text, and their <b>Use</b> is gone - run the input again.</li>",
     "</ul></section>",
     "<section><h3>What IPython adds</h3><ul>",
     "<li><code>_</code>, <code>__</code>, <code>___</code>, <code>_3</code>, <code>Out[3]</code>, <code>In[3]</code>.</li>",
     "<li><code>factor?</code> describes <code>factor</code>, <code>factor??</code> shows its source.</li>",
-    "<li><code>%who</code> and <code>%whos</code> list your variables, <code>%time</code> times a statement, <code>%reset</code> (or <b>Reset</b>) starts afresh.</li>",
-    "<li>Completion: after a <code>.</code> a menu lists what the object in memory has (methods, properties), and while a name is typed it opens when only a few names begin that way - yours first. <kbd>↑</kbd> / <kbd>↓</kbd> choose, <kbd>Enter</kbd>, <kbd>Tab</kbd> or a tap take one, <kbd>Esc</kbd> closes it; <kbd>Tab</kbd> also opens it with every name that fits.</li>",
+    "<li><code>%who</code> and <code>%whos</code> list your variables, <code>%time</code> times a statement, <code>%reset</code> (or <b>Reset</b>) starts afresh. ",
+    "A magic is a line of its own; <code>%reset</code> is a cell of its own - with anything else beside it, nothing runs and nothing is reset.</li>",
+    "<li>Completion: after a <code>.</code> a menu lists what the object in memory has (methods, properties), and while a name is typed it opens when only a few names begin that way - yours first. <kbd>↑</kbd> / <kbd>↓</kbd> choose, <kbd>Enter</kbd>, <kbd>Tab</kbd> or a tap take one, <kbd>Esc</kbd> closes it; <kbd>Tab</kbd> also opens it with every name that fits. ",
+    "Nothing of yours is run to find the names: past a property (<code>obj.prop.</code>) there is no menu, since the property would have to be read - except <code>editor</code>'s own, so <code>editor.expr.</code> lists what the formula has.</li>",
     "<li>The transcript is kept between visits, as text. Where the Python it ran in is gone (the app started afresh) it comes back faded, <i>not run in this Python</i> - the variables are not kept, only what was typed and shown - and <b>Run all again</b> runs its inputs once more. <b>Clear</b> forgets it. Before the console is first used, the prompt offers <code>editor.expr</code>.</li>",
     "<li><kbd>↑</kbd> / <kbd>↓</kbd> bring back earlier inputs (kept between visits), a tap on an earlier input puts it back and a tap on an output copies it into the input at the cursor, <kbd>Ctrl</kbd>+<kbd>L</kbd> or <b>Clear</b> clears the screen.</li>",
     "<li><code>display(obj)</code> shows a value typeset in the middle of the output.</li>",
+    "<li>A cell shows so much and no more: past 200,000 characters or 200 pieces of output the rest is cut, and says so; a value too long to read typeset is shown as text.</li>",
     "</ul></section>",
     "<section><h3>Good to know</h3><ul>",
     "<li>There is no keyboard to wait on: <code>input()</code> says so, and <code>!commands</code> have no shell to run in.</li>",
@@ -47,6 +51,12 @@
       var HISTORY_MAX = 200;
       var TRANSCRIPT_MAX = 60;          // cells kept between visits
       var TEXT_MAX = 20000;             // characters of one output kept
+      var CODE_MAX = 20000;             // characters of one input kept
+      var ITEMS_MAX = 40;               // outputs of one cell kept
+      var CELL_MAX = 60000;             // characters of one cell's outputs kept
+      var KEPT_MAX = 400000;            // characters of the whole transcript kept: the oldest cells go first
+      var CUT_NOTE = "[\u2026 output cut]\n";
+      var KINDS = { stdout: true, stderr: true, error: true, display: true };
       var FIRST_INPUT = "editor.expr";   // what the prompt offers before the console is first used
 
       /** A field for code: no capitals, no corrections, no spelling marks - what
@@ -113,22 +123,35 @@
       function keepWrite(name, text) {
         if (api.keep) Promise.resolve(api.keep.write(name, text)).catch(function () {});
       }
+      var gone = false;                 // the panel was taken away (destroy): nothing is asked any more
       var scriptTimer = null;
+      function keepScriptNow() {
+        clearTimeout(scriptTimer);
+        scriptTimer = null;
+        keepWrite("console-script", JSON.stringify({ name: nameField.value, text: script.value }));
+      }
       function keepScript() {
         clearTimeout(scriptTimer);
-        scriptTimer = setTimeout(function () {
-          keepWrite("console-script", JSON.stringify({ name: nameField.value, text: script.value }));
-        }, 400);
+        scriptTimer = setTimeout(keepScriptNow, 400);
       }
       keepRead("console-script").then(function (text) {
-        try {
-          var kept = text ? JSON.parse(text) : null;
-          if (kept && typeof kept.text === "string" && !script.value) { script.value = kept.text; nameField.value = kept.name || "script.py"; }
-        } catch (e) { /* not ours */ }
+        var kept = null;
+        try { kept = text ? JSON.parse(text) : null; } catch (e) { /* not ours */ }
+        if (kept && typeof kept.text === "string") {
+          // Kept empty is kept: a script that was emptied used to come back
+          // as the example.
+          if (!script.value) { script.value = kept.text; nameField.value = typeof kept.name === "string" && kept.name ? kept.name : "script.py"; }
+          return;
+        }
         if (!script.value) script.value = EXAMPLE;
       });
       keepRead("console-history").then(function (text) {
-        try { var list = text ? JSON.parse(text) : null; if (Array.isArray(list)) state.history = list.concat(state.history).slice(-HISTORY_MAX); }
+        try {
+          var list = text ? JSON.parse(text) : null;
+          // (only what was typed: anything else in there was recalled as "[object Object]")
+          if (Array.isArray(list)) list = list.filter(function (line) { return typeof line === "string"; });
+          if (Array.isArray(list)) state.history = list.concat(state.history).slice(-HISTORY_MAX);
+        }
         catch (e) { /* not ours */ }
         state.pos = state.history.length;
         // Never used yet: the prompt offers the formula itself, Enter away.
@@ -138,23 +161,26 @@
       // come back: the one they ran in may still be alive (a server's Python
       // outlives a reload of its page), or gone (an app started afresh).
       var hello = api.call("hello", {}, { quiet: true }).then(function (res) {
-        if (res && res.token) state.token = res.token;
+        if (res && res.token) setToken(res.token);
         if (res && res.next) setNext(res.next);
         return state.token;
       }, function () { return state.token; });
       Promise.all([keepRead("console-transcript"), hello]).then(function (got) {
-        var cells = null;
-        try { cells = got[0] ? JSON.parse(got[0]) : null; } catch (e) { /* not ours */ }
-        if (!Array.isArray(cells) || !cells.length) return;
-        state.transcript = cells.concat(state.transcript).slice(-TRANSCRIPT_MAX);
+        var kept = null;
+        try { kept = got[0] ? JSON.parse(got[0]) : null; } catch (e) { /* not ours */ }
+        if (!Array.isArray(kept)) return;
+        // What is read is text somebody kept: each cell is looked at, and one
+        // that is not a cell is left out - of what is drawn, and of what is
+        // written back at the next run.
+        var cells = kept.map(cleanCell).filter(function (c) { return c !== null; });
+        if (!cells.length) return;
+        state.transcript = boundTranscript(cells.concat(state.transcript));
         var token = got[1];
-        var gone = cells.filter(function (c) { return !token || !c || c.token !== token; });
-        var alive = cells.filter(function (c) { return token && c && c.token === token; });
+        var past = cells.filter(function (c) { return !token || c.token !== token; });
+        var alive = cells.filter(function (c) { return token && c.token === token; });
         var first = log.firstChild;                      // anything already run in this visit stays below
-        if (gone.length) drawRestored(gone, first);
-        alive.forEach(function (c) {
-          if (typeof c.code === "string") drawCell(c.code, { n: c.n, items: c.items || [], out: c.out || null }, false, first);
-        });
+        if (past.length) drawRestored(past, first);
+        alive.forEach(function (c) { drawKept(c, false, first); });
       });
       keepRead("console-mode").then(function (mode) { if (mode === "script" || mode === "console") setMode(mode, true); });
 
@@ -183,14 +209,16 @@
         }, function () {});
       }
       function drawItems(box, items) {
-        (items || []).forEach(function (item) {
+        (Array.isArray(items) ? items : []).forEach(function (item) {
+          if (!item || !KINDS.hasOwnProperty(item.kind)) return;
+          var text = String(item.text == null ? "" : item.text);
           if (item.kind === "display") {
             var math = h("div", { class: "pc-display", title: "Tap to copy it into the input" });
-            typeset(math, item.latex, item.text);
-            reusable(math, item.text);
+            typeset(math, typeof item.latex === "string" ? item.latex : null, text);
+            reusable(math, text);
             box.appendChild(math);
           } else {
-            box.appendChild(h("pre", { class: "pc-stream pc-" + (item.kind === "error" ? "error" : item.kind) }, [item.text]));
+            box.appendChild(h("pre", { class: "pc-stream pc-" + item.kind }, [text]));
           }
         });
       }
@@ -239,14 +267,30 @@
         scrollDown(box);
       }
 
-      function useButton(n) {
+      /** Use beside an Out[n]: the button knows which namespace its Out[n]
+       *  is of (`token`), and says so - the numbers start again with every
+       *  namespace, and the Out[1] from before a Reset is not this one's. */
+      function useButton(n, token) {
         var b = button("Use", "Put Out[" + n + "] in the formula: over the selection, or as the whole formula when nothing is selected", "pc-use");
+        b.setAttribute("data-token", token || "");
         b.addEventListener("click", function () {
           var msg = where();
           msg.n = n;
+          msg.token = token;
           api.call("use", msg).catch(function (e) { api.error(String(e.message || e)); });
         });
         return b;
+      }
+      /** Another namespace is behind the panel (a Reset, %reset, another
+       *  session, Python started again): the outputs above are text from now
+       *  on, as last time's are, and their Use buttons go. */
+      function setToken(token) {
+        if (!token || token === state.token) return;
+        state.token = token;
+        var buttons = log.querySelectorAll(".pc-use");
+        for (var i = 0; i < buttons.length; i++) {
+          if (buttons[i].getAttribute("data-token") !== token) buttons[i].parentNode.removeChild(buttons[i]);
+        }
       }
 
       function drawCell(code, res, restored, where_) {
@@ -262,8 +306,9 @@
             typeset(math, res.out.latex, res.out.text);
             reusable(math, res.out.text);
             // (a restored Out[n] is only text now: no Use - that number means another value in this namespace)
+            var token = res.token || state.token;
             entry.appendChild(h("div", { class: "pc-out" }, [h("span", { class: "pc-prompt pc-prompt-out" }, ["Out[" + n + "]:"]), math]
-              .concat(restored ? [] : [useButton(n)])));
+              .concat(restored || !token ? [] : [useButton(n, token)])));
           }
         }
         if (where_) log.insertBefore(entry, where_); else log.appendChild(entry);
@@ -271,22 +316,61 @@
       }
 
       /* ---- the transcript, kept as text between visits ---- */
-      function clip(text) {
-        text = String(text == null ? "" : text);
-        return text.length > TEXT_MAX ? text.slice(0, TEXT_MAX) + "\n…" : text;
+      function clip(text, max) {
+        max = max == null ? TEXT_MAX : max;
+        return text.length > max ? text.slice(0, max) + "\n…" : text;
       }
-      function keepCell(code, res, error) {
-        var cell = { code: code, n: res && res.n != null ? res.n : null, token: (res && res.token) || state.token, items: [] };
-        (res && res.items || []).forEach(function (it) {
-          var item = { kind: it.kind, text: clip(it.text) };
-          if (it.latex && it.latex.length <= TEXT_MAX) item.latex = it.latex;
+      /** A cell as it is kept, or null for what is not one.  It is what is
+       *  written and what is read back: written, so that sixty cells stay a
+       *  few hundred kilobytes whatever they printed (the input, each output,
+       *  the outputs of a cell and their number have a bound each); read,
+       *  because what is kept is a file, and one cell of it with `items:
+       *  "abc"` stopped all the others from being drawn, at every visit. */
+      function cleanCell(c) {
+        if (!c || typeof c !== "object" || typeof c.code !== "string") return null;
+        var cell = { code: c.code, n: typeof c.n === "number" && isFinite(c.n) ? c.n : null,
+                     token: typeof c.token === "string" ? c.token : null, items: [] };
+        // An input cut short is kept to be read, and marked: it is not run again.
+        if (c.code.length > CODE_MAX) { cell.code = c.code.slice(0, CODE_MAX); cell.cut = true; }
+        else if (c.cut === true) cell.cut = true;
+        var room = CELL_MAX, dropped = false;
+        (Array.isArray(c.items) ? c.items : []).forEach(function (it) {
+          if (!it || typeof it !== "object" || typeof it.text !== "string" || !KINDS.hasOwnProperty(it.kind)) return;
+          if (it.kind === "error") { cell.items.push({ kind: "error", text: clip(it.text) }); return; }   // always: it is why the cell stopped
+          if (cell.items.length >= ITEMS_MAX || room <= 0) { dropped = true; return; }
+          var item = { kind: it.kind, text: clip(it.text, Math.min(TEXT_MAX, room)) };
+          room -= item.text.length;
+          if (typeof it.latex === "string" && it.latex.length <= Math.min(TEXT_MAX, room)) { item.latex = it.latex; room -= it.latex.length; }
           cell.items.push(item);
         });
-        if (error) cell.items.push({ kind: "error", text: clip(error) });
-        if (res && res.out) cell.out = { text: clip(res.out.text), latex: res.out.latex && res.out.latex.length <= TEXT_MAX ? res.out.latex : null };
-        state.transcript.push(cell);
-        if (state.transcript.length > TRANSCRIPT_MAX) state.transcript = state.transcript.slice(-TRANSCRIPT_MAX);
+        if (dropped) cell.items.push({ kind: "stdout", text: CUT_NOTE });
+        if (c.out && typeof c.out === "object" && typeof c.out.text === "string") {
+          cell.out = { text: clip(c.out.text), latex: typeof c.out.latex === "string" && c.out.latex.length <= TEXT_MAX ? c.out.latex : null };
+        }
+        return cell;
+      }
+      /** The cells that are kept: the last TRANSCRIPT_MAX, and of those as
+       *  many of the latest as fit in KEPT_MAX characters. */
+      function boundTranscript(cells) {
+        cells = cells.slice(-TRANSCRIPT_MAX);
+        var sizes = cells.map(function (c) { return JSON.stringify(c).length; });
+        var total = sizes.reduce(function (a, b) { return a + b; }, 0);
+        while (cells.length > 1 && total > KEPT_MAX) { total -= sizes.shift(); cells.shift(); }
+        return cells;
+      }
+      function keepCell(code, res, error) {
+        var items = (res && Array.isArray(res.items) ? res.items : []).concat(error ? [{ kind: "error", text: String(error) }] : []);
+        var cell = cleanCell({ code: code, n: res ? res.n : null, token: (res && res.token) || state.token,
+                               items: items, out: res ? res.out : null });
+        if (!cell) return;
+        state.transcript = boundTranscript(state.transcript.concat([cell]));
         keepWrite("console-transcript", JSON.stringify(state.transcript));
+      }
+      /** A kept cell, drawn - each in a try of its own: one that cannot be
+       *  drawn must not take along the ones after it. */
+      function drawKept(c, restored, first) {
+        try { drawCell(c.code, { n: c.n != null ? c.n : "?", token: c.token, items: c.items, out: c.out || null }, restored, first); }
+        catch (e) { if (window.console) console.warn("sympy-editor console: a kept cell could not be drawn", e); }
       }
       /** Last time's cells, faded, above anything run in this visit: their
        *  inputs as they were typed and their outputs as text - the Python
@@ -297,17 +381,23 @@
         var again = button("Run all again", "Run these inputs again, in order, in this session's Python (stops at the first error)", "pc-rerun");
         head.appendChild(again);
         log.insertBefore(head, first);
-        cells.forEach(function (c) {
-          if (!c || typeof c.code !== "string") return;
-          drawCell(c.code, { n: c.n != null ? c.n : "?", items: c.items || [], out: c.out || null }, true, first);
-        });
+        cells.forEach(function (c) { drawKept(c, true, first); });
         again.addEventListener("click", function () {
           if (state.running) return;
           again.disabled = true;
-          var codes = cells.map(function (c) { return c && c.code; }).filter(function (c) { return typeof c === "string" && c.trim(); });
           var chain = Promise.resolve(true);
-          codes.forEach(function (code) {
-            chain = chain.then(function (ok) { return ok ? execute(code, true) : false; });
+          cells.forEach(function (c) {
+            if (!c.code.trim()) return;
+            chain = chain.then(function (ok) {
+              if (!ok) return false;
+              if (c.cut) {
+                // Half an input is another input: it is not run, and what
+                // comes after it may need what it defined.
+                note(log, "In [" + (c.n != null ? c.n : "?") + "] was too long to be kept whole: it is not run again, and the run stops here.", "pc-note-bad");
+                return false;
+              }
+              return execute(c.code, true);
+            });
           });
           chain.then(function () { again.disabled = false; input.focus({ preventScroll: true }); });
         });
@@ -329,7 +419,7 @@
       function followUp(res) {
         if (!res) return Promise.resolve();
         if (res.token && state.token && res.token !== state.token) note(log, "A new namespace: the variables above are gone.", "pc-note-new");
-        if (res.token) state.token = res.token;
+        if (res.token) setToken(res.token);
         if (res.next) setNext(res.next);
         var p = res.changed ? Promise.resolve(api.send({ action: "snapshot" })) : Promise.resolve();
         return p.then(function () {
@@ -550,7 +640,7 @@
        *  menu opened by itself, so a long list of plain names stays shut. */
       function askCompletions(auto) {
         var w = wordBeforeCaret();
-        if (!w) { closeMenu(); return; }
+        if (!w || gone) { closeMenu(); return; }
         var seq = ++comp.seq;
         api.call("complete", { code: input.value, pos: w.pos }, { quiet: true }).then(function (res) {
           if (seq !== comp.seq || !res) return;
@@ -655,7 +745,7 @@
       clearBtn.addEventListener("click", clear);
       resetBtn.addEventListener("click", function () {
         api.call("reset", {}).then(function (res) {
-          if (res && res.token) state.token = res.token;
+          if (res && res.token) setToken(res.token);
           if (res && res.next) setNext(res.next);
           note(state.mode === "script" ? scriptOut : log, "A fresh namespace: SymPy, editor and the formula's names.", "pc-note-new");
         }, function (e) { api.error(String(e.message || e)); });
@@ -724,11 +814,18 @@
           if (!c) return;
           if (state.token && c.token !== state.token) {
             note(log, "A new namespace (another session, or Python restarted): the variables above are gone.", "pc-note-new");
-            state.token = c.token;
+            setToken(c.token);
           }
           if (c.next) setNext(c.next);
         },
-        destroy: function () { clearTimeout(scriptTimer); }
+        destroy: function () {
+          gone = true;
+          // What was typed in the last moment is kept now - the timer that
+          // would have kept it goes with the panel - and the menu's own timer
+          // must not ask Python for a panel that is not there.
+          if (scriptTimer !== null) keepScriptNow();
+          closeMenu();
+        }
       };
     }
   });

@@ -8,6 +8,7 @@ self-contained Pyodide page (downloads Pyodide + SymPy, ~30 s).
 """
 
 import json
+import sympy
 import os
 import socket
 import threading
@@ -689,7 +690,7 @@ def test_touch_range_drag_leaves_the_toolbar_alone_until_it_settles(browser, ser
     page.wait_for_function("document.querySelector('.se-source').textContent === 'x**2 + y + z'")
     terms = _display_children(page, "/")
     x, two = _display_children(page, terms[0])
-    unwrap = ed + ".actions.querySelector('button[data-cmd=\"unwrap\"]').disabled"
+    unwrap = ed + ".buttons.unwrap.disabled"
     _touch(page, "pointerdown", x)
     assert _wait(lambda: page.locator(".se-status").inner_text() == "Symbol: x", timeout=2)
     assert page.evaluate(unwrap) is True
@@ -1097,7 +1098,6 @@ def test_edge_of_a_matrix_entry_extends_it(browser, serve_expr):
     page.keyboard.press("ArrowDown")
     assert page.locator(".se-caret").count() == 1 and page.locator(".se-selected").count() == 0
     assert page.locator(".se-box-select").count() == 0 and page.locator(".se-source mark").count() == 0
-    assert not page.locator(".se-actions").is_visible()
     # ↑ inside a matrix is a row up (the caret is in the bottom row here), and
     # the row above having none, the next ↑ selects what the caret is beside -
     # the way out of a grid, and what ↑ does at a caret everywhere else
@@ -1247,33 +1247,38 @@ def test_unwrap_asks_which_argument_to_keep(browser, serve_expr):
     assert page.errors == []
 
 
-def test_floating_action_bar_click_and_tap(browser, serve_expr):
+def test_no_bar_floats_under_the_selection(browser, serve_expr):
+    """Nothing pops up under a selection: the arrows are in the row under the
+    formula, at its left, and the edits on the tool strip - each command in
+    one fixed place."""
     from sympy import cos
     t = symbols("theta")
     srv, doc = serve_expr(x * cos(t) + y)
     page = _open(browser, srv.url)
-    bar = page.locator(".se-actions")
-    assert not bar.is_visible()
+    row, tools = page.locator(".se-keyrow"), page.locator(".se-toolbar")
     _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "theta"))
     page.keyboard.press("ArrowUp")
-    assert bar.is_visible()
-    box = page.locator(".se-box-select").bounding_box()
-    bb = bar.bounding_box()
-    assert bb["y"] >= box["y"] + box["height"]                # right under the selection
-    bar.locator('[data-cmd="child"]').click()                 # ↓ button: back into theta
+    assert page.locator(".se-actions").count() == 0
+    assert page.evaluate("document.querySelector('.se-view').style.paddingBottom") == ""   # no room kept for one
+    # the row: right under the formula, the arrows from its left edge, in a line
+    vb, rb = page.locator(".se-view").bounding_box(), row.bounding_box()
+    assert 0 <= rb["y"] - (vb["y"] + vb["height"]) < 12, (vb, rb)
+    boxes = [row.locator(f'[data-cmd="{c}"]').bounding_box() for c in ("left", "right", "parent", "child")]
+    assert abs(boxes[0]["x"] - vb["x"]) < 4, (boxes, vb)
+    assert len({round(b["y"]) for b in boxes}) == 1 and [b["x"] for b in boxes] == sorted(b["x"] for b in boxes)
+    assert tools.locator('[data-cmd="parent"], [data-cmd="left"]').count() == 0            # and nowhere else
+    assert not row.locator('[data-cmd="keyboard"]').is_visible()                           # a mouse: no keyboard button
+    row.locator('[data-cmd="child"]').click()                 # ↓ button: back into theta
     assert page.locator(".se-status").inner_text() == "Symbol: theta"
-    bar.locator('[data-cmd="child"]').click()                 # ↓ on an atom: a caret after it, bar gone
-    assert page.locator(".se-caret").count() == 1 and not bar.is_visible()
+    row.locator('[data-cmd="child"]').click()                 # ↓ on an atom: a caret after it
+    assert page.locator(".se-caret").count() == 1
     page.keyboard.press("ArrowUp")                            # back on theta
-    page.locator('.se-toolbar [data-cmd="parent"]').click()   # toolbar ↑ to cos(theta)
+    row.locator('[data-cmd="parent"]').click()                # ↑ to cos(theta)
     assert page.locator(".se-status").inner_text() == "cos: cos(theta)"
-    _next_state(page, lambda: bar.locator('[data-cmd="unwrap"]').click())
+    _next_state(page, lambda: tools.locator('[data-cmd="unwrap"]').click())
     assert doc.expr == x * t + y
-    assert bar.is_visible()                                   # the selection survives on the changed node
-    page.keyboard.press("Escape")
-    assert not bar.is_visible()                               # nothing selected: no bar
     _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "y"))
-    _next_state(page, lambda: bar.locator('[data-cmd="delete"]').click())
+    _next_state(page, lambda: tools.locator('[data-cmd="delete"]').click())
     assert doc.expr == x * t
     # by finger
     ctx = browser.new_context(has_touch=True, is_mobile=True, viewport={"width": 420, "height": 800})
@@ -1282,13 +1287,66 @@ def test_floating_action_bar_click_and_tap(browser, serve_expr):
     tp.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
     cx, cy = _center(tp, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "theta"))
     tp.touchscreen.tap(cx, cy)
-    tp.locator(".se-actions [data-cmd=\"parent\"]").tap()   # x*theta
+    tp.locator(".se-keyrow [data-cmd=\"parent\"]").tap()   # x*theta
     assert tp.locator(".se-status").inner_text().startswith("Mul")
-    tp.locator(".se-actions [data-cmd=\"unwrap\"]").tap()   # two factors: the chooser asks
+    tp.locator(".se-toolbar [data-cmd=\"unwrap\"]").tap()   # two factors: the chooser asks
     tp.locator(".se-keep").wait_for(state="visible")
     tp.locator(".se-keep button", has_text="theta").first.tap()   # keep theta
     tp.wait_for_function("document.querySelector('.se-source').textContent === 'theta'")
     assert doc.expr == t
+    ctx.close()
+    assert page.errors == []
+
+
+def test_the_keyboard_button_sits_under_the_formula_and_blinks(browser, serve_expr):
+    """On a touch screen the keyboard's button is an icon just under the
+    formula, at the right; it blinks when a selection or a caret appears,
+    not for the same one again, and opens the field.  With a mouse there is
+    no such button."""
+    srv, doc = serve_expr(x * y + z)
+    page = _open(browser, srv.url)
+    assert not page.locator('[data-cmd="keyboard"]').is_visible()
+    ctx = browser.new_context(has_touch=True, is_mobile=True, viewport={"width": 420, "height": 800})
+    tp = ctx.new_page()
+    errors = []
+    tp.on("pageerror", lambda e: errors.append(str(e)))
+    tp.goto(srv.url)
+    tp.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    key = tp.locator('[data-cmd="keyboard"]')
+    assert key.count() == 1 and key.is_visible()
+    assert tp.locator('.se-toolbar [data-cmd="keyboard"]').count() == 0
+    assert key.inner_text().strip() == "" and key.locator("svg").count() == 1   # the icon alone
+    kb, vb = key.bounding_box(), tp.locator(".se-view").bounding_box()
+    sb = tp.locator(".se-source").bounding_box()
+    assert 0 <= kb["y"] - (vb["y"] + vb["height"]) < 12, (kb, vb)               # just beneath the formula
+    assert abs(kb["x"] + kb["width"] - (vb["x"] + vb["width"])) < 4, (kb, vb)   # at its right end
+    assert kb["y"] + kb["height"] <= sb["y"] + 1, (kb, sb)                      # over the source line
+    assert kb["width"] >= 40 and kb["height"] >= 32                             # a finger's target
+    ab = [tp.locator(f'.se-keyrow [data-cmd="{c}"]').bounding_box() for c in ("left", "right", "parent", "child")]
+    assert abs(ab[0]["x"] - vb["x"]) < 4 and ab[3]["x"] + ab[3]["width"] < kb["x"], (ab, kb)   # the arrows at the left of its row
+    assert all(abs(b["y"] + b["height"] / 2 - kb["y"] - kb["height"] / 2) < 3 for b in ab), (ab, kb)
+    assert all(b["width"] >= 40 for b in ab), ab
+    hinting = lambda: tp.evaluate("document.querySelector('[data-cmd=\"keyboard\"]').classList.contains('se-hint')")
+    assert not hinting()                                                        # nothing selected: it rests
+    nodes = doc.snapshot()["nodes"]
+    tp.touchscreen.tap(*_center(tp, next(k for k, v in nodes.items() if v["src"] == "z")))
+    assert _wait(hinting)
+    top = tp.locator(".se-source").bounding_box()["y"]
+    assert tp.evaluate("getComputedStyle(document.querySelector('[data-cmd=\"keyboard\"]')).animationName") == "se-key-hint"
+    assert _wait(lambda: not hinting(), timeout=6)                              # a few beats, then it rests
+    assert tp.locator(".se-source").bounding_box()["y"] == top                  # and nothing moved
+    # the same selection drawn again does not blink; a caret does
+    tp.evaluate("document.querySelector('.sympy-editor').__sympyEditor._updateToolbar()")
+    assert not hinting()
+    tp.evaluate("document.querySelector('.sympy-editor').__sympyEditor._caretAtEnd('end')")
+    assert _wait(hinting)
+    # another selection, and the button opens the field for it
+    tp.touchscreen.tap(*_center(tp, next(k for k, v in nodes.items() if v["src"] == "x")))
+    assert _wait(hinting)
+    key.tap()
+    tp.locator("input.se-inline").wait_for(state="visible")
+    assert not hinting()
+    assert errors == []
     ctx.close()
     assert page.errors == []
 
@@ -1328,7 +1386,7 @@ def test_copy_cut_paste_of_a_selection(browser, serve_expr):
     p2.goto(srv.url)
     p2.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
     _click(p2, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "y"))
-    p2.locator(".se-actions [data-cmd=\"copy\"]").click()
+    p2.locator(".se-toolbar [data-cmd=\"copy\"]").click()
     assert p2.evaluate("navigator.clipboard.readText()") == "y"
     ctx.close()
     assert page.errors == []
@@ -1479,13 +1537,6 @@ def test_long_formula_scrolls_sideways_and_fits_a_phone(browser, serve_expr):
     assert page.evaluate("getComputedStyle(document.querySelector('.se-tools')).flexWrap") == "wrap"
     rows = page.evaluate("(() => { const tops = new Set([...document.querySelectorAll('.se-tools [data-cmd]')].map(b => Math.round(b.getBoundingClientRect().top))); return tops.size; })()")
     assert rows >= 2 and page.evaluate("(() => { const t = document.querySelector('.se-tools'); return t.scrollWidth <= t.clientWidth; })()")
-    # the action bar under a selection wraps as well instead of running off the screen
-    _click(page, "/0")
-    bar = page.locator(".se-actions").bounding_box()
-    root = page.locator(".sympy-editor").bounding_box()
-    assert bar["x"] >= root["x"] and bar["x"] + bar["width"] <= root["x"] + root["width"] + 1
-    assert page.evaluate("(() => { const tops = new Set([...document.querySelectorAll('.se-actions button')].map(b => Math.round(b.getBoundingClientRect().top))); return tops.size; })()") >= 2
-    page.keyboard.press("Escape")
     # a plain wheel over the formula scrolls it sideways instead of the page
     r = view.bounding_box()
     page.mouse.move(r["x"] + r["width"] / 2, r["y"] + r["height"] / 2)
@@ -1702,35 +1753,35 @@ def test_arrow_buttons_move_the_selection_and_the_caret(browser, serve_expr):
     page = _open(browser, srv.url)
     kids = _display_children(page, "/")
     _click(page, kids[0])
-    page.locator('.se-toolbar [data-cmd="right"]').click()
+    page.locator('.se-keyrow [data-cmd="right"]').click()
     assert page.locator(".se-selected").get_attribute("data-path") == kids[1]
-    page.locator('.se-actions [data-cmd="right"]').click()
+    page.locator('.se-keyrow [data-cmd="right"]').click()
     assert page.locator(".se-selected").get_attribute("data-path") == kids[2]
-    page.locator('.se-actions [data-cmd="left"]').click()
+    page.locator('.se-keyrow [data-cmd="left"]').click()
     assert page.locator(".se-selected").get_attribute("data-path") == kids[1]
     # with a caret, the buttons move it between the terms
     page.keyboard.press("Tab")                                     # caret after b
     assert page.locator(".se-caret").count() == 1
     gap = "(() => { const c = document.querySelector('.sympy-editor').__sympyEditor.caret; return [c.index, c.attach || null, document.querySelector('.se-caret').getBoundingClientRect().left]; })()"
     i1, at1, x1 = page.evaluate(gap)
-    page.locator('.se-toolbar [data-cmd="right"]').click()
+    page.locator('.se-keyrow [data-cmd="right"]').click()
     i2, at2, x2 = page.evaluate(gap)
     # The operator is drawn between the two terms, so the first step to the
     # right crosses it: the same gap, its other side.
     assert (i2, at2) == (i1, "right") and at1 == "left" and x2 > x1
-    page.locator('.se-toolbar [data-cmd="right"]').click()
+    page.locator('.se-keyrow [data-cmd="right"]').click()
     i2b, at2b, x2b = page.evaluate(gap)
     assert i2b == i1 + 1 and x2b > x2                              # and the next step reaches the next gap
-    page.locator('.se-toolbar [data-cmd="left"]').click()
+    page.locator('.se-keyrow [data-cmd="left"]').click()
     i3, at3, x3 = page.evaluate(gap)
     assert (i3, at3) == (i2, at2) and x3 < x2b                     # back the way it came
-    page.locator('.se-toolbar [data-cmd="left"]').click()          # and back to where it started
+    page.locator('.se-keyrow [data-cmd="left"]').click()          # and back to where it started
     i4, at4, x4 = page.evaluate(gap)
     assert (i4, at4) == (i1, at1) and x4 == x1
     # with a caret, ↓ is disabled and ↑ selects the atom the caret is attached to
-    assert page.locator('.se-toolbar [data-cmd="child"]').is_disabled()
-    assert page.locator('.se-toolbar [data-cmd="parent"]').is_enabled()
-    page.locator('.se-toolbar [data-cmd="parent"]').click()
+    assert page.locator('.se-keyrow [data-cmd="child"]').is_disabled()
+    assert page.locator('.se-keyrow [data-cmd="parent"]').is_enabled()
+    page.locator('.se-keyrow [data-cmd="parent"]').click()
     assert page.locator(".se-caret").count() == 0 and page.locator(".se-selected").get_attribute("data-path") == kids[1]
     assert page.errors == []
 
@@ -1749,7 +1800,7 @@ def test_caret_walks_through_atoms_across_levels(browser, serve_expr):
     caret = "(() => { const c = document.querySelector('.sympy-editor').__sympyEditor.caret; return c && {path: c.path, extend: c.extend || null, index: c.index, attach: c.attach || null, x: document.querySelector('.se-caret').getBoundingClientRect().left}; })()"
     start = page.evaluate(caret)
     assert (start["path"], start["index"], start["attach"]) == ("/", 1, "left")
-    right = page.locator('.se-toolbar [data-cmd="right"]')
+    right = page.locator('.se-keyrow [data-cmd="right"]')
     steps = []
     for _ in range(6):
         assert right.is_enabled()
@@ -1767,7 +1818,7 @@ def test_caret_walks_through_atoms_across_levels(browser, serve_expr):
     assert all(steps[i]["x"] > steps[i - 1]["x"] for i in range(1, 6)) and steps[0]["x"] > start["x"]
     assert right.is_disabled()
     # back: the same positions in reverse, strictly leftwards, down to the start of the sum, where ← is disabled
-    left = page.locator('.se-toolbar [data-cmd="left"]')
+    left = page.locator('.se-keyrow [data-cmd="left"]')
     back = []
     for _ in range(7):
         assert left.is_enabled()
@@ -1784,7 +1835,7 @@ def test_caret_walks_through_atoms_across_levels(browser, serve_expr):
     for _ in range(5):
         right.click()
     assert page.evaluate(caret)["extend"] == "before"
-    page.locator('.se-toolbar [data-cmd="parent"]').click()
+    page.locator('.se-keyrow [data-cmd="parent"]').click()
     assert page.locator(".se-selected").get_attribute("data-path") == pb and page.locator(".se-caret").count() == 0
     assert page.errors == []
 
@@ -1849,19 +1900,19 @@ def test_caret_enters_a_rational_and_its_parts_are_editable(browser, serve_expr)
     caret = "(() => { const c = document.querySelector('.sympy-editor').__sympyEditor.caret; return c && [c.path, c.extend || null]; })()"
     # ←/→ from nothing: a caret at the start / the end
     page.locator(".se-view").focus()
-    page.locator('.se-toolbar [data-cmd="right"]').click()
+    page.locator('.se-keyrow [data-cmd="right"]').click()
     assert page.evaluate(caret) == ["/", None] and page.locator(".se-caret").count() == 1
-    assert page.locator('.se-toolbar [data-cmd="right"]').is_disabled()       # nothing further right
-    assert page.locator('.se-toolbar [data-cmd="left"]').is_enabled()
+    assert page.locator('.se-keyrow [data-cmd="right"]').is_disabled()       # nothing further right
+    assert page.locator('.se-keyrow [data-cmd="left"]').is_enabled()
     # walking left enters the number: after the denominator, before it, after the numerator, before it
-    left = page.locator('.se-toolbar [data-cmd="left"]')
+    left = page.locator('.se-keyrow [data-cmd="left"]')
     seen = []
     for _ in range(4):
         left.click()
         seen.append(page.evaluate(caret))
     assert seen == [[pr + "/d", "after"], [pr + "/d", "before"], [pr + "/n", "after"], [pr + "/n", "before"]]
     # the numerator is selectable and editable
-    page.locator('.se-toolbar [data-cmd="parent"]').click()
+    page.locator('.se-keyrow [data-cmd="parent"]').click()
     assert page.locator(".se-selected").get_attribute("data-path") == pr + "/n"
     page.keyboard.type("3")
     _next_state(page, lambda: page.keyboard.press("Enter"))
@@ -1871,8 +1922,8 @@ def test_caret_enters_a_rational_and_its_parts_are_editable(browser, serve_expr)
     _next_state(page, lambda: page.keyboard.press("Enter"))
     assert doc.expr == x + 3 / y
     page.keyboard.press("Escape")
-    page.locator('.se-toolbar [data-cmd="left"]').click()                    # from nothing: the start
-    assert page.evaluate(caret) == ["/", None] and page.locator('.se-toolbar [data-cmd="left"]').is_disabled()
+    page.locator('.se-keyrow [data-cmd="left"]').click()                    # from nothing: the start
+    assert page.evaluate(caret) == ["/", None] and page.locator('.se-keyrow [data-cmd="left"]').is_disabled()
     assert page.errors == []
 
 
@@ -2321,7 +2372,7 @@ def test_touch_tap_again_edits_and_caret_tap_inserts(browser, serve_expr):
     page.keyboard.press("Enter")
     page.wait_for_function("document.querySelector('.se-source').textContent === 'y + z + 2'")
     # the keyboard button: visible on touch devices, opens a field for the selection
-    kb = page.locator('.se-toolbar [data-cmd="keyboard"]')
+    kb = page.locator('.se-keyrow [data-cmd="keyboard"]')
     assert kb.is_visible()
     x0, y0 = _center(page, "/0")
     page.touchscreen.tap(x0, y0)
@@ -2341,8 +2392,8 @@ def test_touch_tap_again_edits_and_caret_tap_inserts(browser, serve_expr):
 def test_keyboard_button_hidden_with_a_mouse(browser, serve_expr):
     srv, doc = serve_expr(x + y)
     page = _open(browser, srv.url)
-    assert page.locator('.se-toolbar [data-cmd="keyboard"]').count() == 1
-    assert not page.locator('.se-toolbar [data-cmd="keyboard"]').is_visible()
+    assert page.locator('.se-keyrow [data-cmd="keyboard"]').count() == 1
+    assert not page.locator('.se-keyrow [data-cmd="keyboard"]').is_visible()
     # double-clicking a gap opens the insertion field, not an edit of the whole expression
     gx, gy = _gap_between(page, "/0", "/1")
     page.mouse.dblclick(gx, gy)
@@ -2825,18 +2876,18 @@ def test_the_tools_are_laid_out_in_columns(browser, serve_expr):
         return out;
     }""")
     by = {b["name"]: b for b in blocks}
-    assert {"session", "zoom", "sessions", "nav", "edit", "clip", "apply"} <= set(by), blocks
+    assert {"session", "zoom", "sessions", "edit", "clip", "apply"} <= set(by), blocks
+    assert "nav" not in by, blocks                                 # the arrows are under the formula
     rows = sorted({b["top"] for b in blocks})
-    assert len(rows) == 3, blocks                                  # two rows of three, then the wide one
+    assert len(rows) == 3, blocks                                  # a row of three, one of two, then the wide one
     # a block never breaks apart: what belongs together stays on one line
     assert by["session"]["top"] == by["zoom"]["top"] == by["sessions"]["top"] == rows[0]
-    assert by["nav"]["top"] == by["edit"]["top"] == by["clip"]["top"] == rows[1]
+    assert by["edit"]["top"] == by["clip"]["top"] == rows[1]
     assert by["apply"]["top"] == rows[2] and by["apply"]["wide"]
     # left column flush left, right column flush right, middle centred
-    assert by["session"]["left"] <= 1 and by["nav"]["left"] <= 1, blocks
+    assert by["session"]["left"] <= 1 and by["edit"]["left"] <= 1, blocks
     assert by["sessions"]["right"] <= 1 and by["clip"]["right"] <= 1, blocks
     assert abs(by["zoom"]["left"] - by["zoom"]["right"]) <= 2, blocks
-    assert abs(by["edit"]["left"] - by["edit"]["right"]) <= 2, blocks
     assert by["apply"]["left"] <= 1 and by["apply"]["right"] <= 1, blocks
     page.close()
 
@@ -2893,9 +2944,7 @@ def test_navigation_arrows_are_one_uniform_set(browser, serve_expr):
         }
         return out;
     }"""
-    for root in (".se-toolbar", ".se-actions"):
-        if root == ".se-actions":
-            _select(page, "/0")                                   # the floating bar needs a selection
+    for root in (".sympy-editor",):                               # the arrows under the formula, Edit on the strip
         m = page.evaluate(MEASURE, root)
         arrows = [m[c] for c in ("parent", "child", "left", "right")]
         assert all(a["icon"] for a in arrows), (root, m)          # drawn, not typed
@@ -3761,7 +3810,7 @@ def test_the_app_wears_its_own_icon_beside_its_name(browser, serve_expr):
     srv, doc = serve_expr(x + y, logo=logo)
     page = _open(browser, srv.url)
     assert page.locator("h1 .page-logo svg").count() == 1
-    assert page.locator(".se-toolbar svg.se-icon").count() > 0        # the arrows, and no mark
+    assert page.locator(".se-keyrow svg.se-icon").count() > 0        # the arrows, and no mark
     assert page.locator(".sympy-editor .page-logo").count() == 0
     where = page.evaluate("""() => {
         const mark = document.querySelector('h1 .page-logo').getBoundingClientRect();
@@ -3851,7 +3900,6 @@ def test_dragging_over_the_source_line_selects_in_the_formula(browser, serve_exp
     assert page.evaluate("String(getSelection())") == "sin(x)"      # the text really is selected
     assert page.locator(".se-status").inner_text() == "sin: sin(x)"  # and the formula followed
     assert page.locator(".se-view .se-selected").count() >= 1
-    assert not page.locator(".se-actions").is_visible()              # the bar keeps out of the way
     # a caret in the line hints at the node it falls in, without selecting
     page.mouse.click(where["left"] + 2, where["y"])
     assert page.evaluate("String(getSelection())") == ""
@@ -4202,7 +4250,7 @@ def test_down_from_an_operator_drops_to_the_caret_it_stands_for(browser, serve_e
         ed = "document.querySelector('.sympy-editor').__sympyEditor"
         assert _wait(lambda: page.evaluate(f"(() => !!{ed}.junction)()"))
         if how == "button":
-            page.locator('.se-toolbar [data-cmd="child"]').click()
+            page.locator('.se-keyrow [data-cmd="child"]').click()
         else:
             page.locator(".se-view").press("ArrowDown")
         assert _wait(lambda: page.evaluate(f"(() => !!{ed}.caret)()")), how
@@ -4283,7 +4331,7 @@ def test_either_side_of_an_operator_is_a_place_of_its_own(browser, serve_expr, e
         assert glyph, expr_src
         page.mouse.click(glyph[0], glyph[1])
         assert _wait(lambda: page.evaluate(f"(() => !!{ed}.junction)()")), expr_src
-        page.locator('.se-toolbar [data-cmd="child"]').click()
+        page.locator('.se-keyrow [data-cmd="child"]').click()
         assert _wait(lambda: page.evaluate(f"(() => !!{ed}.caret)()")), (expr_src, side)
         if side == "left":
             page.locator(".se-view").press("ArrowLeft")     # the other side of the glyph
@@ -5094,7 +5142,7 @@ def test_a_function_at_a_caret_is_added_there(browser, serve_expr):
 
 
 def test_matrix_rows_columns_and_the_resize_grip(browser, serve_expr):
-    """In a matrix the action bar adds and removes rows and columns of the
+    """In a matrix the row under the formula adds and removes rows and columns of the
     selection's row / column, and the grip on the bottom-right corner resizes
     the matrix by dragging, a cell at a time, with an outline of the size it
     will get.  Outside a matrix none of it shows."""
@@ -5107,7 +5155,7 @@ def test_matrix_rows_columns_and_the_resize_grip(browser, serve_expr):
     mats = [k for k, v in nodes.items() if v.get("matrix")]
     entry7 = next(k for k, v in nodes.items() if v["src"] == "7")
     xpath = next(k for k, v in nodes.items() if v["src"] == "x")
-    bar = page.locator(".se-actions")
+    bar = page.locator(".se-keyrow")
     grip = page.locator(".se-mat-handle")
     # a scalar factor beside the matrix: no matrix tools
     _click(page, xpath)
@@ -5575,3 +5623,472 @@ def test_what_the_browser_kept_moves_to_the_app_and_goes(browser, serve_expr):
     assert page.evaluate("window.SympyEditorApp.kept.zoom") == "2"
     assert page.evaluate("localStorage.getItem('sympy-editor:zoom')") is None
     assert page.errors == []
+
+
+@pytest.mark.skipif(not os.environ.get("SYMPY_EDITOR_SLOW_TESTS"), reason="set SYMPY_EDITOR_SLOW_TESTS=1")
+def test_one_package_that_cannot_be_installed_does_not_take_the_others(browser, tmp_path):
+    """micropip installs a list or none of it: one requirement with no wheel
+    for Pyodide (the handwriting add-on's onnxruntime) took every other
+    add-on's with it, and the LaTeX add-on had no lark."""
+    from sympy_editor.html import build_config, render_page
+    cfg = build_config(Document(x + 1), backend="pyodide")
+    cfg["micropip"] = ["no-such-package-of-sympy-editor-tests", "lark"]
+    path = tmp_path / "py.html"
+    path.write_text(render_page(cfg, "packages"), encoding="utf-8")
+    page = browser.new_page()
+    page.add_init_script("delete window.Worker")        # Python in the page itself, where it can be asked
+    page.goto(path.as_uri())
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    page.wait_for_function("document.querySelector('.se-loading').hidden", timeout=240000)
+    runtimes = "Object.values(window.__sympyEditorPyodide.runtimes)"
+    assert page.evaluate(f"{runtimes}.length") == 1
+    assert page.evaluate(f"{runtimes}[0].inPage.py.runPython('import lark; lark.__name__')") == "lark"
+    _click(page, '/0')
+    page.keyboard.type("y")
+    page.keyboard.press("Enter")
+    page.wait_for_function("document.querySelector('.se-source').textContent.includes('y')", timeout=180000)
+
+
+# -- an audit of the front end: keys, fields, the menus, an editor that goes --
+
+_ED = "document.querySelector('.sympy-editor').__sympyEditor"
+
+
+def _src(page):
+    return page.evaluate(_ED + ".state.src")
+
+
+def _idle(page):
+    page.wait_for_function("!%s.busy" % _ED, timeout=10000)
+
+
+def test_a_greek_name_is_shown_as_its_letter_only_when_the_letter_reads_back(browser, serve_expr):
+    """Several names share one letter - λ is lamda and lambda, Λ is Lamda and
+    Lambda, ε epsilon and varepsilon - and the letter reads back as the first:
+    `Lambda(x, x**2)` opened in a field and closed untouched came back as a
+    function called Lamda, committed as a step, and varepsilon as epsilon."""
+    srv, doc = serve_expr(y + sympy.Lambda(x, x**2))
+    page = _open(browser, srv.url)
+    names = page.evaluate("""() => { var bad = [];
+        ['alpha', 'theta', 'lamda', 'lambda', 'Lamda', 'Lambda', 'epsilon', 'varepsilon', 'oo', 'infty', 'pi', 'Gamma',
+         'gamma(x)', 'beta(a, b)', 'Lambda(x, x**2)', 'alphabet', 'beta1', 'theta_1 + eta', 'pixel*psi', 'zeta (s)']
+          .forEach(function (s) { if (SympyEditor.toSource(SympyEditor.toDisplay(s)) !== s) bad.push(s); });
+        return bad; }""")
+    assert names == []
+    assert page.evaluate("SympyEditor.toDisplay('theta + lamda*oo')") == "θ + λ*∞"
+    assert page.evaluate("SympyEditor.toDisplay('gamma(x) + gamma')") == "gamma(x) + γ"
+    before = doc.export()["history"]
+    _select(page, "/1")                                  # the Lambda
+    page.keyboard.press("Enter")
+    field = page.locator("input.se-inline")
+    field.wait_for()
+    assert field.input_value() == "Lambda(x, x**2)"
+    page.keyboard.press("Enter")
+    page.wait_for_timeout(400)
+    _idle(page)
+    assert doc.export()["history"] == before and page.locator(".se-error").is_hidden()
+    assert page.evaluate("SympyEditor.expandCommands('\\\\varepsilon ', 12, []).text") == "varepsilon "
+    assert page.errors == []
+
+
+@pytest.mark.parametrize("opener", ["help", "drawer", "history"])
+def test_what_is_open_over_the_formula_has_the_keyboard(browser, serve_expr, opener):
+    """A key pressed with the guide, the history or the drawer open went to
+    the formula behind it: Delete removed what was selected out of sight, a
+    letter opened a field under the overlay."""
+    srv, doc = serve_expr(x + y * z + sin(x) + 1, options={"sessions": True}, store=False)
+    page = _open(browser, srv.url)
+    page.wait_for_function(_ED + "._sessionsReady", timeout=10000)
+    _select(page, "/0")
+    page.locator(f'[data-cmd="{opener}"]').click()
+    shown = {"help": ".se-help-view", "drawer": ".se-drawer.se-open", "history": ".se-history-view:not(.se-help-view)"}[opener]
+    page.locator(shown).wait_for(timeout=15000)
+    for key in ("Delete", "Backspace", "a", "Enter"):
+        page.keyboard.press(key)
+    page.wait_for_timeout(400)
+    _idle(page)
+    assert str(doc.expr) == "x + y*z + sin(x) + 1" and page.locator("input.se-inline").count() == 0
+    page.keyboard.press("Escape")
+    assert _wait(lambda: page.locator(shown).count() == 0 or not page.locator(shown).is_visible())
+    # and the formula has it back
+    page.locator(".se-view").focus()
+    page.evaluate(_ED + ".select('/0')")
+    _next_state(page, lambda: page.keyboard.press("Delete"))
+    assert str(doc.expr) == "x + y*z + sin(x)"
+    assert page.errors == []
+
+
+def test_the_tools_answer_to_the_keyboard(browser, serve_expr):
+    """Enter and Space on a focused button or check box were taken for the
+    formula's: Enter on Undo opened a field on the selection and undid
+    nothing, Space on "unevaluated" left the box as it was."""
+    srv, doc = serve_expr(x + y)
+    page = _open(browser, srv.url)
+    _next_state(page, lambda: page.evaluate(_ED + ".send({action: 'set', src: 'x + y + 1'})"))
+    _select(page, "/0")
+    page.locator('[data-cmd="undo"]').focus()
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    assert str(doc.expr) == "x + y" and page.locator("input.se-inline").count() == 0
+    page.locator('[data-cmd="redo"]').focus()
+    _next_state(page, lambda: page.keyboard.press(" "))
+    assert str(doc.expr) == "x + y + 1" and page.locator("input.se-inline").count() == 0
+    box = page.locator(".se-lazy-box")
+    box.focus()
+    page.keyboard.press(" ")
+    assert box.is_checked() and page.locator("input.se-inline").count() == 0
+    assert page.errors == []
+
+
+@pytest.mark.parametrize("wait", [0, 900])
+def test_a_template_selects_its_first_slot_whenever_it_is_applied(browser, serve_expr, wait):
+    """Applied after its preview had been drawn, a template selected nothing:
+    the new state was compared with itself, where no slot is new.  Before
+    the preview it worked - what Enter did depended on how fast it came."""
+    srv, doc = serve_expr(x + y)
+    page = _open(browser, srv.url)
+    _select(page, "/")
+    page.keyboard.press("Delete")
+    page.locator("input.se-inline-empty").wait_for()
+    page.keyboard.type("\\sum ")
+    page.wait_for_timeout(wait)
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    _idle(page)
+    assert str(doc.expr).startswith("Sum(_1")
+    assert page.evaluate(_ED + ".selected") == page.evaluate(_ED + ".state.placeholders[0]")
+    assert page.errors == []
+
+
+def test_an_operator_that_is_refused_stays_selected(browser, serve_expr):
+    """The selection moved to the node before the answer was known: a change
+    that was refused left the node selected, the operator's palette gone -
+    and a second Del, meant for the operator, was the node's."""
+    srv, doc = serve_expr(x + y + z)
+    page = _open(browser, srv.url)
+    plus = page.locator(".se-view .mbin").first
+    box = plus.bounding_box()
+    page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    assert _wait(lambda: page.evaluate("!!%s.junction" % _ED))
+    was = page.evaluate("(function () { var j = %s.junction; return [j.path, j.left, j.right]; })()" % _ED)
+    page.keyboard.press("=")
+    page.wait_for_function("!document.querySelector('.se-error').hidden", timeout=10000)
+    _idle(page)
+    assert _wait(lambda: page.evaluate("!!%s.junction" % _ED))
+    assert page.evaluate("(function () { var j = %s.junction; return [j.path, j.left, j.right]; })()" % _ED) == was
+    assert page.evaluate(_ED + ".selected") is None and str(doc.expr) == "x + y + z"
+    assert page.locator(".se-opbar").is_visible()
+    _next_state(page, lambda: page.keyboard.press("*"))          # and it can still be changed
+    assert str(doc.expr) in ("x*y + z", "z + x*y")
+    assert page.errors == []
+
+
+def test_a_method_picked_at_a_caret_is_called_on_the_expression(browser, serve_expr):
+    """With a caret shown, whatever was picked was written at the caret - a
+    method too: ".expand(_1)" went in as text, and Python could not read it."""
+    srv, doc = serve_expr((x + 1) * (y + 2))
+    page = _open(browser, srv.url)
+    page.locator(".se-view").focus()
+    page.keyboard.press("ArrowRight")
+    assert _wait(lambda: page.evaluate("!!%s.caret" % _ED))
+    box = page.locator(".se-methods")
+    box.click()
+    box.fill(".expand")                                   # typed as the menu writes it, dot and all
+    menu = _pick_menu(page, ".se-methods")
+    assert _wait(lambda: menu.locator(".se-pick-item").count() >= 1)
+    assert menu.locator(".se-pick-item").first.get_attribute("data-name") == "expand"
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    _idle(page)
+    assert doc.expr == sympy.expand((x + 1) * (y + 2)) and page.locator(".se-error").is_hidden()
+    assert page.errors == []
+
+
+@pytest.mark.parametrize("typed, result", [("\\int", "Integral(_1, _2)"), ("\\lim", "Limit(_1, _2, _3, dir='+')"),
+                                           ("2\\le", None), ("\\sin", None)])
+def test_a_command_the_text_ends_with_is_a_command(browser, serve_expr, typed, result):
+    """"\\int" waits while it may still become "\\integral": sent as it stood
+    when Enter was pressed, it was no formula."""
+    srv, doc = serve_expr(x + y)
+    page = _open(browser, srv.url)
+    assert page.evaluate("(t) => SympyEditor.expandCommands(t, t.length, []).text", typed) == typed
+    final = page.evaluate("(t) => SympyEditor.expandCommands(t, t.length, [], true).text", typed)
+    assert "\\" not in final
+    if result is None:
+        return
+    _select(page, "/0")
+    page.keyboard.type(typed)
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    _idle(page)
+    assert str(sympy.srepr(doc.expr)).count("Placeholder") >= 2 and result.split("(")[0] in str(doc.expr)
+    assert page.locator(".se-error").is_hidden() and page.errors == []
+
+
+def test_two_templates_at_once_have_slots_of_their_own(browser, serve_expr):
+    srv, doc = serve_expr(x)
+    page = _open(browser, srv.url)
+    text = page.evaluate("SympyEditor.expandCommands('\\\\sum \\\\int ', 10, ['_1']).text")
+    assert text == "Sum(_2, (_3, _4, _5)) Integral(_6, _7) "
+
+
+def test_the_whole_expression_is_deleted_without_a_source_line(browser, serve_expr):
+    """Delete on the whole expression empties the view for a new one to be
+    typed - through the source line, which an editor made without one does
+    not have: nothing happened, and the key was taken all the same."""
+    srv, doc = serve_expr(x + y, options={"showSource": False})
+    page = _open(browser, srv.url)
+    _select(page, "/")
+    page.keyboard.press("Delete")
+    field = page.locator("input.se-inline-empty")
+    field.wait_for()
+    assert page.locator(".se-view.se-empty").count() == 1
+    page.keyboard.type("z**2")
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    _idle(page)
+    assert str(doc.expr) == "z**2" and page.errors == []
+
+
+def test_a_character_typed_with_altgr_is_typed(browser, serve_expr):
+    """On a German, Italian, French or Spanish keyboard \\ [ ] { } @ | ~ are
+    typed with AltGr, which Windows reports as Ctrl+Alt, and on a Mac with
+    Option: taken for shortcuts, they opened no field - "\\int" typed over a
+    selection came out as "int"."""
+    srv, doc = serve_expr(x + y)
+    page = _open(browser, srv.url)
+    press = """(init) => document.querySelector('.se-view').dispatchEvent(
+        new KeyboardEvent('keydown', Object.assign({bubbles: true, cancelable: true}, init)))"""
+    for init in ({"key": "\\", "ctrlKey": True, "altKey": True}, {"key": "{", "altKey": True},
+                 {"key": "[", "ctrlKey": True, "altKey": True}):
+        page.evaluate(_ED + ".select('/0')")
+        page.evaluate(press, init)
+        field = page.locator("input.se-inline")
+        field.wait_for()
+        assert field.input_value() == init["key"]
+        page.keyboard.press("Escape")
+        assert _wait(lambda: page.locator("input.se-inline").count() == 0)
+    # a shortcut is still a shortcut, and Alt with a letter is a menu's
+    page.evaluate(_ED + ".select('/0')")
+    for init in ({"key": "f", "altKey": True}, {"key": "b", "ctrlKey": True}, {"key": "k", "metaKey": True}):
+        page.evaluate(press, init)
+        assert page.locator("input.se-inline").count() == 0
+    assert page.errors == []
+
+
+def test_enter_that_ends_a_composition_does_not_apply_the_field(browser, serve_expr):
+    """An input method builds a character from several keys, and the Enter
+    that chooses it is part of that: it applied the field instead."""
+    srv, doc = serve_expr(x + y)
+    page = _open(browser, srv.url)
+    _select(page, "/0")
+    page.keyboard.press("Enter")
+    field = page.locator("input.se-inline")
+    field.wait_for()
+    field.fill("z")
+    page.evaluate("""() => document.querySelector('input.se-inline').dispatchEvent(
+        new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true, isComposing: true}))""")
+    page.wait_for_timeout(300)
+    assert page.locator("input.se-inline").count() == 1 and str(doc.expr) == "x + y"
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    assert str(doc.expr) == "y + z" and page.errors == []
+
+
+def test_the_function_list_arriving_leaves_a_field_alone(browser, serve_expr):
+    """The list of SymPy's functions is asked for at the box's first focus,
+    and its answer - a snapshot - was drawn as one: a field opened and typed
+    into while the list was on its way was closed, its text gone."""
+    srv, doc = serve_expr(x + y)
+    page = _open(browser, srv.url)
+    hold = {"route": None}
+
+    def late(route):
+        body = route.request.post_data or ""
+        if '"functions"' in body and hold["route"] is None:
+            hold["route"] = route                       # answered later, by hand
+        else:
+            route.continue_()
+
+    page.route(srv.url.rstrip("/") + "/api", late)
+    page.locator(".se-fn").click()
+    assert _until_route(page, hold)
+    page.keyboard.press("Escape")
+    _select(page, "/0")
+    page.keyboard.press("Enter")
+    field = page.locator("input.se-inline")
+    field.wait_for()
+    field.fill("x**2 + 5")
+    hold["route"].continue_()
+    page.wait_for_function(_ED + "._functionsLoaded === true", timeout=10000)
+    page.wait_for_timeout(300)
+    assert page.locator("input.se-inline").count() == 1 and field.input_value() == "x**2 + 5"
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    assert str(doc.expr) == "x**2 + y + 5"
+    assert "sin" in _menu_labels(page, ".se-fn")          # and the list is there
+    assert page.errors == []
+
+
+def _until_route(page, hold, timeout=5.0):
+    end = time.time() + timeout
+    while time.time() < end and hold["route"] is None:
+        page.wait_for_timeout(50)
+    return hold["route"] is not None
+
+
+def test_the_values_asked_for_are_for_what_was_selected_then(browser, serve_expr):
+    """The form of an operation with parameters remembered the path it was
+    opened for and read the range when Apply was pressed: a range selected
+    meanwhile went out under a path that was not its parent's."""
+    srv, doc = serve_expr(x**2 + y**2 + z)
+    page = _open(browser, srv.url)
+    sent = []
+    page.on("request", lambda r: sent.append(json.loads(r.post_data)) if r.method == "POST" and r.post_data else None)
+    page.evaluate(_ED + ".select(null)")
+    page.evaluate(_ED + "._applyOp('derive_by_array', " + _ED + ".opsSelect)")
+    form = page.locator(".se-fn-form")
+    form.wait_for()
+    page.evaluate("""() => { var ed = %s; ed.range = {parent: '/', anchor: 0, focus: 1}; ed.selected = null; ed._applySelection(); }""" % _ED)
+    form.locator("input").first.fill("[x, y]")
+    _next_state(page, lambda: form.locator(".se-fn-apply").click())
+    applied = [m for m in sent if m.get("action") == "apply"][-1]
+    assert applied["path"] == "/" and "children" not in applied, applied
+    assert page.errors == []
+
+
+def test_an_editor_that_has_gone_takes_no_answer_and_applies_no_field(browser, serve_expr):
+    """destroy() took the editor off the page and left it running: an
+    answer on its way was drawn, its add-ons mounted again, the sessions
+    written; and the field left open, blurred by the removal, was applied -
+    half a formula went out as the edit."""
+    from sympy_editor.ops import Op
+
+    def slow(expr):
+        time.sleep(1.0)
+        return expr + 1
+
+    doc = Document(x + y, ops={"slow": Op("slow", "Slow", slow)}, addons=[_demo_addon()[0]])
+    srv = EditorServer(doc, port=0, store=False)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        page = _open(browser, srv.url)
+        sent = []
+        page.on("request", lambda r: sent.append(json.loads(r.post_data)) if r.method == "POST" and r.post_data else None)
+        page.evaluate("""() => { var ed = %s; window.__ed = ed; window.__mounts = 0;
+            var m = ed._mountAddon; ed._mountAddon = function (d) { window.__mounts++; return m.call(ed, d); }; }""" % _ED)
+        _select(page, "/0")
+        page.keyboard.press("Enter")
+        page.locator("input.se-inline").wait_for()
+        page.locator("input.se-inline").fill("cos(")      # a field left open, half typed
+        page.evaluate("() => { window.__ed.send({action: 'apply', path: '/', op: 'slow'}); window.__ed.destroy(); }")
+        page.wait_for_timeout(1800)                       # the slow answer has come by now
+        assert page.evaluate("window.__mounts") == 0
+        assert page.evaluate("window.__ed.destroyed && window.__ed.closed")
+        assert page.evaluate("document.querySelectorAll('.sympy-editor').length") == 0
+        assert [m for m in sent if m.get("action") in ("replace", "set", "insert")] == []
+        assert str(srv.document.expr) == "x + y + 1"      # what was asked before it went was done, and no more
+        assert page.errors == []
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_an_addon_that_cannot_be_mounted_is_tried_once(browser, serve_expr):
+    """One whose mount throws was mounted again at every snapshot - every
+    edit, every preview - to throw again."""
+    from sympy_editor import Addon
+
+    class Broken(Addon):
+        name = "broken"
+        js = ('SympyEditor.registerAddon("broken", { mount: function () { '
+              'window.__broken = (window.__broken || 0) + 1; throw new Error("no panel today"); } });')
+
+    doc = Document(x + y, addons=[Broken()])
+    srv = EditorServer(doc, port=0, store=False)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        page = _open(browser, srv.url)
+        for src in ("x + 1", "x + 2", "x + 3"):
+            _next_state(page, lambda: page.evaluate("(s) => %s.send({action: 'set', src: s})" % _ED, src))
+        assert page.evaluate("window.__broken") == 1 and str(srv.document.expr) == "x + 3"
+        # switched off and on, it is given another chance
+        _next_state(page, lambda: page.evaluate(_ED + ".send({action: 'addons', disable: ['broken']})"))
+        _next_state(page, lambda: page.evaluate(_ED + ".send({action: 'addons', enable: ['broken']})"))
+        assert page.evaluate("window.__broken") == 2
+        assert page.errors == []
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_what_goes_is_drawn_whatever_the_change_before_left(browser, serve_expr):
+    """The picture of the old formula is a copy of its rendering, marks
+    included: those of the change before (kept) hid in the next animation
+    what was going, and one copied while an animation ran was invisible
+    altogether."""
+    srv, doc = serve_expr(x + 1, options={"animateDuration": 1500})
+    page = _open(browser, srv.url)
+    _next_state(page, lambda: page.evaluate(_ED + ".send({action: 'set', src: 'x + 2'})"))
+    page.wait_for_timeout(1800)                           # that animation is over
+    page.evaluate(_ED + ".send({action: 'set', src: 'sin(y)'})")
+    page.locator(".se-ghost-old").wait_for(state="attached", timeout=5000)
+    marks = page.evaluate("""() => { var g = document.querySelector('.se-ghost-old');
+        return { root: g.className, both: g.querySelectorAll('.se-kept.se-removed').length,
+                 removed: g.querySelectorAll('.se-removed').length, opacity: getComputedStyle(g).opacity }; }""")
+    assert "se-changing" not in marks["root"] and marks["both"] == 0 and marks["removed"] >= 1, marks
+    assert float(marks["opacity"]) > 0
+    # a second change while the first is still moving
+    page.evaluate(_ED + ".send({action: 'set', src: 'cos(z)'})")
+    page.wait_for_function(_ED + ".state.src === 'cos(z)'", timeout=10000)
+    ghosts = page.evaluate("""() => [].map.call(document.querySelectorAll('.se-ghost-old'), function (g) {
+        return [g.className.indexOf('se-changing') >= 0, getComputedStyle(g).opacity]; })""")
+    assert all(not changing and float(opacity) > 0 for changing, opacity in ghosts), ghosts
+    assert page.errors == []
+
+
+def test_a_script_asked_for_twice_is_loaded_once(browser, serve_expr):
+    """Two add-ons (or two editors) asking for one library at once put it in
+    the page twice, the second copy replacing the globals the first had
+    handed out.  A load that failed is tried again when asked again."""
+    srv, doc = serve_expr(x + 1)
+    page = _open(browser, srv.url)
+    hits = []
+
+    def lib(route):
+        hits.append(route.request.url)
+        if "broken" in route.request.url and len([h for h in hits if "broken" in h]) == 1:
+            return route.abort()
+        route.fulfill(status=200, content_type="text/javascript",
+                      body="window.__libLoads = (window.__libLoads || 0) + 1;")
+    page.route("**/lib-*.js", lib)
+    loads = page.evaluate("""async (base) => {
+        var a = SympyEditor.loadScript(base + '/lib-a.js'), b = SympyEditor.loadScript(base + '/lib-a.js');
+        await Promise.all([a, b]);
+        await SympyEditor.loadScript(base + '/lib-a.js');
+        var failed = false;
+        try { await SympyEditor.loadScript(base + '/lib-broken.js'); } catch (e) { failed = true; }
+        await SympyEditor.loadScript(base + '/lib-broken.js');
+        return {count: window.__libLoads, same: a === b, failed: failed,
+                tags: document.querySelectorAll('script[src$="lib-a.js"]').length};
+    }""", srv.url.rstrip("/"))
+    assert loads == {"count": 2, "same": True, "failed": True, "tags": 1}, loads
+    assert len([h for h in hits if "lib-a" in h]) == 1
+
+
+def test_an_addon_is_given_the_range_as_the_editor_sends_it(browser, serve_expr):
+    """The add-ons read a range's argument indices through the editor's
+    private ``_rangeIndices``; the API has them now."""
+    from sympy_editor import Addon
+
+    class Peek(Addon):
+        name = "peek"
+        js = ('SympyEditor.registerAddon("peek", { mount: function (api) { window.__peek = api; } });')
+
+    doc = Document(x + y + z, addons=[Peek()])
+    srv = EditorServer(doc, port=0, store=False)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        page = _open(browser, srv.url)
+        page.wait_for_function("!!window.__peek")
+        assert page.evaluate("window.__peek.rangeIndices()") is None
+        page.evaluate(_ED + ".range = {parent: '/', anchor: 0, focus: 1}")
+        assert page.evaluate("window.__peek.rangeIndices()") == page.evaluate(_ED + "._rangeIndices()")
+        assert len(page.evaluate("window.__peek.rangeIndices()")) == 2
+        assert page.errors == []
+    finally:
+        srv.shutdown()
+        srv.server_close()

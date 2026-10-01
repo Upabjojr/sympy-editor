@@ -41,10 +41,11 @@ def default_store() -> Path:
       the XDG specification says when the variable is not set.
 
     ``XDG_STATE_HOME`` is honoured wherever it is set, for whoever has laid
-    their home out that way.
+    their home out that way - an absolute path, as the specification asks: a
+    relative one is ignored, or the store would follow the working directory.
     """
     xdg = os.environ.get("XDG_STATE_HOME")
-    if xdg:
+    if xdg and os.path.isabs(xdg):
         return Path(xdg) / "sympy-editor"
     if sys.platform == "win32":
         local = os.environ.get("LOCALAPPDATA")
@@ -64,10 +65,12 @@ def _safe_name(name: str, fallback: str) -> str:
 
 class Store:
     """One file per name in ``folder``.  ``folder=False`` keeps nothing, and
-    the page falls back to the browser's own storage; ``None`` is
-    :func:`default_store`."""
+    the page falls back to the browser's own storage; ``None`` (or ``True``)
+    is :func:`default_store`."""
 
     def __init__(self, folder: Optional[Union[str, Path, bool]] = None):
+        if folder is True:
+            folder = None
         self.folder: Optional[Path] = None if folder is False else Path(folder or default_store())
         #: One write at a time from this store: the page saves the sessions
         #: from every editor it shows, and the server answers each request
@@ -87,7 +90,10 @@ class Store:
         if self.folder is None:
             return None
         try:
-            return self.file(key).read_text(encoding="utf-8")
+            # Bytes that are not UTF-8 (a file damaged, or written by something
+            # else) are read as far as they can be: what the page cannot use
+            # it starts afresh from, where an exception here answered nothing.
+            return self.file(key).read_text(encoding="utf-8", errors="replace")
         except FileNotFoundError:
             return None
 
@@ -108,7 +114,9 @@ class Store:
             fd, name = tempfile.mkstemp(dir=str(self.folder), prefix=path.name + ".", suffix=".new")
             temp = Path(name)
             try:
-                with os.fdopen(fd, "w", encoding="utf-8") as out:
+                # A lone surrogate (text cut through the middle of a character)
+                # cannot be written as UTF-8: it is replaced, the rest is kept.
+                with os.fdopen(fd, "w", encoding="utf-8", errors="replace") as out:
                     out.write(value)
                 for attempt in range(20):
                     try:
@@ -139,7 +147,7 @@ class Store:
                 self.keep(key, str(message.get("value") or ""))
                 return {"keep": None}
             return {"keep": self.kept(key)}
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             return {"error": f"The store could not be used: {exc}"}
 
 

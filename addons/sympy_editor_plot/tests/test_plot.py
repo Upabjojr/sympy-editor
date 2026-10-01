@@ -109,3 +109,86 @@ def test_a_value_is_a_number_read_in_the_documents_names():
     assert "must be a number" in _error(doc, path="/", var="x", values={"y": "z"}, span=[0, 1], n=3)
     res = _samples(doc, path="/", var="x", values={"y": "pi/2"}, span=[0, 1], n=3)
     assert abs(res["curves"][0]["y"][2] - 3.141592653589793 / 2 * 0.8414709848078965) < 1e-9
+
+
+def test_no_name_of_the_formula_is_run(tmp_path):
+    """lambdify writes Python and runs it, with the names of undefined
+    functions and of bound symbols in it as they are - and a name is any
+    text: a formula opened from a file ran what its names said, as soon as
+    the panel sampled it."""
+    from sympy import Function, IndexedBase, Sum, Symbol, Tuple
+    from sympy_editor_plot import numeric_form
+    marker = tmp_path / "ran"
+    write = f"open({str(marker)!r},'w').write('x')"
+    hostile = [
+        Function(f"(lambda v: {write} and 1)")(x),
+        Sum(x, Tuple(Symbol(f"k in ({write},) for k"), 1, 3)),
+        Symbol(f"x); {write}; (") + x,
+        IndexedBase(f"a); {write}; (")[1] * x,
+    ]
+    for expr in hostile:
+        # as a file would bring it: read from text, never typed
+        doc = Document(x, history=[__import__("sympy").srepr(expr)], index=0, addons=[ADDON])
+        snap = doc.handle({"action": "addon", "addon": "plot", "method": "samples", "path": "/", "n": 5})
+        assert not marker.exists(), expr
+        assert snap["query"].get("error") or snap["query"]["result"]["curves"] or snap["query"]["result"]["needs"]
+    assert "undefined function" in _error(Document(hostile[0], addons=[ADDON]), path="/")
+    k = Symbol("k")
+    assert _samples(Document(Sum(k * x, (k, 1, 3)), addons=[ADDON]), path="/", n=3, span=[0, 2])["curves"][0]["y"] \
+        == [0.0, 6.0, 12.0]
+    form, var = numeric_form(Sum(Symbol("k; evil") * x, (Symbol("k; evil"), 1, 3)), x)
+    assert {str(s) for s in form.atoms(Symbol)} == {"v0", "v1"} and str(var) in ("v0", "v1")
+    positive = Symbol("p", positive=True)
+    assert numeric_form(sqrt(positive), positive)[1].is_positive        # the assumptions are kept
+
+
+def test_what_has_no_curve_says_so():
+    import json
+    from sympy import IndexedBase, MatrixSymbol
+    A = MatrixSymbol("A", 2, 2)
+    assert "matrix expression" in _error(Document(A + A * A.T, addons=[ADDON]), path="/")
+    assert "no number can stand for" in _error(Document(IndexedBase("a")[1] * x, addons=[ADDON]), path="/")
+    doc = Document(sin(x), addons=[ADDON])
+    assert "too wide" in _error(doc, path="/", span=[-1e308, 1e308])
+    snap = doc.handle({"action": "addon", "addon": "plot", "method": "samples", "path": "/", "span": [-1e308, 1e308]})
+    json.dumps(snap, allow_nan=False)                                   # an answer the page can read
+
+
+def test_a_value_is_read_as_typed_and_answered_as_a_number():
+    """The panel sends the text of its field - it used to send what
+    parseFloat made of it, ``1`` for ``1/2`` and nothing for ``pi/2`` - so
+    whatever can be typed there arrives here: the answer says which number
+    each value was read as (the slider goes there), and what is no real
+    number is refused by the name of the symbol it was for, not drawn as
+    gaps or reported as a syntax error of nothing in particular."""
+    import math
+    doc = Document(y * sin(x), addons=[ADDON])
+    for text, number in [("pi/2", math.pi / 2), ("1/2", 0.5), ("-1/4", -0.25), ("3*2", 6.0), (" 2 ", 2.0), (0.5, 0.5)]:
+        res = _samples(doc, path="/", var="x", values={"y": text}, span=[0, 1], n=3)
+        assert res["needs"] == [] and abs(res["values"]["y"] - number) < 1e-12, text
+        assert abs(res["curves"][0]["y"][2] - number * math.sin(1)) < 1e-9, text
+    for text, reason in [("2e", "cannot be read"), ("pi/", "cannot be read"), ("", "cannot be read"),
+                         ("z", "names z"), ("I", "real number"), ("oo", "real number"), ("[1, 2]", "real number")]:
+        said = _error(doc, path="/", var="x", values={"y": text}, span=[0, 1], n=3)
+        assert "The value of y must be a" in said and reason in said, (text, said)
+    # a value nobody asked for - of the axis, of a symbol that is not there - is not read at all
+    res = _samples(doc, path="/", var="x", values={"y": "2", "x": "2e", "w": "pi/"}, span=[0, 1], n=3)
+    assert res["values"] == {"y": 2.0}
+    assert doc.can_undo is False and doc.last_note is None
+
+
+def test_two_symbols_of_one_name_are_refused_by_name():
+    """``x`` and an ``x`` that is real are two symbols, and the panel knows
+    symbols by their names: one of the two went on the axis and the answer
+    asked for a value of the other, ``x`` again, which no row of the panel
+    could give - the note asked for it forever."""
+    from sympy import Symbol
+    real = Symbol("x", real=True)
+    doc = Document(Symbol("x") + real * y, addons=[ADDON])
+    for payload in ({}, {"var": "x"}, {"var": "x", "values": {"x": "2", "y": "1"}}, {"var": "y", "values": {"x": "2"}}):
+        said = _error(doc, path="/", span=[0, 1], n=3, **payload)
+        assert "two different symbols called x" in said and "another name" in said, (payload, said)
+    # a piece with one of them alone is plotted as ever
+    piece = [path for path in ("/0", "/1") if doc.get(path) == real * y][0]
+    res = _samples(doc, path=piece, var="x", values={"y": "2"}, span=[0, 1], n=3)
+    assert res["free"] == ["x", "y"] and res["curves"][0]["y"] == [0.0, 1.0, 2.0]

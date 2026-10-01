@@ -432,3 +432,64 @@ def test_an_addon_switched_on_by_name_before_any_snapshot(tmp_path, monkeypatch)
     doc = Document(x, available=["a_module_addon"])
     snap = doc.handle({"action": "addons", "enable": ["by_name"]})                  # the first message it gets
     assert snap["error"] is None and snap["addons"] == ["by_name"]
+
+
+def test_a_folder_that_is_not_an_addon_stops_nothing(tmp_path, monkeypatch):
+    """A manifest with a name or a module of the wrong type, or a directory
+    that cannot be read, raised from inside the scan - and with it every
+    Document() made while that folder was registered."""
+    from sympy_editor import addons as addons_module
+    from sympy_editor.addons import installed, read_manifest, scan_addons
+
+    def folder(name, manifest):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "addon.json").write_text(json.dumps(manifest), encoding="utf-8")
+        return tmp_path / name
+
+    for i, manifest in enumerate([{"name": ["a"], "module": "m"}, {"name": "a", "module": 5}, {"name": 5, "module": "m"},
+                                  {"name": "a", "module": "../m"}, {"name": "A b", "module": "m"}, ["a"], {"name": "a"}]):
+        assert read_manifest(folder(f"bad{i}", manifest)) is None, manifest
+    good = folder("good", {"name": "fine", "module": "fine_pkg.sub", "label": 3, "requires": ["lark", 7]})
+    (good / "fine_pkg").mkdir()
+    folder("twin", {"name": "fine", "module": "other_pkg"})
+    before = list(sys.path)
+    try:
+        found = scan_addons(tmp_path)
+        assert list(found) == ["fine"] and found["fine"]["module"] == "fine_pkg.sub"
+        assert found["fine"]["label"] == "fine" and found["fine"]["requires"] == ["lark"]
+        assert str(good.resolve()) in sys.path                     # the package's top level is what is looked for
+        monkeypatch.setattr(addons_module, "ADDON_FOLDERS", [str(tmp_path)])
+        monkeypatch.setenv("SYMPY_EDITOR_ADDONS", str(tmp_path / "missing"))
+        assert installed()["fine"] == "fine_pkg.sub"
+        real = Path.iterdir
+
+        def unreadable(self):
+            if self == tmp_path:
+                raise PermissionError(13, "Permission denied", str(self))
+            return real(self)
+
+        monkeypatch.setattr(Path, "iterdir", unreadable)
+        assert scan_addons(tmp_path) == {}
+        assert Document(x).expr == x                               # and a document is made all the same
+    finally:
+        sys.path[:] = before
+
+
+def test_an_addon_written_in_a_script_embeds_no_file_of_its_neighbours(tmp_path, monkeypatch):
+    """The default python_sources() took the directory of the add-on's
+    module: for one defined in a script, whatever lay beside the script -
+    every .py of the project went into the page."""
+    import importlib
+    (tmp_path / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "secrets_config.py").write_text("PASSWORD = 'hunter2'\n", encoding="utf-8")
+    (tmp_path / "lone_addon.py").write_text(
+        "from sympy_editor import Addon\n"
+        "class Lone(Addon):\n    name = 'lone'\nADDON = Lone()\n", encoding="utf-8")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    try:
+        addon = importlib.import_module("lone_addon").ADDON
+        assert addon.python_sources() == {}
+        page = to_html(x, addons=[addon])
+        assert "hunter2" not in page
+    finally:
+        sys.modules.pop("lone_addon", None)

@@ -346,9 +346,14 @@ SympyEditor.registerAddon("latex", (function () {
           say(res.error || "This LaTeX could not be read", true);
           return;
         }
+        var more = res.more > 0
+          // the reader offers the first parts of a long text, not all of them
+          ? " " + res.more + (res.more === 1 ? " more part is" : " more parts are") +
+            " not offered: put the text in piece by piece to choose there."
+          : "";
         say(res.ambiguities.length
             ? (res.ambiguities.length === 1 ? "One part of this can be read two ways: pick below."
-                                            : res.ambiguities.length + " parts of this can be read several ways: pick below.")
+                                            : res.ambiguities.length + " parts of this can be read several ways: pick below.") + more
             : "");
         readingOf.textContent = aimWords(aim);
         drawGhost(res.latex);
@@ -469,6 +474,9 @@ SympyEditor.registerAddon("latex", (function () {
         + "<li><b>LaTeX</b>, among the editor's tools, opens a field <i>in the formula</i>: over the selection, at the cursor, or after the whole expression - wherever what you type will go. It is drawn as what it is - in dashes, on tinted paper - because it is not part of the formula yet.</li>"
         + "<li>Opened on a selection, the field stands <i>in that piece's place</i> and the piece is taken off the screen until the field goes: what is typed replaces it. At a cursor the formula is left whole and what is typed is added there - the line under the editor says which it will be.</li>"
         + "<li>What is typed is read as you type. Under the editor: the reading as it will look and what SymPy gets of it, the parts that can be read more than one way - <code>f(x)</code> applied or multiplied, how far <code>\\sin x \\cos y</code> reaches - each a row of its readings, typeset, to pick from, and a switch for each name that usually means a constant (<code>\\pi</code>, <code>e</code>, <code>i</code>, <code>\\gamma</code>).</li>"
+        + "<li>What SymPy itself writes reads back as it was - <code>f{\\left(x \\right)}</code> is <code>f</code> applied, <code>\\operatorname{asin}</code> is SymPy's <code>asin</code>. Names come out as SymPy spells them, so they can be typed in the line under the formula: <code>x_{1}</code> is <code>x_1</code>, <code>\\hat{v}</code> is <code>vhat</code>, <code>x'</code> is <code>xprime</code> - drawn just as they were written.</li>"
+        + "<li>A <code>d</code> before a letter is a differential only under an integral or a fraction bar (<code>\\frac{\\partial^2 f}{\\partial x \\partial y}</code>); anywhere else <code>d x</code> is a product. A number too large to work out - <code>10^{10^{8}}</code>, <code>20000!</code> - is kept as written.</li>"
+        + "<li>A text is read in one go up to 1000 characters and a few seconds' work; of a long one the first twelve parts that can be read several ways are offered, and the line under the editor says how many more there are. Put a long formula in piece by piece.</li>"
         + "<li>A text that stops in the middle of an expression (<code>\\frac{x</code>, <code>x +</code>) or of a command (<code>\\fr</code>) is <i>not finished yet</i>, not wrong: the last reading stays, dimmed, until it reads again.</li>"
         + "<li><b>Apply to the formula</b> (or <kbd>Enter</kbd>) puts it in - nothing changes before that - and then the formula before and after is shown, what went in red and what came in green, to <b>Keep</b> (which takes you back up to the formula) or to <b>Undo the change</b>. <kbd>Esc</kbd> closes the field and leaves the formula alone.</li>"
         + "</ul></section>";
@@ -486,8 +494,11 @@ SympyEditor.registerAddon("latex", (function () {
           return true;
         },
         onSelect: function () {
-          // The field belongs where the selection is: while it is open, a new
-          // selection moves it (and the reading follows the new target).
+          // The field is put back where it stood - the formula may have been
+          // drawn around it afresh - aimed where it was aimed when it opened:
+          // putting it in the formula is itself something the editor answers
+          // (a caret or a selection let go), and that answer must not move
+          // the target.  To aim elsewhere, close the field and open it there.
           if (!typing) return;
           var text = field.value;
           openField(true);                       // where it aims was settled when it opened

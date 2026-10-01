@@ -191,8 +191,12 @@ class MainActivity : AppCompatActivity() {
                 if (url.scheme == "https" && url.host == BUNDLE_HOST) return false
                 try {
                     startActivity(Intent(Intent.ACTION_VIEW, url))
-                } catch (e: android.content.ActivityNotFoundException) {
-                    // nothing can open it: then nothing does
+                } catch (e: Exception) {
+                    // Nothing can open it - no app takes it
+                    // (ActivityNotFoundException), it is another app's alone
+                    // (SecurityException), or it is a file:// address, which
+                    // may not leave this app (FileUriExposedException): then
+                    // nothing does.  A link must not end the app.
                 }
                 return true
             }
@@ -255,17 +259,42 @@ class MainActivity : AppCompatActivity() {
             if (intent.action == Intent.ACTION_SEND && !text.isNullOrBlank()) arrive("shared", text)
             return
         }
-        pythonThread.execute {
+        fileThread.execute {
             try {
-                val size = contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
-                if (size > MAX_OPEN_BYTES) throw java.io.IOException("it is too large to be a formula")
-                val text = contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                    ?: throw java.io.IOException("nothing could be read")
+                val text = readFormula(uri)
                 val name = nameOf(uri)
-                runOnUiThread { arrive(name, text) }
+                runOnUiThread { if (!isDestroyed) arrive(name, text) }      // not to a WebView that is gone
             } catch (exc: Exception) {
                 report("The file could not be opened: " + (exc.message ?: exc.toString()))
+            } catch (exc: OutOfMemoryError) {
+                report("The file could not be opened: $TOO_LARGE")
             }
+        }
+    }
+
+    /** The text of a document handed to the app - opened with it from
+     *  elsewhere, or picked in the dialog.  Never on the main thread: a
+     *  provider may be slow, or another app's, and the interface would wait
+     *  for it.
+     *
+     *  Read piece by piece and given up at [MAX_OPEN_BYTES]: a provider need
+     *  not say how long its document is (many answer "unknown", -1, which
+     *  passed for small), so the limit is kept by counting what arrives.
+     *  Read in one go, a document without an end took all the memory there
+     *  was - an Error, which no `catch (Exception)` sees - and the app with
+     *  it; any app may send one, the activity being there to be sent to. */
+    private fun readFormula(uri: Uri): String {
+        val stream = contentResolver.openInputStream(uri) ?: throw java.io.IOException("nothing could be read")
+        return stream.use { input ->
+            val held = java.io.ByteArrayOutputStream()
+            val piece = ByteArray(64 * 1024)
+            while (true) {
+                val count = input.read(piece)
+                if (count < 0) break
+                if (held.size() + count > MAX_OPEN_BYTES) throw java.io.IOException(TOO_LARGE)
+                held.write(piece, 0, count)
+            }
+            held.toString("UTF-8")
         }
     }
 
@@ -275,7 +304,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun handOver(name: String, text: String) {
         web.evaluateJavascript("window.SympyEditor && window.SympyEditor.openText(" +
-            "${JSONObject.quote(name)}, ${JSONObject.quote(text)});", null)
+            "${quote(name)}, ${quote(text)});", null)
     }
 
     override fun onDestroy() {
@@ -298,6 +327,14 @@ class MainActivity : AppCompatActivity() {
         }
         opening?.let { outState.putString(STATE_OPENING, it) }
     }
+
+    /** A JavaScript string literal, whatever the text holds.  JSON lets the
+     *  two Unicode line separators through as they are, and to a WebView
+     *  from before 2018 they end the line - in the middle of a string, which
+     *  is an error, and the whole script is dropped: they are written as
+     *  escapes. */
+    private fun quote(text: String): String =
+        JSONObject.quote(text).replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
 
     /** Run `js` in the page, on the UI thread - unless the activity is gone:
      *  a Python answer can arrive after a recreation, for a dead WebView. */
@@ -349,7 +386,7 @@ class MainActivity : AppCompatActivity() {
                 ok = false
                 e.message ?: e.toString()
             }
-            evaluate("window.__sympyEditorNative(${JSONObject.quote(req)}, $ok, ${JSONObject.quote(payload)});")
+            evaluate("window.__sympyEditorNative(${quote(req)}, $ok, ${quote(payload)});")
         }
     }
 
@@ -383,15 +420,23 @@ class MainActivity : AppCompatActivity() {
             pending = null
             if (save == null) return@registerForActivityResult
             val waiting = File(save.path)
-            try {
-                if (uri != null) {                                             // else nothing chosen
-                    val bytes = waiting.readBytes()
-                    contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+            // Written on the files' thread, not this one (the main one): where
+            // the user said may be a slow place.  The text takes a name of
+            // its own first: the page may keep another file - which waits
+            // under the same name - before this one has been written.
+            val taken = File(waiting.parentFile, "writing-" + System.nanoTime())
+            val file = if (waiting.renameTo(taken)) taken else waiting
+            fileThread.execute {
+                try {
+                    if (uri != null) {                                         // else nothing chosen
+                        val bytes = file.readBytes()
+                        contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+                    }
+                } catch (exc: Exception) {
+                    report("The file could not be written: " + (exc.message ?: exc.toString()))
+                } finally {
+                    file.delete()
                 }
-            } catch (exc: Exception) {
-                report("The file could not be written: " + (exc.message ?: exc.toString()))
-            } finally {
-                waiting.delete()
             }
         }
         openFrom = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
@@ -399,13 +444,21 @@ class MainActivity : AppCompatActivity() {
             opening = null
             if (token == null) return@registerForActivityResult
             if (uri == null) { answerOpen(token, null, null); return@registerForActivityResult }
-            try {
-                val name = nameOf(uri)
-                val text = contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                answerOpen(token, name, text)
-            } catch (exc: Exception) {
-                answerOpen(token, null, null)
-                report("The file could not be read: " + (exc.message ?: exc.toString()))
+            // Read on the files' thread, with the limit a file opened from
+            // elsewhere has: this one had none, and was read on the main
+            // thread, which a slow provider held until Android offered to
+            // end the app.
+            fileThread.execute {
+                try {
+                    val text = readFormula(uri)
+                    answerOpen(token, nameOf(uri), text)
+                } catch (exc: Exception) {
+                    answerOpen(token, null, null)
+                    report("The file could not be read: " + (exc.message ?: exc.toString()))
+                } catch (exc: OutOfMemoryError) {
+                    answerOpen(token, null, null)
+                    report("The file could not be read: $TOO_LARGE")
+                }
             }
         }
     }
@@ -429,10 +482,10 @@ class MainActivity : AppCompatActivity() {
     /** Hand what was opened (or nothing) back to the page that asked. */
     private fun answerOpen(token: String, name: String?, text: String?) {
         val js = if (text == null) {
-            "window.SympyEditor.openedFile(${JSONObject.quote(token)});"
+            "window.SympyEditor.openedFile(${quote(token)});"
         } else {
-            "window.SympyEditor.openedFile(${JSONObject.quote(token)}, ${JSONObject.quote(name ?: "")}, " +
-                "${JSONObject.quote(text)});"
+            "window.SympyEditor.openedFile(${quote(token)}, ${quote(name ?: "")}, " +
+                "${quote(text)});"
         }
         evaluate(js)
     }
@@ -440,7 +493,7 @@ class MainActivity : AppCompatActivity() {
     /** Say something went wrong, in the page's own status line. */
     private fun report(message: String) {
         val js = "window.SympyEditor && window.SympyEditor.hostError && " +
-            "window.SympyEditor.hostError(${JSONObject.quote(message)});"
+            "window.SympyEditor.hostError(${quote(message)});"
         evaluate(js)
     }
 
@@ -477,8 +530,8 @@ class MainActivity : AppCompatActivity() {
 
     /** Answer a question of the page's (see ``Host.ask`` in editor.js). */
     private fun answerHost(token: String, value: String?) {
-        val js = "window.SympyEditor && window.SympyEditor.hostAnswer(${JSONObject.quote(token)}" +
-            (if (value == null) "" else ", ${JSONObject.quote(value)}") + ");"
+        val js = "window.SympyEditor && window.SympyEditor.hostAnswer(${quote(token)}" +
+            (if (value == null) "" else ", ${quote(value)}") + ");"
         evaluate(js)
     }
 
@@ -617,9 +670,9 @@ class MainActivity : AppCompatActivity() {
                 null
             }
             val js = if (text == null) {
-                "window.SympyEditor.keptValue(${JSONObject.quote(token)});"
+                "window.SympyEditor.keptValue(${quote(token)});"
             } else {
-                "window.SympyEditor.keptValue(${JSONObject.quote(token)}, ${JSONObject.quote(text)});"
+                "window.SympyEditor.keptValue(${quote(token)}, ${quote(text)});"
             }
             evaluate(js)
         }
@@ -668,6 +721,12 @@ class MainActivity : AppCompatActivity() {
     companion object {
         /** The largest file taken as a formula: a saved one is a few kB. */
         private const val MAX_OPEN_BYTES = 20L * 1024 * 1024
+        private const val TOO_LARGE = "it is too large to be a formula"
+
+        /** Files are read and written on a thread of their own: not the main
+         *  one, which draws, and not Python's, where a file would wait behind
+         *  a long computation - and a computation behind a slow provider. */
+        private val fileThread = Executors.newSingleThreadExecutor()
 
         /** Python runs on one thread of its own: a long computation must not
          *  block the interface, and CPython objects belong to their thread.

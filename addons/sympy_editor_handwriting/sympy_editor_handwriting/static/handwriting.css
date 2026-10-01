@@ -27,9 +27,6 @@
 @media (prefers-reduced-motion: reduce) { .sympy-editor.se-inking .se-view { transition: none; } }
 @media (any-pointer: coarse) { .sympy-editor.se-inking .se-view { min-height: 40vh; } }
 .sympy-editor.se-full.se-inking .se-view { min-height: 0; }
-/* The bar of actions a selection brings up sits just where one would write:
- * it steps aside while the Pen is on, and comes back with it. */
-.sympy-editor.se-inking .se-actions { display: none !important; }
 /* what the ink replaces: hidden while one writes over it, its place kept */
 .sympy-editor .se-view .hw-covered { visibility: hidden !important; }
 .sympy-editor.hw-covering .se-box-select { display: none !important; }
@@ -304,7 +301,31 @@
   color: inherit;
   cursor: pointer;
 }
-.hw-keep { border-color: rgba(var(--se-accent), 0.65); }
+/* The two answers wear the colours of the change shown above them, the
+ * editor's own (--se-added-rgb / --se-removed-rgb, light and dark): Keep is
+ * the green of what came - filled, the answer one expects to give - and
+ * Undo the red of what went, in its border and its words only: it is the
+ * way back, not a danger, and a solid red would say otherwise. */
+.hw-applied-ask button { transition: background 120ms ease, border-color 120ms ease; }
+.hw-applied-ask .hw-keep {
+  border-color: rgba(var(--se-added-rgb), 0.6);
+  background: rgba(var(--se-added-rgb), 0.14);
+  color: rgb(var(--se-added-rgb));
+  font-weight: 600;
+}
+.hw-applied-ask .hw-back {
+  border-color: rgba(var(--se-removed-rgb), 0.4);
+  color: rgb(var(--se-removed-rgb));
+}
+.hw-applied-ask .hw-keep:active { background: rgba(var(--se-added-rgb), 0.3); }
+.hw-applied-ask .hw-back:active { background: rgba(var(--se-removed-rgb), 0.14); }
+.hw-applied-ask .hw-keep:focus-visible { outline: 2px solid rgba(var(--se-added-rgb), 0.6); outline-offset: 1px; }
+.hw-applied-ask .hw-back:focus-visible { outline: 2px solid rgba(var(--se-removed-rgb), 0.5); outline-offset: 1px; }
+@media (hover: hover) {
+  .hw-applied-ask .hw-keep:hover { background: rgba(var(--se-added-rgb), 0.22); border-color: rgba(var(--se-added-rgb), 0.85); }
+  .hw-applied-ask .hw-back:hover { background: rgba(var(--se-removed-rgb), 0.08); border-color: rgba(var(--se-removed-rgb), 0.7); }
+}
+@media (prefers-reduced-motion: reduce) { .hw-applied-ask button { transition: none; } }
 
 /* what went and what came, marked as the history's own report marks a step
  * (those colours live in the report's CSS: here they are, for this panel) */

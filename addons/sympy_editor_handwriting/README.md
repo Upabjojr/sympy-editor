@@ -17,7 +17,8 @@ read as the operator that takes its place - `=`, `<`, `>`, `≤`, `≥`, `≠`,
 
 Where it goes is what the editor says: over the selected sub-expression (or
 the selected range) - hidden, its place kept, while the pen is on or ink
-waits, back only when the writing is discarded -, at the cursor, or - with neither - against the piece of
+waits, back only when the writing is discarded (putting the pen away clears
+the ink that was not applied) -, at the cursor, or - with neither - against the piece of
 the formula it is written by.  That piece is drawn into the strokes as a
 stand-in (a triangle, which the model reads as `\Delta`), so the ink is read
 *together with* it: a bar under it with ink under the bar is a fraction over
@@ -33,7 +34,9 @@ While the Pen is on, the formula opens a space where what is written will go -
 at the cursor, on the side of an operator the cursor is drawn on (after the
 `+` of `a + b` when the cursor stands after it) - and it widens as you write (a box that opens past the edge of the screen is
 scrolled towards the middle, and a stroke that ends by the edge opens more
-space ahead and scrolls the box back into sight); a tap still selects a piece or puts the cursor
+space ahead and scrolls the box back into sight - written freely, with nothing
+selected and no cursor, the area itself is given that space: it scrolls on to
+the right and grows downwards, the formula staying where it is); a tap still selects a piece or puts the cursor
 between two, so where to write is chosen as it always was.
 
 The strip under the editor holds only what came of it: the readings, to pick
@@ -56,6 +59,16 @@ The host engine is there for a device that carries no model — an App Store
 build without one, a browser on a phone — and for a line of ordinary algebra,
 which it reads well enough for the LaTeX reader to turn into SymPy. It is not
 a replacement for the stroke model.
+
+Which engine reads is the document's choice, not the add-on's - one add-on
+object serves every document of a Python, and a choice kept on it was every
+page's: it is kept in `doc.addon_state["handwriting"]`, travels with the
+session (`export_state` / `restore_state`) and with every snapshot
+(`snap["handwriting"]["engine"]`, which the panel follows).
+`HandwritingAddon(engine=...)` is what a document that has not chosen asks.
+Where the engine chosen cannot read - the device's own reader, on a device
+that has none - the page asks the first that can; where none can, the Pen is
+off and the strip under the formula says why (the Pen's own title too).
 
 An engine is anything with `status()`, `warm(background)` and
 `recognize(strokes, beam, limit)`; pass your own:
@@ -98,8 +111,14 @@ back is read as SymPy here, like any other reading.
 The weights are not in this package, and must not be: the model is
 math-ocr's, not this package's to redistribute.
 
-When any of this is missing the panel says what, and the rest of the editor is
+When any of this is missing the strip under the formula says what - it stays
+in sight for as long as nothing can read - and the rest of the editor is
 unaffected.
+
+A page is told whether the model reads, why not, the model's name and its
+notice: never where the model or the checkout are on the machine that built
+the page, which a saved page would carry to whoever it is passed on to.
+`StrokeRecognizer.status()` has the paths, for the Python that asks.
 
 ## Trying it
 
@@ -124,7 +143,38 @@ or, from Python, `serve(expr, addons=["handwriting", "latex"])`.
   its export has one, goes into the app with it, and the add-on's guide shows
   it; a build without one warns.
 * **Not** in a self-contained Pyodide page, the web site or the iOS app, so
-  `addon.json` keeps it out of their bundles.
+  `addon.json` keeps it out of their bundles.  A page that runs its own Python
+  and has the add-on all the same (`save_html(expr, ..., addons=["handwriting"])`)
+  installs nothing for it - onnxruntime has no wheel for Pyodide, and
+  `pyodide_packages()` asks for none - and works as any other page: the panel
+  asks the page's own Python what reads there, which is nothing, says so, and
+  asks the device's own reader where there is one.
+
+## What the pointer does
+
+* A stroke is one pointer's, from where it comes down to where it lifts:
+  another pointer coming down meanwhile waits - it does not take the stroke's
+  place.
+* With a pen, a touch is the hand that holds it: ignored while the pen is
+  down and for half a second after it lifts, and a pen coming down takes over
+  from a touch that came down before it.  Two fingers, with no pen about,
+  zoom and drag the formula.
+* A contact the system cancels (`pointercancel`) leaves nothing: no stroke,
+  no tap.
+* Zoomed, the ink is magnified about the corner of the formula as it is
+  drawn, so it stays by what it was written by.
+* With the last stroke gone - erased, taken back or cleared - so are the
+  readings, and Apply.
+
+## What Python refuses
+
+`handle` looks at a payload's shape before anything is loaded or read, and
+refuses in words: strokes that are no list of lists of points, more than
+20 000 points (counted before any is read), a box that is not four numbers,
+readings that are no list or carry no text, `children` that are no whole
+numbers.  A reading that holds the placeholder (`\mathit{nestedpiece}`) with
+no piece to put there - a path that is gone, arguments the node has not - is
+refused rather than read with the placeholder's name in it.
 
 ## Two things the model's output needs
 

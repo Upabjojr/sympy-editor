@@ -3,6 +3,7 @@
 from Python and taken back with Undo, the selection as ``editor.selection``,
 a script, and the guide.  Needs Playwright with Chromium and the KaTeX CDN
 (skipped otherwise)."""
+import json
 import os
 import sys
 import threading
@@ -21,6 +22,7 @@ playwright = pytest.importorskip("playwright.sync_api")
 from sympy_editor import Document  # noqa: E402
 from sympy_editor.html import default_urls  # noqa: E402
 from sympy_editor.server import EditorServer  # noqa: E402
+from sympy_editor.store import Store  # noqa: E402
 from sympy_editor_console import ADDON  # noqa: E402
 
 x, y = symbols("x y")
@@ -39,8 +41,10 @@ pytestmark = pytest.mark.skipif(not _online(default_urls()["katexJs"]), reason="
 
 
 @contextmanager
-def _page(doc, launch=None, **context):
-    srv = EditorServer(doc, port=0)
+def _page(doc, launch=None, store=None, **context):
+    """The editor of `doc` in a page, served; `store` is where the server
+    keeps what the page keeps (a test's own folder by default: conftest.py)."""
+    srv = EditorServer(doc, port=0, **({} if store is None else {"store": store}))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
         with playwright.sync_playwright() as p:
@@ -405,3 +409,154 @@ def test_the_script_is_kept_as_text_and_runs_again_after_a_reload():
         assert page.locator(".se-addon-console .pc-name").input_value() == "answer.py"
         page.locator(".se-addon-console .pc-btn", has_text="Run script").click()
         page.wait_for_function("document.querySelector('.se-addon-console .pc-script-out').innerText.includes('k is 42')")
+
+
+def _kept(store, name):
+    """What the panel kept under `name` (the add-on's names are the
+    editor's `addon:<name>`), read from the server's store."""
+    text = Store(store).kept("addon:console-" + name)
+    return None if text is None else json.loads(text)
+
+
+def test_use_is_for_the_outputs_of_this_namespace():
+    """The numbers start again with every namespace, and Use sent the number
+    alone: after a Reset the button beside the old ``Out[1]: 42`` put the new
+    ``Out[1]``, ``x**2``, in the formula.  Once the namespace is another one
+    - Reset, or ``%reset`` - the outputs above are text, as last time's are,
+    and their Use is gone."""
+    doc = Document(sin(x) + y, addons=[ADDON])
+    with _page(doc) as page:
+        uses = page.locator(".se-addon-console .pc-use")
+        _enter(page, "41 + 1")
+        assert uses.count() == 1
+        page.locator(".se-addon-console .pc-btn", has_text="Reset").click()
+        page.wait_for_selector(".se-addon-console .pc-note-new")
+        page.wait_for_function(f"!{ED}.busy")
+        assert uses.count() == 0                                          # 42 is not this namespace's Out[1]
+        entry = _enter(page, "x**2")
+        assert entry.locator(".pc-prompt-out").inner_text() == "Out[1]:" and uses.count() == 1
+        _enter(page, "%reset")
+        assert uses.count() == 0
+        entry = _enter(page, "x**3")
+        entry.locator(".pc-use").click()                                  # and this namespace's still goes
+        page.wait_for_function("document.querySelector('.se-source').textContent.trim() === 'x**3'")
+        # a Use that did not hear of the change - a page of before this fix - is refused by Python
+        stale = page.evaluate(f"{ED}._addonCall('console', 'use', {{n: 1, token: 'of-another'}}).then(() => 'taken', e => String(e.message))")
+        assert "namespace that is gone" in stale and doc.expr == x ** 3
+
+
+def test_a_damaged_transcript_does_not_stop_the_others(tmp_path):
+    """What is kept is a file, and one cell of it that was not as the panel
+    writes it - ``items: "abc"``, an item that is null or has no text -
+    raised in the middle of the restore: nothing was drawn, at every visit,
+    and the cell was written back with the others until sixty new ones had
+    pushed it out.  A kept history holding anything but text was recalled as
+    ``[object Object]``."""
+    cells = [None, 5, "text", [1], {"code": 5},
+             {"code": "a", "n": 1, "token": "zz", "items": "abc"},
+             {"code": "b", "n": 2, "token": "zz",
+              "items": [None, {"kind": "stdout"}, {"kind": "stdout", "text": 5}, {"kind": "nope", "text": "?"},
+                        {"kind": "stdout", "text": "kept"}]},
+             {"code": "c", "n": "3", "token": "zz", "out": "text"},
+             {"code": "d", "n": 4, "token": "zz", "out": {"text": "shown", "latex": 5}},
+             {"code": "e", "n": 5, "token": "zz", "items": []}]
+    Store(tmp_path).keep("addon:console-transcript", json.dumps(cells))
+    Store(tmp_path).keep("addon:console-history", json.dumps([{"a": 1}, 5, None, "ok"]))
+    with _page(Document(sin(x) + y, addons=[ADDON]), store=tmp_path) as page:
+        page.wait_for_selector(".se-addon-console .pc-restored-head")
+        restored = page.locator(".se-addon-console .pc-entry.pc-restored")
+        assert [e.strip() for e in restored.locator(".pc-code").all_inner_texts()] == ["a", "b", "c", "d", "e"]
+        assert restored.nth(1).locator(".pc-stream").all_inner_texts() == ["kept"]
+        assert restored.nth(2).locator(".pc-prompt-in").inner_text() == "In [?]:"
+        assert restored.nth(3).locator(".pc-math").inner_text() == "shown"
+        field = page.locator(".se-addon-console .pc-input")
+        field.click()
+        recalled = []
+        for _ in range(3):
+            field.press("ArrowUp")
+            recalled.append(field.input_value())
+        assert recalled == ["ok", "ok", "ok"]                             # the one input that was one
+        _enter(page, "1 + 1")
+        page.wait_for_timeout(300)
+        kept = _kept(tmp_path, "transcript")                                # and what is written back is clean
+        assert [c["code"] for c in kept] == ["a", "b", "c", "d", "e", "1 + 1"]
+        assert all(isinstance(c["items"], list) and all(set(i) <= {"kind", "text", "latex"} for i in c["items"]) for c in kept)
+        assert kept[1]["items"] == [{"kind": "stdout", "text": "kept"}] and kept[2]["n"] is None
+        assert _kept(tmp_path, "history") == ["ok", "1 + 1"]
+
+
+def test_what_is_kept_of_a_transcript_is_bounded(tmp_path):
+    """Each output was cut where it was kept, but not their number, nor the
+    input, nor the whole: sixty cells of a loop that displays went into one
+    JSON of megabytes, written at every run (and a browser's own storage, on
+    a standalone page, holds five).  An input too long to keep whole is kept
+    cut, to be read - and "Run all again" does not run half an input."""
+    with _page(Document(sin(x) + y, addons=[ADDON]), store=tmp_path) as page:
+        _enter(page, "for i in range(150):\n    display(x**i)\n")
+        page.wait_for_timeout(300)
+        kept = _kept(tmp_path, "transcript")
+        assert len(kept[0]["items"]) == 41 and kept[0]["items"][-1]["text"].endswith("output cut]\n")
+        for _ in range(8):
+            _enter(page, "print('a'*30000); display(x); print('b'*30000); display(x); print('c'*30000)")
+        page.wait_for_timeout(300)
+        text = Store(tmp_path).kept("addon:console-transcript")
+        kept = json.loads(text)
+        assert len(text) <= 400_000 and 3 <= len(kept) < 9                 # the oldest went
+        assert all(sum(len(i["text"]) for i in c["items"]) <= 60_010 for c in kept)
+        page.locator(".se-addon-console .pc-btn", has_text="Clear").click()
+        _enter(page, "v = 7")
+        long = "w = " + "1 + " * 6000 + "1"
+        _enter(page, long)
+        page.wait_for_timeout(300)
+        kept = _kept(tmp_path, "transcript")
+        assert len(kept[1]["code"]) == 20_000 and kept[1]["cut"] is True
+        page.locator(".se-addon-console .pc-btn", has_text="Reset").click()
+        page.wait_for_selector(".se-addon-console .pc-note-new")
+        _reload(page)
+        page.wait_for_selector(".se-addon-console .pc-rerun")
+        page.locator(".se-addon-console .pc-rerun").click()
+        page.wait_for_selector(".se-addon-console .pc-note-bad")
+        assert "too long to be kept whole" in page.locator(".se-addon-console .pc-note-bad").inner_text()
+        page.wait_for_function(f"!{ED}.busy")
+        assert page.locator(".se-addon-console .pc-entry:not(.pc-restored) .pc-code").all_inner_texts() == ["v = 7"]
+        assert "NameError" in _enter(page, "w").inner_text()                # half of it was not run
+
+
+def test_the_panel_going_keeps_the_script_and_asks_nothing_more(tmp_path):
+    """The script is kept 400 ms after the last key, and taking the panel
+    away (the add-on switched off) only stopped that timer: what was typed
+    in the last moment was lost.  The completion menu's own timer was left
+    running, and asked Python for a panel that was no longer there."""
+    with _page(Document(sin(x) + y, addons=[ADDON]), store=tmp_path) as page:
+        asked = []
+        page.on("request", lambda r: asked.append(r.post_data) if r.method == "POST" and "complete" in (r.post_data or "") else None)
+        page.evaluate("""() => {
+            const typed = (el, text) => { el.value = text; el.selectionStart = el.selectionEnd = text.length;
+                                          el.dispatchEvent(new Event('input', {bubbles: true})); };
+            typed(document.querySelector('.se-addon-console .pc-script'), 'print(6 * 7)\\n');
+            const field = document.querySelector('.se-addon-console .pc-input');
+            field.focus();
+            typed(field, 'fac');
+            %s._unmountAddon('console');
+        }""" % ED)
+        assert page.locator(".se-addon-console").count() == 0
+        page.wait_for_timeout(800)
+        assert _kept(tmp_path, "script") == {"name": "script.py", "text": "print(6 * 7)\n"}
+        assert asked == []
+
+
+def test_a_script_that_was_emptied_stays_empty(tmp_path):
+    """The example was put in the box whenever it was empty once the kept
+    script had been read - so a script the user had emptied came back as the
+    example at the next visit."""
+    with _page(Document(sin(x) + y, addons=[ADDON]), store=tmp_path) as page:
+        page.locator(".se-addon-console .pc-tab", has_text="Script").click()
+        script = page.locator(".se-addon-console .pc-script")
+        page.wait_for_function("document.querySelector('.se-addon-console .pc-script').value.includes('editor.expr')")   # the example, at first
+        script.fill("")
+        page.wait_for_timeout(700)                                      # kept 400 ms after the last key
+        assert _kept(tmp_path, "script")["text"] == ""
+        _reload(page)
+        page.wait_for_timeout(700)
+        assert page.locator(".se-addon-console .pc-scripting").is_visible()
+        assert script.input_value() == ""

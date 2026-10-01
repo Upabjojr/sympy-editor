@@ -115,3 +115,14 @@ def test_browser_sympy_is_the_pinned_wheel():
     assert cfg["sympyWheel"] == SYMPY_WHEEL and SYMPY_WHEEL.endswith(f"sympy-{SYMPY_VERSION}-py3-none-any.whl")
     assert cfg["pyodideIndex"] == f"https://cdn.jsdelivr.net/pyodide/v{PYODIDE_VERSION}/full/"
     assert build_config(Document(x), urls={"sympyWheel": ""})["sympyWheel"] == ""      # Pyodide's own package instead
+
+
+def test_an_element_id_is_escaped_where_it_is_written():
+    """The id went raw into the attribute and into the script's string."""
+    from sympy_editor import to_history_html
+    evil = 'a"></div><script>alert(1)</script>'
+    for page in (to_html(x, element_id=evil), to_history_html([x, x + 1], element_id=evil)):
+        assert "<script>alert(1)" not in page and 'id="a&quot;&gt;' in page
+        assert 'getElementById("a\\">\\u003c/div>' in page
+    assert 'getElementById("plain-id")' in to_html(x, element_id="plain-id", full_page=False)
+    assert "<title>7</title>" in to_html(x, title=7)

@@ -149,7 +149,21 @@ Two conventions between printer, document and front end:
   into the parent).  Elsewhere one neighbour is combined; `,` inserts an
   argument.
   An edge-click caret remembers its side (`gap.attach`), so the left edge
-  of `y` attaches typed text to `y`, the right edge of `x` to `x`.
+  of `y` attaches typed text to `y`, the right edge of `x` to `x`.  A caret
+  with no side of its own (a click in the gap, an arrow key) takes the side
+  it is *drawn* on: `_showCaret` records `gap.drawn` and `_insertMessage`
+  sends `attach` for the nearer end of the gap - after the `+` of `x + 1`
+  an `r` is `x + r*1`, not `r*x + 1` (`Document.insert` joins the left
+  neighbour when told nothing, which is right only for a caret drawn there);
+  not for a text that opens with an operator - `+ w` is a new term wherever
+  in the gap.  The end gaps of a node that draws glyphs of its own around
+  its arguments (`f(x, y)`: `_gapsOf` compares the host's visual rect with
+  its first and last argument) stop at the node's edge; for the root, the
+  room outside is an *extend* gap of the node (`r*f(x, y)`, where it used
+  to type `f(r*x, y)` from a caret drawn left of the `f`).  The rule behind
+  all of it: **what is typed lands where the caret is drawn** - check a
+  change to carets against the cases of
+  `test_text_typed_at_a_caret_joins_the_term_the_caret_is_drawn_against`.
   An operator typed at either end of the text takes the neighbour on that
   side whichever one the caret is attached to ("*y*" between the factors
   of `x*z` gives `x*y*z`); with one neighbour a far-side operator is dropped.
@@ -274,9 +288,9 @@ Two conventions between printer, document and front end:
   `{"action": "matrix", "op", "path", "rows", "cols"}`, labelled "Matrix:
   new row" ... in the history.  `_node_info` marks explicit matrices with
   `matrix: {rows, cols}`; the front end's `_matrixContext()` walks the
-  selection's ancestors to the nearest such node, `_placeActions` shows the
-  `+ row / + col / − row / − col` buttons (`matrow`...) of the action bar
-  for it, and `_placeMatrixHandle` (from `_applySelection`) puts the grip
+  selection's ancestors to the nearest such node, `_applyToolbar` shows the
+  `+ row / + col / − row / − col` buttons (`matrow`..., `.se-mat-tools` in
+  the row under the formula) for it, and `_placeMatrixHandle` (from `_applySelection`) puts the grip
   `.se-mat-handle` on the matrix's bottom-right corner - re-appended to the
   view at every state, like the boxes, since the rendering is replaced.
   Dragging the grip (its own pointer listeners stop propagation and capture
@@ -305,7 +319,7 @@ Two conventions between printer, document and front end:
   rule crosses its blocks.  At the edge of the grid each key falls back to
   what it did before - `↑` in the top row selects the matrix, `←/→` step out
   of it, so every cell stays reachable and the way out is unchanged.  The
-  keys and the toolbar/action-bar arrows go through the same `command()`
+  keys and the arrow buttons under the formula go through the same `command()`
   cases, and `_updateToolbar` asks `_gridTarget`/`_gridCaretTarget` (dry
   runs) so a button is live exactly when the move exists.
 - **A drag that leaves the formula.**  `_extendDragTo(x, y)` hit-tests a
@@ -529,7 +543,9 @@ Two conventions between printer, document and front end:
   exist for them.  Update it in the same commit as the feature -
   `test_help_button_shows_the_guide` checks a phrase from each area.
 - **Tool blocks and columns.**  Every tool lives in a `.se-block`
-  (`data-block`: session, zoom, sessions, nav, edit, clip, apply) built by
+  (`data-block`: session, zoom, sessions, edit, clip, apply - the arrows are
+  in the row under the formula, and `clip` is pinned to the right-hand
+  column in their place) built by
   the `block()` helper, and a block never breaks apart.  Under 44rem the
   blocks spread across each line (`justify-content: space-between`); from
   44rem `.se-tools` becomes a three-column grid and `:nth-child(3n+1/2/0)`
@@ -624,8 +640,9 @@ Two conventions between printer, document and front end:
   break it and both are easy to reintroduce: `contenteditable` must be
   `"true"`, not `"plaintext-only"` (a drag over a plaintext-only line
   selects nothing in Chromium, though a double-click does), and
-  `_placeActions` must do nothing while the source has the focus - the
-  floating bar appearing under the pointer takes the drag apart.  A test
+  nothing may appear under the pointer while the source has the focus - a
+  floating bar popping up there took the drag apart (there is no such bar
+  any more: see "The row under the formula").  A test
   drags over `sin(x)` and checks both the text and the formula.
 - **Touch sizes.**  The `any-pointer: coarse` rule lists every control that
   grows for a finger.  A control added later and left out of that list stays
@@ -674,8 +691,8 @@ Two conventions between printer, document and front end:
   formula would scroll the button out of sight.  `Editor.setFullscreen`
   toggles `.se-full` on the root - `position: fixed`, a column flex box, the
   stage and the view taking the leftover height, the toolbar, the source line
-  and the Symbols panel all hidden (the corner button and the floating action
-  bar are what is left), the formula centred and drawn at 1.9em - and Esc
+  and the Symbols panel all hidden (the corner button and the row under the
+  formula are what is left), the formula centred and drawn at 1.9em - and Esc
   leaves it when nothing is selected (the last `Escape` branch of `_onKey`).
   The panel is only the fallback: `_browserFullscreen` asks for the real
   thing through the Fullscreen API (a user gesture is needed, and an iframe
@@ -687,7 +704,7 @@ Two conventions between printer, document and front end:
   ignores `hide()` from an unfocused window and undoes it when focus comes
   back, so the activity remembers `wantsFullscreen` and applies it again in
   `onWindowFocusChanged`.  The button is 44x44 on a coarse pointer - a
-  target, not a glyph.  The overlay boxes, the caret and the action bar are
+  target, not a glyph.  The overlay boxes, the caret and the operator palette are
   placed in pixels, and the view keeps changing size *after* the class is
   toggled (the browser's full screen, a phone's bars going away, a
   rotation, a window resize): a `ResizeObserver` on `.se-view`
@@ -695,6 +712,22 @@ Two conventions between printer, document and front end:
   the selection again whenever the view's size changes -
   `test_the_selection_follows_the_view_into_full_screen` resizes the
   viewport after the toggle and checks the box sits on the glyphs.
+- **The row under the formula.**  `.se-keyrow`, right under `.se-stage`,
+  always there (so nothing under it moves) and kept in full screen: the four
+  arrows at its left (`.se-nav`; they are not on the tool strip), then
+  `.se-mat-tools` - `+ row / + col / − row / − col`, shown only while the
+  selection is in an explicit matrix; the row wraps when they do not fit a
+  phone - and, at the right end, the keyboard's button (icon only,
+  `buttons.keyboard`, `data-cmd="keyboard"`), shown for a coarse pointer
+  only.  **No bar floats under the selection** (the `.se-actions` bar is
+  gone, on the owner's request: it covered what was being worked on): every
+  command has one fixed place - the arrows here, Edit / Unwrap / Delete /
+  Isolate / Copy / Paste on the strip.  Do not bring a pop-up back for a
+  new command; the operator palette (`.se-opbar`) and the keep chooser are
+  the only things that appear at the selection.  `_hintKeyboard` (from `_applyToolbar`) gives it
+  `.se-hint` - four beats of `se-key-hint`, `KEY_HINT_MS` - when the
+  selection, range, junction or caret is a new one, not when the same one is
+  drawn again and not while a field is open.
 - **Touch keyboards.**  `noAutoCaps` (applied by `h()` to every text input,
   and by hand to the contenteditable source line) turns off
   `autocapitalize`, `autocorrect`, `autocomplete` and `spellcheck`: what is
@@ -763,7 +796,15 @@ Two conventions between printer, document and front end:
   Each editor keeps through its own backend (`Keep.of(editor)`;
   `SympyEditor.setKeeper` only sets a fallback); writes of one name go one
   after another, latest wins, a failed write is retried once and then kept in
-  the browser for that write only.  The widget puts only committed snapshots
+  the browser for that write only.  The session list is shared by every
+  editor on one keeper, so it is never written unread: `_saveSessions` waits
+  for the writes in flight (`Keep.settled`), reads the list strictly, merges
+  in by row `id` what this editor changed since it last read or wrote
+  (`_noteKept`, `_mergeSessions`) and writes that.  A page being closed
+  cannot wait for a read: with a remote keeper `_keepCommittedNow` writes the
+  one session under `session-last` (sent with fetch's `keepalive` when small
+  enough, `KEEPALIVE_MAX`), which `_readSessions` puts in its row at the next
+  start.  `parseSessions` reads a damaged list as none.  The widget puts only committed snapshots
   in its trait: previews, queries and errors come back as custom messages,
   paired by per-view `_req` ids.  `server._Running` sets, clears and
   delivers an interrupt under one lock and cancels a late delivery, so an
@@ -801,11 +842,11 @@ Two conventions between printer, document and front end:
   min-width: 0; min-height: 1.3em`): the status text must never change the
   container's width nor move the tools, either of which moves the formula
   under the pointer between two clicks.  The tools sit in `.se-tools` in three logical rows -
-  session/timeline + zoom, selection navigation + edits + clipboard, and
+  session/timeline + zoom, edits + clipboard, and
   the two groups of pickers (actions, library) + the toggle - forced by `.se-break` spans
   (`flex-basis: 100%`), with `.se-sep` rules between the blocks of a row;
   each row still wraps onto more lines when narrow, and the status line sits
-  under them at every width; `.se-actions` wraps too (`max-width: calc(100% - 8px)`), so no
+  under them at every width; `.se-opbar` wraps too (`max-width: calc(100% - 8px)`), so no
   button is ever off-screen.
 - **Zoom and sideways scrolling.**  `Editor.setZoom(zoom, anchorX)` sets the
   CSS variable `--se-zoom` on `.se-view` (`font-size: calc(base *
@@ -922,7 +963,11 @@ without this a tap that changes the selection woke every one of them); a
 `help` (HTML) on the definition or the instance puts a "?" in the box's
 summary that opens it in the editor's help overlay (`showHelp(html, title)`, the same page as the
 toolbar's "?") - every add-on with a panel should have one.  `api.call(method, payload)`
-is the promise of a query's result or the new snapshot.  A Pyodide page
+is the promise of a query's result or the new snapshot; `api.rangeIndices()`
+gives a range's `children` as the editor's own messages carry them, and
+`api.loadScript(url)` loads a URL once per page (a failed load is tried again).
+An add-on whose `mount` throws is not mounted again until it is switched off
+and on (`_addonsFailed`).  A Pyodide page
 carries the add-ons' packages (`cfg["packages"]`, written under
 `/sympy_editor_pkg/<module>/`) and `micropip`-installs their `requires`
 (`cfg["micropip"]`); `document["addons"]` / `document["available"]` name them by module for
@@ -977,7 +1022,7 @@ of its own under `addons/<pkg>/tests/` (unit and Playwright), and a fix to
 an add-on comes with a test there - `pytest addons/` runs them all,
 including `addons/tests/test_demo_page.py`, which refuses a stale
 `addons/demo.html` (rebuild with `python addons/demo.py` after any change);
-the mobile bundles do not carry add-ons.  Rebuilders and printer methods
+the mobile bundles carry them as folders beside the app's Python (above).  Rebuilders and printer methods
 are process-wide registries: activation adds, nothing removes; kinds are
 not.
 

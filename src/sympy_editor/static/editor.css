@@ -128,6 +128,9 @@
   .se-block:nth-of-type(3n) { justify-self: end; }
   /* (the column rules above carry a pseudo-class, so this needs the extra
    * class to win: a wide block takes the whole row) */
+  /* the arrows went under the formula, so the second row holds two blocks:
+   * the clipboard keeps the right-hand column */
+  .se-block[data-block="clip"] { grid-column: 3; justify-self: end; }
   .se-block.se-block-wide { grid-column: 1 / -1; justify-self: stretch; }
 }
 .se-toolbar button[data-cmd^="zoom"] { padding-left: 0.35rem; padding-right: 0.35rem; min-width: 1.9em; font-variant-numeric: tabular-nums; }
@@ -139,8 +142,8 @@
  * exactly as tall as "Edit" beside it. */
 .se-toolbar button[data-cmd="parent"], .se-toolbar button[data-cmd="child"],
 .se-toolbar button[data-cmd="left"], .se-toolbar button[data-cmd="right"],
-.se-actions button[data-cmd="parent"], .se-actions button[data-cmd="child"],
-.se-actions button[data-cmd="left"], .se-actions button[data-cmd="right"] {
+.se-keyrow button[data-cmd="parent"], .se-keyrow button[data-cmd="child"],
+.se-keyrow button[data-cmd="left"], .se-keyrow button[data-cmd="right"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -150,7 +153,7 @@
 }
 .se-icon { display: block; width: 1.2em; height: 1.2em; }
 .se-zoom { display: inline-flex; align-items: center; gap: 0.25rem; white-space: nowrap; }   /* one block: wraps as a unit */
-.se-toolbar button, .se-addon > summary .se-addon-help {
+.se-toolbar button, .se-keyrow button, .se-addon > summary .se-addon-help {
   font: inherit;
   font-size: 12px;
   line-height: 1.2;
@@ -165,23 +168,23 @@
 }
 /* Pressed: the surface sinks - the gradient flips and the shadow moves
  * inside, and the label follows it down by half a pixel. */
-.se-toolbar button:active:not(:disabled), .se-addon > summary .se-addon-help:active, .se-actions button:active:not(:disabled),
+.se-toolbar button:active:not(:disabled), .se-keyrow button:active:not(:disabled), .se-addon > summary .se-addon-help:active,
 .se-opbar button:active:not(:disabled), .se-keep button:active:not(:disabled) {
   background: var(--se-btn-down);
   box-shadow: var(--se-btn-shadow-down);
   transform: translateY(0.5px);
 }
-.se-toolbar button:focus-visible, .se-addon > summary .se-addon-help:focus-visible,
-.se-actions button:focus-visible, .se-opbar button:focus-visible {
+.se-toolbar button:focus-visible, .se-keyrow button:focus-visible, .se-addon > summary .se-addon-help:focus-visible,
+.se-opbar button:focus-visible {
   outline: 2px solid rgba(var(--se-accent), 0.55);
   outline-offset: 1px;
 }
-.se-toolbar button:disabled {
+.se-toolbar button:disabled, .se-keyrow button:disabled {
   background: none;                       /* flat and quiet: nothing to press */
   box-shadow: none;
 }
 @media (prefers-reduced-motion: reduce) {
-  .se-toolbar button, .se-addon > summary .se-addon-help, .se-pick, .se-actions button, .se-opbar button { transition: none; }
+  .se-toolbar button, .se-keyrow button, .se-addon > summary .se-addon-help, .se-pick, .se-opbar button { transition: none; }
 }
 /* The apply row: two groups boxed apart - the actions (Transform and the
  * type's own menu, both lists chosen by options.actions) and the library
@@ -365,7 +368,7 @@
 }
 @keyframes se-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .se-spinner { animation: none; } }
-.se-toolbar button:disabled { opacity: 0.4; cursor: default; }
+.se-toolbar button:disabled, .se-keyrow button:disabled { opacity: 0.4; cursor: default; }
 .se-sep { width: 1px; height: 1.1rem; background: var(--se-border); margin: 0 0.5rem; }
 .se-status {
   /* its own full line under the tool rows: it is always visible, and its
@@ -495,7 +498,7 @@
 .sympy-editor.se-full .se-stage { flex: 1 1 auto; min-height: 0; display: flex; }
 /* the formula alone: the tools, the source line and the Symbols panel all
  * step aside.  What is left is the corner button (a little more visible,
- * since it is the only thing to aim at), the keys, and the action bar that
+ * since it is the only thing to aim at), the row of arrows under the formula and the operator palette that
  * appears under a selection. */
 .sympy-editor.se-full > .se-toolbar,
 .sympy-editor.se-full > .se-source,
@@ -883,12 +886,36 @@
 .se-session button[data-armed] { border-color: var(--se-error); color: var(--se-error); }
 .se-session-add { border-top: 1px dashed var(--se-border); padding-top: 0.25rem; margin-top: 0.3rem; }
 
-/* the keyboard button only matters where there is no physical keyboard */
-.se-toolbar button[data-cmd="keyboard"] { display: none; }
-@media (any-pointer: coarse) { .se-toolbar button[data-cmd="keyboard"] { display: inline-block; font-size: 1.1em; } }
+/* The row just under the formula: the four arrows at the left, the rows and
+ * columns of a matrix after them while the selection is in one, and the
+ * keyboard's button at the right end.  That last one only matters where
+ * there is no physical keyboard, so it is there for a coarse pointer and
+ * nowhere else.  The row is always there, selection or not, so that nothing
+ * under it moves; it wraps when a matrix's buttons do not fit a phone. */
+.se-keyrow { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.5rem; margin-top: 0.25rem; }
+.se-nav, .se-mat-tools { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 0.25rem; }
+.se-mat-tools[hidden] { display: none; }
+.se-keyrow button[data-cmd="keyboard"] { display: none; align-items: center; justify-content: center; min-width: 2.75rem; margin-left: auto; }
+@media (any-pointer: coarse) {
+  .se-keyrow button[data-cmd="keyboard"] { display: inline-flex; }
+  .se-keyrow .se-nav button[data-cmd] { min-width: 2.75rem; }   /* a thumb's target, like the keyboard's */
+}
+.se-keyrow button[data-cmd="keyboard"] .se-icon { width: 1.5em; height: 1.5em; }
+/* There is something to type at (a selection, a caret): the button blinks a
+ * few beats in the accent colour.  The class goes after KEY_HINT_MS
+ * (editor.js), which is these four beats. */
+.se-keyrow button.se-hint {
+  border-color: rgba(var(--se-accent), 0.9);
+  color: rgb(var(--se-accent));
+  animation: se-key-hint 0.6s ease-in-out 4;
+}
+@keyframes se-key-hint {
+  50% { opacity: 0.25; box-shadow: 0 0 0 3px rgba(var(--se-accent), 0.35); }
+}
+@media (prefers-reduced-motion: reduce) { .se-keyrow button.se-hint { animation: none; } }
 
-/* floating action bar under the selection */
-.se-actions, .se-opbar {
+/* the operator palette, floating under a selected operator */
+.se-opbar {
   position: absolute;
   z-index: 20;
   display: flex;
@@ -901,9 +928,7 @@
   border-radius: 0.35rem;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
 }
-.se-actions[hidden], .se-opbar[hidden] { display: none; }
-.se-actions .se-mat-sep { margin: 0 0.2rem; }
-.se-actions .se-mat-sep[hidden], .se-actions button[hidden] { display: none; }
+.se-opbar[hidden] { display: none; }
 /* Explicit matrices: the grip on the bottom-right corner resizes the matrix
  * by dragging (rows down, columns right); the ghost is the outline of the
  * size it will get, with that size written in its corner.  Both are placed
@@ -937,7 +962,7 @@
   border-radius: 3px;
   background: rgba(var(--se-accent), 0.08);
 }
-.se-mat-ghost-label {   /* top-right: the action bar sits under the matrix, over its bottom corner */
+.se-mat-ghost-label {   /* top-right: clear of the matrix's bottom corner, where the grip is */
   position: absolute;
   right: 2px;
   top: 2px;
@@ -957,7 +982,7 @@
    Unwrap has more than one candidate (x**2: the base or the exponent). */
 .se-keep {
   position: absolute;
-  z-index: 21;               /* above the action bar, which sits under the selection */
+  z-index: 21;               /* above the floating bars */
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -988,7 +1013,7 @@
 .se-keep button:focus-visible { box-shadow: 0 0 0 2px rgba(var(--se-accent), 0.45); }
 .se-keep .se-keep-cancel { border-color: transparent; opacity: 0.7; }
 
-.se-actions button, .se-opbar button {
+.se-opbar button {
   font: inherit;
   font-size: 12px;
   line-height: 1.2;
@@ -1000,15 +1025,15 @@
   cursor: pointer;
   transition: background 120ms ease, box-shadow 120ms ease, transform 80ms ease;
 }
-.se-actions button:disabled, .se-opbar button:disabled { opacity: 0.35; cursor: default; }
+.se-opbar button:disabled { opacity: 0.35; cursor: default; }
 
 /* touch screens: bigger targets, larger formula */
 @media (pointer: coarse) {
   /* every control the finger can hit, the menus and the function box
    * included: leaving one out left it visibly smaller than the rest (the
    * type and Methods menus beside Transform) and harder to tap */
-  .se-toolbar button, .se-addon > summary .se-addon-help, .se-pick,
-  .se-sym select, .se-sym input, .se-sym button, .se-actions button, .se-opbar button {
+  .se-toolbar button, .se-keyrow button, .se-addon > summary .se-addon-help, .se-pick,
+  .se-sym select, .se-sym input, .se-sym button, .se-opbar button {
     font-size: 14px;
     padding: 0.45rem 0.7rem;
     min-height: 2.2rem;
@@ -1024,13 +1049,13 @@
 /* hover feedback only where hovering exists: on a touch screen :hover
  * sticks to the last tapped button, which then looks "active" */
 @media (hover: hover) {
-  .se-toolbar button:hover:not(:disabled), .se-addon > summary .se-addon-help:hover {
+  .se-toolbar button:hover:not(:disabled), .se-keyrow button:hover:not(:disabled), .se-addon > summary .se-addon-help:hover {
     background: var(--se-btn-hover);
     border-color: rgba(var(--se-accent), 0.55);
     box-shadow: var(--se-btn-edge), var(--se-btn-shadow-hover);
   }
   .se-pick:hover:not(:disabled) { border-color: rgba(var(--se-accent), 0.55); }
-  .se-actions button:hover:not(:disabled), .se-opbar button:hover:not(:disabled) {
+  .se-opbar button:hover:not(:disabled) {
     background: rgba(var(--se-accent), 0.14);
     box-shadow: inset 0 0 0 1px rgba(var(--se-accent), 0.25);
   }

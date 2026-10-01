@@ -82,6 +82,8 @@ The arrows mean the same thing everywhere: **↑ out, ↓ in, ← → along**.
 | `+ - * / ^ =` | changes the operator |
 | Del / Backspace | removes it — the two terms then multiply |
 
+A change of operator that is refused leaves the operator selected.
+
 ### From a range
 
 | Key | Result |
@@ -141,9 +143,19 @@ typed is spliced in at that point:
 * `,` makes a new argument;
 * an operator alone, typed between two arguments, changes the operator.
 
-Clicking a gap and typing is different from arrowing to a side of an operator:
-a click in a gap inserts a **new argument** there, attached to neither
-neighbour.
+Which side the caret is on is what it shows. A click on the edge of a term
+puts it on that term. A caret with no side of its own - a click in the gap,
+an arrow key - belongs to the neighbour it is drawn against: in `x + 1` the
+gap holds the `+`, and a caret drawn after it, in front of the `1`, is on the
+side of the `1`. So `r` typed there gives `x + r` (that is `x + r*1`), and
+typed with the caret against the `x`, before the `+`, it gives `r*x + 1`.
+Where nothing is drawn between the two (the factors of `x y`) the caret is on
+the left one.
+
+A node that draws something of its own around its arguments — the name and
+the parentheses of `f(x, y)` — has an inside and an outside. A caret outside
+it, left of the `f` or right of the `)`, is beside the call: `r` typed there
+gives `r*f(x, y)`. Inside, in front of the `x`, it gives `f(r*x, y)`.
 
 ↓ from an operator puts the caret just after it, on its own line only. A
 caret attached to the term on its left stands at the end of that term in the
@@ -184,6 +196,13 @@ back. The boxes are the placeholder symbols `_1`, `_2`… in the source line.
 Tab also moves between empty slots when there are any; with none, Tab puts a
 caret beside the selection.
 
+Each template typed gets boxes of its own: `\frac` twice in one field gives
+four boxes, not two pairs with the same names, and none takes the name of a
+box already in the formula. A command is expanded when the field is
+committed too — `\int` followed at once by Enter builds the integral, as a
+space after it would have. After a change, the first *new* box is selected,
+also when the change was typed over a preview.
+
 ## 9. What the hosts share, and where they differ
 
 The editing model — every rule above — is identical in all four. The
@@ -203,11 +222,22 @@ widget, and the keyboard rules apply on a tablet with a keyboard attached.
 
 Two pieces of interface follow the pointer rather than the host:
 
-* the **keyboard button** on the tool strip appears only where the pointer is
-  coarse. It opens the field for whatever is current: the selection, the
-  caret, or the whole expression.
-* the **arrow buttons** on the tool strip do exactly what the arrow keys do,
-  so everything reachable by keyboard is reachable by finger.
+* the **keyboard button** appears only where the pointer is coarse: an icon
+  at the right end of the row just under the formula. It opens the field for whatever
+  is current: the selection, the caret, or the whole expression. When a
+  selection, a range, an operator or a caret appears it blinks for a couple
+  of seconds in the accent colour (not under reduced motion, where it only
+  takes the colour), to say the keyboard opens there; it does not blink
+  again for the same thing drawn again, nor while a field is open.
+* the **arrow buttons**, at the left of the row just under the formula, do
+  exactly what the arrow keys do, so everything reachable by keyboard is
+  reachable by finger. In a matrix the row also holds **+ row**, **+ col**,
+  **− row** and **− col**.
+
+No bar pops up under a selection or a caret: every command has one fixed
+place - the arrows in that row, Edit, Unwrap, Delete, Isolate, Copy and Paste
+on the tool strip. Only the operator palette (under a selected operator) and
+the chooser that asks which argument to keep appear at the selection.
 
 ## 10. Three rules that hold everywhere
 
@@ -215,6 +245,13 @@ Two pieces of interface follow the pointer rather than the host:
 to that node; with a range, to those arguments; with a caret and nothing
 selected, a function is *added at the caret* rather than applied to the whole
 expression; with nothing at all, to the whole expression.
+
+**Keys go to what is in front.** While the guide, the history or the
+sessions drawer is open, keys are theirs: Esc closes them and nothing typed
+reaches the formula behind. A focused toolbar button or check box takes its
+own Space and Enter. A character typed with AltGr (Option on a Mac) is a
+character like any other, and Enter while an input method is composing
+finishes the composition — it never commits the field.
 
 **A refused edit never changes the selection.** The message appears under the
 formula and the formula flickers red for half a second; what was selected

@@ -119,6 +119,16 @@ def _script_json(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False).replace("<", "\\u003c").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
 
 
+def _id_attr(element_id: str) -> str:
+    """An element id, for an ``id="..."`` attribute."""
+    return _html.escape(str(element_id), quote=True)
+
+
+def _id_script(element_id: str) -> str:
+    """An element id as a JavaScript string, safe inside a <script>."""
+    return _script_json(str(element_id))
+
+
 def _as_document(expr: Union[Basic, str, Document], **document_kwargs) -> Document:
     if isinstance(expr, Document):
         if document_kwargs:
@@ -198,12 +208,12 @@ def render_fragment(config: Dict[str, Any], element_id: Optional[str] = None) ->
     return (
         f'<link rel="stylesheet" href="{katex_css}">\n'
         f"<style>\n{read_static('editor.css')}\n</style>\n"
-        f'<div id="{element_id}" class="sympy-editor-host"></div>\n'
+        f'<div id="{_id_attr(element_id)}" class="sympy-editor-host"></div>\n'
         # Several fragments on one page share one SympyEditor (and, through
         # it, one Pyodide runtime); the script is skipped once it is defined.
         f'<script>\nif (!window.SympyEditor) {{\n{read_static("editor.js")}\n}}\n</script>\n'
         "<script>\n"
-        f'SympyEditor.mount(document.getElementById("{element_id}"), {_script_json(config)});\n'
+        f'SympyEditor.mount(document.getElementById({_id_script(element_id)}), {_script_json(config)});\n'
         "</script>\n"
     )
 
@@ -260,7 +270,7 @@ def render_page(config: Dict[str, Any], title: str = "SymPy Editor", head: str =
     fixes the editor's element id (random otherwise) for a reproducible page;
     ``logo`` is SVG markup shown beside the title (the applications put their
     own icon there, having no title bar to carry it)."""
-    name = _html.escape(title)
+    name = _html.escape(str(title))
     # aria-hidden: the heading beside it already says the name, and the mark's
     # own <title>/<desc> - the note that lets us use SymPy's logo - would
     # otherwise be read out as part of the heading.
@@ -373,10 +383,10 @@ def render_history_fragment(config: Dict[str, Any], element_id: Optional[str] = 
     return (
         f'<link rel="stylesheet" href="{katex_css}">\n'
         f"<style>\n{read_static('editor.css')}\n</style>\n"
-        f'<div id="{element_id}" class="sympy-editor-host"></div>\n'
+        f'<div id="{_id_attr(element_id)}" class="sympy-editor-host"></div>\n'
         f'<script>\nif (!window.SympyEditor) {{\n{read_static("editor.js")}\n}}\n</script>\n'
         "<script>\n"
-        f'SympyEditor.mountHistory(document.getElementById("{element_id}"), {_script_json(config)});\n'
+        f'SympyEditor.mountHistory(document.getElementById({_id_script(element_id)}), {_script_json(config)});\n'
         "</script>\n"
     )
 
@@ -415,7 +425,7 @@ def to_history_html(
     # No <h1> of its own: the report inside the viewer already opens with the
     # title and the step count.
     page = _PAGE.replace("<h1>%(heading)s</h1>\n", "")
-    return page % {"title": _html.escape(config["title"]), "fragment": fragment, "head": head}
+    return page % {"title": _html.escape(str(config["title"])), "fragment": fragment, "head": head}
 
 
 def save_history_html(steps, path, **kwargs) -> Path:

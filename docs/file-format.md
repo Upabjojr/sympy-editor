@@ -42,9 +42,9 @@ same text travels through the `savefile` and `openfile` messages.
 | `history` | every step, as `srepr` — the derivation, not just the answer |
 | `index` | which step is the current one (undo/redo stand either side of it) |
 | `labels` | what produced each step (`Transform: Factor`), `null` for the first |
-| `symbols` | the declared names, as `srepr`, with their assumptions and shapes |
+| `symbols` | the declared names, as `srepr`, with their assumptions and shapes — each a name (a `Symbol`, `MatrixSymbol`, `IndexedBase`, `ArraySymbol`, an undefined function, or the explicit entries of one `MatrixSymbol`); anything else refuses the file |
 | `allow_invalid` | whether the document keeps what SymPy refuses to build |
-| `addon_state` | what each add-on kept about this document, by add-on name |
+| `addon_state` | what each add-on kept about this document, by add-on name — the rewrite rules each as `{"text", "pattern", "replacement"[, "condition"]}`, the parts as `srepr` (a rule kept as its text alone, as earlier versions did, is still read) |
 
 ## Versions
 
@@ -107,6 +107,7 @@ being asked goes through one seam (`Keep` in `editor.js`), under these names:
 | Name | What it holds |
 | --- | --- |
 | `sessions` | the list of sessions, each with the `session` payload above |
+| `session-last` | the last edit of a page that was closed before the list could be written: `{id, state, name, empty, updated}`, one session; it is put in its row at the next start when it is newer (`updated`) than the row |
 | `addons` | which add-ons are switched off, for the editor as a whole: `{"off": [names]}` — every other one is on (`rememberAddons`) |
 | `zoom` | the size the formula is shown at (`rememberZoom`) |
 | `addon:<name>` | what an add-on keeps of its own — the rewrite rules' sets, say (`api.keep`, its editor's keeper) |
@@ -137,6 +138,19 @@ after another (latest wins) and drops the browser's copy only once the keeper
 has confirmed. With `serve()` and the Jupyter widget, sessions work as they
 do in the apps: each one is kept in the store and opened with the `load`
 message.
+
+Several editors can share one keeper — two pages of `serve()`, two widgets
+of a notebook, two windows of the app — and the list is kept whole under one
+name, so an editor never writes it without reading it first: it reads the
+list as kept, puts into it what *it* changed since it last read or wrote it
+(rows added, changed or deleted, matched by `id`), and writes the result.
+What the others added or changed stays. A page being closed cannot wait for
+a read, so it writes its last edit alone, under `session-last` (above);
+with the browser's storage, which answers at once, it merges as usual.
+
+A kept list that is not a list of sessions — damaged, or written by
+something else — is read as no sessions (rows that are not sessions are
+skipped), and the next save writes a good one.
 
 ## Where a saved file goes, and where one comes from
 

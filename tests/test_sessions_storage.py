@@ -457,3 +457,186 @@ def test_a_first_launch_shows_the_add_ons_the_python_has(browser, serving):
     _ready(page, NATIVE)
     page.wait_for_function(NATIVE + ".state.addons_available.some(a => a.name === 'staged')", timeout=10000)
     assert page.errors == []
+
+
+# -- an audit of the sessions: several editors on one store, pages closed and
+#    opened again, what the store holds when it is not what was written ------
+
+def _set(page, src, ed=ED):
+    page.evaluate("(src) => %s.send({action: 'set', src: src})" % ed, src)
+    page.wait_for_function("(src) => %s.state.src === src && !%s.busy" % (ed, ed), arg=src, timeout=10000)
+
+
+def _names(folder):
+    store = _kept(folder)
+    return sorted(s["name"] for s in store["list"]) if store else []
+
+
+def test_two_editors_on_one_store_keep_each_other_s_sessions(browser, serving, tmp_path):
+    """The list of sessions is kept whole under one name, and every editor
+    wrote its own copy of it, read once at start: two pages of serve() - which
+    share the default store, as two widgets of a notebook do - erased each
+    other's sessions at every save, and brought back the ones deleted."""
+    a = serving(Document(x + 1), options={"sessions": True}, store=tmp_path)
+    b = serving(Document(y + 2), options={"sessions": True}, store=tmp_path)
+    page_a = _open(browser, a.url)
+    _ready(page_a)
+    assert _wait(lambda: _names(tmp_path) == ["x + 1"])
+    page_b = _open(browser, b.url)
+    _ready(page_b)
+    assert _wait(lambda: _names(tmp_path) == ["x + 1", "y + 2"])
+    _set(page_b, "y**3")
+    assert _until(page_b, lambda: _names(tmp_path) == ["x + 1", "y**3"], timeout=8)
+    _set(page_a, "x**5")
+    assert _until(page_a, lambda: _names(tmp_path) == ["x**5", "y**3"], timeout=8), _names(tmp_path)
+    _set(page_b, "y**4")
+    assert _until(page_b, lambda: _names(tmp_path) == ["x**5", "y**4"], timeout=8), _names(tmp_path)
+    # each page lists the other's session as it stands now, once it looks (the drawer opened)
+    page_a.evaluate(ED + ".openDrawer()")
+    assert _until(page_a, lambda: sorted(s["name"] for s in page_a.evaluate(ED + "._sessionStore.list")) == ["x**5", "y**4"])
+    assert _until(page_a, lambda: page_a.locator(".se-session:not(.se-session-add)").count() == 2)
+    page_a.evaluate(ED + ".closeDrawer()")
+    # a session deleted in one page stays deleted when the other saves
+    left = page_b.evaluate(ED + "._sessionStore.current")
+    assert page_b.evaluate(ED + ".newSession('current')") is True
+    assert _until(page_b, lambda: len(_kept(tmp_path)["list"]) == 3, timeout=8)
+    _set(page_a, "x**6")
+    assert _until(page_a, lambda: len(page_a.evaluate(ED + "._sessionStore.list")) == 3, timeout=8)
+    assert page_a.evaluate("(id) => %s.deleteSession(id)" % ED, left) is True
+    assert _until(page_a, lambda: left not in [s["id"] for s in _kept(tmp_path)["list"]], timeout=8)
+    _set(page_b, "y**7")
+    page_b.evaluate(ED + ".flush()")
+    assert _until(page_b, lambda: _names(tmp_path) == ["x**6", "y**7"], timeout=8), _names(tmp_path)
+    assert _until(page_b, lambda: left not in [s["id"] for s in page_b.evaluate(ED + "._sessionStore.list")])
+    assert page_a.errors == [] and page_b.errors == []
+
+
+def test_an_edit_right_before_the_page_goes_reaches_the_server(browser, serving, tmp_path):
+    """Kept by the server, the last edit went out as a request the page being
+    closed cancelled: it was lost most of the time.  The session alone goes
+    first, small enough for a request that outlives its page, and is read
+    back at the next start."""
+    doc = Document(x + y)
+    srv = serving(doc, options={"sessions": True}, store=tmp_path)
+    for n in range(3):
+        page = _open(browser, srv.url)
+        _ready(page)
+        _wait(lambda: page.evaluate(ED + "._sessionSaveTimer") is None, timeout=5)
+        src = "x + y + %d" % (100 + n)
+        _set(page, src)
+        page.goto("about:blank")                         # at once: the page is gone before the save
+        step = srv.document.export()["history"][-1]
+        last = tmp_path / "session-last.json"
+        assert _wait(lambda: last.is_file() and step in last.read_text(encoding="utf-8"), timeout=5), n
+        page.close()
+    # opened again, the page has the edit in its session - one session, not one per visit
+    page = _open(browser, srv.url)
+    _ready(page)
+    cur = page.evaluate(ED + "._currentSession()")
+    assert cur["state"]["history"][cur["state"]["index"]] == srv.document.export()["history"][-1]
+    assert _until(page, lambda: len(_kept(tmp_path)["list"]) == 1 and _names(tmp_path) == ["x + y + 102"], timeout=8)
+    assert page.errors == []
+
+
+def test_a_page_opened_again_is_the_same_session(browser, serving, tmp_path):
+    """The session of a document handed in was reused only while it held one
+    step: after the first edit, every reload of the page added a session."""
+    srv = serving(Document(x + y), options={"sessions": True}, store=tmp_path)
+    page = _open(browser, srv.url)
+    _ready(page)
+    _set(page, "x + y + 1")
+    page.evaluate(ED + ".flush()")
+    assert _until(page, lambda: "Integer(1)" in _last_step(tmp_path))
+    for _ in range(3):
+        page.reload()
+        page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+        _ready(page)
+        page.wait_for_timeout(1200)
+        assert len(_kept(tmp_path)["list"]) == 1 and len(page.evaluate(ED + "._sessionStore.list")) == 1
+    assert page.evaluate(ED + ".state.can_undo")
+    # another document handed in is another session, whatever its expression
+    other = serving(Document(x + y + 1), options={"sessions": True}, store=tmp_path)
+    page2 = _open(browser, other.url)
+    _ready(page2)
+    assert _until(page2, lambda: len(_kept(tmp_path)["list"]) == 2, timeout=8)
+
+
+@pytest.mark.parametrize("kept", [
+    {"current": None, "list": [None]},
+    {"current": "a", "list": [None, {"id": "a"}]},
+    {"current": "a", "list": [{"id": "a", "name": 123, "updated": "then", "state": None}]},
+    {"current": "a", "list": [{"id": "a", "name": {"x": 1}, "updated": 5}, 7, "text", [], {"name": "no id"},
+                              {"id": "a", "name": "twice"}]},
+    {"current": 5, "list": "none"},
+])
+def test_a_list_that_is_not_one_starts_the_sessions_all_the_same(browser, serving, tmp_path, kept):
+    """A row of the wrong shape threw while the list was drawn: no session
+    was opened, no edit was kept, nothing was said - and the text, never
+    written again, did the same at every start."""
+    (tmp_path / "sessions.json").write_text(json.dumps(kept), encoding="utf-8")
+    srv = serving(Document(x + y), options={"sessions": True}, store=tmp_path)
+    page = _open(browser, srv.url)
+    _ready(page)
+    page.locator('[data-cmd="drawer"]').click()
+    assert _wait(lambda: page.locator(".se-session:not(.se-session-add)").count() >= 1)
+    _set(page, "x*y")
+    page.evaluate(ED + ".flush()")
+    assert _until(page, lambda: "Mul" in _last_step(tmp_path), timeout=8)
+    rows = _kept(tmp_path)["list"]
+    assert all(isinstance(r, dict) and isinstance(r["id"], str) and isinstance(r["name"], str) for r in rows), rows
+    assert page.errors == []
+
+
+def test_a_file_that_is_refused_changes_nothing(browser, serving, tmp_path):
+    """The session for a file was made, and opened, before the file was
+    read: refused, the file left the user in a session named after it,
+    holding a 0."""
+    srv = serving(Document(x + y), options={"sessions": True}, store=tmp_path)
+    page = _open(browser, srv.url)
+    _ready(page)
+    before = page.evaluate(ED + "._sessionStore")
+    page.evaluate("""SympyEditor.openText('broken.sympy', '{"sympy-editor": 99, "min-reader": 99, "expr": "x"}')""")
+    page.wait_for_function("!document.querySelector('.se-error').hidden", timeout=10000)
+    assert "could not be opened" in page.locator(".se-error").inner_text()
+    page.wait_for_function("!%s.busy" % ED, timeout=10000)
+    after = page.evaluate(ED + "._sessionStore")
+    assert after["current"] == before["current"] and [s["id"] for s in after["list"]] == [s["id"] for s in before["list"]]
+    assert page.evaluate(ED + ".state.src") == "x + y" and str(srv.document.expr) == "x + y"
+    assert page.errors == []
+
+
+def test_two_files_handed_over_together_both_open(browser, serving, tmp_path):
+    """Both found the editor idle; the second met the first one's session as
+    it opened and was dropped, with nothing said."""
+    srv = serving(Document(x), options={"sessions": True}, store=tmp_path)
+    page = _open(browser, srv.url)
+    _ready(page)
+    page.evaluate("() => { SympyEditor.openText('one.sympy', 'y**2'); SympyEditor.openText('two.sympy', 'z**3'); }")
+    page.wait_for_function("document.querySelector('.se-source').textContent === 'z**3'", timeout=15000)
+    store = page.evaluate(ED + "._sessionStore")
+    assert sorted(s["name"] for s in store["list"] if s.get("title")) == ["one", "two"]
+    assert _current(store)["name"] == "two"
+    one = [s for s in store["list"] if s["name"] == "one"][0]
+    assert "Symbol('y')" in one["state"]["history"][-1]
+    assert page.errors == []
+
+
+def test_a_name_emptied_goes_back_to_the_session_s_own_formula(browser, serving, tmp_path):
+    """The name given back was the formula on screen - another session's,
+    unless the one renamed was the one open."""
+    srv = serving(Document(x + y), options={"sessions": True}, store=tmp_path)
+    page = _open(browser, srv.url)
+    _ready(page)
+    page.evaluate(ED + ".flush()")
+    first = page.evaluate(ED + "._sessionStore.current")
+    assert page.evaluate(ED + ".newSession('current')") is True
+    _set(page, "sin(z)")
+    page.locator('[data-cmd="drawer"]').click()
+    row = page.locator(".se-session:not(.se-session-current):not(.se-session-add)").first
+    for typed, name in (("mine", "mine"), ("", "x + y")):
+        row.locator(".se-session-rename").first.click()
+        field = row.locator("input.se-session-name")
+        field.fill(typed)
+        field.press("Enter")
+        assert _wait(lambda: [s for s in page.evaluate(ED + "._sessionStore.list") if s["id"] == first][0]["name"] == name)
+    assert page.errors == []

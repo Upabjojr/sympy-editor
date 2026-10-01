@@ -144,7 +144,7 @@ var SympyEditor = (function () {
     "<li>The line and the formula are the same thing seen twice, and follow each other both ways: select text and that sub-expression is selected above; select above and its text is marked here \u2014 put the cursor in one and a caret appears in the other, at the same place.</li>",
     "</ul></section>",
     "<section><h3>Typing between things</h3><ul>",
-    "<li>Click between two terms, or at the left/right edge of an object: a caret appears. <kbd>Tab</kbd>/<kbd>Shift</kbd>+<kbd>Tab</kbd> put it after/before the selection; <kbd>\u2190</kbd>/<kbd>\u2192</kbd> walk it through the formula like a text cursor.</li>",
+    "<li>Click between two terms, or at the left/right edge of an object: a caret appears. <kbd>Tab</kbd>/<kbd>Shift</kbd>+<kbd>Tab</kbd> put it after/before the selection; <kbd>\u2190</kbd>/<kbd>\u2192</kbd> walk it through the formula like a text cursor. What you type joins the term the caret stands against: after the + of x + 1, in front of the 1, an r gives x + r.</li>",
     "<li>What you type is spliced in: operators as written, nothing between means multiplication (cos(t) after x gives x\u22c5cos(t)), <b>+</b>/<b>\u2212</b> add and subtract at the level of the sum, and a typed comma adds a function argument.</li>",
     "<li>Next to a matrix entry or a power's base the caret extends that object: \u201c+ 1\u201d adds to it, \u201cy\u201d multiplies it.</li>",
     "<li>LaTeX shortcuts in any field: \\theta becomes \u03b8 as you type (Greek letters, \\infty, \\le\u2026).</li>",
@@ -162,7 +162,7 @@ var SympyEditor = (function () {
     "<li>The four menus at the foot of the tools are one kind of box: it lists everything it offers when it takes the focus, narrows the list as you type, and \u2191/\u2193 + <kbd>Enter</kbd> (or a click) pick. The first group holds the <b>actions</b>: <b>Transform \u25be</b> for the general operations, and a second menu with the operations for the selection's type (Matrix, Integral, Equation\u2026). Picking one applies it at once, to the selection or, with nothing selected, to the whole expression.</li>",
     "<li><b>Add-ons</b>, at the top of what <b>\u2261</b> opens, switches on or off the add-ons installed beside the editor \u2014 a panel under the formula, tools, node types from other packages \u2014 without restarting anything; what an add-on kept waits for it to come back. In the apps every add-on is on until switched off, and a switch holds for every session and is remembered between launches. (A read-only editor has no \u2261, and there the switches keep a button of their own on the strip.)</li>",
     "<li>In a <b>matrix</b> or an <b>array</b> the four arrows move as it is drawn: <kbd>\u2190</kbd>/<kbd>\u2192</kbd> along the row, <kbd>\u2191</kbd>/<kbd>\u2193</kbd> between the rows \u2014 for the selection and for the caret alike. At the edge the usual meaning takes over: <kbd>\u2191</kbd> in the top row selects the matrix itself (again, its own parent), <kbd>\u2190</kbd>/<kbd>\u2192</kbd> step out of it. An array of any rank works the same way, because the rule follows the drawing: a rank-3 array is a row of matrices, so <kbd>\u2192</kbd> at the right edge of one block enters the next on the same line.</li>",
-    "<li>In a <b>matrix</b> (the matrix, or anything in one of its entries) the bar under the selection adds <b>+ row</b>, <b>+ col</b>, <b>\u2212 row</b>, <b>\u2212 col</b>: a new row or column of empty slots after the selected one (after the last, for the matrix itself), or the selected one taken away. The grip at the matrix\u2019s bottom-right corner <b>reshapes</b> it: the same entries laid out another way (SymPy\u2019s reshape, in reading order), so it snaps to the shapes that hold them all \u2014 12 entries go 1\u00d712, 2\u00d76, 3\u00d74, 4\u00d73, 6\u00d72, 12\u00d71 and nowhere else. Nothing is added or lost; the outline shows the shape it will take. To grow or shrink the matrix, use + row / + col / \u2212 row / \u2212 col.</li>",
+    "<li>In a <b>matrix</b> (the matrix, or anything in one of its entries) the row under the formula adds, beside the arrows, <b>+ row</b>, <b>+ col</b>, <b>\u2212 row</b>, <b>\u2212 col</b>: a new row or column of empty slots after the selected one (after the last, for the matrix itself), or the selected one taken away. The grip at the matrix\u2019s bottom-right corner <b>reshapes</b> it: the same entries laid out another way (SymPy\u2019s reshape, in reading order), so it snaps to the shapes that hold them all \u2014 12 entries go 1\u00d712, 2\u00d76, 3\u00d74, 4\u00d73, 6\u00d72, 12\u00d71 and nowhere else. Nothing is added or lost; the outline shows the shape it will take. To grow or shrink the matrix, use + row / + col / \u2212 row / \u2212 col.</li>",
     "<li>The second group is the <b>library</b>: <b>Methods \u25be</b> lists everything the selected object's class can do \u2014 .det(), .T, .diff()\u2026 \u2014 one pick calls it. A Lambda is itself a function: <b>( ) apply</b> evaluates it at the arguments you give.</li>",
     "<li>The <b>function box</b> beside it holds all of SymPy: pick a function and fill the parameters it asks for; \u201cdiff(x)\u201d, \u201c.T\u201d, \u201cdet()\u201d typed in full apply as written. A container takes the selection as its contents: <i>Matrix</i> over x + y gives the 1\u00d71 matrix holding it.</li>",
     "<li><b>unevaluated</b> builds the symbolic form (Determinant, Integral, sin(0)\u2026) instead of computing it; <i>Evaluate (doit)</i> computes it later.</li>",
@@ -179,14 +179,14 @@ var SympyEditor = (function () {
     "<section><h3>On a phone or tablet</h3><ul>",
     "<li>Tap to select; tap the selected node again to edit it.</li>",
     "<li>Tap a gap for a caret, tap the caret again to insert; tap an operator for its palette.</li>",
-    "<li>Hold a finger still on a node to start a range (the app lets you feel it), then drag over its neighbours; the <b>keyboard</b> button opens the keyboard for the selection.</li>",
+    "<li>Hold a finger still on a node to start a range (the app lets you feel it), then drag over its neighbours; the arrows under the formula move the selection, and the <b>keyboard</b> button at the right end of their row opens the keyboard for the selection or the caret - it blinks when there is one.</li>",
     "<li>Android\u2019s <b>Back</b> closes what is open \u2014 the help, the history, the drawer, a field, the pen \u2014 and lets the selection go before it leaves the app. <b>Copy</b> and <b>Paste</b> use the phone\u2019s clipboard.</li>",
     "<li>Two fingers zoom the formula and, when it is wider or taller than the view, scroll it; one finger dragged across it scrolls it sideways. The arrows at the edges scroll a screen at a time and go away once the end is in sight.</li>",
     "<li>Only what can be zoomed zooms \u2014 the formula, and the plot and the tree when they are on (their <b>?</b> tells how): the page itself never does, and it scrolls up and down only.</li>",
     "</ul></section>",
     "<section><h3>Zoom and full screen</h3><ul>",
     "<li><kbd>Ctrl</kbd>+wheel, <kbd>Ctrl</kbd>+<kbd>+</kbd>/<kbd>\u2212</kbd>/<kbd>0</kbd>, pinch, or the \u2212/100%/+ buttons.</li>",
-    "<li>The faint button in the top-right corner of the editing area gives the formula the whole screen: the tools, the source line and the Symbols panel step aside, the browser\u2019s chrome and, in the app, the system bars go too. The button (or <kbd>Esc</kbd>, with nothing selected) comes back; a selection still brings up the bar of actions under it.</li>",
+    "<li>The faint button in the top-right corner of the editing area gives the formula the whole screen: the tools, the source line and the Symbols panel step aside, the browser\u2019s chrome and, in the app, the system bars go too. The button (or <kbd>Esc</kbd>, with nothing selected) comes back; the arrows and, on a touch screen, the keyboard button stay under the formula.</li>",
     "</ul></section>",
     "<section><h3>Credits and licences</h3><ul>",
     "<li>SymPy Editor is free software under the GNU Affero General Public License, version 3 or later.</li>",
@@ -213,16 +213,28 @@ var SympyEditor = (function () {
     return url && Object.prototype.hasOwnProperty.call(localAssets, url) ? localAssets[url] : url;
   }
 
+  /** One load per URL and page: two add-ons (or two editors) asking for
+   *  the same library at once used to put it in the page twice, the second
+   *  copy replacing the globals the first had already been handed.  A
+   *  failed load is forgotten, so that asking again tries again. */
+  var scriptsLoaded = {};
   function loadScript(src) {
     src = localAsset(src);
-    return new Promise(function (resolve, reject) {
+    if (Object.prototype.hasOwnProperty.call(scriptsLoaded, src)) return scriptsLoaded[src];
+    var p = new Promise(function (resolve, reject) {
       var s = document.createElement("script");
       s.src = src;
       s.async = true;
       s.onload = function () { resolve(); };
-      s.onerror = function () { reject(new Error("Failed to load " + src)); };
+      s.onerror = function () {
+        delete scriptsLoaded[src];
+        if (s.parentNode) s.parentNode.removeChild(s);
+        reject(new Error("Failed to load " + src));
+      };
       document.head.appendChild(s);
     });
+    scriptsLoaded[src] = p;
+    return p;
   }
 
   function ensureCss(href) {
@@ -343,6 +355,9 @@ var SympyEditor = (function () {
   };
   for (var t in TEMPLATES) if (!(t in COMMANDS)) COMMANDS[t] = TEMPLATES[t];
   for (var g in GREEK) if (!(g in COMMANDS)) COMMANDS[g] = GREEK[g];
+  // ε read back is "epsilon": the variant is typed as its name, which SymPy
+  // prints as the variant.
+  COMMANDS.varepsilon = "varepsilon";
 
   /** `template` with its slots numbered afresh: none of `used` (the
    *  placeholder names the formula has) and none already in `text`. */
@@ -367,31 +382,89 @@ var SympyEditor = (function () {
   var GREEK_NAME_RE = new RegExp("(^|[^A-Za-z0-9_])(" + GREEK_NAMES.join("|") + ")(?![A-Za-z])", "g");
   var GREEK_CHAR_RE = new RegExp("[" + Object.keys(GREEK_BACK).join("") + "]", "g");
 
-  /** SymPy source -> text shown in the field ("theta" -> "θ"). */
+  /** Whether `ev` belongs to a composition (an input method building a
+   *  character: Japanese, Chinese, Korean, a dead key): the Enter that ends
+   *  it chooses the character, it does not apply the field. */
+  function composing(ev) {
+    return !!ev.isComposing || ev.keyCode === 229;
+  }
+
+  /** Whether `ev` is a key of the control it was pressed on: Enter and
+   *  Space on a button, a link, a summary or a check box, anything in a
+   *  text field.  Taken for the formula's, Enter on the Undo button opened
+   *  a field on the selection and undid nothing. */
+  function ownsKey(target, ev, view) {
+    if (!target || target === view || !target.tagName) return false;
+    var tag = target.tagName, press = ev.key === "Enter" || ev.key === " " || ev.key === "Spacebar";
+    if (tag === "TEXTAREA") return true;
+    if (tag === "INPUT") return press || !/^(checkbox|radio|button|submit|range)$/.test(target.type || "text");
+    return press && (tag === "BUTTON" || tag === "A" || tag === "SUMMARY");
+  }
+
+  /** Whether `ev` types a character: no modifier, or the one some layouts
+   *  need for it - AltGr (which Windows reports as Ctrl+Alt) for \ [ ] { } @
+   *  | ~ on a German, Italian, French or Spanish keyboard, Option on a Mac.
+   *  Refused with the shortcuts, "\int" typed over a selection came out
+   *  as "int". */
+  function typesCharacter(ev) {
+    if (!ev.key || ev.key.length !== 1) return false;
+    if (!ev.ctrlKey && !ev.metaKey && !ev.altKey) return true;
+    if (ev.metaKey) return false;
+    if (ev.getModifierState && ev.getModifierState("AltGraph")) return true;
+    if (ev.ctrlKey) return ev.altKey;                      // AltGr, as Windows says it
+    return !/[A-Za-z0-9 ]/.test(ev.key);                   // Option: a character; Alt+letter is a menu's
+  }
+
+  /** SymPy source -> text shown in the field ("theta" -> "θ").  Only a
+   *  name its character reads back as: several names share one character
+   *  (λ is lamda and lambda, Λ is Lamda and Lambda, ε epsilon and
+   *  varepsilon), and shown as it, `Lambda(x, x**2)` opened in a field and
+   *  closed untouched came back as a function called Lamda.  Nor a name
+   *  that is called: gamma(x) is the function, not γ times x. */
   function toDisplay(src) {
-    return (src || "").replace(GREEK_NAME_RE, function (m, before, name) { return before + GREEK[name]; });
+    return (src || "").replace(GREEK_NAME_RE, function (m, before, name, offset, all) {
+      if (GREEK_BACK[GREEK[name]] !== name) return m;
+      if (/^\s*\(/.test(all.slice(offset + m.length))) return m;
+      return before + GREEK[name];
+    });
   }
   /** Text of the field -> SymPy source ("θ" -> "theta", "∞" -> "oo"). */
   function toSource(text) {
     return (text || "").replace(GREEK_CHAR_RE, function (ch) { return GREEK_BACK[ch]; });
   }
   /** Replace complete "\command"s in `text`: those followed by a non-letter,
-   *  or that no longer command starts with.  Returns {text, delta} where
-   *  delta is the change of length before `cursor`. */
-  function expandCommands(text, cursor, used) {
+   *  or that no longer command starts with - and, when the text is `final`
+   *  (Enter was pressed), those it ends with: "\int" waits while it may
+   *  still become "\integral", and sent as it stood it was no formula.
+   *  Returns {text, delta} where delta is the change of length before
+   *  `cursor`. */
+  function expandCommands(text, cursor, used, final) {
     var delta = 0;
+    var taken = (used || []).slice();
     var out = text.replace(/\\([A-Za-z]+)/g, function (m, name, offset) {
       var next = text.charAt(offset + m.length);
       if (!(name in COMMANDS)) return m;
-      var complete = (next !== "" && !/[A-Za-z]/.test(next)) || !Object.keys(COMMANDS).some(function (c) {
+      var complete = (next !== "" && !/[A-Za-z]/.test(next)) || (next === "" && final) || !Object.keys(COMMANDS).some(function (c) {
         return c !== name && c.indexOf(name) === 0;
       });
       if (!complete) return m;
-      var value = name in TEMPLATES ? freshSlots(TEMPLATES[name], used, text) : COMMANDS[name];
+      var value = COMMANDS[name];
+      if (name in TEMPLATES) {
+        // slots of their own for each template of the text (two pasted
+        // together used to share their numbers)
+        value = freshSlots(TEMPLATES[name], taken, text);
+        taken = taken.concat(value.match(/_\d+/g) || []);
+      }
       if (offset + m.length <= cursor) delta += value.length - m.length;
       return value;
     });
     return { text: out, delta: delta };
+  }
+
+  /** The text of a field as the source it stands for, when it is applied:
+   *  its commands expanded, the last one too, and its characters named. */
+  function typedSource(text, used) {
+    return toSource(expandCommands(text || "", 0, used, true).text).trim();
   }
 
   /** What changed between two node tables (path -> {src, type, nargs}):
@@ -542,6 +615,8 @@ var SympyEditor = (function () {
    *  \u21b6, \u21b7 or \u2630, which is why the buttons around it settled on
    *  characters every platform does have), and a button that shows an empty
    *  box says nothing at all. */
+  var KEY_HINT_MS = 2400;   // how long the keyboard's button blinks: four beats of se-key-hint (editor.css)
+
   function keyboardSvg() {
     return '<svg class="se-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
       '<g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
@@ -667,6 +742,7 @@ var SympyEditor = (function () {
     });
     this.input.addEventListener("keydown", function (ev) {
       ev.stopPropagation();   // the editor's keys (Delete, arrows...) are not for the formula here
+      if (composing(ev)) return;
       if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
         ev.preventDefault();
         if (self.menu.hidden) { self.open(); return; }
@@ -702,7 +778,9 @@ var SympyEditor = (function () {
   /** Show the list, narrowed to the box's text. */
   Picker.prototype.open = function () {
     if (this.input.disabled || this.input.hidden) return;
-    var q = this.input.value.trim().replace(/\(.*$/, "").toLowerCase();
+    // (the rows of the Methods menu read ".det()": typed as they read, they
+    // are found - the names are compared without their dot)
+    var q = this.input.value.trim().replace(/\(.*$/, "").replace(/^\./, "").toLowerCase();
     var exact = [], starts = [], contains = [];
     var keyOf = function (t) { return String(t || "").toLowerCase().replace(/^\./, ""); };
     for (var i = 0; i < this.items.length; i++) {
@@ -1180,6 +1258,29 @@ var SympyEditor = (function () {
     return Object.assign({ format: 1 }, state);
   }
 
+  /** The kept sessions, from their text: `{current, list}` with nothing in
+   *  the list but sessions - objects with an id, a name that is text and a
+   *  time that is a number.  A row of another shape (null, a number for a
+   *  name) used to throw while the list was drawn, at every start: no
+   *  session was opened, none was saved, and the text was never rewritten.
+   *  Null for text that holds no list at all. */
+  function parseSessions(text) {
+    var store = null;
+    try { store = JSON.parse(text || "null"); }
+    catch (e) { store = null; }                         // garbage: start afresh
+    if (!store || typeof store !== "object" || !Array.isArray(store.list)) return null;
+    var seen = {};
+    var list = store.list.filter(function (row) {
+      if (!row || typeof row !== "object" || Array.isArray(row)) return false;
+      if (typeof row.id !== "string" || !row.id || seen[row.id]) return false;
+      seen[row.id] = true;
+      if (typeof row.name !== "string") row.name = row.name === null || row.name === undefined ? "" : String(row.name);
+      if (typeof row.updated !== "number" || !isFinite(row.updated)) row.updated = 0;
+      return true;
+    });
+    return { current: typeof store.current === "string" && seen[store.current] ? store.current : null, list: list };
+  }
+
   /** Where what should outlive the page is kept: the sessions, each with the
    *  history behind it.
    *
@@ -1212,7 +1313,16 @@ var SympyEditor = (function () {
     },
 
     keeper: function (backend) {
-      return { backend: backend || null, keeps: null, queue: {}, running: {} };
+      return { backend: backend || null, keeps: null, queue: {}, running: {}, done: {} };
+    },
+
+    /** Resolves once what was written under `key` has reached the keeper
+     *  (at once for a host or the browser, which take it as it is told).
+     *  Whoever reads what it wrote waits for this: a read sent behind a
+     *  write is not answered behind it. */
+    settled: function (key, owner) {
+      var k = Keep.of(owner);
+      return (!Keep.host() && k && k.done && k.done[key]) || Promise.resolve();
     },
 
     fallback: null,
@@ -1223,7 +1333,11 @@ var SympyEditor = (function () {
       return app && app.keepRead && app.keepWrite ? app : null;
     },
 
-    read: async function (key, owner) {
+    /** `strict`: only what the keeper itself holds - null when it holds
+     *  nothing, and an error when it could not be asked (the sessions are
+     *  merged with what is kept before they are written: the browser's old
+     *  copy, or nothing, taken for the keeper's would drop rows). */
+    read: async function (key, owner, strict) {
       var app = Keep.host();
       if (app) {
         var kept = await new Promise(function (resolve) {
@@ -1233,7 +1347,7 @@ var SympyEditor = (function () {
           catch (e) { delete Keep.waiting[token]; resolve(null); }
         });
         if (kept !== null && kept !== undefined) return kept;
-        return Keep.local(key);          // nothing kept yet: what the page kept before it had a host
+        return strict ? null : Keep.local(key);   // nothing kept yet: what the page kept before it had a host
       }
       var k = Keep.of(owner);
       if (k && k.backend && k.backend.keep && k.keeps !== false) {
@@ -1241,10 +1355,24 @@ var SympyEditor = (function () {
           var answer = await k.backend.keep(key);
           k.keeps = true;
           if (answer !== null && answer !== undefined) return answer;
-          return Keep.local(key);        // it keeps, but nothing yet: what the page kept before
-        } catch (e) { k.keeps = false; } // it does not keep: the browser's, then
+          return strict ? null : Keep.local(key);  // it keeps, but nothing yet: what the page kept before
+        } catch (e) {
+          // It does not keep: the browser's, then.  Unless it has kept
+          // before - then this is one request that failed, and switching to
+          // the browser's storage for good would split what is kept in two.
+          if (k.keeps !== true) k.keeps = false;
+          if (strict) throw e;
+        }
       }
       return Keep.local(key);
+    },
+
+    /** Whether what is kept is somewhere that has to be asked (a host, a
+     *  Python behind the page) rather than the browser's own storage. */
+    remote: function (owner) {
+      if (Keep.host()) return true;
+      var k = Keep.of(owner);
+      return !!(k && k.backend && k.backend.keep && k.keeps);
     },
 
     write: function (key, text, owner) {
@@ -1259,7 +1387,7 @@ var SympyEditor = (function () {
         // flight could land out of order - the older last, and stale - and a
         // burst (the zoom through a pinch) goes as the one it ends with.
         k.queue[key] = text;
-        if (!k.running[key]) Keep._drain(k, key);
+        if (!k.running[key]) k.done[key] = Keep._drain(k, key);
         return true;
       }
       return Keep.setLocal(key, text);
@@ -1492,8 +1620,6 @@ var SympyEditor = (function () {
         b.setAttribute("aria-label", title);
         return b;
       };
-      // The arrows are one icon rotated four ways (arrowSvg).
-      var arrowBtn = function (cmd, dir, title) { return iconBtn(cmd, arrowSvg(dir), title); };
 
       // 1. the session and its timeline
       block("session");
@@ -1527,21 +1653,16 @@ var SympyEditor = (function () {
         // plain page with neither needs as much as any.
       }
       if (!o.readOnly) {
-        // 4. moving the selection
-        block("nav");
-        arrowBtn("parent", "up", "Select the enclosing expression (↑)");
-        arrowBtn("child", "down", "Select inside: the sub-expression you came from, or the first one; on an atom, a caret after it (↓)");
-        arrowBtn("left", "left", "Select the previous sibling, or move the caret left (←)");
-        arrowBtn("right", "right", "Select the next sibling, or move the caret right (→)");
-        // 5. what to do with it
+        // 4. moving the selection: the arrows are under the formula (keyRow)
+        // 5. what to do with the selection
         block("edit");
         btn("edit", "Edit", "Edit the selection in place (Enter, double-click, or just start typing)");
         btn("unwrap", "Unwrap", "Remove the selected node but keep its argument: cos(θ) → θ (Backspace)");
         btn("delete", "Delete", "Remove the selection entirely (Del)");
         btn("isolate", "Isolate", "Keep only the selection: it becomes the whole expression (Ctrl+Shift+I)");
-        // 6. the keyboard and the clipboard
+        // 6. the clipboard (the keyboard's button is under the formula: see
+        //    keyRow)
         block("clip");
-        iconBtn("keyboard", keyboardSvg(), "Open the keyboard: edit the selection, insert at the caret, or edit the whole expression");
       } else {
         block("clip");
       }
@@ -1695,6 +1816,42 @@ var SympyEditor = (function () {
         self.scrollBtns[dir] = b;
         self.stage.appendChild(b);
       });
+      // The row just under the formula: what moves the selection and what
+      // opens the keyboard, where the thumb is and beside what they act on.
+      // The four arrows at the left (one icon rotated four ways, arrowSvg);
+      // after them, in a matrix only, its rows and columns (_applyToolbar
+      // shows them); the keyboard's button at the right end - only where
+      // there is no physical keyboard (the style sheet shows it for a coarse
+      // pointer), and it blinks when a selection or a caret appears
+      // (_hintKeyboard), since nothing else says a tap there brings the
+      // keyboard up.  There is no bar floating under the selection: every
+      // command has one fixed place.
+      this.keyRow = null;
+      if (!o.readOnly) {
+        var rowBtn = function (cmd, label, title, svg) {
+          var b = h("button", { type: "button", "data-cmd": cmd, title: title }, svg ? [] : [label]);
+          if (svg) { b.innerHTML = svg; b.setAttribute("aria-label", title); }
+          self.buttons[cmd] = b;
+          return b;
+        };
+        this.matTools = h("span", { class: "se-mat-tools", hidden: "", role: "group", "aria-label": "Matrix rows and columns" }, [
+          rowBtn("matrow", "+ row", "New row of empty slots after this one (after the last, for the matrix itself)"),
+          rowBtn("matcol", "+ col", "New column of empty slots after this one (after the last, for the matrix itself)"),
+          rowBtn("matdelrow", "\u2212 row", "Delete this row (the last one, for the matrix itself)"),
+          rowBtn("matdelcol", "\u2212 col", "Delete this column (the last one, for the matrix itself)")
+        ]);
+        this.keyRow = h("div", { class: "se-keyrow", role: "toolbar", "aria-label": "Move the selection" }, [
+          h("span", { class: "se-nav", "data-block": "nav" }, [
+            rowBtn("left", "", "Select the previous sibling, or move the caret left (←)", arrowSvg("left")),
+            rowBtn("right", "", "Select the next sibling, or move the caret right (→)", arrowSvg("right")),
+            rowBtn("parent", "", "Select the enclosing expression (↑)", arrowSvg("up")),
+            rowBtn("child", "", "Select inside: the sub-expression you came from, or the first one; on an atom, a caret after it (↓)", arrowSvg("down"))
+          ]),
+          this.matTools,
+          rowBtn("keyboard", "", "Open the keyboard: edit the selection, insert at the caret, or edit the whole expression", keyboardSvg())
+        ]);
+        root.appendChild(this.keyRow);
+      }
       this.fullscreen = false;
       this.zoom = 1;
       this._applyZoom(this._initialZoom());
@@ -1816,37 +1973,7 @@ var SympyEditor = (function () {
 
       this.error = h("div", { class: "se-error", role: "alert", hidden: "" });
       root.appendChild(this.error);
-      // Floating action bar under the selection: the same commands as the
-      // toolbar, one click or tap away from the object they act on.
-      this.actions = null;
       if (!o.readOnly) {
-        var abtn = function (cmd, label, title) { return h("button", { type: "button", "data-cmd": cmd, title: title }, [label]); };
-        var aArrow = function (cmd, dir, title) {
-          var b = abtn(cmd, "", title);
-          b.innerHTML = arrowSvg(dir);
-          b.setAttribute("aria-label", title);
-          return b;
-        };
-        this.actions = h("div", { class: "se-actions", hidden: "", role: "toolbar" }, [
-          aArrow("left", "left", "Select the previous sibling"),
-          aArrow("right", "right", "Select the next sibling"),
-          aArrow("parent", "up", "Select the enclosing expression"),
-          aArrow("child", "down", "Select inside (the sub-expression you came from, or the first one)"),
-          abtn("edit", "Edit", "Edit in place"),
-          abtn("unwrap", "Unwrap", "Remove this node but keep its argument: cos(θ) → θ"),
-          abtn("delete", "Delete", "Remove entirely"),
-          abtn("isolate", "Isolate", "Keep only this: it becomes the whole expression"),
-          abtn("copy", "Copy", "Copy the SymPy source of the selection (Ctrl+C; Ctrl+X cuts, Ctrl+V pastes)"),
-          abtn("paste", "Paste", "Paste the clipboard over the selection (Ctrl+V)"),
-          // In a matrix (the matrix itself, or anything in one of its
-          // entries): its rows and columns.  Shown by _placeActions.
-          h("span", { class: "se-sep se-mat-sep", hidden: "" }),
-          abtn("matrow", "+ row", "New row of empty slots after this one (after the last, for the matrix itself)"),
-          abtn("matcol", "+ col", "New column of empty slots after this one (after the last, for the matrix itself)"),
-          abtn("matdelrow", "\u2212 row", "Delete this row (the last one, for the matrix itself)"),
-          abtn("matdelcol", "\u2212 col", "Delete this column (the last one, for the matrix itself)")
-        ]);
-        root.appendChild(this.actions);
         // The grip at the bottom-right corner of a matrix: dragging it
         // resizes the matrix - rows down, columns right (see _placeMatrixHandle).
         this.matHandle = h("div", { class: "se-mat-handle",
@@ -1967,9 +2094,15 @@ var SympyEditor = (function () {
      *  toolbar.  Nothing happens when it is mounted already. */
     _mountAddon(d) {
       if (this._mountedAddon(d.name)) return;
+      // One that failed to mount is not tried again at every snapshot - each
+      // edit, each preview mounted it once more, to fail once more - until
+      // its front end is sent again (the add-on switched off and on).
+      var failed = this._addonsFailed || (this._addonsFailed = {});
+      if (failed[d.name]) return;
       var def = addonDefs[d.name];
       if (!def) {
-        if (window.console) console.warn("sympy-editor: add-on " + d.name + " has no front end registered (SympyEditor.registerAddon)");
+        if (window.console && failed[d.name] !== false) console.warn("sympy-editor: add-on " + d.name + " has no front end registered (SympyEditor.registerAddon)");
+        failed[d.name] = false;        // said once; still looked for, a script may register it later
         return;
       }
       var entry = { name: d.name, label: d.label || d.name, def: def, api: null, inst: null, tools: [], box: null, block: null };
@@ -1978,6 +2111,7 @@ var SympyEditor = (function () {
         entry.inst = (def.mount && def.mount(entry.api)) || {};
       } catch (e) {
         if (window.console) console.error("sympy-editor: add-on " + d.name + " failed to mount", e);
+        failed[d.name] = true;
         return;
       }
       var el = entry.inst.element;
@@ -2046,7 +2180,10 @@ var SympyEditor = (function () {
     _syncAddons(snap) {
       var clients = snap.addon_clients || [];
       if (clients.length) loadAddons(clients);
-      for (var c = 0; c < clients.length; c++) this._addonClients[clients[c].name] = clients[c];
+      for (var c = 0; c < clients.length; c++) {
+        this._addonClients[clients[c].name] = clients[c];
+        if (this._addonsFailed) delete this._addonsFailed[clients[c].name];   // sent again: tried again
+      }
       var on = snap.addons || [];
       var mounted = this._addons.slice();
       for (var i = 0; i < mounted.length; i++) if (on.indexOf(mounted[i].name) < 0) this._unmountAddon(mounted[i].name);
@@ -2168,6 +2305,9 @@ var SympyEditor = (function () {
         state: function () { return self.state; },
         selected: function () { return self.selected; },
         range: function () { return self.range; },
+        /** The range's argument indices, as the editor's own messages carry
+         *  them in `children` (null without a range). */
+        rangeIndices: function () { return self.range ? self._rangeIndices() : null; },
         /** The caret, when there is one (a caret and a selection never coexist). */
         caret: function () { return self.caret; },
         /** Where text typed now would go, as the editor itself would send it -
@@ -2273,8 +2413,12 @@ var SympyEditor = (function () {
           // with it.
           var active = document.activeElement;
           var inAddon = !!(active && active.closest && active.closest(".se-addon"));
+          // Nor when it opened something over the formula (the guide, the
+          // history, the drawer), which has the keyboard while it is open.
+          var over = !!(self.helpView || self.historyView || (self.drawer && !self.drawer.hidden))
+            || cmd === "help" || cmd === "history" || cmd === "drawer";
           if (cmd !== "edit" && cmd !== "keyboard" && active !== self.source && active !== self.input
-              && active !== self.emptyField && !inAddon && !self._typingHere()) self.view.focus({ preventScroll: true });
+              && active !== self.emptyField && !inAddon && !over && !self._typingHere()) self.view.focus({ preventScroll: true });
         }
       });
       this.view.addEventListener("mousemove", function (ev) {
@@ -2502,6 +2646,11 @@ var SympyEditor = (function () {
         hd.addEventListener("touchstart", function (ev) { ev.stopPropagation(); }, { passive: true });
       }
       this.root.addEventListener("keydown", function (ev) {
+        // What is open over the formula has the keyboard - the guide, the
+        // history, the drawer (each closes on Esc by itself): a key pressed
+        // there went to the formula behind it, and Delete removed what was
+        // selected out of sight.
+        if (self.helpView || self.historyView || (self.drawer && !self.drawer.hidden)) return;
         if (self.drawer && self.drawer.contains(ev.target)) return;   // Esc is handled at the document level while it is open
         if (self.symbols && self.symbols.contains(ev.target)) return;
         if (self.addonHost && self.addonHost.contains(ev.target)) return;   // an add-on's panel owns its keys
@@ -2510,6 +2659,7 @@ var SympyEditor = (function () {
         if (self.loading) { ev.preventDefault(); return; }
         var t = ev.target;
         if (t === self.input || (t && t.tagName === "SELECT")) return;
+        if (ownsKey(t, ev, self.view)) return;
         self._onKey(ev);
       });
       this.source.addEventListener("focus", function () {
@@ -2524,6 +2674,7 @@ var SympyEditor = (function () {
       });
       this.source.addEventListener("keydown", function (ev) {
         ev.stopPropagation();
+        if (composing(ev)) return;
         if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); self.commitSource(); }
         else if (ev.key === "Escape") { ev.preventDefault(); self.revertSource(); self.view.focus({ preventScroll: true }); }
       });
@@ -2546,7 +2697,7 @@ var SympyEditor = (function () {
       this._endOutside = endOutside;
       window.addEventListener("pointerup", endOutside);
       window.addEventListener("pointercancel", endOutside);
-      // The highlight boxes, the caret and the action bar are placed in
+      // The highlight boxes, the caret and the operator palette are placed in
       // pixels measured from the rendering: whenever the view changes size
       // they must be measured again.  Entering full screen is the case that
       // showed it - the class is toggled at once, but the browser's own full
@@ -2622,7 +2773,7 @@ var SympyEditor = (function () {
 
     /** Apply a snapshot from the backend. */
     async setState(snap) {
-      if (!snap) return;
+      if (!snap || this.destroyed) return;     // an answer that comes after destroy() finds nobody
       if (snap.export) { this._storeSession(snap); return; }   // the answer to a save, not a new state
       if (snap.query) return;                                   // an add-on's query: answered, nothing changed
       if (snap.preview) {
@@ -2640,12 +2791,17 @@ var SympyEditor = (function () {
         this._updateToolbar();
         return;
       } else {
+        // What was committed before this one: the state to compare with when
+        // a preview is on screen.  Read after the assignment it was the new
+        // snapshot itself - nothing had changed, no slot was new, and a
+        // template applied after its preview had shown selected nothing.
+        var committedBefore = this.committed;
         this.committed = snap;
         if (this._sessionsReady && !snap.error) this._scheduleSessionSave();
         this._endEmptyInput();
       }
       var same = snap === this.state;   // re-render of the current state (keeps the range)
-      var previous = this.state && !this.state.preview ? this.state : this.committed;
+      var previous = this.state && !this.state.preview ? this.state : (snap.preview ? this.committed : committedBefore);
       // A new snapshot of the same expression - the add-ons switched on, a
       // session reopened, any answer that changed nothing - has the same
       // paths: the range stays.  Dropping it lost a range selected while an
@@ -2679,21 +2835,10 @@ var SympyEditor = (function () {
         }
       }
       this.selected = sel;
-      if (snap.methods) {
-        for (var mt in snap.methods) this._methodsCache[mt] = snap.methods[mt] || [];
-      }
+      if (!snap.preview && !unchanged) this._fnCaret = null;   // the place it named is of the expression before
+      this._takeLists(snap);
       this._fillOps();
       this._fillSymbols();
-      if (snap.functions && this.fnPicker && !this._functionsLoaded) {
-        this._functionsLoaded = true;
-        this._fnNames = snap.functions;
-        this._fnSigs = snap.signatures || {};
-        var sigs = this._fnSigs;
-        this.fnPicker.setItems(this._fnNames.map(function (name) {
-          return { value: name, label: name, doc: sigs[name] && sigs[name].doc ? sigs[name].doc : "" };
-        }));
-        if (document.activeElement === this.fnInput) this.fnPicker.open();
-      }
       if (snap.signature && this.fnInput) {
         this._fnSigs[snap.signature.name] = snap.signature;
         // After the request that brought it has settled: a function without
@@ -2850,13 +2995,19 @@ var SympyEditor = (function () {
       var vr = this.view.getBoundingClientRect(), dr = disp.getBoundingClientRect();
       var ghost = function (source, left, top, width) {
         var g = source.cloneNode(true);
+        // A copy of a rendering carries the marks that rendering had: those
+        // of the change before this one (kept, removed), and "changing" -
+        // invisible - when it was copied in the middle of an animation.
+        // Left on the ghost, what goes was drawn transparent instead of red.
+        g.classList.remove("se-changing", "se-ghost-old", "se-ghost-new");
         g.classList.add("se-ghost");
         g.style.left = Math.round(left) + "px";
         g.style.top = Math.round(top) + "px";
         g.style.width = Math.round(width) + "px";
         var all = g.querySelectorAll("*");
         for (var i = 0; i < all.length; i++) {
-          all[i].classList.remove("se-selected", "se-hover", "se-editing", "se-added", "se-added-box");
+          all[i].classList.remove("se-selected", "se-hover", "se-editing", "se-added", "se-added-box",
+                                  "se-kept", "se-removed", "se-changing");
           if (all[i].hasAttribute("data-path")) { all[i].setAttribute("data-ghost", all[i].getAttribute("data-path")); all[i].removeAttribute("data-path"); }
           if (all[i].classList.contains("se-inline")) all[i].parentNode.removeChild(all[i]);
         }
@@ -3374,7 +3525,7 @@ var SympyEditor = (function () {
         if (!quiet) this._setStatus("Operator " + j.text + " in " + jn.type + " " + jn.src
                         + " (type + - * / ^ = to change it; Delete removes it, the two then multiply)");
         this._markSource([]);
-        this._placeActions(null);
+        this._clearBarRoom();
         this._positionBar(this.opBar, jr);
         return;
       }
@@ -3389,7 +3540,7 @@ var SympyEditor = (function () {
         this._drawBoxes("select", u ? [u] : []);
         if (!quiet) this._setStatus(this.state.nodes[this.range.parent].type + " range: " + this._rangeSource(rangePaths));
         this._markSource(rangePaths);
-        this._placeActions(u);
+        this._clearBarRoom();
         return;
       }
       var node = this.selected && this.state && this.state.nodes ? this.state.nodes[this.selected] : null;
@@ -3400,11 +3551,11 @@ var SympyEditor = (function () {
         this._drawBoxes("select", els.length && !els[0].classList.contains("se-editing") ? srects : []);
         if (!quiet) this._setStatus(node.type + ": " + node.src);
         this._markSource([this.selected]);
-        this._placeActions(els.length && !els[0].classList.contains("se-editing") ? this._unionRect(srects) : null);
+        this._clearBarRoom();
       } else {
         this._drawBoxes("select", []);
         this._markSource([]);
-        this._placeActions(null);
+        this._clearBarRoom();
       }
       if (!node && !this.closed) {
         if (!quiet) this._setStatus(this.annotated ? (this.opts.readOnly ? "" : "Click to select; click between terms to insert")
@@ -3480,11 +3631,12 @@ var SympyEditor = (function () {
       if (this.closed) return;
       var k = ev.key;
       if (this.helpView && k === "Escape") { ev.preventDefault(); this.closeHelp(); return; }
-      var mod = ev.ctrlKey || ev.metaKey;
+      var typed = typesCharacter(ev);
+      var mod = (ev.ctrlKey || ev.metaKey) && !typed;      // a shortcut, not AltGr
       var ro = this.opts.readOnly;
       var t = this.selected ? this.tree[this.selected] : null;
       var handled = true;
-      if (!ro && !mod && !ev.altKey && k.length === 1 && this.view.classList.contains("se-empty")) {
+      if (!ro && typed && this.view.classList.contains("se-empty")) {
         ev.preventDefault();
         this.beginEmptyInput(k);                                   // everything was deleted: type the new expression here
         return;
@@ -3507,7 +3659,7 @@ var SympyEditor = (function () {
         this.select(null);
       } else if (this.junction && (k === "Delete" || k === "Backspace")) {
         if (!ro) this.setOperator("");
-      } else if (this.junction && !mod && !ev.altKey && OPERATOR_KEYS.indexOf(k) >= 0) {
+      } else if (this.junction && typed && OPERATOR_KEYS.indexOf(k) >= 0) {
         if (!ro) this.setOperator(k);
       } else if (this.junction && k === "ArrowUp") {
         this.select(this.junction.path);
@@ -3533,7 +3685,7 @@ var SympyEditor = (function () {
         this.select(this.range.parent);
       } else if (this.range && (k === "ArrowDown" || k === "ArrowLeft" || k === "ArrowRight")) {
         this.select(this._displayChildren(this.range.parent)[this.range.focus]);   // collapse
-      } else if (this.range && !ro && !mod && !ev.altKey && k.length === 1) {
+      } else if (this.range && !ro && typed) {
         this.beginRangeEdit(k);
       } else if (this.caret && k === "Escape") {
         this._hideCaret();
@@ -3549,7 +3701,7 @@ var SympyEditor = (function () {
         if (!this._gridCaretMove("up")) this._selectBesideCaret();   // ↑ first selects the object the caret sits next to (then the ancestors)
       } else if (this.caret && k === "ArrowDown") {
         this._gridCaretMove("down");   // in a grid: the row below; elsewhere nothing to go into from a caret
-      } else if (this.caret && !ro && !mod && !ev.altKey && k.length === 1) {
+      } else if (this.caret && !ro && typed) {
         this.beginInsert(k);
       } else if (k === "Enter") {
         if (!ro) this.beginEdit(this.selected || "/");
@@ -3572,7 +3724,7 @@ var SympyEditor = (function () {
         if (this._gridMove(dir)) { /* the cell beside */ }
         else if (this.selected) this._moveSideways(k === "ArrowLeft" ? -1 : 1);
         else this._caretAtEnd(k === "ArrowLeft" ? "start" : "end");
-      } else if (!ro && !mod && !ev.altKey && k.length === 1 && this.selected) {
+      } else if (!ro && typed && this.selected) {
         this.beginEdit(this.selected, k);   // start replacing the selection with what is typed
       } else {
         handled = false;
@@ -3618,7 +3770,7 @@ var SympyEditor = (function () {
       });
       this.select(path);
       this._drawBoxes("select", []);
-      this._placeActions(null);
+      this._clearBarRoom();
       this._setStatus("Editing " + this.state.nodes[path].type + " – Enter to apply, Esc to cancel");
       input.focus();
       if (initial === undefined) input.select();
@@ -3688,7 +3840,7 @@ var SympyEditor = (function () {
       if (buttons[at]) buttons[at].focus({ preventScroll: true });
     }
 
-    /** The chooser above the selection - the action bar is under it. */
+    /** The chooser above the selection. */
     _placeKeep(path) {
       var el = this._els(path)[0];
       if (!el || !this.keepMenu) { this._hideKeep(); return; }
@@ -3696,12 +3848,11 @@ var SympyEditor = (function () {
       var left = rect.left - rr.left;
       var maxLeft = Math.max(0, this.root.clientWidth - this.keepMenu.offsetWidth - 4);
       var top = rect.top - rr.top - this.keepMenu.offsetHeight - 6;
-      if (top < 0) top = rect.bottom - rr.top + 6;   // no room above: under it, over the action bar
+      if (top < 0) top = rect.bottom - rr.top + 6;   // no room above: under it
       this.keepMenu.style.left = Math.round(Math.max(0, Math.min(left, maxLeft))) + "px";
       this.keepMenu.style.top = Math.round(top) + "px";
     }
 
-    /** Show the floating action bar under a viewport rectangle (null hides it). */
     /** The explicit matrix the selection is, or is inside of: `{path, rows,
      *  cols}`, or null.  With nothing selected, the whole expression counts. */
     _matrixContext() {
@@ -3768,47 +3919,10 @@ var SympyEditor = (function () {
       if (this.matGhost && this.matGhost.parentNode) this.matGhost.parentNode.removeChild(this.matGhost);
     }
 
-    _placeActions(rect) {
-      if (!this.actions) return;
-      // The bar acts on the formula.  While the source line has the focus the
-      // work is in the text, and popping the bar up there took the selection
-      // apart mid-drag: it appears under the pointer, the pointer leaves the
-      // line, and the browser drops the selection being made.
-      if (document.activeElement === this.source) rect = null;
-      if (!rect || this.input || this.closed) { this.actions.hidden = true; this.view.style.paddingBottom = ""; return; }
-      // Mid-drag the bar follows the selection, but its buttons keep their
-      // state until the selection settles, as the toolbar's do: Unwrap is
-      // live on x**2 and not on a range, and went on and off as the finger
-      // crossed from one to the other (_updateToolbar catches up).
-      if (this._drawing()) { this._actionsStale = true; this._updateToolbar(); }
-      else this._setActionStates();
-      this.actions.hidden = false;
-      this._positionBar(this.actions, rect);
-    }
-
-    /** Which of the bar's buttons apply to the selection. */
-    _setActionStates() {
-      this._actionsStale = false;
-      var t = this.selected ? this.tree[this.selected] : null;
-      var selNode = this.selected && !this.range ? this.state.nodes[this.selected] : null;
-      var unwrapOk = !!(selNode && (selNode.nargs || selNode.parts));
-      var mctx = this._matrixContext();
-      var sep = this.actions.querySelector(".se-mat-sep");
-      if (sep) sep.hidden = !mctx;
-      var buttons = this.actions.querySelectorAll("button");
-      for (var i = 0; i < buttons.length; i++) {
-        var cmd = buttons[i].getAttribute("data-cmd");
-        if (cmd.indexOf("mat") === 0) buttons[i].hidden = !mctx;
-        buttons[i].disabled = cmd === "parent" ? !(this.range || (t && t.parent))
-                            : cmd === "child" ? false
-                            : cmd === "paste" ? false
-                            : cmd === "unwrap" ? !unwrapOk
-                            : cmd === "delete" ? !(this.range || this.selected)
-                            : cmd === "isolate" ? !(this.range || (this.selected && this.selected !== "/"))
-                            : cmd === "matdelrow" ? !(mctx && mctx.rows > 1)
-                            : cmd === "matdelcol" ? !(mctx && mctx.cols > 1)
-                            : false;
-      }
+    /** Give back the room the view made under the formula for a floating
+     *  bar (the operator palette: _positionBar) that is no longer shown. */
+    _clearBarRoom() {
+      this.view.style.paddingBottom = "";
     }
 
     /** Place a floating bar under `rect` (a selection) - under the formula's
@@ -3988,6 +4102,24 @@ var SympyEditor = (function () {
       }
     }
 
+    /** What a snapshot carries for the menus: the methods of the types it
+     *  introduces, and SymPy's function names (asked for once). */
+    _takeLists(snap) {
+      if (snap.methods) {
+        for (var mt in snap.methods) this._methodsCache[mt] = snap.methods[mt] || [];
+      }
+      if (snap.functions && this.fnPicker && !this._functionsLoaded) {
+        this._functionsLoaded = true;
+        this._fnNames = snap.functions;
+        this._fnSigs = snap.signatures || {};
+        var sigs = this._fnSigs;
+        this.fnPicker.setItems(this._fnNames.map(function (name) {
+          return { value: name, label: name, doc: sigs[name] && sigs[name].doc ? sigs[name].doc : "" };
+        }));
+        if (document.activeElement === this.fnInput) this.fnPicker.open();
+      }
+    }
+
     /** Ask the backend for SymPy's function names once (for the box's autocompletion). */
     _loadFunctions() {
       if (this._functionsLoaded || this._functionsRequested || !this.backend) return;
@@ -3999,7 +4131,12 @@ var SympyEditor = (function () {
       var done = function () { if (!self.busy) self._hideLoading(); };
       Promise.resolve(this.backend.send({ action: "functions" }, function (text) { self._report(text); })).then(function (snap) {
         done();
-        if (snap) self.setState(snap);   // the widget backend answers through its trait instead
+        if (!snap || self.destroyed) return;
+        // Only the lists are taken.  The answer is a snapshot, and drawn as
+        // one it ended whatever was open - a field typed into while the
+        // list was on its way lost its text.
+        self._takeLists(snap);
+        self._fillOps();
       }, function () { done(); self._functionsRequested = false; });
     }
 
@@ -4034,12 +4171,17 @@ var SympyEditor = (function () {
       if (!this.fnForm) {   // no function box on this page: let the backend say what is missing
         return this.send({ action: "apply", path: path, op: spec.name });
       }
+      // What the form is about is what was selected when it opened - the
+      // path and, for a range, its arguments: read when Apply is pressed,
+      // the range was whatever had been selected meanwhile, under a path
+      // that was not its parent's.
+      var children = this.range && this.range.parent === path ? this._rangeIndices() : null;
       this._showFnForm({ name: spec.label.replace(/…\s*$/, ""), params: spec.params, doc: spec.doc || "",
                          callable: true, hinted: true },
         function (values) {
           var msg = { action: "apply", path: path, op: spec.name, args: values };
           if (self.lazy()) msg.lazy = true;
-          if (self.range) msg.children = self._rangeIndices();
+          if (children) msg.children = children;
           self.send(msg);
         }, anchor);
     }
@@ -4132,6 +4274,9 @@ var SympyEditor = (function () {
       // live caret - the place the user pointed at is still the place.
       var gap = this.caret || this._fnCaret;
       if (!gap || this.selected || this.range) return false;
+      // A method (.expand) is called on something, not written somewhere:
+      // with nothing selected that is the whole expression, caret or not.
+      if (/^\s*\./.test(text)) return false;
       this._fnCaret = null;
       var src = /\(/.test(text) ? text : text + "(_1)";
       src = freshSlots(src, this._placeholderNames(), "");
@@ -4290,7 +4435,7 @@ var SympyEditor = (function () {
 
     /** Apply the edited source line as the whole expression. */
     commitSource() {
-      var src = toSource(this.source.textContent).trim();
+      var src = typedSource(this.source.textContent, this._placeholderNames());
       var base = this.committed || this.state;
       var same = src === (base ? base.src : "");
       clearTimeout(this._previewTimer);
@@ -4382,9 +4527,10 @@ var SympyEditor = (function () {
         self._schedulePreview();
       });
       input.addEventListener("keydown", function (ev) {
+        if (composing(ev)) { ev.stopPropagation(); return; }
         if (ev.key === "Enter") {
           ev.preventDefault();
-          var src = toSource(input.value).trim();
+          var src = typedSource(input.value, self._placeholderNames());
           if (!src) return;
           // the field stays until the answer: a refused text is kept to fix
           // (setState ends it when the expression is committed)
@@ -4422,7 +4568,10 @@ var SympyEditor = (function () {
 
     /** Put the keyboard in the source line with everything selected. */
     editSource(text) {
-      if (this.opts.readOnly || !this.opts.showSource) return false;
+      if (this.opts.readOnly) return false;
+      // Without the source line there is no line to type in - but the view
+      // still empties: deleting the whole expression did nothing at all there.
+      if (!this.opts.showSource && text !== "") return false;
       var sel = window.getSelection();
       if (text !== undefined) {
         // Start over: the line holds only `text` (possibly nothing) until Enter applies it.
@@ -4493,7 +4642,27 @@ var SympyEditor = (function () {
         return gaps;
       }
       var first = kids[0], last = kids[kids.length - 1];
-      push(this._argIndex(p, first.path), (p === "/" ? Math.min(hr.left, first.rect.left) : first.rect.left) - pad,
+      // A node that draws something of its own around its arguments - the
+      // name and the parentheses of f(x, y), the braces of a set - has an
+      // inside and an outside: the room before the first argument stops at
+      // the node's own edge, and outside it the caret is beside the node
+      // (it extends it: "r" there is r*f(x, y)), not in front of its first
+      // argument - which is where it used to type, f(r*x, y), from a caret
+      // drawn left of the f.  A sum or a product starts with its first
+      // argument and ends with its last: nothing changes for them.
+      var vr = this._visualRect(host);
+      var lead = first.rect.left - vr.left, trail = vr.right - last.rect.right;
+      var outside = function (side, a, b) {
+        gaps.push({ path: p, extend: side, index: 0, a: a, b: b,
+          leftEl: side === "after" ? host : null, rightEl: side === "before" ? host : null,
+          top: vr.top, bottom: vr.bottom, height: vr.bottom - vr.top });
+      };
+      var a0 = (p === "/" ? Math.min(hr.left, first.rect.left) : first.rect.left) - pad;
+      if (lead > 2) {
+        if (p === "/") outside("before", a0, vr.left);
+        a0 = Math.max(a0, vr.left);
+      }
+      push(this._argIndex(p, first.path), a0,
         first.rect.left, null, first.el, first.rect.top, first.rect.bottom);
       for (var i = 0; i + 1 < kids.length; i++) {
         var l = kids[i], r = kids[i + 1];
@@ -4505,7 +4674,12 @@ var SympyEditor = (function () {
         // cursor after a character - not the union with a taller neighbour.
         push(this._argIndex(p, r.path), l.rect.right, r.rect.left, l.el, r.el, l.rect.top, l.rect.bottom);
       }
-      push(node.nargs, last.rect.right, (p === "/" ? Math.max(hr.right, last.rect.right) : last.rect.right) + pad,
+      var b1 = (p === "/" ? Math.max(hr.right, last.rect.right) : last.rect.right) + pad;
+      if (trail > 2) {
+        if (p === "/") outside("after", vr.right, b1);
+        b1 = Math.min(b1, vr.right);
+      }
+      push(node.nargs, last.rect.right, b1,
         last.el, null, last.rect.top, last.rect.bottom);
       return gaps;
     }
@@ -4639,7 +4813,7 @@ var SympyEditor = (function () {
       this._hideCaret(true);
       this.caret = gap;
       this.junction = null;
-      this._placeActions(null);
+      this._clearBarRoom();
       // Vertical extent: the object the caret sits next to (measured now,
       // since the gap may have been computed before a scroll).
       var beside = gap.leftEl || gap.rightEl;
@@ -4650,12 +4824,13 @@ var SympyEditor = (function () {
       var vr = this.view.getBoundingClientRect();
       var cx = Math.max(gap.a, Math.min(x === undefined ? gap.b : x, gap.b));
       this._caretX = cx;           // the end of the gap it is drawn at: an Edit field opens there (beginInsert)
+      gap.drawn = cx;              // ... and what is typed joins the neighbour on that side (_insertMessage)
       this.caretEl.style.left = Math.round(cx - vr.left + this.view.scrollLeft - 1) + "px";
       this.caretEl.style.top = Math.round(gap.top - vr.top + this.view.scrollTop) + "px";
       this.caretEl.style.height = Math.round(Math.max(12, gap.height)) + "px";
       this.view.appendChild(this.caretEl);
       // A caret and a selection never coexist: with a caret, keys only insert.
-      // Lift the selection completely: classes, highlight box, source mark, action bar.
+      // Lift the selection completely: classes, highlight box, source mark.
       this.selected = null;
       this.range = null;
       this._applySelection();
@@ -4744,7 +4919,37 @@ var SympyEditor = (function () {
       if (this.lazy()) msg.lazy = true;
       this.selected = j.path;                  // what the change leaves is selected afterwards
       this.junction = null;
-      this.send(msg);
+      var self = this;
+      Promise.resolve(this.send(msg)).then(function (snap) {
+        // Refused, nothing changed - the selection neither: the operator is
+        // selected as it was, in the rendering as it is now.  Left on the
+        // node, a second Del (meant for the operator) deleted the node.
+        if (!snap || !snap.error || self.destroyed || self.junction || self.selected !== j.path) return;
+        var again = self._junctionLike(j);
+        self.selected = null;
+        self.range = null;
+        self.junction = again;
+        self._fillOps();
+        self._applySelection();
+        self._updateToolbar();
+      });
+    }
+
+    /** The operator `j` was (between the same two arguments of the same
+     *  node), found in the rendering as it stands - a new rendering has new
+     *  elements.  Null when it is not on the screen to be found. */
+    _junctionLike(j) {
+      var kids = this._displayChildren(j.path);
+      var le = this._els(kids[j.leftIndex] || "")[0], re = this._els(kids[j.rightIndex] || "")[0];
+      if (!le || !re) return null;
+      var lr = this._visualRect(le), rr = this._visualRect(re);
+      var y = (Math.max(lr.top, rr.top) + Math.min(lr.bottom, rr.bottom)) / 2;
+      var tries = [(lr.right + rr.left) / 2, rr.left + 2];       // between the two; the sign a negative term starts with
+      for (var i = 0; i < tries.length; i++) {
+        var found = this._operatorAt({ clientX: tries[i], clientY: y });
+        if (found && found.path === j.path && found.left === j.left && found.right === j.right) return found;
+      }
+      return null;
     }
 
     /** Children of `p` in reading order: left to right on a line, a higher
@@ -5249,7 +5454,7 @@ var SympyEditor = (function () {
       });
       this._drawBoxes("select", []);
       this._drawBoxes("hover", []);
-      this._placeActions(null);
+      this._clearBarRoom();
       this._setStatus("Editing " + this.state.nodes[parent].type + " range – Enter to apply, Esc to cancel");
       input.focus();
       if (initial === undefined) input.select();
@@ -5305,6 +5510,7 @@ var SympyEditor = (function () {
       });
       input.addEventListener("keydown", function (ev) {
         ev.stopPropagation();
+        if (composing(ev)) return;
         if (ev.key === "Enter") { ev.preventDefault(); self.commitEdit(); }
         else if (ev.key === "Escape") { ev.preventDefault(); self.cancelEdit(); }
       });
@@ -5361,7 +5567,20 @@ var SympyEditor = (function () {
       var msg = { action: "insert", path: parent, index: gap.index, src: src };
       if (gap.leftEl) msg.left = this._argIndex(parent, gap.leftEl.getAttribute("data-path"));
       if (gap.rightEl) msg.right = this._argIndex(parent, gap.rightEl.getAttribute("data-path"));
-      if (gap.attach) msg.attach = gap.attach;
+      // The caret is a point in the written formula: with no side of its
+      // own (a click in the gap, an arrow key) it belongs to the neighbour
+      // it is drawn against.  In x + 1 the gap holds the "+", and a caret
+      // drawn after it - in front of the 1 - joins the 1: "r" typed there is
+      // x + r*1, not r*x + 1, which is what joining the left one whatever
+      // the caret showed used to give.
+      // Not for a text that opens with an operator: "+ w" is a new term
+      // wherever in the gap it is typed, never w times what follows.
+      var attach = gap.attach;
+      if (!attach && gap.leftEl && gap.rightEl && gap.drawn !== undefined && gap.b - gap.a > 2
+          && !/^\s*[-+*\/^,\u2212]/.test(src || "")) {
+        attach = gap.drawn - gap.a < gap.b - gap.drawn ? "left" : "right";
+      }
+      if (attach) msg.attach = attach;
       return msg;
     }
 
@@ -5369,7 +5588,7 @@ var SympyEditor = (function () {
       if (this.editing === null && !this.inserting) return;
       var inserting = this.inserting, editRange = this._editRange;
       var path = this.editing;
-      var src = toSource(this.input.value).trim();
+      var src = typedSource(this.input.value, this._placeholderNames());
       var original = this._editOriginal;
       this._endEdit();
       this._applySelection();
@@ -5467,6 +5686,7 @@ var SympyEditor = (function () {
           return;
         }
         case "keyboard":
+          this._endKeyboardHint();
           if (this.input) { this.input.focus(); return; }   // bring the keyboard back for the open field
           if (this.caret) return this.beginInsert("");
           if (this.range) return this.beginRangeEdit();
@@ -5621,21 +5841,114 @@ var SympyEditor = (function () {
     }
 
     /** The sessions as the keeper has them - the app's own storage, the
-     *  server's, or the browser's (see Keep).  Read once, at startup. */
+     *  server's, or the browser's (see Keep) - with the last edit of a page
+     *  that was closed over it (see _keepCommittedNow). */
     async _readSessions() {
-      var text = null;
+      var text = null, last = null;
       try { text = await Keep.read("sessions", this); }
       catch (e) { text = null; }
-      var store = null;
-      try { store = JSON.parse(text || "null"); }
-      catch (e) { store = null; }                       // garbage: start afresh
-      this._sessionStore = store && Array.isArray(store.list) ? store : { current: null, list: [] };
-      return this._sessionStore;
+      try { last = JSON.parse((await Keep.read("session-last", this)) || "null"); }
+      catch (e) { last = null; }
+      var store = parseSessions(text) || { current: null, list: [] };
+      this._noteKept(store);           // as kept: the row the last edit goes into is this editor's change
+      if (last && typeof last === "object" && last.state && typeof last.state === "object") {
+        var row = store.list.filter(function (r) { return r.id === last.id; })[0];
+        if (row && typeof last.updated === "number" && last.updated > row.updated) {
+          row.state = last.state;
+          row.updated = last.updated;
+          row.empty = !!last.empty;
+          if (!row.title && typeof last.name === "string") row.name = last.name;
+        }
+      }
+      this._sessionStore = store;
+      return store;
     }
 
+    /** Remember the rows as they are kept: what differs from this at the
+     *  next save is what this editor changed (see _mergeSessions). */
+    _noteKept(store) {
+      var kept = this._sessionsKept = {};
+      store.list.forEach(function (row) { kept[row.id] = JSON.stringify(row); });
+    }
+
+    /** Bring into `store` what other editors did to the kept list since
+     *  this one last read or wrote it.  The list is kept whole under one
+     *  name, and every editor that shares the keeper - two pages of
+     *  serve(), two widgets of a notebook, two windows of the app - wrote
+     *  its own copy of it: each save erased the sessions the others had
+     *  added, and brought back the ones they had deleted.  A row this editor
+     *  changed (or added) is its own; one it deleted stays deleted; the
+     *  rest is as kept - a row the others added comes in, one they deleted
+     *  goes, unless it is the one open here.  True when the list changed. */
+    _mergeSessions(store, kept) {
+      var known = this._sessionsKept || {}, mine = {}, out = [], seen = {}, changed = false;
+      store.list.forEach(function (row) { mine[row.id] = row; });
+      kept.list.forEach(function (row) {
+        var own = mine[row.id];
+        if (!own) {
+          if (Object.prototype.hasOwnProperty.call(known, row.id)) return;   // deleted here
+          out.push(row);                                                     // added elsewhere
+          changed = true;
+        } else if (JSON.stringify(own) !== known[row.id] || JSON.stringify(row) === known[row.id]) {
+          out.push(own);                                                     // changed here, or nowhere
+        } else {
+          out.push(row);                                                     // changed elsewhere
+          changed = true;
+        }
+        seen[row.id] = true;
+      });
+      store.list.forEach(function (row) {
+        if (seen[row.id]) return;
+        var touched = JSON.stringify(row) !== known[row.id];                 // new here, or changed here
+        if (touched || row.id === store.current) out.push(row);
+        else changed = true;                                                 // deleted elsewhere
+      });
+      store.list = out;
+      return changed;
+    }
+
+    /** Keep the sessions.  What is kept elsewhere is read first and merged
+     *  (see _mergeSessions), one save at a time. */
     _saveSessions(store) {
       this._sessionStore = store;
+      if (!Keep.remote(this)) {
+        var local = parseSessions(Keep.local("sessions"));                   // the browser's storage answers at once
+        if (local && this._mergeSessions(store, local)) this._fillSessionsLater();
+        this._writeSessions(store);
+        return;
+      }
+      this._sessionsWaiting = true;
+      if (this._sessionsMerging) return;
+      var self = this;
+      this._sessionsMerging = (async function () {
+        try {
+          while (self._sessionsWaiting && !self.destroyed) {
+            self._sessionsWaiting = false;
+            var kept = null;
+            try {
+              await Keep.settled("sessions", self);      // what was written last is there to be read
+              kept = parseSessions(await Keep.read("sessions", self, true));
+            } catch (e) { kept = null; }                 // it could not be asked: written as it is, merged next time
+            if (self.destroyed) return;
+            if (kept && self._mergeSessions(self._sessionStore, kept)) self._fillSessionsLater();
+            self._writeSessions(self._sessionStore);
+          }
+        } finally {
+          self._sessionsMerging = null;
+        }
+      })();
+    }
+
+    /** The list drawn again once the caller is done with it (a merge
+     *  brought in, or took away, a session of another editor's). */
+    _fillSessionsLater() {
+      var self = this;
+      setTimeout(function () { if (!self.destroyed) self._fillSessions(); }, 0);
+    }
+
+    _writeSessions(store) {
       var kept = Keep.write("sessions", JSON.stringify(store), this);
+      this._noteKept(store);
       if (kept) { this._storageFull = false; return; }
       // Nothing took it.  No storage at all (a private window, say) is
       // nothing to report; a full one is: the sessions silently stopping
@@ -5688,9 +6001,22 @@ var SympyEditor = (function () {
         // last one opened over it.  The last one is reused only when it holds
         // nothing but this same expression (a cell run again), or nothing at
         // all, so that the list does not grow by one at every run.
+        // And it is reused when it is this very document's - the page
+        // opened again, with its edits: the list grew by one at every reload.
         var h0 = cur.state && cur.state.history;
         var blank = !cur.state && !cur.name && !cur.title;
-        fresh = !(blank || (h0 && h0.length === 1 && this.state && h0[0] === this.state.srepr));
+        var same = false;
+        if (Array.isArray(h0) && h0.length && this.state) {
+          var at0 = Math.max(0, Math.min(cur.state.index === undefined ? h0.length - 1 : cur.state.index | 0, h0.length - 1));
+          if (h0.length === 1) same = h0[0] === this.state.srepr;
+          else if (h0[at0] === this.state.srepr) {
+            try {
+              var has = await this.backend.send({ action: "export" }, function () {});
+              same = !!(has && has.export && JSON.stringify(has.export.history) === JSON.stringify(h0));
+            } catch (e) { same = false; }
+          }
+        }
+        fresh = !(blank || same);
       } else if (cur && cur.state) {
         try {
           var opened = await this.backend.openDocument(sessionState(cur.state), this._report.bind(this));
@@ -5759,9 +6085,20 @@ var SympyEditor = (function () {
       }
       cur.state = next;
       if (cur.empty) cur.empty = false;
-      if (!cur.title) cur.name = (snap.src || "").slice(0, 60);
+      if (!cur.title) cur.name = cur.formula = (snap.src || "").slice(0, 60);
       cur.updated = Date.now();
-      this._saveSessions(store);
+      if (!Keep.remote(this)) { this._saveSessions(store); return; }   // the browser's storage: read, merged and written at once
+      // Elsewhere the list cannot be read before the page goes, and written
+      // unread it would undo what other editors did to it; and a Python
+      // behind the page is written to with a request, which a page being
+      // closed only completes when it is small (fetch's keepalive) - the
+      // list, with every session's history, is not.  So the session goes
+      // alone, under a name of its own, and is put in its place at the next
+      // start (_readSessions) - or by the save that follows, if the page is
+      // still there when its answer comes.
+      this._sessionStore = store;
+      Keep.write("session-last", JSON.stringify({ id: cur.id, state: next, name: cur.name, empty: !!cur.empty,
+                                                   updated: cur.updated }), this);
     }
 
     /** What the system's Back does (Android's button or gesture, through the
@@ -5794,21 +6131,33 @@ var SympyEditor = (function () {
     /** Open `text` as a formula, as File -> Open does with what was picked:
      *  what the host hands over when a .sympy file is opened with the app
      *  from somewhere else (SympyEditor.openText). */
-    async openText(name, text) {
+    openText(name, text) {
+      // One file after another: two handed over together both found the
+      // editor idle, and the second, meeting the first one's session as it
+      // opened, was dropped without a word.
+      var self = this;
+      var next = function () { return self._openText(name, text); };
+      this._opening = (this._opening || Promise.resolve()).then(next, next);
+      return this._opening;
+    }
+
+    async _openText(name, text) {
       if (this.closed || !this.backend || !text) return;
       var base = (name || "").replace(/\.[^.]*$/, "");
       this.closeDrawer();
       this.closeHistory();
       this.closeHelp();
       this._setStatus("Opening " + (name || "the file") + "\u2026");
-      var holding = false;
+      var holding = false, made = null, before = null;
       try {
         // A computation running (or a session opening) has the document: the
         // file waits for it.  Sent at once, it went to the session that was
         // open and replaced its history.
         if (!(await this._whenIdle())) return;
-        if (this._sessionsReady && !(await this._sessionFor(base))) {
-          throw new Error("no session could be made for it, and the one open is left as it was");
+        if (this._sessionsReady) {
+          before = (this._sessionStore || this._loadSessions()).current;
+          made = await this._sessionFor(base);
+          if (!made) throw new Error("no session could be made for it, and the one open is left as it was");
         }
         if (!(await this._whenIdle())) return;
         this.busy = holding = true;
@@ -5823,7 +6172,13 @@ var SympyEditor = (function () {
         await this.setState(snap);
         this._setStatus(name ? "Opened " + name : "Opened");
       } catch (e) {
-        this._showError("The file could not be opened: " + ((e && e.message) || e));
+        var why = "The file could not be opened: " + ((e && e.message) || e);
+        if (holding) { this.busy = holding = false; this._updateToolbar(); }
+        // A file that is refused changes nothing: the session made for it
+        // goes, and the one that was open is open again.  It used to stay,
+        // named after the file and holding a 0.
+        if (made && before && before !== made && (await this.openSession(before))) this._dropSession(made);
+        this._showError(why);
       } finally {
         if (holding) { this.busy = false; this._updateToolbar(); }
       }
@@ -5853,7 +6208,7 @@ var SympyEditor = (function () {
     }
 
     _storeSession(snap) {
-      if (!snap || !snap.export) return;          // an error answer holds no session: keep what is kept
+      if (!snap || !snap.export || this.destroyed) return;   // an error answer holds no session: keep what is kept
       var store = this._sessionStore || this._loadSessions();
       var cur = store.list.filter(function (s) { return s.id === store.current; })[0];
       if (!cur) return;
@@ -5861,7 +6216,8 @@ var SympyEditor = (function () {
       if (cur.empty && snap.export && snap.export.history.length > 1) cur.empty = false;   // something was typed
       // The name follows the formula until the user gives the session one of
       // their own ("Simplifying the Hamiltonian"), which nothing overwrites.
-      if (!cur.title) cur.name = cur.empty ? "(empty)" : (snap.src || "").slice(0, 60);
+      cur.formula = cur.empty ? "(empty)" : (snap.src || "").slice(0, 60);   // what the name goes back to
+      if (!cur.title) cur.name = cur.formula;
       cur.updated = Date.now();
       if (snap.history) this._history = snap.history;
       this._saveSessions(store);
@@ -5904,7 +6260,11 @@ var SympyEditor = (function () {
           if (row) {
             var typed = input.value.trim().slice(0, 60);
             row.title = !!typed;
-            row.name = typed || (row.empty ? "(empty)" : ((self.state && self.state.src) || row.name || ""));
+            // Emptied, the name is the session's own formula again - not
+            // the one on screen, which is another session's unless this is
+            // the one open.
+            var shown = row.id === store.current && self.state ? self.state.src : "";
+            row.name = typed || (row.empty ? "(empty)" : (shown || row.formula || row.name || "").slice(0, 60));
             self._saveSessions(store);
           }
         }
@@ -6184,7 +6544,7 @@ var SympyEditor = (function () {
                    state: { history: ["Integer(0)"], index: 0, symbols: [] }, empty: false };
       store.list.push(sess);
       this._saveSessions(store);
-      if (await this.openSession(sess.id)) return true;
+      if (await this.openSession(sess.id)) return sess.id;
       this._dropSession(sess.id);                 // it never opened: no orphan left in the list
       return false;
     }
@@ -6366,6 +6726,7 @@ var SympyEditor = (function () {
       if (id === store.current) return true;
       var ok = false;
       clearTimeout(this._sessionSaveTimer);
+      this._sessionSaveTimer = null;       // no save is waiting any more (flush says so to the app that asks)
       this.busy = true;
       this._updateToolbar();
       try {
@@ -6456,8 +6817,11 @@ var SympyEditor = (function () {
         // clearing the pointer before a refused open (busy, or a session
         // Python cannot read) left no current session, and nothing saved.
         if (this.busy) return false;
-        var latest = rest.slice().sort(function (a, b) { return b.updated - a.updated; })[0];
-        if (!(await this.openSession(latest.id))) return false;
+        // The latest of the others that opens: one that cannot be read
+        // (kept in the list, marked) must not keep this one from going.
+        var others = rest.slice().sort(function (a, b) { return b.updated - a.updated; }), opened = false;
+        for (var i = 0; i < others.length && !opened; i++) opened = await this.openSession(others[i].id);
+        if (!opened) return false;
         store = this._sessionStore || this._loadSessions();
         store.list = store.list.filter(function (s) { return s.id !== id; });
         this._saveSessions(store);
@@ -6834,10 +7198,41 @@ var SympyEditor = (function () {
       this._applyToolbar();
     }
 
+    /** Blink the keyboard's button when there is something new to type at: a
+     *  selection, a range, an operator or a caret that was not there a
+     *  moment ago.  A few beats and it rests - it says "the keyboard opens
+     *  here", it is not an alarm; nothing blinks while a field is open (the
+     *  keyboard is up already) nor when the same thing is merely drawn again
+     *  (a scroll, a zoom, a re-render). */
+    _hintKeyboard(off) {
+      var b = this.buttons.keyboard;
+      if (!b) return;
+      var c = this.caret, r = this.range, j = this.junction;
+      var key = off ? null
+        : c ? "c" + c.path + ":" + c.index + ":" + (c.attach || "")
+        : r ? "r" + r.parent + ":" + r.anchor + ":" + r.focus
+        : j ? "j" + j.path + ":" + j.left
+        : this.selected ? "s" + this.selected : null;
+      var was = this._keyHint;
+      this._keyHint = key;
+      if (!key || this.input) { this._endKeyboardHint(); return; }
+      if (key === was) return;
+      this._endKeyboardHint();
+      void b.offsetWidth;                  // the animation starts over
+      b.classList.add("se-hint");
+      var self = this;
+      this._keyHintTimer = setTimeout(function () { self._endKeyboardHint(); }, KEY_HINT_MS);
+    }
+
+    _endKeyboardHint() {
+      clearTimeout(this._keyHintTimer);
+      this._keyHintTimer = null;
+      if (this.buttons.keyboard) this.buttons.keyboard.classList.remove("se-hint");
+    }
+
     _applyToolbar() {
       clearTimeout(this._toolbarTimer);
       this._toolbarTimer = null;
-      if (this._actionsStale && this.actions && this.state) this._setActionStates();
       var s = this.state || {};
       var b = this.buttons;
       // Not this.busy: a request in flight greys nothing out (see send), and a
@@ -6858,6 +7253,15 @@ var SympyEditor = (function () {
       set("redo", dis || !s.can_redo);
       set("edit", dis);
       set("keyboard", dis);
+      // In a matrix (the matrix itself, or anything in one of its entries):
+      // its rows and columns, beside the arrows.
+      var mctx = dis ? null : this._matrixContext();
+      if (this.matTools) this.matTools.hidden = !mctx;
+      set("matrow", !mctx);
+      set("matcol", !mctx);
+      set("matdelrow", !(mctx && mctx.rows > 1));
+      set("matdelcol", !(mctx && mctx.cols > 1));
+      this._hintKeyboard(dis);
       set("delete", dis || !(range || this.selected || this.junction));
       set("unwrap", dis || range || !this.selected || !(s.nodes && s.nodes[this.selected] && (s.nodes[this.selected].nargs || s.nodes[this.selected].parts)));
       set("isolate", dis || !(range || (this.selected && this.selected !== "/")));
@@ -6898,6 +7302,21 @@ var SympyEditor = (function () {
      *  listener left behind would keep its editor alive. */
     destroy() {
       this.flush();
+      // From here on nothing is sent and no answer is taken: a request on its
+      // way used to come back to an editor that was gone, which drew it,
+      // mounted its add-ons again and wrote the sessions.  And a field left
+      // open is dropped, not applied - taking the editor off the page blurs
+      // it, and a blur applies: half a formula was sent as the edit.
+      this.destroyed = this.closed = true;
+      this.sourceDirty = false;
+      clearTimeout(this._previewTimer);
+      clearTimeout(this._flashTimer);
+      clearTimeout(this._sessionSaveTimer);
+      this._sessionSaveTimer = null;
+      this._followLoading(false);
+      if (this.backend && typeof this.backend.close === "function") {
+        try { this.backend.close(); } catch (e) { /* gone already */ }
+      }
       var at = liveEditors.indexOf(this);
       if (at >= 0) liveEditors.splice(at, 1);
       if (lastEditor === this) lastEditor = liveEditors[liveEditors.length - 1] || null;
@@ -6922,6 +7341,7 @@ var SympyEditor = (function () {
       }
       this._cancelHold();
       clearTimeout(this._toolbarTimer);
+      this._endKeyboardHint();
       if (this._resizeObserver) { this._resizeObserver.disconnect(); this._resizeObserver = null; }
       if (this._contentObserver) { this._contentObserver.disconnect(); this._contentObserver = null; }
       if (this._relayout) window.removeEventListener("resize", this._relayout);
@@ -6948,15 +7368,30 @@ var SympyEditor = (function () {
     };
   }
 
+  //: The longest text sent as a request that outlives the page (see send).
+  var KEEPALIVE_MAX = 20000;
+
   function httpBackend(cfg) {
     var url = cfg.apiUrl || "/api";
     var backend = {
       send: async function (msg) {
-        var r = await fetch(url, {
+        var request = {
           method: "POST",
           headers: { "Content-Type": "application/json", "X-SymPy-Editor-Token": cfg.token || "" },
           body: JSON.stringify(msg)
-        });
+        };
+        // What is kept outlives the page that sent it: a page closed with
+        // the request on its way had it cancelled, and the last edit was not
+        // kept.  The browser completes a request marked keepalive - a small
+        // one (64 KiB for all of them together), hence the size.
+        var lasting = msg && msg.action === "keep" && "value" in msg && request.body.length <= KEEPALIVE_MAX;
+        var r;
+        if (lasting) {
+          try { r = await fetch(url, Object.assign({ keepalive: true }, request)); }
+          catch (e) { r = await fetch(url, request); }       // over the browser's allowance: as any other
+        } else {
+          r = await fetch(url, request);
+        }
         if (!r.ok) throw new Error("Server error: HTTP " + r.status + " " + r.statusText);
         return r.json();
       },
@@ -7084,12 +7519,28 @@ var SympyEditor = (function () {
    *  here, since the worker runs from a blob: URL.  When every one is such a
    *  wheel the bundle carries the whole closure (mobile/build_www.py
    *  vendors it), so nothing is looked up: deps=False, and an offline page
-   *  installs them all.  Empty for nothing to install. */
+   *  installs them all.  Empty for nothing to install.
+   *
+   *  All at once first, then one by one when that fails: micropip installs
+   *  a list or none of it, so a single requirement with no wheel for
+   *  Pyodide (onnxruntime) took every other add-on's with it - the LaTeX
+   *  add-on had no lark on any page that listed the handwriting one. */
   function micropipCode(list) {
     if (!list || !list.length) return "";
     var wheel = function (r) { return /\.whl$/i.test(r); };
     var reqs = list.map(function (r) { return wheel(r) ? new URL(r, document.baseURI).href : r; });
-    return "import micropip\nawait micropip.install(" + JSON.stringify(reqs) + (reqs.every(wheel) ? ", deps=False" : "") + ")";
+    var deps = reqs.every(wheel) ? ", deps=False" : "";
+    return ["import micropip",
+            "__se_reqs = " + JSON.stringify(reqs),
+            "try:",
+            "    await micropip.install(__se_reqs" + deps + ")",
+            "except Exception:",
+            "    for __se_req in __se_reqs:",
+            "        try:",
+            "            await micropip.install(__se_req" + deps + ")",
+            "        except Exception as __se_err:",
+            "            print('sympy-editor: could not install', __se_req, '-', str(__se_err).splitlines()[-1:])",
+            ""].join("\n");
   }
 
   /** Pyodide loaded in the page itself (the fallback when a worker cannot be
@@ -7384,7 +7835,14 @@ var SympyEditor = (function () {
        *  failure is passed on rather than reported and forgotten: the caller
        *  is what takes the spinner down and puts the reason where it can be
        *  read. */
-      warmup: function (report) { return start(report).then(function () { report(""); }, function (e) { report(""); throw e; }); }
+      warmup: function (report) { return start(report).then(function () { report(""); }, function (e) { report(""); throw e; }); },
+      /** The editor has gone (destroy): its document goes with it.  Each one
+       *  left behind stayed in the runtime, and was made again after every
+       *  interruption. */
+      close: function () {
+        if (rt && id) rt.close(id);
+        id = null;
+      }
     };
   }
 
@@ -7473,6 +7931,11 @@ var SympyEditor = (function () {
       warmup: function (report) {
         return start(report).then(function () { report(""); },
                                   function (e) { report(""); throw e; });
+      },
+      /** The editor has gone (destroy): the host drops its document. */
+      close: function () {
+        if (docId) closeDoc(docId);
+        docId = null;
       }
     };
   }

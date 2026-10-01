@@ -82,7 +82,7 @@ def test_click_selects_in_the_formula_and_double_click_edits(page_and_doc):
     assert doc.get(sel) == y * z                                  # the same node in the formula
     assert page.locator(".tree-node.tree-selected text").text_content() == "Mul"
     # the other way round: selecting in the formula marks the tree
-    page.locator('.se-toolbar [data-cmd="parent"]').click()      # the enclosing expression, in the editor
+    page.locator('.se-keyrow [data-cmd="parent"]').click()      # the enclosing expression, in the editor
     page.wait_for_function("document.querySelector('.tree-node.tree-selected text').textContent === 'Add'")
     # a double-click on a leaf edits its value
     _node(page, "y").dblclick()
@@ -457,25 +457,273 @@ def test_the_mouse_drags_the_tree_from_empty_space():
 
 
 def test_switching_the_tree_off_takes_its_page_listener_away(page_and_doc):
-    """The panel listens for pointerdown on the whole page (to close its
-    menus); switched off, it must stop - or every off/on cycle leaves one more
-    listener, and a dead panel's, behind."""
+    """The panel listens on the whole page - for pointerdown, to close its
+    menus, and for click, to tell a double click; switched off, it must stop -
+    or every off/on cycle leaves one more listener, and a dead panel's,
+    behind."""
     page, doc = page_and_doc
     page.add_init_script("""(() => {
       const add = document.addEventListener.bind(document), rem = document.removeEventListener.bind(document);
-      const live = new Set();
-      window.__pointerdowns = () => live.size;
-      document.addEventListener = (t, f, o) => { if (t === 'pointerdown') live.add(f); return add(t, f, o); };
-      document.removeEventListener = (t, f, o) => { if (t === 'pointerdown') live.delete(f); return rem(t, f, o); };
+      const live = new Set(), ours = (t) => t === 'pointerdown' || t === 'click';
+      window.__listeners = () => live.size;
+      document.addEventListener = (t, f, o) => { if (ours(t)) live.add(f); return add(t, f, o); };
+      document.removeEventListener = (t, f, o) => { if (ours(t)) live.delete(f); return rem(t, f, o); };
     })()""")
     page.reload()
     page.wait_for_selector(".se-addon-tree .tree-node", timeout=30000)
-    before = page.evaluate("window.__pointerdowns()")
+    before = page.evaluate("window.__listeners()")
     ed = "document.querySelector('.sympy-editor').__sympyEditor"
     for _ in range(3):
         page.evaluate(ed + ".send({action: 'addons', disable: ['tree']})")
         page.wait_for_selector(".se-addon-tree", state="detached", timeout=10000)
         page.evaluate(ed + ".send({action: 'addons', enable: ['tree']})")
         page.wait_for_selector(".se-addon-tree .tree-node", timeout=10000)
-    assert page.evaluate("window.__pointerdowns()") == before
+    assert page.evaluate("window.__listeners()") == before
     assert page.errors == []
+
+
+# What the page sends to Python, as it sends it: a gesture that must change
+# nothing is one that sends nothing.
+RECORD = """() => { const ed = document.querySelector('.sympy-editor').__sympyEditor;
+    window.__sent = []; const send = ed.backend.send.bind(ed.backend);
+    ed.backend.send = function (m, r) { window.__sent.push(m); return send(m, r); }; }"""
+CHANGES = "() => window.__sent.filter(m => m.action === 'addon').map(m => m.method)"
+IDLE = "!document.querySelector('.sympy-editor').__sympyEditor.busy"
+
+
+def _wide_sum():
+    """F(a) + G(b) + ... : a row of nodes much wider than a phone."""
+    from sympy import Function
+    names, args = "F G H K L M N P Q R S T".split(), symbols("a b c d e g h k m n p q")
+    return sum(Function(n)(s) for n, s in zip(names, args))
+
+
+def test_a_finger_that_scrolls_the_tree_from_a_node_moves_nothing():
+    """A finger put down on a node and drawn sideways scrolls the tree - and
+    used to edit the expression as well: the press started a drag as a
+    mouse's does, the browser took the gesture for its scroll and sent
+    ``pointercancel``, and the cancel was handled as a drop on whatever node
+    the finger had last passed over (``F(a) + G(b) + ...``, a finger on ``K``
+    drawn to the left, became ``... + H(c, K(d)) + ...``).  A finger does not
+    drag nodes: it scrolls, as the guide says."""
+    doc = Document(_wide_sum(), addons=[ADDON])
+    with playwright.sync_playwright() as p:
+        page, ctx, browser, srv = _gesture_page(p, doc, has_touch=True, viewport={"width": 390, "height": 700})
+        try:
+            page.wait_for_function(IDLE)
+            page.evaluate(RECORD)
+            before, steps = doc.expr, len(doc.history_labels()["actions"])
+            # the heads in the row under the root, left to right; the finger
+            # goes down on the last that is wholly on the screen and is drawn
+            # over the ones before it
+            heads = page.evaluate("""() => [...document.querySelectorAll('.tree-node.tree-head-node')]
+                .filter(g => g.getAttribute('data-key').indexOf('/') < 0 && g.getAttribute('data-key') !== '')
+                .map(g => { const r = g.getBoundingClientRect();
+                            return {left: r.left, right: r.right, y: (r.top + r.bottom) / 2}; })
+                .filter(n => n.left > 0 && n.right < innerWidth - 4).sort((a, b) => a.left - b.left)""")
+            assert len(heads) >= 4, heads
+            start = heads[-1]
+            x0, y0 = start["left"] + 4, start["y"]
+            assert x0 > 220, heads                               # room for the finger to travel
+            # what the finger's events are, and whether a node was ever
+            # shown as dragged or as a place to drop - while it happens,
+            # since none of it is left to see afterwards
+            page.evaluate("""() => { window.__pointer = []; window.__dragged = false;
+                const svg = document.querySelector('.tree-svg');
+                ['pointerdown', 'pointermove', 'pointerup', 'pointercancel'].forEach(t =>
+                    svg.addEventListener(t, e => window.__pointer.push(t + ':' + e.pointerType), true));
+                new MutationObserver(() => {
+                    if (svg.querySelector('.tree-dragging, .tree-drop, .tree-drop-no')) window.__dragged = true;
+                }).observe(svg, {subtree: true, attributes: true, attributeFilter: ['class']}); }""")
+            cdp = ctx.new_cdp_session(page)
+            cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x0, "y": y0}]})
+            for i in range(1, 41):
+                cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [{"x": x0 - 5 * i, "y": y0}]})
+                page.wait_for_timeout(10)
+            cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+            page.wait_for_timeout(600)
+            page.wait_for_function(IDLE)
+
+            seen = page.evaluate("window.__pointer")
+            assert "pointerdown:touch" in seen and "pointercancel:touch" in seen, seen   # the gesture this is about
+            assert page.evaluate(SCROLL)["left"] > 40                                   # the tree scrolled
+            assert page.evaluate(CHANGES) == []                                         # and that is all it did
+            assert not page.evaluate("window.__dragged")                                # no node was picked up on the way
+            assert doc.expr == before and len(doc.history_labels()["actions"]) == steps
+            assert page.locator(".tree-node.tree-dragging, .tree-node.tree-drop, .tree-node.tree-drop-no").count() == 0
+            assert page.errors == []
+        finally:
+            browser.close(); srv.shutdown(); srv.server_close()
+
+
+def test_a_drag_that_is_cancelled_drops_nothing():
+    """``pointercancel`` went to the same function as ``pointerup``, which
+    lets go of the subtree where it is: a drag the browser took away - a pen
+    whose stroke became a scroll, a window that lost the pointer - was
+    committed as a drop on the node under it.  A cancelled gesture is given
+    up, whatever kind of pointer made it."""
+    doc = Document(sin(x) + y * z, addons=[ADDON])
+    with _served(doc) as page:
+        page.wait_for_function(IDLE)
+        page.evaluate(RECORD)
+        lit = page.evaluate("""() => {
+            const node = (src) => [...document.querySelectorAll('.tree-node')].find(g => g.querySelector('title').textContent === src);
+            const at = (g) => { const r = g.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; };
+            const from = node('sin(x)'), to = node('y*z'), a = at(from), b = at(to);
+            const send = (type, target, p) => target.dispatchEvent(new PointerEvent(type, {pointerId: 7, pointerType: 'pen',
+                isPrimary: true, button: type === 'pointermove' ? -1 : 0, buttons: 1, clientX: p[0], clientY: p[1],
+                bubbles: true, cancelable: true}));
+            send('pointerdown', from, a);
+            send('pointermove', from, [a[0] + 8, a[1] + 8]);
+            send('pointermove', to, b);
+            const lit = to.classList.contains('tree-drop') && from.classList.contains('tree-dragging');
+            send('pointercancel', to, b);
+            return lit; }""")
+        assert lit                                                   # the drag was under way, over a node that would take it
+        page.wait_for_timeout(500)
+        page.wait_for_function(IDLE)
+        assert page.evaluate(CHANGES) == []
+        assert doc.expr == sin(x) + y * z
+        assert page.locator(".tree-node.tree-dragging, .tree-node.tree-drop, .tree-node.tree-drop-no").count() == 0
+        assert page.errors == []
+
+
+def test_the_first_double_click_on_a_node_opens_the_field(page_and_doc):
+    """On a fresh page, with nothing selected, a double-click on a node did
+    nothing: its first click selects in the formula, the formula's box grows
+    for the selection's tools and the panel moves down, so the second click
+    - the pointer has not moved - lands beside the node, and the browser's
+    ``dblclick`` with it.  Later double-clicks worked, the panel having
+    moved already, which is how the test above never saw it: it clicks a
+    node first.  The panel tells a double click by itself now: a second
+    click soon after the first, where the first was."""
+    page, doc = page_and_doc
+    assert page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.selected") is None
+    _node(page, "y").dblclick()
+    field = page.locator(".tree-edit")
+    page.wait_for_timeout(300)                     # what closes the field again would have by now
+    assert field.is_visible() and field.input_value() == "y"
+    assert page.evaluate("document.activeElement === document.querySelector('.tree-edit')")
+    # the field is where the node is now, not where it was
+    box, node = field.bounding_box(), _node(page, "y").bounding_box()
+    assert abs(box["x"] - node["x"]) < 3 and abs(box["y"] - node["y"]) < 3, (box, node)
+    field.fill("2")
+    field.press("Enter")
+    page.wait_for_function("document.querySelector('.se-source').textContent === 'x + 2*z'")
+    assert doc.expr == x + 2 * z
+    # two clicks far apart in time are two clicks: the second selects again
+    _node(page, "z").click()
+    page.wait_for_timeout(700)
+    _node(page, "z").click()
+    page.wait_for_timeout(200)
+    assert not field.is_visible() and page.locator(".tree-quick").is_visible()
+    # and so are two clicks on two nodes, however quick
+    a, b = _node(page, "x").bounding_box(), _node(page, "z").bounding_box()
+    page.mouse.click(a["x"] + a["width"] / 2, a["y"] + a["height"] / 2)
+    page.mouse.click(b["x"] + b["width"] / 2, b["y"] + b["height"] / 2)
+    page.wait_for_timeout(200)
+    assert not field.is_visible()
+    assert page.locator(".tree-node.tree-selected title").text_content() == "z"
+    assert page.errors == []
+
+
+def test_a_double_tap_edits_the_node_that_was_tapped():
+    """On a phone the formula's box grows by more than a row of the tree when
+    the first tap selects, so the second tap found another node under the
+    finger - the parent, ``Mul``, for a tap on ``y`` - and the field opened
+    for that one: the head of the product, where the value of a leaf was
+    asked for.  The node is the one the first tap was on."""
+    doc = Document(x + y * z + sin(x), addons=[ADDON])
+    with playwright.sync_playwright() as p:
+        page, ctx, browser, srv = _gesture_page(
+            p, doc, has_touch=True, is_mobile=True, viewport={"width": 420, "height": 820})
+        try:
+            page.wait_for_function(IDLE)
+            page.evaluate(RECORD)
+            cdp = ctx.new_cdp_session(page)
+            box = _node(page, "y").bounding_box()
+            at = [box["x"] + box["width"] / 2, box["y"] + box["height"] / 2]
+            for dx in (0, 7):                                    # a finger does not land twice on one spot
+                cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": at[0] + dx, "y": at[1]}]})
+                cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+                page.wait_for_timeout(120)
+            page.wait_for_timeout(300)
+            field = page.locator(".tree-edit")
+            assert field.is_visible() and field.input_value() == "y"
+            # and nothing else was done with the second tap, whatever it landed on
+            assert page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.selected") is not None
+            assert doc.get(page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.selected")) == y
+            assert page.evaluate(CHANGES) == []
+            assert page.errors == []
+        finally:
+            browser.close(); srv.shutdown(); srv.server_close()
+
+
+def test_a_field_left_as_it_was_is_not_a_step(page_and_doc):
+    """Looking at a node and clicking away added a step to the history each
+    time - "Tree: /1/0 → y" over and over, the expression the same, Undo lit
+    with nothing to undo: the field sent its text when it lost the focus
+    without asking whether it had changed.  The editor's own field does
+    nothing then, and neither does this one."""
+    page, doc = page_and_doc
+    page.evaluate(RECORD)
+    steps = len(doc.history_labels()["actions"])
+    field = page.locator(".tree-edit")
+    for label in ("y", "Mul"):                                   # a leaf's value, an inner node's head
+        for leave in ("away", "Enter"):
+            _node(page, label).dblclick()
+            field.wait_for(state="visible", timeout=3000)
+            assert field.input_value() == label
+            if leave == "away":
+                page.locator(".tree-hint").click()               # elsewhere: the field loses the focus
+            else:
+                field.press("Enter")
+            field.wait_for(state="hidden", timeout=3000)
+            page.wait_for_timeout(300)
+            page.wait_for_function(IDLE)
+    assert page.evaluate(CHANGES) == []
+    assert len(doc.history_labels()["actions"]) == steps and doc.expr == x + y * z
+    assert not page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.can_undo")
+    # spaces around the same text are the same text; another text is a step
+    _node(page, "y").dblclick()
+    field.fill("  y ")
+    page.locator(".tree-hint").click()
+    field.wait_for(state="hidden", timeout=3000)
+    page.wait_for_timeout(300)
+    assert page.evaluate(CHANGES) == []
+    _node(page, "y").dblclick()
+    field.fill("2")
+    page.locator(".tree-hint").click()
+    page.wait_for_function("document.querySelector('.se-source').textContent === 'x + 2*z'")
+    assert page.evaluate(CHANGES) == ["replace"] and doc.expr == x + 2 * z
+    assert page.errors == []
+
+
+def test_a_piece_of_the_formula_with_no_node_stands_for_the_node_around_it():
+    """The formula has pieces the tree has no node for - the ``2`` of
+    ``x - 2*y`` is part of a ``-2`` there, the product after the minus is
+    nothing at all.  With one of them selected the panel marked the root, or
+    whichever node had been clicked last, and its fields acted on that:
+    ``sin`` typed in "wrap in…" with the ``2`` selected gave
+    ``sin(x - 2*y)``.  The node is the one around the piece, as the guide
+    says: the nearest piece above it that the tree does have."""
+    doc = Document(x - 2 * y, addons=[ADDON])
+    with _served(doc) as page:
+        ed = "document.querySelector('.sympy-editor').__sympyEditor"
+        marked = "[...document.querySelectorAll('.tree-node.tree-selected title')].map(t => t.textContent)"
+        term = [p for p in doc.snapshot()["nodes"] if doc.get(p) == -2 * y][0]
+        assert doc.get(term + "/neg/0") == 2
+        # a node clicked before must not be what the fields act on afterwards
+        _node(page, "x").click()
+        page.keyboard.press("Escape")
+        for piece in (term + "/neg/0", term + "/neg", term):
+            page.evaluate("p => %s.select(p)" % ed, piece)
+            page.wait_for_function("%s.length === 1 && %s[0] === '-2*y'" % (marked, marked), timeout=3000)
+        page.evaluate("p => %s.select(p)" % ed, term + "/neg/1")           # the y has a node of its own
+        page.wait_for_function("%s[0] === 'y'" % marked, timeout=3000)
+        page.evaluate("p => %s.select(p)" % ed, term + "/neg/0")
+        page.locator(".tree-field[placeholder^='wrap']").fill("sin")
+        page.locator(".tree-field[placeholder^='wrap']").press("Enter")
+        page.wait_for_function("document.querySelector('.se-source').textContent === 'x - sin(2*y)'")
+        assert doc.expr == x + sin(-2 * y)
+        assert page.errors == []

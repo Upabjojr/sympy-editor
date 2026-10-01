@@ -2,6 +2,7 @@
 allow them, kept as invalid nodes by one that does."""
 
 import pytest
+import sympy
 from sympy import Add, MatrixSymbol, Pow, S, Symbol, latex, sin, srepr, symbols
 
 from sympy_editor import Document
@@ -153,3 +154,57 @@ def test_a_series_is_valid_and_can_be_edited():
     assert snap["error"] is None and doc.expr == series(exp(x), x, 0, 7)
     doc.handle({"action": "set", "src": "1 + x + O(x**2)"})
     assert doc.expr == 1 + x + O(x**2)
+
+
+def test_what_sympy_builds_only_evaluated_is_valid():
+    """Validity was decided by building the node unevaluated, which some
+    constructors cannot do for nodes they build otherwise: a Range, an
+    intersection of intervals with symbolic ends, a union of open ones were
+    refused at every commit - nothing holding one could be edited."""
+    from sympy import BlockDiagMatrix, Intersection, Interval, MatrixSymbol, Range, SymmetricDifference, Union, oo, symbols
+    from sympy_editor.invalid import first_problem
+    x, y = symbols("x y")
+    A, B, C = (MatrixSymbol(n, 2, 2) for n in "ABC")
+    for expr in (Range(0, 10), Intersection(Interval(0, x), Interval(y, 3)),
+                 Union(Interval.open(-oo, 0), Interval.open(0, oo)),
+                 SymmetricDifference(Interval(0, 2), Interval(1, 3)), BlockDiagMatrix(A, B)):
+        assert first_problem(expr) is None, expr
+        doc = Document(expr)
+        doc.replace("/", expr)
+        assert doc.expr == expr
+    doc = Document(Intersection(Interval(0, x), Interval(y, 3)))
+    doc.replace("/0/1", "x + 1")
+    assert doc.expr == Intersection(Interval(0, x + 1), Interval(y, 3))
+    doc = Document(BlockDiagMatrix(A, B))              # its arguments are the blocks, not a grid of them
+    doc.replace("/0", C)
+    assert doc.expr == BlockDiagMatrix(C, B)
+    # and what SymPy refuses either way is still refused
+    doc = Document(x)
+    with pytest.raises(ValueError):
+        doc.replace("/", sympy.Add(2, A, evaluate=False))
+
+
+def test_nothing_large_is_computed_while_reading():
+    """The reading kept `2**100000000` as written, but not `Pow(2, 100000000)`
+    nor `factorial(100000000)`: a saved step holding one kept the reader
+    busy for good, in a file opened or a session restored."""
+    import time
+    from sympy_editor.invalid import read_source, read_srepr
+    started = time.time()
+    names = Document(sympy.Symbol("x"))._read_names()
+    for text in ("factorial(Integer(100000000))", "Pow(Integer(2), Integer(1000000000))",
+                 "Pow(Integer(2), Pow(Integer(10), Integer(10)))", "binomial(Integer(10000000), Integer(5000000))",
+                 "Pow(Pow(Integer(2), Integer(10000)), Integer(10000))"):
+        assert sympy.srepr(Document._read_step(text, names)) == text
+        assert not read_srepr(text, evaluate=True).is_Number       # evaluated, and still not computed
+    for text, shown in (("Pow(2, 100000000)", "2**100000000"), ("factorial(10**9)", "factorial(1000000000)"),
+                        ("fibonacci(10**7)", "fibonacci(10000000)"), ("2**100000000", "2**100000000")):
+        assert str(read_source(text)) == shown
+    assert str(read_source("Pow(2, 100000000)", python_numbers=True)) == "2**100000000"
+    doc = Document(sympy.Symbol("x"), history=["factorial(Integer(100000000))"], index=0)
+    assert doc.snapshot()["src"] == "factorial(100000000)"
+    assert time.time() - started < 5
+    # what is small is computed as before, and large numbers that compute nothing are left alone
+    for text, shown in (("sqrt(16)", "4"), ("factorial(5)", "120"), ("2**10", "1024"), ("Pow(2, 10)", "1024"),
+                        ("Rational(1, 100000)", "1/100000"), ("100000*x", "100000*x"), ("x**100000", "x**100000")):
+        assert str(read_source(text)) == shown

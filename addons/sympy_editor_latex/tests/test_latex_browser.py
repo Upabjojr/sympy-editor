@@ -215,6 +215,32 @@ def test_the_ambiguities_and_the_constants_are_offered_under_the_editor():
             _close(srv, browser)
 
 
+def test_the_parts_not_offered_are_counted_under_the_editor():
+    """A long text has more ambiguous parts than are offered (the first
+    twelve): the reader counted the others, and the panel said nothing of
+    them - the rows simply stopped.  The note under the editor says how many
+    more there are, and how to get at them."""
+    from sympy_editor_latex.parser import MAX_POINTS
+    doc = Document(x + y, addons=[ADDON])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc)
+        try:
+            tex = " ".join(r"\ln " + v for v in "xyzabcuvw")
+            _type(page, tex)
+            assert _wait(lambda: page.locator(".ltx-src").inner_text().startswith("log("), 20)
+            more = ADDON.reader.read(tex)["more"]
+            assert more > 0 and page.locator(".ltx-point").count() <= MAX_POINTS
+            note = page.locator(".ltx-note").inner_text()
+            assert f"{more} more parts are not offered" in note and "piece by piece" in note, note
+            # a short text has everything offered, and no such words
+            _type(page, r"\sin x \cos y")
+            assert _wait(lambda: page.locator(".ltx-src").inner_text() == str(sin(x) * cos(y)), 15)
+            assert "not offered" not in page.locator(".ltx-note").inner_text()
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
 def test_what_it_did_is_shown_and_can_be_taken_back():
     """Applying shows the formula before and after, marked as the history marks
     a step, to keep or to undo; the field closes, the tool comes up."""

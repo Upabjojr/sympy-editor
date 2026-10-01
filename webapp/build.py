@@ -77,24 +77,46 @@ if ("serviceWorker" in navigator) {{
 """
 
 SW = """// sympy-editor web app: precache the bundle, serve it from the cache (offline).
-var CACHE = "sympy-editor-%(hash)s";
+// The caches of an origin belong to every site served from it - each
+// <user>.github.io/<project>/ beside this one - so this app's are named by
+// where it lives, and it opens, searches and deletes those alone.  (A space
+// between the parts: a path never holds one, so no place's names begin with
+// another's.)
+var PREFIX = "sympy-editor " + new URL(self.registration.scope).pathname + " ";
+var CACHE = PREFIX + "%(hash)s";
 var FILES = %(files)s;
+// An earlier build of this app, to be replaced: named as this one is or, from
+// before the names said where, "sympy-editor-<hash>" - which another copy of
+// the app on this origin may have made too, so that one is ours only when what
+// it holds is from here.
+function outdated(name) {
+  if (name === CACHE) return Promise.resolve(false);
+  if (name.indexOf(PREFIX) === 0) return Promise.resolve(true);
+  if (!/^sympy-editor-[0-9a-f]{12}$/.test(name)) return Promise.resolve(false);
+  return caches.open(name).then(function (cache) { return cache.keys(); }).then(function (held) {
+    return held.length > 0 && held.every(function (r) { return r.url.indexOf(self.registration.scope) === 0; });
+  });
+}
 self.addEventListener("install", function (event) {
   event.waitUntil(caches.open(CACHE).then(function (cache) { return cache.addAll(FILES.map(function (u) { return new Request(u, { cache: "reload" }); })); }).then(function () { return self.skipWaiting(); }));
 });
 self.addEventListener("activate", function (event) {
   event.waitUntil(caches.keys().then(function (keys) {
-    return Promise.all(keys.filter(function (k) { return k !== CACHE; }).map(function (k) { return caches.delete(k); }));
+    return Promise.all(keys.map(function (k) {
+      return outdated(k).then(function (old) { return old ? caches.delete(k) : false; });
+    }));
   }).then(function () { return self.clients.claim(); }));
 });
 self.addEventListener("fetch", function (event) {
   if (event.request.method !== "GET") return;
   var url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;    // CDN files (a --cdn build) go to the network
-  event.respondWith(caches.match(event.request, { ignoreSearch: true }).then(function (hit) {
-    return hit || fetch(event.request).then(function (response) {
-      if (response.ok) { var copy = response.clone(); caches.open(CACHE).then(function (cache) { cache.put(event.request, copy); }); }
-      return response;
+  event.respondWith(caches.open(CACHE).then(function (cache) {
+    return cache.match(event.request, { ignoreSearch: true }).then(function (hit) {
+      return hit || fetch(event.request).then(function (response) {
+        if (response.ok) cache.put(event.request, response.clone());
+        return response;
+      });
     });
   }));
 });
@@ -747,7 +769,9 @@ def shelf_site(out: Path, *, cache: Path | None = None, cdn: bool = False) -> Pa
     it is for.
     """
     out.mkdir(parents=True, exist_ok=True)
-    urls = None if cdn else build_www.vendor(out, cache or Path.home() / ".cache" / "sympy-editor", pyodide=False)
+    cache = cache or Path.home() / ".cache" / "sympy-editor"
+    build_www.clear_vendored(out, cache)       # the folder is dropped into a site as it is: nothing of an earlier build
+    urls = None if cdn else build_www.vendor(out, cache, pyodide=False)
     write_icons(out)
     from sympy_editor import to_html
 
@@ -798,6 +822,8 @@ def build(out: Path, *, cdn: bool = False, cache: Path | None = None) -> Path:
               if vendored else None))
     (out / "manifest.webmanifest").write_text(json.dumps(manifest(), indent=2), encoding="utf-8")
     write_icons(out)
+    # What is there is what this build wrote (build_www clears what an earlier
+    # one vendored), and the pictures kept beside the derivations page.
     files = sorted(p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file() and p.name != "sw.js")
     digest = hashlib.sha256()
     for name in files:

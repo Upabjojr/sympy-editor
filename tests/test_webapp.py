@@ -40,9 +40,42 @@ def test_cdn_build_has_the_pwa_files(tmp_path):
     # filled from the network, never from the HTTP cache: a new cache holding
     # the previous build's files would never be replaced
     assert 'new Request(u, { cache: "reload" })' in sw and "cache.addAll(FILES)" not in sw
-    assert re.search(r'var CACHE = "sympy-editor-[0-9a-f]{12}"', sw)
+    assert re.search(r'var CACHE = PREFIX \+ "[0-9a-f]{12}"', sw)
+    # named by where the app lives: the caches of an origin are everybody's
+    assert 'var PREFIX = "sympy-editor " + new URL(self.registration.scope).pathname + " ";' in sw
+    assert "k !== CACHE" not in sw and "caches.match(" not in sw        # its own caches, and no others
     # a rebuilt, identical bundle keeps its cache name; a different page changes it
     assert mod.build(tmp_path / "dist2", cdn=True) and (tmp_path / "dist2" / "sw.js").read_text() == sw
+
+
+def test_the_precache_lists_what_this_build_wrote(tmp_path):
+    """The worker precaches every file it finds in the output folder, and the
+    folder stays from one build to the next: a `--cdn` build into one that
+    had held a vendored build listed 38 files under `vendor/` - to download
+    at install, for a page that loads none of them - and a rebuild after a
+    SymPy bump listed the old wheel beside the new.  The pictures kept beside
+    the derivations page are content, and stay listed."""
+    mod = _load()
+    out = tmp_path / "dist"
+    for name in ("vendor/katex/katex.min.js", "vendor/katex/fonts/KaTeX_Main-Regular.woff2",
+                 "vendor/pyodide/sympy-1.13.3-py3-none-any.whl",
+                 "vendor/pyodide/removed-addon-dep-1.0-py3-none-any.whl"):
+        (out / name).parent.mkdir(parents=True, exist_ok=True)
+        (out / name).write_bytes(b"of an earlier build")
+    (out / "derivations").mkdir()
+    (out / "derivations" / "jupyter-widget.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    mod.build(out, cdn=True)
+    files = json.loads(re.search(r"var FILES = (\[.*?\]);", (out / "sw.js").read_text()).group(1))
+    assert [f for f in files if "vendor" in f] == [], files
+    assert "./derivations/jupyter-widget.png" in files and "./index.html" in files
+    assert sorted(f[2:] for f in files if f != "./") == sorted(
+        p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file() and p.name != "sw.js")
+    # the showcase is a folder dropped into a site as it is: the same there
+    shelf = tmp_path / "shelf"
+    (shelf / "vendor" / "pyodide").mkdir(parents=True)
+    (shelf / "vendor" / "pyodide" / "sympy-1.13.3-py3-none-any.whl").write_bytes(b"of an earlier build")
+    mod.shelf_site(shelf, cdn=True)
+    assert not (shelf / "vendor").exists()
 
 
 def test_service_worker_installs_and_caches(tmp_path):
@@ -64,11 +97,67 @@ def test_service_worker_installs_and_caches(tmp_path):
             page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
             page.wait_for_function("navigator.serviceWorker.ready.then(() => true)", timeout=30000)
             keys = page.evaluate("caches.keys()")
-            assert any(k.startswith("sympy-editor-") for k in keys), keys
-            cached = page.evaluate("caches.keys().then(ks => caches.open(ks.find(k => k.startsWith('sympy-editor-'))).then(c => c.keys())).then(rs => rs.map(r => r.url))")
+            assert any(k.startswith("sympy-editor / ") for k in keys), keys
+            cached = page.evaluate("caches.keys().then(ks => caches.open(ks.find(k => k.startsWith('sympy-editor / '))).then(c => c.keys())).then(rs => rs.map(r => r.url))")
             assert any(u.endswith("/index.html") for u in cached) and any(u.endswith("/manifest.webmanifest") for u in cached)
             root = f"http://127.0.0.1:{httpd.server_address[1]}/"
             assert root in cached, cached                    # the bare URL, for opening it offline
+            assert page.evaluate("fetch('manifest.webmanifest').then(r => r.json()).then(m => m.name)") == "SymPy Editor"
+            browser.close()
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_the_service_worker_keeps_to_its_own_caches(tmp_path):
+    """The caches of an origin are shared by every site served from it, and
+    `<user>.github.io` serves each project from a folder: on activation the
+    worker deleted every cache but its own - another site's, a second copy of
+    this app's - and it answered requests from whichever cache held the
+    address, its own or not.  It now names its caches by where it lives,
+    replaces those (and the ones it made before they were so named), and
+    reads from its own alone."""
+    playwright = pytest.importorskip("playwright.sync_api")
+    mod = _load()
+    site = tmp_path / "site"
+    out = mod.build(site / "app", cdn=True)
+    (site / "index.html").write_text("<!DOCTYPE html><title>the origin's other tenants</title>", encoding="utf-8")
+    import http.server, functools
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(site))
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    origin = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        with playwright.sync_playwright() as p:
+            try:
+                browser = p.chromium.launch()
+            except Exception as exc:
+                pytest.skip(f"chromium not available: {exc}")
+            page = browser.new_page()
+            page.goto(origin + "/index.html")
+            # what the origin holds before the app is opened: another site's
+            # cache - with an answer of its own for an address of the app's -,
+            # an earlier build of the app here, under each of the names it
+            # has had, and a copy of the app that lives elsewhere
+            page.evaluate("""async (origin) => {
+                const put = async (name, url, body) =>
+                    (await caches.open(name)).put(url, new Response(body, {headers: {"Content-Type": "application/json"}}));
+                await put("another-site-v1", origin + "/app/manifest.webmanifest", '{"name": "not this app"}');
+                await put("sympy-editor-0123456789ab", origin + "/app/index.html", "an earlier build");
+                await put("sympy-editor /app/ 0123456789ab", origin + "/app/index.html", "an earlier build");
+                await put("sympy-editor-ba9876543210", origin + "/copy/index.html", "a copy elsewhere");
+                await put("sympy-editor /copy/ 0123456789ab", origin + "/copy/index.html", "a copy elsewhere");
+                await put("sympy-editor /app/more/ 0123456789ab", origin + "/app/more/index.html", "a copy below");
+            }""", origin)
+            page.goto(origin + "/app/index.html")
+            page.wait_for_function("""navigator.serviceWorker.ready.then(
+                (reg) => reg.active.state === "activated" && !!navigator.serviceWorker.controller)""", timeout=30000)
+            keys = set(page.evaluate("caches.keys()"))
+            own = {k for k in keys if re.fullmatch(r"sympy-editor /app/ [0-9a-f]{12}", k)}
+            assert len(own) == 1 and "sympy-editor /app/ 0123456789ab" not in own, keys
+            assert keys - own == {"another-site-v1", "sympy-editor-ba9876543210", "sympy-editor /copy/ 0123456789ab",
+                                  "sympy-editor /app/more/ 0123456789ab"}, keys
+            # and a request is answered from the app's own cache, whoever else holds the address
             assert page.evaluate("fetch('manifest.webmanifest').then(r => r.json()).then(m => m.name)") == "SymPy Editor"
             browser.close()
     finally:

@@ -71,7 +71,7 @@ from sympy.core.numbers import Number
 from sympy.core.power import Pow
 from sympy.simplify.radsimp import fraction
 from sympy.functions.elementary.piecewise import ExprCondPair
-from sympy.matrices.expressions.blockmatrix import BlockMatrix
+from sympy.matrices.expressions.blockmatrix import BlockDiagMatrix, BlockMatrix
 from sympy.matrices.expressions.matadd import MatAdd
 from sympy.matrices.expressions.matmul import MatMul
 from sympy.matrices.matrixbase import MatrixBase
@@ -255,6 +255,8 @@ def get_at(expr: Basic, path: Path, settings: Settings = None) -> Basic:
             node = _part(node, i, path, settings)
             continue
         try:
+            if i < 0:              # args[-1] is an argument too, but no path names it
+                raise IndexError(i)
             node = node.args[i]
         except (IndexError, AttributeError, TypeError):
             raise ValueError(f"Invalid path {format_path(path)} for {expr}") from None
@@ -316,8 +318,9 @@ def _rebuild(expr: Basic, args: List[Basic]) -> Basic:
     for cls, func in REBUILDERS.items():
         if isinstance(expr, cls):
             return func(expr, args)
-    if isinstance(expr, BlockMatrix):
+    if isinstance(expr, BlockMatrix) and not isinstance(expr, BlockDiagMatrix):
         # BlockMatrix stores a matrix of blocks but is constructed from rows.
+        # (Not its subclass BlockDiagMatrix, whose arguments are the blocks.)
         return BlockMatrix(args[0].tolist())
     if isinstance(expr, (MatMul, MatAdd)):
         # Matrix arithmetic is canonicalised by the operators (A*A -> A**2),
@@ -434,6 +437,8 @@ def delete_at(expr: Basic, path: Path, settings: Settings = None) -> Basic:
         # a (key, value) item of a Dict is removed whole: half of it is no item
         return delete_at(expr, path[:-1], settings)
     args = list(parent.args)
+    if not isinstance(last, int) or not 0 <= last < len(args):
+        raise ValueError(f"Invalid path {format_path(path)} for {expr}")
     del args[last]
     if isinstance(parent, Pow) and len(args) == 1:
         # A power cannot be built from one side; what is left is what stays.
@@ -1004,7 +1009,16 @@ def latex_spans(expr: Basic, **settings) -> Tuple[str, Dict[str, Tuple[int, int]
     marked, _nodes = printer.annotate(expr)
     text, spans = spans_from_marked(marked)
     plain = latex(expr, **dict(settings, mode="plain"))
+    if text != plain and _unbraced_direction(text) == plain:
+        # A one-sided limit: the direction is written in braces here ("0^{+}",
+        # so that it can be annotated) and bare by SymPy.  The spans are those
+        # of the text they were measured in, which says the same.
+        return text, spans
     return plain, (spans if text == plain else {})
+
+
+def _unbraced_direction(text: str) -> str:
+    return text.replace("^{+}", "^+").replace("^{-}", "^-")
 
 
 def annotate_str(expr: Basic) -> Tuple[str, Dict[str, Tuple[int, int]]]:

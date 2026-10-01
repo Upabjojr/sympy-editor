@@ -4,6 +4,7 @@ the formula at once, the piece it is read together with, the strip that keeps
 or takes the change back, and the eraser.  The model is faked - what is tested
 is the add-on, not math-ocr - so it needs only Playwright with Chromium and the
 KaTeX CDN (skipped otherwise)."""
+import os
 import sys
 import threading
 import time
@@ -243,9 +244,10 @@ def test_the_selection_written_over_is_hidden_until_the_writing_is_discarded():
             assert page.evaluate(hidden)["y"] == "hidden"
             # the place is kept: the formula did not close up around the hole
             assert page.evaluate("document.querySelector('.se-view .katex').getBoundingClientRect().width") >= width - 1
-            page.locator(pen).click()                             # the pen down, the ink kept: still hidden
-            assert page.evaluate(hidden)["y"] == "hidden"
-            page.locator(pen).click()
+            page.locator(pen).click()                             # the pen down takes the ink: back
+            assert _wait(lambda: page.evaluate(hidden) == {"y": "visible", "box": True})
+            page.locator(pen).click()                                      # the pen on again: hidden again
+            _drag(page, view["x"] + 40, view["y"] + 90, view["x"] + 110, view["y"] + 120)
             page.locator('[data-cmd="addon:handwriting:clear"]').click()   # the ink discarded...
             assert page.evaluate(hidden)["y"] == "hidden"                  # ...the pen still on
             page.locator(pen).click()                                      # and put away: back
@@ -293,6 +295,55 @@ def test_writing_at_the_edge_of_the_screen_scrolls_the_room_into_sight():
             ink_right = view["x"] + view["width"] - 6 - page.evaluate("document.querySelector('.se-view').scrollLeft")
             assert shown["right"] - ink_right > 0.2 * view["width"], (shown, ink_right)
             assert ink_right > shown["left"]                              # the stroke itself still in sight
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
+def test_free_writing_at_the_edge_of_the_view_is_given_space_to_go_on():
+    """With nothing selected and no cursor there is no room to grow, and a
+    stroke that reached the edge of the view had nowhere to continue.  The
+    view is given space past the ink - to the right it scrolls there, down
+    it grows - without the formula moving; and the space goes with the ink."""
+    doc = Document(x + y, addons=[HandwritingAddon(MuteRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc, pen=False)
+        try:
+            page.set_viewport_size({"width": 420, "height": 800})
+            page.locator('[data-cmd="addon:handwriting:pen"]').click()
+            assert page.locator(".se-view .se-selected").count() == 0 and page.locator(".se-caret").count() == 0
+            page.wait_for_timeout(300)                                   # the view settles at its writing height
+            geo = lambda: page.evaluate("""() => {
+                const v = document.querySelector('.se-view'), r = v.getBoundingClientRect();
+                const g = [...v.querySelectorAll('[data-path]')].find(e => e.textContent.replace(/[\\s\\u200b]/g, '') === 'x').getBoundingClientRect();
+                return {left: r.left, right: r.right, top: r.top, bottom: r.bottom, height: r.height,
+                        scrollLeft: v.scrollLeft, scrollWidth: v.scrollWidth, clientWidth: v.clientWidth,
+                        glyph: [g.left + v.scrollLeft, g.top - r.top]};
+            }""")
+            before = geo()
+            assert before["scrollLeft"] == 0 and before["scrollWidth"] <= before["clientWidth"] + 1
+            # a stroke under the formula, ending a few pixels short of the right edge
+            y0 = before["bottom"] - 50
+            _drag(page, before["right"] - 80, y0, before["right"] - 6, y0 + 8)
+            page.wait_for_function("document.querySelector('.se-view').scrollLeft > 20", timeout=5000)
+            page.wait_for_timeout(600)                                   # the smooth scroll settles
+            after = geo()
+            ink_right = before["right"] - 6 - after["scrollLeft"]
+            assert after["right"] - ink_right > 0.2 * (after["right"] - after["left"]), (after, ink_right)   # space ahead
+            assert ink_right > after["left"]                             # the stroke still in sight
+            assert abs(after["glyph"][0] - before["glyph"][0]) < 1, (before, after)    # the formula did not move
+            assert abs(after["glyph"][1] - before["glyph"][1]) < 1, (before, after)
+            assert page.locator("[data-strokes]").first.get_attribute("data-strokes") == "1"
+            # a stroke by the bottom edge: the view grows under it
+            _drag(page, after["left"] + 60, after["bottom"] - 30, after["left"] + 90, after["bottom"] - 5)
+            assert _wait(lambda: geo()["height"] > after["height"] + 30), (after, geo())
+            page.wait_for_timeout(300)
+            taller = geo()
+            assert abs(taller["glyph"][1] - before["glyph"][1]) < 1, (before, taller)
+            # the ink gone, the space goes with it
+            page.locator('[data-cmd="addon:handwriting:clear"]').click()
+            assert _wait(lambda: geo()["scrollWidth"] <= geo()["clientWidth"] + 1), geo()
+            assert _wait(lambda: abs(geo()["height"] - before["height"]) < 2), (before, geo())
             assert page.errors == []
         finally:
             _close(srv, browser)
@@ -1082,18 +1133,19 @@ def test_the_writing_tools_stay_off_while_the_pen_is():
             _drag(page, view["x"] + 200, view["y"] + 40, view["x"] + 250, view["y"] + 80)
             assert _wait(lambda: not tools["clear"].is_disabled() and not tools["undo"].is_disabled())
 
-            # and the Pen off again puts them all away, ink or no ink
+            # and the Pen off again puts them all away, and the ink with them
             tools["pen"].click()
             assert _wait(off)
-            assert page.locator(".hw-panel").get_attribute("data-strokes") == "1"
+            assert page.locator(".hw-panel").get_attribute("data-strokes") == "0"
             assert page.errors == []
         finally:
             _close(srv, browser)
 
 
-def test_back_puts_the_pen_down_and_keeps_the_ink():
+def test_putting_the_pen_down_clears_the_ink():
     """Android's Back (SympyEditor.back) puts the pen down, as pressing the
-    Pen again does - the ink stays - and says it closed something."""
+    Pen again does, and says it closed something; the pen put away takes
+    the ink that was not applied with it, whichever way it went."""
     doc = Document(x + y, addons=[HandwritingAddon(MuteRecognizer())])
     with playwright.sync_playwright() as p:
         srv, browser, page = _page(p, doc)
@@ -1105,9 +1157,440 @@ def test_back_puts_the_pen_down_and_keeps_the_ink():
             assert _wait(lambda: page.locator("[data-strokes]").first.get_attribute("data-strokes") == "1")
             assert page.evaluate("SympyEditor.back()") is True
             assert _wait(lambda: page.locator("[data-pen]").first.get_attribute("data-pen") == "off")
-            assert page.locator("[data-strokes]").first.get_attribute("data-strokes") == "1"
+            assert page.locator("[data-strokes]").first.get_attribute("data-strokes") == "0"
             assert pen.get_attribute("aria-pressed") in ("false", None)
             assert page.evaluate("SympyEditor.back()") is False
+            # the Pen tool itself: on, a stroke, off - the stroke is gone, and
+            # it is not there when the pen comes back
+            pen.click()
+            _drag(page, view["x"] + 200, view["y"] + 40, view["x"] + 250, view["y"] + 80)
+            assert _wait(lambda: page.locator("[data-strokes]").first.get_attribute("data-strokes") == "1")
+            pen.click()
+            assert _wait(lambda: page.locator("[data-pen]").first.get_attribute("data-pen") == "off")
+            assert page.locator("[data-strokes]").first.get_attribute("data-strokes") == "0"
+            pen.click()
+            assert page.locator("[data-strokes]").first.get_attribute("data-strokes") == "0"
             assert page.errors == []
         finally:
             _close(srv, browser)
+
+
+# ---- pointers: a hand on the screen, a contact taken back ---------------------
+
+class KeptRecognizer(LetterRecognizer):
+    """Keeps every ink it was asked to read, in order."""
+
+    def __init__(self):
+        self.calls = []
+
+    def recognize(self, strokes, beam=4, limit=5):
+        self.calls.append(strokes)
+        return super().recognize(strokes, beam=beam, limit=limit)
+
+
+# A pointer event on the ink layer, as a pen, a finger or the mouse sends it.
+FIRE = """(a) => {
+  const [type, kind, id, x, y, buttons] = a;
+  document.querySelector('.hw-ink').dispatchEvent(new PointerEvent(type, {
+    bubbles: true, cancelable: true, pointerId: id, pointerType: kind, clientX: x, clientY: y,
+    button: 0, buttons: buttons, isPrimary: true}));
+}"""
+
+# A piece of the formula (the smallest whose text is `want`), where the ink's
+# own coordinates have it: from the ink layer's corner, the view's scroll added.
+IN_INK = """(want) => {
+  const els = [...document.querySelectorAll('.se-view [data-path]')]
+    .filter(e => e.textContent.replace(/[\\s\\u200b]/g, '') === want);
+  const el = els.sort((a, b) => b.getAttribute('data-path').length - a.getAttribute('data-path').length)[0];
+  const q = el.getBoundingClientRect(), c = document.querySelector('.hw-ink').getBoundingClientRect();
+  const v = document.querySelector('.se-view');
+  return {l: q.left - c.left + v.scrollLeft, r: q.right - c.left + v.scrollLeft,
+          t: q.top - c.top + v.scrollTop, b: q.bottom - c.top + v.scrollTop, cx: c.left, cy: c.top};
+}"""
+
+ED = "document.querySelector('.sympy-editor').__sympyEditor"
+
+
+def _fire(page, *event):
+    page.evaluate(FIRE, list(event))
+
+
+def _stroke(page, kind, pid, x0, y0, moves=14, dx=3):
+    _fire(page, "pointerdown", kind, pid, x0, y0, 1)
+    for i in range(1, moves + 1):
+        _fire(page, "pointermove", kind, pid, x0 + dx * i, y0, 1)
+    _fire(page, "pointerup", kind, pid, x0 + dx * moves, y0, 0)
+
+
+def test_a_hand_resting_on_the_screen_does_not_break_the_stroke():
+    """Bug: a second pointer coming down while a stroke was being written
+    took the stroke's place.  The edge of the hand touching the screen as the
+    pen wrote cut the stroke where it touched - the rest of it was never
+    recorded - and left a stroke of its own where the hand was.  A touch
+    while the pen is down, or a moment after it lifts, is the hand; two
+    fingers, with no pen about, still zoom."""
+    rec = KeptRecognizer()
+    doc = Document(x + y, addons=[HandwritingAddon(rec), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc)
+        try:
+            panel = page.locator(".hw-panel")
+            box = page.locator(".hw-ink").bounding_box()
+            X, Y = box["x"] + box["width"] * 0.6, box["y"] + box["height"] * 0.5
+            _stroke(page, "pen", 11, X, Y)                       # ink on the formula: a tap is a dot from now on
+            assert _wait(lambda: panel.get_attribute("data-strokes") == "1")
+            # the second stroke, and the hand comes down half way through it
+            _fire(page, "pointerdown", "pen", 11, X, Y + 20, 1)
+            for i in range(1, 8):
+                _fire(page, "pointermove", "pen", 11, X + 3 * i, Y + 20, 1)
+            _fire(page, "pointerdown", "touch", 22, X + 150, Y + 40, 1)
+            for i in range(8, 15):
+                _fire(page, "pointermove", "pen", 11, X + 3 * i, Y + 20, 1)
+                _fire(page, "pointermove", "touch", 22, X + 150 + i, Y + 40, 1)
+            _fire(page, "pointerup", "pen", 11, X + 42, Y + 20, 0)
+            # the hand lifts after the pen, and touches once more as it goes
+            _fire(page, "pointerup", "touch", 22, X + 165, Y + 40, 0)
+            _fire(page, "pointerdown", "touch", 23, X + 140, Y + 60, 1)
+            _fire(page, "pointerup", "touch", 23, X + 140, Y + 60, 0)
+            assert _wait(lambda: len(rec.calls) > 0 and len(rec.calls[-1]) >= 2, 15)
+            page.wait_for_timeout(900)                           # anything more would have been read by now
+            ink = [s for s in rec.calls[-1] if len(s) != 0][-2:]
+            assert panel.get_attribute("data-strokes") == "2"
+            assert [len(s) for s in ink] == [15, 15], [len(s) for s in rec.calls[-1]]
+            left = X - box["x"]
+            assert abs(ink[1][0][0] - left) < 1 and abs(ink[1][-1][0] - (left + 42)) < 1     # the whole of it
+            assert all(p[0] < left + 60 for s in ink for p in s)                              # and none of the hand
+            # two fingers, the pen long gone: the formula is zoomed, and nothing is written
+            zoom = page.evaluate(ED + ".zoom")
+            _fire(page, "pointerdown", "touch", 31, X - 100, Y + 40, 1)
+            _fire(page, "pointerdown", "touch", 32, X, Y + 40, 1)
+            for i in range(1, 9):
+                _fire(page, "pointermove", "touch", 32, X + 12 * i, Y + 40, 1)
+            _fire(page, "pointerup", "touch", 32, X + 96, Y + 40, 0)
+            _fire(page, "pointerup", "touch", 31, X - 100, Y + 40, 0)
+            assert page.evaluate(ED + ".zoom") > zoom * 1.3
+            assert panel.get_attribute("data-strokes") == "2"
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
+def test_a_pen_takes_over_from_the_hand_that_came_down_first():
+    """The hand is often on the screen before the pen: its touch begins a
+    stroke, and the pen coming down takes over - the stroke is the pen's,
+    whole, and nothing of the hand's is kept.  Any other pointer coming down
+    while a stroke is written waits for it to end."""
+    rec = KeptRecognizer()
+    doc = Document(x + y, addons=[HandwritingAddon(rec), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc)
+        try:
+            panel = page.locator(".hw-panel")
+            box = page.locator(".hw-ink").bounding_box()
+            X, Y = box["x"] + box["width"] * 0.6, box["y"] + box["height"] * 0.5
+            _stroke(page, "pen", 11, X, Y)
+            page.wait_for_timeout(700)                           # the hand's moment after that stroke is over
+            _fire(page, "pointerdown", "touch", 22, X + 150, Y + 40, 1)
+            _fire(page, "pointermove", "touch", 22, X + 152, Y + 41, 1)
+            _fire(page, "pointerdown", "pen", 11, X, Y + 20, 1)
+            for i in range(1, 15):
+                _fire(page, "pointermove", "pen", 11, X + 3 * i, Y + 20, 1)
+                _fire(page, "pointermove", "touch", 22, X + 152 + i, Y + 41, 1)
+                if i == 7:                                       # and a mouse button pressed in the middle of it
+                    _fire(page, "pointerdown", "mouse", 1, X + 200, Y, 1)
+                    _fire(page, "pointerup", "mouse", 1, X + 200, Y, 0)
+            _fire(page, "pointerup", "pen", 11, X + 42, Y + 20, 0)
+            _fire(page, "pointerup", "touch", 22, X + 166, Y + 41, 0)
+            assert _wait(lambda: len(rec.calls) > 0 and len(rec.calls[-1]) >= 2, 15)
+            page.wait_for_timeout(900)
+            assert panel.get_attribute("data-strokes") == "2"
+            ink = rec.calls[-1][-2:]
+            left = X - box["x"]
+            assert [len(s) for s in ink] == [15, 15]
+            assert all(p[0] < left + 60 for s in ink for p in s)
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
+def test_a_contact_the_system_takes_back_leaves_nothing():
+    """Bug: ``pointercancel`` ended a contact as ``pointerup`` does: what the
+    system had taken back stayed on the formula as a stroke, and a short one
+    went through as a tap, selecting what was under it.  A cancelled contact
+    leaves nothing, and the next stroke is written as any other."""
+    rec = KeptRecognizer()
+    doc = Document(x + y, addons=[HandwritingAddon(rec), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc)
+        try:
+            panel = page.locator(".hw-panel")
+            box = page.locator(".hw-ink").bounding_box()
+            X, Y = box["x"] + box["width"] * 0.6, box["y"] + box["height"] * 0.5
+            _fire(page, "pointerdown", "touch", 7, X, Y, 1)
+            for i in range(1, 12):
+                _fire(page, "pointermove", "touch", 7, X + 4 * i, Y + 2 * i, 1)
+            _fire(page, "pointercancel", "touch", 7, X + 44, Y + 22, 0)
+            assert panel.get_attribute("data-strokes") == "0"
+            # a short one, on a glyph: no tap either
+            g = page.evaluate(TEXT_RECT, "x")
+            _fire(page, "pointerdown", "touch", 8, (g["left"] + g["right"]) / 2, (g["top"] + g["bottom"]) / 2, 1)
+            _fire(page, "pointercancel", "touch", 8, (g["left"] + g["right"]) / 2, (g["top"] + g["bottom"]) / 2, 0)
+            page.wait_for_timeout(1000)
+            assert page.locator(".se-view .se-selected").count() == 0
+            assert panel.get_attribute("data-strokes") == "0" and rec.calls == []
+            assert page.locator(".hw-cand").count() == 0
+            # ink written before is still read, the cancelled stroke after it left out
+            _drag(page, X, Y, X + 40, Y + 20)
+            assert _wait(lambda: panel.get_attribute("data-strokes") == "1")
+            _fire(page, "pointerdown", "touch", 9, X, Y + 40, 1)
+            for i in range(1, 12):
+                _fire(page, "pointermove", "touch", 9, X + 4 * i, Y + 40, 1)
+            _fire(page, "pointercancel", "touch", 9, X + 44, Y + 40, 0)
+            assert _wait(lambda: len(rec.calls) == 1, 15)
+            assert panel.get_attribute("data-strokes") == "1"
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
+def test_erasing_the_last_stroke_takes_the_readings_with_it():
+    """Bug: with every stroke rubbed out the readings stayed, Apply with them
+    - and Apply put into the formula the reading of ink that was not there.
+    It is as when the last stroke is taken back: no readings, no Apply."""
+    doc = Document(x + y, addons=[HandwritingAddon(LetterRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc)
+        try:
+            panel = page.locator(".hw-panel")
+            box = page.locator(".hw-ink").bounding_box()
+            X, Y = box["x"] + box["width"] * 0.6, box["y"] + box["height"] * 0.5
+            _drag(page, X, Y, X + 44, Y + 22, steps=11)
+            apply = page.locator(".hw-apply")
+            assert _wait(lambda: apply.is_visible() and not apply.is_disabled(), 15)
+            assert page.locator(".hw-cand").count() == 1
+            page.locator('[data-cmd="addon:handwriting:erase"]').click()
+            _drag(page, X - 10, Y, X + 44, Y + 22, steps=11)
+            assert _wait(lambda: panel.get_attribute("data-strokes") == "0")
+            page.wait_for_timeout(1000)                          # nothing is read of nothing
+            assert page.locator(".hw-cand").count() == 0
+            assert not apply.is_visible() and apply.is_disabled()
+            assert "Read in" not in page.locator(".hw-note").inner_text()
+            assert str(doc.expr) == "x + y"
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
+@pytest.mark.parametrize("selected", [None, "x"])
+def test_ink_stays_by_what_it_was_written_by_when_the_formula_is_zoomed(selected):
+    """Bug: zoomed, the ink was magnified about the corner of the ink layer,
+    while the formula - centred - grows where it stands: a line drawn under
+    the y of x + y was 500 px to the right of the y at twice the size, and
+    the piece to read the ink with was guessed from there.  The ink keeps its
+    place by the formula: under the y still - and, written in the space
+    opened by a selection, as far from the selection as it was, in the
+    formula's own measure."""
+    rec = KeptRecognizer()
+    doc = Document(x + y, addons=[HandwritingAddon(rec), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc, pen=False)
+        try:
+            if selected:
+                r = page.evaluate(TEXT_RECT, selected)
+                page.mouse.click((r["left"] + r["right"]) / 2, (r["top"] + r["bottom"]) / 2)
+                assert _wait(lambda: page.locator(".se-view .se-selected").count() == 1)
+            page.locator('[data-cmd="addon:handwriting:pen"]').click()
+            page.wait_for_timeout(400)                           # the view has grown, the space opened
+            by = selected or "y"
+            g = page.evaluate(IN_INK, by)
+            # under the y, from its left to its right; or, in the space the
+            # selection opened, a line beginning 10 px after the x
+            x0 = g["r"] + 10 if selected else g["l"]
+            x1 = x0 + 30 if selected else g["r"]
+            y0 = (g["t"] + g["b"]) / 2 if selected else g["b"] + 3
+            _drag(page, g["cx"] + x0, g["cy"] + y0, g["cx"] + x1, g["cy"] + y0, steps=10)
+            assert _wait(lambda: len(rec.calls) == 1, 15)
+            g = page.evaluate(IN_INK, by)                        # the space widened as the line was drawn
+            s = rec.calls[-1][-1]
+            edge = g["r"] if selected else g["l"]
+            level = (g["t"] + g["b"]) / 2 if selected else g["b"]
+            was = (s[0][0] - edge, s[-1][0] - edge, s[0][1] - level)
+            for n, zoom in enumerate((2, 0.6), start=2):
+                page.evaluate(ED + ".setZoom(%s)" % zoom)
+                page.wait_for_timeout(300)
+                # read again, to see where the ink is: what is sent is the ink as it is kept
+                page.locator('[data-cmd="addon:handwriting:undo"]').click()
+                page.locator('[data-cmd="addon:handwriting:redo"]').click()
+                assert _wait(lambda: len(rec.calls) == n, 15)
+                g = page.evaluate(IN_INK, by)
+                s = rec.calls[-1][-1]
+                edge = g["r"] if selected else g["l"]
+                level = (g["t"] + g["b"]) / 2 if selected else g["b"]
+                now = (s[0][0] - edge, s[-1][0] - edge, s[0][1] - level)
+                assert all(abs(a - b * zoom) < 2.5 for a, b in zip(now, was)), (zoom, was, now)
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
+# ---- which engine reads, and a page where none does ---------------------------
+
+NO_READER_OF_ITS_OWN = """
+    try { delete Navigator.prototype.createHandwritingRecognizer; } catch (e) {}
+    try { delete navigator.createHandwritingRecognizer; } catch (e) {}
+"""
+A_READER_OF_ITS_OWN = """
+    window.SympyEditorApp = Object.assign(window.SympyEditorApp || {}, {
+        recognizeInk: function (token, json) {
+            window.__askedWith = JSON.parse(json);
+            setTimeout(function () {
+                window.SympyEditor.inkRead(token, JSON.stringify({candidates: [{latex: "w + 2"}]}));
+            }, 10);
+        }
+    });
+"""
+
+
+def _again(page, script):
+    """The page loaded again with ``script`` run before it: what the device
+    offers is looked for when the add-on starts."""
+    page.add_init_script(script)
+    page.reload()
+    page.wait_for_selector(".se-stage .hw-ink", timeout=30000)
+    page.wait_for_selector(".se-view [data-path]")
+    page.wait_for_function("document.querySelector('.se-stage .hw-ink').clientWidth > 0")
+
+
+def test_one_document_s_choice_of_engine_is_not_another_s():
+    """Bug: a page that chose the device's own reader chose it for every
+    page built after it, the add-on being one object: on a device with no
+    such reader those had the Pen off, the strip hidden, and the menu to
+    choose the model again inside the hidden strip.  The choice is the
+    document's; and a document that did choose the device's reader, opened
+    where there is none, is read by the first engine that can."""
+    rec = KeptRecognizer()
+    addon = HandwritingAddon(rec)
+    chose = Document(y, addons=[addon, LATEX])
+    chose.handle({"action": "addon", "addon": "handwriting", "method": "engine", "name": "host"})
+    fresh = Document(x, addons=[addon, LATEX])
+    pen = '[data-cmd="addon:handwriting:pen"]'
+    with playwright.sync_playwright() as p:
+        for doc, after in ((fresh, "x*z"), (chose, "y*z")):
+            srv, browser, page = _page(p, doc, pen=False)
+            try:
+                _again(page, NO_READER_OF_ITS_OWN)
+                assert _wait(lambda: not page.locator(pen).is_disabled()), page.locator(".hw-note").inner_text()
+                page.locator(pen).click()
+                assert _wait(lambda: page.locator(".hw-panel").is_visible())
+                assert page.locator(".hw-engine").is_hidden()          # one engine that can read: nothing to choose
+                asked = len(rec.calls)
+                view = page.locator(".se-view").bounding_box()
+                _drag(page, view["x"] + 200, view["y"] + 60, view["x"] + 260, view["y"] + 100)
+                apply = page.locator(".hw-apply")
+                assert _wait(lambda: apply.is_visible() and not apply.is_disabled(), 15)
+                assert len(rec.calls) == asked + 1                      # read by the model
+                apply.click()
+                assert _wait(lambda: str(doc.expr) == after, 15), str(doc.expr)
+                assert page.errors == []
+            finally:
+                _close(srv, browser)
+        # the choice is kept all the same: where the device has a reader, it is the one asked
+        srv, browser, page = _page(p, chose, pen=False)
+        try:
+            _again(page, A_READER_OF_ITS_OWN)
+            page.locator(pen).click()
+            menu = page.locator(".hw-engine")
+            assert _wait(lambda: menu.is_visible())
+            assert menu.input_value() == "host"
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
+class NoModel(FakeRecognizer):
+    """A recognizer with no model to run, as in a page that runs its own Python."""
+
+    def status(self):
+        return {"available": False, "reason": "A page that runs its own Python carries no handwriting model"}
+
+
+def test_where_nothing_reads_the_strip_says_so_and_the_device_s_reader_is_asked_when_there_is_one():
+    """Bug: where the model cannot run - a page that runs its own Python, a
+    Python without the model - the Pen was off and nothing said why: the
+    strip that holds the reason was hidden with the Pen.  It shows, with the
+    reason, and the Pen's own title says it too; and on a device with a
+    reader of its own that reader is asked, with nothing to switch."""
+    doc = Document(x, addons=[HandwritingAddon(NoModel()), LATEX])
+    pen = '[data-cmd="addon:handwriting:pen"]'
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc, pen=False)
+        try:
+            _again(page, NO_READER_OF_ITS_OWN)
+            assert _wait(lambda: page.locator(".hw-panel").is_visible())
+            said = page.locator(".hw-note").inner_text()
+            assert "carries no handwriting model" in said and "no reader of its own" in said
+            assert "error" in page.locator(".hw-note").get_attribute("class")
+            assert _wait(lambda: page.locator(pen).is_disabled())
+            assert "carries no handwriting model" in page.locator(pen).get_attribute("title")
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+        srv, browser, page = _page(p, doc, pen=False)
+        try:
+            _again(page, A_READER_OF_ITS_OWN)
+            assert _wait(lambda: not page.locator(pen).is_disabled())
+            assert page.locator(".hw-panel").is_hidden()               # it can be written on: the editor as it was
+            page.locator(pen).click()
+            view = page.locator(".se-view").bounding_box()
+            _drag(page, view["x"] + 200, view["y"] + 60, view["x"] + 260, view["y"] + 100)
+            assert _wait(lambda: page.locator(".hw-cand").count() == 1, 15)
+            assert page.evaluate("window.__askedWith.length") == 1
+            assert page.locator(".hw-src").inner_text() == "w + 2"
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
+@pytest.mark.skipif(not os.environ.get("SYMPY_EDITOR_SLOW_TESTS"), reason="set SYMPY_EDITOR_SLOW_TESTS=1")
+def test_a_page_that_runs_its_own_python_edits_and_says_the_model_is_not_in_it(tmp_path):
+    """Bug: with the add-on in its catalogue a standalone page could not
+    edit: it was asked to install onnxruntime, which Pyodide has no wheel
+    of, and the one install failed for every add-on - the LaTeX add-on had no
+    lark.  Nothing is installed for the model now; the page's own Python says
+    that it has none (the options, written by the Python that built the page,
+    may say that one had), the strip shows it, and the rest of the page
+    works."""
+    from sympy_editor import save_html
+    from sympy_editor_handwriting import ADDON
+    path = tmp_path / "page.html"
+    save_html(Document(x + 1, addons=[ADDON, LATEX]), path)
+    pen = '[data-cmd="addon:handwriting:pen"]'
+    with playwright.sync_playwright() as p:
+        try:
+            browser = p.chromium.launch()
+        except Exception as exc:
+            pytest.skip(f"chromium not available: {exc}")
+        try:
+            page = browser.new_page(viewport={"width": 900, "height": 1000})
+            errors = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.add_init_script("delete window.Worker;" + NO_READER_OF_ITS_OWN)   # Python in the page itself
+            page.goto(path.as_uri())
+            page.wait_for_selector(".se-stage .hw-ink", timeout=60000)
+            page.wait_for_function("document.querySelector('.se-loading').hidden", timeout=240000)
+            assert _wait(lambda: "runs its own Python" in page.locator(".hw-note").inner_text(), 120), \
+                page.locator(".hw-note").inner_text()
+            assert page.locator(".hw-panel").is_visible() and page.locator(pen).is_disabled()
+            # the LaTeX add-on has its lark, and the formula is edited
+            read = page.evaluate("""async () => {
+                const ed = document.querySelector('.sympy-editor').__sympyEditor;
+                const snap = await ed.backend.send({action: 'addon', addon: 'latex', method: 'read',
+                                                    latex: '\\\\frac{1}{2}'}, () => {});
+                return snap.query;
+            }""")
+            assert read["result"]["ok"] and read["result"]["src"] == "1/2", read
+            page.evaluate(ED + ".send({action: 'set', src: 'x + 2'})")
+            assert _wait(lambda: page.locator(".se-source").inner_text().strip() == "x + 2", 30)
+            assert errors == []
+        finally:
+            browser.close()

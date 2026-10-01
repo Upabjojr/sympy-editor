@@ -443,3 +443,27 @@ def test_source_span_of_a_numerator_leaves_the_sign_out():
     assert text[slice(*spans["/0"])] == "-1/2" and text[slice(*spans["/0/n"])] == "1"
     text, spans = annotate_str(x - Rational(3, 4))
     assert text[slice(*spans["/0"])] == "- 3/4" and text[slice(*spans["/0/n"])] == "3"
+
+
+def test_a_path_names_no_argument_from_the_end():
+    """`args[-1]` is an argument too: get_at and delete_at took a negative
+    step and answered with the wrong node, where replace_at refused it."""
+    from sympy_editor.printer import delete_at, get_at, replace_at
+    expr = x + y + 1
+    for call in (lambda: get_at(expr, (-1,)), lambda: delete_at(expr, (-1,)), lambda: replace_at(expr, (-1,), x),
+                 lambda: delete_at(expr, (7,))):
+        with pytest.raises(ValueError, match="Invalid path"):
+            call()
+
+
+def test_a_one_sided_limit_has_spans():
+    """The direction is written "0^{+}" here and "0^+" by SymPy: compared as
+    they were, the two texts differed and every span was dropped."""
+    from sympy import Limit, sin
+    from sympy_editor import annotate_str, latex_spans
+    expr = Limit(sin(x) / x, x, 0)
+    text, spans = latex_spans(expr)
+    assert text.replace("^{+}", "^+") == latex(expr, mode="plain") and set(spans) == set(annotate_str(expr)[1])
+    start, end = spans["/0"]
+    assert text[start:end] == r"\frac{\sin{\left(x \right)}}{x}"
+    assert latex_spans(Limit(sin(x) / x, x, 0, "+-"))[1]

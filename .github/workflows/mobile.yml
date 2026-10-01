@@ -5,6 +5,12 @@ on:
   push:
     tags: ["v*"]
 
+# The jobs read the repository and keep what they built as the run's
+# artifacts, which asks nothing of the token: they publish no release.  The
+# Android job holds the release keystore while it runs.
+permissions:
+  contents: read
+
 jobs:
   android:
     runs-on: ubuntu-latest

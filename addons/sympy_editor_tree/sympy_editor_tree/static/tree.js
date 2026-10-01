@@ -65,11 +65,26 @@ SympyEditor.registerAddon("tree", {
       for (var i = 0; i < nodes.length; i++) if (nodes[i].data.view === view) return nodes[i];
       return null;
     }
+    /** The node a piece of the formula stands for: its own, or the one
+     *  around it.  The formula has pieces the tree has no node for - the 2
+     *  of x - 2*y is part of a -2 here, the product after the minus
+     *  (/1/neg) is nothing at all - so the view path is walked up, /1/neg/0,
+     *  /1/neg, /1, to the first piece that some node is shown as. */
+    function nodeForView(view) {
+      if (view === null || view === undefined) return null;
+      var steps = String(view).split("/").filter(function (p) { return p !== ""; });
+      while (true) {
+        var n = byView("/" + steps.join("/"));
+        if (n || !steps.length) return n;
+        steps.pop();
+      }
+    }
     function selectedNode() {
-      var v = api.selected();
-      // The formula's selection is a view path; a node under a fraction has
-      // none in the argument tree - fall back to the focused node.
-      return byView(v) || (focused ? byKey(focused) : null) || byKey("");
+      // What is selected in the formula comes first, and the node the tree
+      // has focused only when nothing is: with a piece selected that had no
+      // node of its own, the fields used to act on whichever node was
+      // clicked last - or on the root, the whole expression.
+      return nodeForView(api.selected()) || (focused ? byKey(focused) : null) || byKey("");
     }
 
     /* ---- layout ---- */
@@ -364,6 +379,7 @@ SympyEditor.registerAddon("tree", {
       editField.style.width = Math.max(box.width, 80) + "px";
       editField.hidden = false;
       editField.setAttribute("data-key", key(d.path));
+      editField.setAttribute("data-original", editField.value);
       editField.focus();
       editField.select();
     }
@@ -373,6 +389,11 @@ SympyEditor.registerAddon("tree", {
       editField.hidden = true;
       var n = byKey(k);
       if (!commit || !n || !text) return;
+      // Left as it was, there is nothing to send: losing the focus applies
+      // the field, so a look at a node and a click elsewhere used to be a
+      // step of the history each time, with the expression unchanged and
+      // Undo lit.  The editor's own field does the same (commitEdit).
+      if (text === editField.getAttribute("data-original")) return;
       if (n.data.atom) call("replace", { path: n.data.path, src: text });
       else call("set_head", { path: n.data.path, head: text });
     }
@@ -436,11 +457,58 @@ SympyEditor.registerAddon("tree", {
 
     svg.addEventListener("click", function (ev) {
       var n = nodeOf(ev.target);
-      if (n) { selectNode(n); showQuick(n); } else hideQuick();
+      if (n) {
+        selectNode(n);
+        showQuick(n);
+        clicked = { key: key(n.data.path), x: ev.clientX, y: ev.clientY, at: ev.timeStamp };
+      } else hideQuick();
     });
+
+    /* A double click is told here, not left to the browser.  Its dblclick
+     * goes to whatever is under the pointer at the second click, and that
+     * need not be the node: the first click selects in the formula, the
+     * formula's box grows for the selection's tools, the panel moves down
+     * and the second click - the pointer has not moved - lands beside the
+     * node.  The first double-click on a fresh page opened nothing.
+     *
+     * So a click on a node is remembered, and the next click is its second
+     * when the browser counts it as one (detail, which goes by the system's
+     * own double-click time and does not care what is under the pointer),
+     * or when it comes soon after, where the first was or on the same node -
+     * two taps of a finger are counted by nobody and never land on one spot.
+     * Listened for on the page, before anything else hears it: the second
+     * click may land outside the panel altogether, and whatever it lands on
+     * it was not meant for. */
+    var DOUBLE_MS = 400, DOUBLE_PX = 6;
+    var clicked = null;    // the last click, when it was on a node: {key, x, y, at}
+    function onDocClick(ev) {
+      var first = clicked;
+      clicked = null;
+      if (!first || ev.button !== 0) return;
+      var again = ev.detail > 1;
+      if (!again && ev.timeStamp - first.at <= DOUBLE_MS) {
+        var over = svg.contains(ev.target) ? nodeOf(ev.target) : null;
+        again = (over && key(over.data.path) === first.key) ||
+                Math.abs(ev.clientX - first.x) + Math.abs(ev.clientY - first.y) <= DOUBLE_PX;
+      }
+      var n = again ? byKey(first.key) : null;
+      if (!n) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      hideQuick(); hideMenu();
+      beginEdit(n);
+    }
+    document.addEventListener("click", onDocClick, true);
+    // The browser's own is what is left to a browser that does not count
+    // its clicks.  Not when the field is open: the second click has opened
+    // it, for the node that was clicked first - and on a narrow screen the
+    // panel moves far enough to put another node under the pointer, which
+    // is the one this event is for.
     svg.addEventListener("dblclick", function (ev) {
       var n = nodeOf(ev.target);
-      if (n) { ev.preventDefault(); beginEdit(n); }
+      if (!n) return;
+      ev.preventDefault();
+      if (editField.hidden) beginEdit(n);
     });
     svg.addEventListener("keydown", function (ev) {
       var n = nodeOf(document.activeElement);
@@ -540,9 +608,10 @@ SympyEditor.registerAddon("tree", {
                y: (clientY - box.top + scroller.scrollTop) / zoom };
     }
 
-    /** A node being dragged onto another, given up: a second finger, or a
-     *  redraw, means the drag is no longer what is happening.  Not endDrag -
-     *  that one lets go of the subtree where it is. */
+    /** A node being dragged onto another, given up: a second finger, or
+     *  the browser taking the pointer away (pointercancel), means the drag
+     *  is no longer what is happening.  Not endDrag - that one lets go of
+     *  the subtree where it is. */
     function cancelDrag() {
       if (!drag) return;
       drag.from.el.classList.remove("tree-dragging");
@@ -627,13 +696,20 @@ SympyEditor.registerAddon("tree", {
     /* Nothing else gets back to life size, so a double-click on empty space
      * does - the plot's double-click resets its span the same way. */
     scroller.addEventListener("dblclick", function (ev) {
-      if (nodeOf(ev.target) || zoom === 1) return;   // on a node it opens the editor
+      // On a node it opens the field - and so it did when the field is
+      // open: the second click of that one landed here, beside the node.
+      if (nodeOf(ev.target) || zoom === 1 || !editField.hidden) return;
       var at = pointAt(ev.clientX, ev.clientY);
       showAt(1, at.x, at.y, ev.clientX, ev.clientY);
     });
 
     // Drag a subtree onto another node: it becomes that node's last argument.
+    // With a mouse or a pen.  One finger is the browser's, to scroll the box
+    // with (touch-action in the CSS), and a scroll that began on a node was a
+    // drag here as well: the tree went along under the finger and the node
+    // under it was moved into the last one it had passed over.
     svg.addEventListener("pointerdown", function (ev) {
+      if (ev.pointerType === "touch") return;
       var n = nodeOf(ev.target);
       if (!n || !n.data.path.length || ev.button !== 0) return;
       drag = { from: n, x: ev.clientX, y: ev.clientY, moved: false, over: null, pointer: ev.pointerId };
@@ -671,7 +747,9 @@ SympyEditor.registerAddon("tree", {
       call("move", { from: d.from.data.path, to: d.over.data.path });
     }
     svg.addEventListener("pointerup", endDrag);
-    svg.addEventListener("pointercancel", endDrag);
+    // A cancel is not a release: the gesture was taken away - by the browser
+    // for a scroll of its own, by the system - and nothing was dropped.
+    svg.addEventListener("pointercancel", cancelDrag);
 
     headSel.addEventListener("change", function () {
       var n = selectedNode();
@@ -697,6 +775,7 @@ SympyEditor.registerAddon("tree", {
       "<section><h3>What it shows</h3><ul>",
       "<li>The expression as SymPy holds it: <code>x + y*z</code> is <b>Add</b> over <code>x</code> and <b>Mul</b>, <b>Mul</b> over <code>y</code> and <code>z</code>. Inner nodes carry the class (the head), leaves their value.</li>",
       "<li>The formula shows the printer's view: a fraction hides a <code>Pow(…, -1)</code>, a minus a <code>Mul(-1, …)</code>. Those nodes are here, but have no piece of their own in the formula: selecting one selects the nearest piece that is there.</li>",
+      "<li>The other way round, the formula has pieces that are no node here: the <code>2</code> of <code>x - 2*y</code> is part of a <code>-2</code>. With one of them selected, the node around it is the one marked \u2014 <b>Mul</b>, the <code>-2*y</code> \u2014 and the one the fields and <b>Node \u25be</b> act on.</li>",
       "</ul></section>",
       "<section><h3>Selecting</h3><ul>",
       "<li>Click a node to select the same piece in the formula (and the node lights up here when you select in the formula); a bar of quick actions appears under it: edit, delete, wrap, add an argument, and \u22ef for everything else.</li>",
@@ -712,9 +791,9 @@ SympyEditor.registerAddon("tree", {
       "<li>A double-click on empty space brings it back to life size.</li>",
       "</ul></section>",
       "<section><h3>Editing</h3><ul>",
-      "<li>Double-click a node (or <kbd>Enter</kbd> on it, or <b>Edit</b>/<b>Head</b> in the bar under it) to type over it: a new value for a leaf, a new head for an inner node \u2014 <b>Mul</b> over the arguments of an <b>Add</b> turns the sum into a product.</li>",
+      "<li>Double-click a node (or <kbd>Enter</kbd> on it, or <b>Edit</b>/<b>Head</b> in the bar under it) to type over it: a new value for a leaf, a new head for an inner node \u2014 <b>Mul</b> over the arguments of an <b>Add</b> turns the sum into a product. <kbd>Enter</kbd> or a click elsewhere applies what was typed, <kbd>Esc</kbd> gives it up; a field left as it was changes nothing, and is no step of the history.</li>",
       "<li>Right-click a node, or press <b>Node \u25be</b> for the selected one (or <b>\u22ef</b> in the bar under it, which is how a finger gets there): edit, delete, wrap, add an argument, then the editor's <b>Transform</b> entries for that kind of node and the <b>Methods</b> of its class.</li>",
-      "<li>With a mouse, drag a subtree onto another node: it becomes that node's last argument (a finger on the tree scrolls it instead). While you drag, a node lights up green where the drop may land and red where it may not \u2014 a node that its parent needs (the x of sin(x), the base of a power) cannot be taken out, a leaf takes no argument, nothing goes into itself. <kbd>Del</kbd> removes the focused node.</li>",
+      "<li>With a mouse or a pen, drag a subtree onto another node: it becomes that node's last argument. A finger on the tree scrolls it, from a node as from empty space, and moves nothing. While you drag, a node lights up green where the drop may land and red where it may not \u2014 a node that its parent needs (the x of sin(x), the base of a power) cannot be taken out, a leaf takes no argument, nothing goes into itself. <kbd>Del</kbd> removes the focused node.</li>",
       "<li>A transformation that is not allowed is refused: the error shows in the editor's line and the panel flickers red for half a second.</li>",
       "<li>The fields add an argument to the selected node or wrap it in a function; <b>Head \u25be</b> changes its head.</li>",
       "<li>Every change is a step of the editor's history: <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes it back. SymPy evaluates as it does for any edit, so moving <code>y</code> under an <b>Add</b> of <code>x</code> gives <code>x + y</code>.</li>",
@@ -749,14 +828,16 @@ SympyEditor.registerAddon("tree", {
       onState: function (snap) {
         if (snap.preview || !snap.tree) return;
         tree = snap.tree;
+        clicked = null;                  // the node clicked is not in this tree
         endEdit(false);
         hideQuick();
         draw();
       },
       onSelect: function () { markSelection(); },
       destroy: function () {
-        drag = null; hideMenu();
+        drag = null; clicked = null; hideMenu();
         document.removeEventListener("pointerdown", onDocPointerDown);
+        document.removeEventListener("click", onDocClick, true);
       }
     };
   }

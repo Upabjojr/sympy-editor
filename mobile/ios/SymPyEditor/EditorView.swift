@@ -49,9 +49,37 @@ extension EditorView {
      {"trigger": {"url-filter": "^wss?://"}, "action": {"type": "block"}}]
     """
 
+    /// What is shown in place of the page when the rules cannot be had.
+    static let refusal = """
+    <!DOCTYPE html><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SymPy Editor</title>
+    <body style="font: 16px/1.5 -apple-system, sans-serif; margin: 2rem; color-scheme: light dark">
+    <h1 style="font-size: 1.2rem">SymPy Editor could not start</h1>
+    <p>The editor never uses the network, and the rules that keep its page
+    from it could not be set up on this device. The page is not shown
+    without them.</p>
+    <p>Closing the app and opening it again may help. Your sessions are kept.</p>
+    """
+
+    /// The rules, compiled, handed over on the main thread: to the page's
+    /// web view and to the one a report is printed from.  nil when they
+    /// could not be compiled - and then neither shows anything.
+    static func offline(_ done: @escaping (WKContentRuleList?) -> Void) {
+        WKContentRuleListStore.default().compileContentRuleList(
+            forIdentifier: "sympy-editor-offline", encodedContentRuleList: Self.offlineRules) { list, error in
+            if list == nil {
+                NSLog("sympy-editor: the offline rules did not compile: \(String(describing: error))")
+            }
+            DispatchQueue.main.async { done(list) }
+        }
+    }
+
     static func webView(for bridge: PythonBridge) -> WKWebView {
         let config = WKWebViewConfiguration()
-        config.setURLSchemeHandler(BundleSchemeHandler(), forURLScheme: Self.scheme)
+        // The bundle is served once the rules are in (below), not before.
+        let bundle = BundleSchemeHandler()
+        config.setURLSchemeHandler(bundle, forURLScheme: Self.scheme)
         config.userContentController.addUserScript(
             WKUserScript(source: PythonBridge.injectedScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         config.userContentController.add(bridge, name: PythonBridge.handlerName)
@@ -76,17 +104,18 @@ extension EditorView {
         // not wait for it (importing SymPy takes a moment).
         bridge.warmUp()
         // The page loads once the rules are in: nothing it asks for may reach
-        // the network, not even before they compile.
-        WKContentRuleListStore.default().compileContentRuleList(
-            forIdentifier: "sympy-editor-offline", encodedContentRuleList: Self.offlineRules) { list, error in
-            DispatchQueue.main.async {
-                if let list = list {
-                    web.configuration.userContentController.add(list)
-                } else {
-                    NSLog("sympy-editor: the offline rules did not compile: \(String(describing: error))")
-                }
-                web.load(URLRequest(url: Self.start))
+        // the network, not even before they compile.  And not at all when
+        // they do not: the page used to load all the same, with a line in the
+        // log, in an app whose promise is that it cannot reach the network.
+        // It says so instead, and the bundle stays closed - to a reload too.
+        Self.offline { rules in
+            guard let rules = rules else {
+                web.loadHTMLString(Self.refusal, baseURL: Self.start)
+                return
             }
+            web.configuration.userContentController.add(rules)
+            bundle.open = true
+            web.load(URLRequest(url: Self.start))
         }
         return web
     }
@@ -316,7 +345,12 @@ final class BundleNavigation: NSObject, WKNavigationDelegate {
 
 /// Serves app://www/<path> from the bundled `www` folder with proper MIME types.
 final class BundleSchemeHandler: NSObject, WKURLSchemeHandler {
+    /// Whether the bundle is served: not until the web view has the rules
+    /// that keep the page off the network (EditorView.webView).
+    var open = false
+
     func webView(_ webView: WKWebView, start task: WKURLSchemeTask) {
+        guard open else { task.didFailWithError(URLError(.noPermissionsToReadFile)); return }
         guard let url = task.request.url, let base = Bundle.main.resourceURL else {
             task.didFailWithError(URLError(.badURL)); return
         }

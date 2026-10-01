@@ -27,7 +27,8 @@ from sympy import Basic
 
 from sympy_editor.addons import Addon
 
-from .recognizer import StrokeRecognizer, functions_as_commands, sized_delimiters, stand_in, with_braces
+from .recognizer import (StrokeRecognizer, check_beam, check_box, check_strokes, functions_as_commands, page_status,
+                         sized_delimiters, stand_in, with_braces)
 
 __all__ = ["HandwritingAddon", "Engine", "ADDON", "StrokeRecognizer", "functions_as_commands",
            "sized_delimiters", "with_braces"]
@@ -58,6 +59,53 @@ def _takes_context(recognizer) -> bool:
         return "context" in inspect.signature(recognizer.recognize).parameters
     except (TypeError, ValueError):
         return False
+
+
+#: More readings than a host has any reason to send: the rest is let go.
+MAX_READINGS = 16
+
+
+def _text(value, what: str = "The LaTeX to read") -> str:
+    """A text of a payload: nothing for none (``null`` used to be read as
+    the letters of "None"), and anything that is no text refused."""
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise ValueError(f"{what} is text")
+    return value
+
+
+def _given(value) -> Optional[List[Dict[str, Any]]]:
+    """The readings a host made of the ink, as they came in: a list, each
+    with its ``latex``.  One that says nothing is no reading, and goes."""
+    if value is None:
+        return None
+    shape = "The readings of the ink come as a list, each with its LaTeX"
+    if not isinstance(value, (list, tuple)):
+        raise ValueError(shape)
+    out = []
+    for cand in value:
+        if not isinstance(cand, dict):
+            raise ValueError(shape)
+        latex = _text(cand.get("latex"), "A reading's LaTeX").strip()
+        if latex:
+            out.append(dict(cand, latex=latex))
+    return out[:MAX_READINGS]
+
+
+def _children(value) -> Optional[List[int]]:
+    """The arguments a reading goes over, by number - or None."""
+    if value is None:
+        return None
+    if not isinstance(value, (list, tuple)) or not all(isinstance(i, int) and not isinstance(i, bool) for i in value):
+        raise ValueError("The pieces a reading takes the place of come as a list of whole numbers")
+    return list(value)
+
+
+def _refused(error: str) -> Dict[str, Any]:
+    """A reading that is refused here, in the shape the LaTeX reader answers in."""
+    return {"ok": False, "src": None, "latex": None, "error": error, "incomplete": None,
+            "ambiguities": [], "constants": [], "choices": {}}
 
 
 def _nest(tex: str, piece: str, stand=STAND_IN) -> str:
@@ -108,8 +156,10 @@ class Engine:
         return self.recognizer.status()
 
     def describe(self) -> Dict[str, Any]:
+        """The engine as the page is told of it: its status without the
+        folders of this machine (``page_status``)."""
         return {"name": self.name, "label": self.label, "where": self.where,
-                "note": self.note, "status": self.status()}
+                "note": self.note, "status": page_status(self.status())}
 
 
 #: What a reading of ink over an operator may say, as LaTeX, and the
@@ -153,8 +203,11 @@ class HandwritingAddon(Addon):
         self.engines: "OrderedDict[str, Engine]" = OrderedDict()
         for eng in engines or self._default_engines(recognizer):
             self.engines[eng.name] = eng
-        #: Which of them is asked.  A host engine the page cannot offer falls
-        #: back to the first that reads here (see :meth:`_engine`).
+        #: Which of them is asked by a document that has not chosen: the
+        #: choice itself is the document's (``doc.addon_state``, see
+        #: :meth:`chosen`), since one add-on serves many.  A host engine the
+        #: page cannot offer falls back to the first that reads here (see
+        #: :meth:`_reader`).
         self.engine = engine or next(iter(self.engines))
         first = self.engines[self.engine]
         #: What ``recognizer`` used to be: the model, for whoever asks.
@@ -179,18 +232,35 @@ class HandwritingAddon(Addon):
             if eng.recognizer is not None:
                 eng.recognizer.warm(background=True)
 
-    def _engine(self, name: Optional[str] = None) -> Engine:
-        """The engine to ask: the one named, or the one chosen."""
-        eng = self.engines.get(str(name or self.engine))
+    def pyodide_packages(self) -> List[str]:
+        """Nothing: a Pyodide page cannot run the model - onnxruntime has no
+        wheel for it, and asked for beside the other add-ons' requirements
+        it failed the one ``micropip.install`` for all of them, the LaTeX
+        add-on's ``lark`` included - so there is nothing to install for it.
+        The page reads with the device's own reader where there is one."""
+        return []
+
+    def chosen(self, doc=None) -> str:
+        """The engine ``doc`` asks: the one it chose, else the add-on's own.
+        The choice is the document's - kept on the add-on, which every
+        document shares, one page's choice was every other page's."""
+        state = doc.addon_state.get(self.name) if doc is not None else None
+        name = state.get("engine") if isinstance(state, dict) else None
+        return name if name in self.engines else self.engine
+
+    def _engine(self, doc=None, name: Optional[str] = None) -> Engine:
+        """The engine to ask: the one named, or the one ``doc`` chose."""
+        name = self.chosen(doc) if name is None or name == "" else name
+        eng = self.engines.get(name) if isinstance(name, str) else None
         if eng is None:
-            raise ValueError(f"No handwriting engine called {name or self.engine!r}")
+            raise ValueError(f"No handwriting engine called {name!r}")
         return eng
 
-    def _reader(self, name: Optional[str] = None) -> Engine:
+    def _reader(self, doc=None, name: Optional[str] = None) -> Engine:
         """The engine to hand strokes to here: the one named or chosen when it
         reads here, else the first that does - a host engine reads in the
         page, and strokes that reach Python are for one of these."""
-        eng = self._engine(name)
+        eng = self._engine(doc, name)
         if eng.recognizer is not None:
             return eng
         for other in self.engines.values():
@@ -198,12 +268,32 @@ class HandwritingAddon(Addon):
                 return other
         raise ValueError("No handwriting engine reads strokes here")
 
+    def _status(self, eng: Engine) -> Dict[str, Any]:
+        """What the page shows of the model (its notice, why it cannot
+        read): the engine's own status when it reads here, the model's
+        beside a host engine."""
+        if eng.where != "python" and "math-ocr" in self.engines:
+            eng = self.engines["math-ocr"]
+        return page_status(eng.status())
+
     def client_options(self) -> Dict[str, Any]:
-        chosen = self._engine()
-        return {"status": chosen.status() if chosen.where == "python" else self.engines["math-ocr"].status()
-                if "math-ocr" in self.engines else chosen.status(),
-                "engine": self.engine,
+        # What a page needs, and no more: it is written into every page
+        # built, a saved one too - the model's folder and the checkout's
+        # used to go out with each.
+        return {"status": self._status(self._engine()), "engine": self.engine,
                 "engines": [eng.describe() for eng in self.engines.values()]}
+
+    def contribute(self, doc, snap: Dict[str, Any], expr) -> None:
+        # the document's own choice of engine: the page follows it
+        snap[self.name] = {"engine": self.chosen(doc)}
+
+    def export_state(self, doc) -> Optional[Dict[str, Any]]:
+        state = doc.addon_state.get(self.name) or {}
+        return {"engine": state["engine"]} if state.get("engine") in self.engines else None
+
+    def restore_state(self, doc, data) -> None:
+        if isinstance(data, dict) and data.get("engine") in self.engines:
+            doc.addon_state.setdefault(self.name, {})["engine"] = data["engine"]
 
     @staticmethod
     def _latex():
@@ -226,14 +316,18 @@ class HandwritingAddon(Addon):
     def _piece(doc, nest, children=None) -> Optional[Basic]:
         """The node at ``nest`` ("" and "/" are the whole formula) - or, with
         ``children``, those of its arguments, as the product or sum they
-        form - or None."""
+        form - or None: for a path the document does not have, and for
+        arguments the node does not have, or named twice."""
         if nest is None:
             return None
         try:
             node = doc.get(str(nest))
             if not children:
                 return node
-            args = [node.args[int(i)] for i in children]
+            index = [int(i) for i in children]
+            if len(set(index)) != len(index) or not all(0 <= i < len(node.args) for i in index):
+                return None
+            args = [node.args[i] for i in index]
             return args[0] if len(args) == 1 else node.func(*args)
         except Exception:  # noqa: BLE001 - a path the document no longer has
             return None
@@ -241,10 +335,30 @@ class HandwritingAddon(Addon):
     def _read(self, doc, latex: str, picks: Optional[Dict[str, Any]] = None, nest=None,
               children=None) -> Dict[str, Any]:
         payload = dict(picks or {}, latex=latex)
-        piece = self._piece(doc, nest, children) if PIECE_TEX in latex else None
-        if piece is not None:
-            payload["pieces"] = {PIECE_NAME: piece}
-        return self._latex().read(doc, payload)
+        if PIECE_NAME not in latex:
+            return self._latex().read(doc, payload)
+        # The placeholder stands for a piece of the formula, and is no name
+        # of its own: with no piece to put there - a path that is gone,
+        # arguments the node has not - the reading is refused.  Read all the
+        # same, it answered with a symbol called "nestedpiece".
+        piece = self._piece(doc, nest, children)
+        if piece is None:
+            return _refused("The piece this was written by is not in the formula any more: write it again")
+        payload["pieces"] = {PIECE_NAME: piece}
+        res = self._latex().read(doc, payload)
+        expr = res.get("expr")
+        if res.get("ok") and isinstance(expr, Basic) and self._placeholders(expr, piece):
+            # read into a name (an accent over it, say) rather than replaced
+            return _refused("The piece the ink was written by cannot be read there: correct the LaTeX, "
+                            "or read the ink alone")
+        return res
+
+    @staticmethod
+    def _placeholders(expr: Basic, piece: Basic) -> List[Basic]:
+        """The symbols of ``expr`` that carry the placeholder's name, and
+        are not the piece's own."""
+        own = piece.atoms(sympy.Symbol)
+        return [s_ for s_ in expr.atoms(sympy.Symbol) if PIECE_NAME in s_.name and s_ not in own]
 
     @staticmethod
     def _operator_reading(latex: str) -> Dict[str, Any]:
@@ -274,36 +388,44 @@ class HandwritingAddon(Addon):
 
     def handle(self, doc, method: str, payload: Dict[str, Any]):
         if method == "status":
-            return self._engine().status()
+            return self._status(self._engine(doc))
         if method == "engines":
-            return {"engine": self.engine, "engines": [eng.describe() for eng in self.engines.values()]}
+            # What reads here, asked by the page as it starts: its options
+            # were written by the Python that built it, which is another
+            # Python when the page runs its own (and that one had the model).
+            return {"engine": self.chosen(doc), "engines": [eng.describe() for eng in self.engines.values()],
+                    "status": self._status(self._engine(doc))}
         if method == "engine":
-            # Which engine reads from now on.  A host engine is the page's to
-            # run: nothing is loaded here, and "write" takes its readings in.
-            eng = self._engine(payload.get("name"))
-            self.engine = eng.name
+            # Which engine reads this document from now on.  A host engine
+            # is the page's to run: nothing is loaded here, and "write"
+            # takes its readings in.
+            eng = self._engine(doc, payload.get("name"))
+            doc.addon_state.setdefault(self.name, {})["engine"] = eng.name
             if eng.recognizer is not None:
                 eng.recognizer.warm(background=True)
-            return {"engine": self.engine, "where": eng.where, "status": eng.status()}
+            return {"engine": eng.name, "where": eng.where, "status": page_status(eng.status())}
         if method == "recognize":
-            result = self._reader(payload.get("engine")).recognizer.recognize(payload.get("strokes"),
-                                                                              beam=payload.get("beam", 4))
+            strokes, beam = check_strokes(payload.get("strokes")), check_beam(payload.get("beam"))
+            result = self._reader(doc, payload.get("engine")).recognizer.recognize(strokes, beam=beam)
             for cand in result["candidates"]:
                 cand["reading"] = self._reading(doc, cand["latex"])
             return result
         if method == "latex_of":
             # The pieces offered to read the ink with, typeset on their
             # buttons: the LaTeX of each, as the editor draws it.
+            paths = payload.get("paths") or []
+            if not isinstance(paths, (list, tuple)):
+                raise ValueError("The pieces to typeset come as a list of paths")
             out = {}
-            for path in payload.get("paths") or []:
+            for path in paths:
                 try:
                     out[str(path)] = sympy.latex(doc.get(str(path)), **dict(doc.printer_settings))
                 except Exception:  # noqa: BLE001 - a path gone with an edit: its button keeps its text
                     continue
             return {"latex": out}
         if method == "read":
-            return {"reading": self._reading(doc, str(payload.get("latex", "")), self._picks(payload),
-                                             payload.get("nest"), payload.get("children"))}
+            return {"reading": self._reading(doc, _text(payload.get("latex")), self._picks(payload),
+                                             payload.get("nest"), _children(payload.get("children")))}
         if method == "write":
             # What is written, read: strokes in, readings out - and, with ``nest``
             # (a node's path), read together with that node, whose LaTeX takes the
@@ -314,18 +436,23 @@ class HandwritingAddon(Addon):
             # The strokes may have been read already, by the host's own reader
             # (a host engine, see Engine): then the readings come in as
             # ``candidates`` and only the nesting and the SymPy are done here.
-            given = payload.get("candidates")
+            # The payload's shape first, in words a user can read - before
+            # anything is loaded, drawn or read.
+            given = _given(payload.get("candidates"))
+            strokes = check_strokes(payload.get("strokes")) if given is None else []
+            beam = check_beam(payload.get("beam"))
+            box = check_box(payload["context"]) if payload.get("context") is not None and given is None else None
             if payload.get("operator"):
                 # Written over a selected operator: it takes that operator's
                 # place, so it is read as an operator - never as a formula,
                 # nor together with a piece.  The readings that are no
                 # operator go; the rest once each, best first.
                 if given is not None:
-                    result = {"candidates": [dict(c) for c in given], "ms": payload.get("ms", 0),
-                              "engine": payload.get("engine") or self.engine}
+                    result = {"candidates": given, "ms": payload.get("ms", 0),
+                              "engine": self._engine(doc, payload.get("engine")).name}
                 else:
-                    reader = self._reader(payload.get("engine"))
-                    result = reader.recognizer.recognize(payload.get("strokes"), beam=payload.get("beam", 4))
+                    reader = self._reader(doc, payload.get("engine"))
+                    result = reader.recognizer.recognize(strokes, beam=beam)
                     result["engine"] = reader.name
                 out, seen = [], set()
                 for cand in result["candidates"]:
@@ -345,27 +472,28 @@ class HandwritingAddon(Addon):
                 result["nested"] = False
                 return result
             if given is not None:
-                result = {"candidates": [dict(c) for c in given], "ms": payload.get("ms", 0),
-                          "strokes": len(payload.get("strokes") or []), "engine": payload.get("engine") or self.engine}
+                drawn = payload.get("strokes")
+                result = {"candidates": given, "ms": payload.get("ms", 0),
+                          "strokes": len(drawn) if isinstance(drawn, (list, tuple)) else 0,
+                          "engine": self._engine(doc, payload.get("engine")).name}
             else:
                 # A piece to read with (``context``, its box): given to a
                 # recognizer that takes it as such, drawn into the strokes as
                 # the triangle for one that does not.
-                reader = self._reader(payload.get("engine"))
+                reader = self._reader(doc, payload.get("engine"))
                 rec = reader.recognizer
-                strokes, box = payload.get("strokes"), payload.get("context")
                 nesting = box is not None and payload.get("nest") is not None
                 family = self._siblings(doc, rec, payload) if nesting else None
                 if family is not None:
-                    result = rec.recognize(strokes, beam=payload.get("beam", 4), context=family["boxes"])
+                    result = rec.recognize(strokes, beam=beam, context=family["boxes"])
                     result["engine"] = reader.name
                     return self._with_siblings(doc, result, family)
                 if nesting and _takes_context(rec):
-                    result = rec.recognize(strokes, beam=payload.get("beam", 4), context=box)
+                    result = rec.recognize(strokes, beam=beam, context=box)
                 else:
                     if nesting:
                         strokes = stand_in(box, strokes)
-                    result = rec.recognize(strokes, beam=payload.get("beam", 4))
+                    result = rec.recognize(strokes, beam=beam)
                 result["engine"] = reader.name
             stand = _stand_in(result.get("stand_in") or r"\Delta")
             nest = payload.get("nest")        # "" is the whole formula, a piece like any other
@@ -390,12 +518,16 @@ class HandwritingAddon(Addon):
         if method == "insert":
             # a reading nested among siblings replaces the run it names: its
             # ``children`` are the piece's, and where it goes
-            res = self._read(doc, str(payload.get("latex", "")), self._picks(payload), payload.get("nest"),
-                             payload.get("children") if payload.get("nest") is not None else None)
+            latex, children = _text(payload.get("latex")), _children(payload.get("children"))
+            if payload.get("caret") is not None and not isinstance(payload["caret"], dict):
+                # let through, it was no caret at all - and the reading took the whole formula's place
+                raise ValueError("Where the cursor is comes as the editor describes it")
+            res = self._read(doc, latex, self._picks(payload), payload.get("nest"),
+                             children if payload.get("nest") is not None else None)
             if not res.get("ok"):
                 raise ValueError(res.get("error") or "This could not be read")
             # where the LaTeX panel would put it: the selection, the caret, the end
-            self._latex().put(doc, res["expr"], payload, str(payload.get("latex", "")))
+            self._latex().put(doc, res["expr"], payload, latex)
             return None
         raise ValueError(f"The handwriting add-on has no method {method!r}")
 
@@ -407,6 +539,9 @@ class HandwritingAddon(Addon):
         "tokens"}``, the boxes left to right and at most as many as the model
         has tokens for, around the piece.  None otherwise."""
         sibs = payload.get("siblings") or []
+        if not isinstance(sibs, (list, tuple)) or not all(isinstance(s_, dict) for s_ in sibs):
+            raise ValueError("The pieces beside the one the ink is written by come as a list, each with its path and its box")
+        sibs = [dict(s_, box=check_box(s_.get("box"))) for s_ in sibs]
         tokens = rec.box_tokens() if hasattr(rec, "box_tokens") else []
         if len(sibs) < 2 or len(tokens) < 2:
             return None

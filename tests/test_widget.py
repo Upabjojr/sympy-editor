@@ -331,3 +331,75 @@ def test_a_late_interrupt_still_lets_the_answer_out(monkeypatch):
     assert entered.is_set()                  # the interrupt was delivered late, or the race never happened
     assert got and got[-1]["_req"] == 1
     assert w._running is None and w.expr == x + 1
+
+
+def test_every_document_keyword_reaches_the_document():
+    """allow_invalid (and history, index, labels, format) went on to the
+    widget's own constructor, which dropped them with a deprecation warning."""
+    import inspect
+    import warnings
+    from sympy_editor.widget import DOCUMENT_KEYWORDS
+    theirs = [n for n in inspect.signature(Document.__init__).parameters if n not in ("self", "expr")]
+    assert sorted(theirs) == sorted(DOCUMENT_KEYWORDS)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        w = SympyEditorWidget(x, store=False, allow_invalid=True)
+        assert w.document.allow_invalid is True
+        w = SympyEditorWidget(x, store=False, history=["Symbol('x')", "Symbol('y')"], index=0, labels=[None, "Edit"])
+    assert w.expr == x and json.loads(w.snapshot)["can_redo"]
+
+
+def test_messages_are_answered_in_the_order_they_came():
+    """A thread per message met the others at a lock, which is not a queue:
+    of edits sent one after the other a later one could be applied first."""
+    import time
+    w = SympyEditorWidget(x, store=False)
+    _answers(w)
+    handle = w.document.handle
+    order = []
+
+    def slow(message):
+        order.append(message.get("src"))
+        time.sleep(0.01)
+        return handle(message)
+
+    w.document.handle = slow
+    sources = [f"x + {i}" for i in range(12)]
+    for src in sources:
+        w._on_msg(w, {"action": "set", "src": src}, [])
+    deadline = time.time() + 10
+    while len(order) < len(sources) and time.time() < deadline:
+        w.wait(1)
+    w.wait(5)
+    assert order == sources and w.expr == x + 11
+
+
+def test_the_widget_answers_a_write_it_cannot_make(tmp_path):
+    """A text that cannot be written as it is (half a character) raised in
+    the kernel: no answer went back, and an empty file was left behind."""
+    w = SympyEditorWidget(x, store=tmp_path / "kept", save_dir=tmp_path)
+    sent = _answers(w)
+    w._on_msg(w, {"action": "writefile", "name": "sur.txt", "text": "a\ud800b", "_req": 4}, [])
+    assert sent[-1]["_req"] == 4 and sent[-1].get("saved")
+    assert (tmp_path / "sur.txt").read_text(encoding="utf-8") == "a?b"
+    w._on_msg(w, {"action": "keep", "key": "k", "value": "\ud800", "_req": 5}, [])
+    assert sent[-1] == {"keep": None, "_req": 5}
+    w.keeper.answer = lambda content: 1 / 0                 # whatever goes wrong, an answer goes back
+    w._on_msg(w, {"action": "keep", "key": "k", "_req": 6}, [])
+    assert sent[-1]["_req"] == 6 and "ZeroDivisionError" in sent[-1]["error"]
+
+
+def test_edit_without_anywidget_leaves_the_widgets_own_keywords_out(monkeypatch):
+    """store= and save_dir= are the widget's: the fallback page handed them
+    to Document, which raised instead of showing the page."""
+    import sys
+    import warnings
+    monkeypatch.setitem(sys.modules, "anywidget", None)
+    monkeypatch.delitem(sys.modules, "sympy_editor.widget", raising=False)
+    shown = []
+    import sympy_editor
+    monkeypatch.setattr(sympy_editor, "display_html", lambda expr, **kwargs: shown.append(kwargs) or "page")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        assert edit(x, store=False, save_dir=".", title="T") == "page"
+    assert shown == [{"title": "T"}]

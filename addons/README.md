@@ -15,10 +15,11 @@ addons/
   sympy_editor_matching/    rewrite rules matched many-to-one              (sympy-matching)
   sympy_editor_latex/       LaTeX in: a first reading, every ambiguity a choice, constants as switches (lark)
   sympy_editor_console/     a Python console and script runner, with `editor` for the formula (no dependency)
-  demo.py                   a page with the five, to try them in a browser
+  sympy_editor_handwriting/ writing on the formula by hand, read by math-ocr's stroke model (onnxruntime; not in Pyodide)
+  demo.py                   a page with the first five, to try them in a browser
 ```
 
-All five are **drafts**: they work end to end (each has tests, and the
+All six are **drafts**: they work end to end (each has tests, and the
 editor's browser test drives a panel), but their interfaces are the first
 version of an idea, not a promise.  They live in this repository for
 convenience only: an add-on is an **external project** - any package, in
@@ -175,8 +176,9 @@ message travels.  Add-ons keep that shape.  They do not get a second channel:
   `export_state(doc)` / `restore_state(doc, data)` carry it with a session
   (`Document.export()["addon_state"]`), as JSON the add-on parses back; in
   Jupyter `w.addon_state` is the same dict, live.  What should outlive a
-  session - a library of rule sets - the add-on keeps in the browser's
-  storage from its panel (`localStorage`, which every host has).
+  session - a library of rule sets - the add-on keeps from its panel
+  through `api.keep`, its editor's keeper (the app's storage, the server's
+  or the kernel's store; the browser's only on a standalone page).
 
 ### The `api` a panel receives
 
@@ -184,13 +186,14 @@ message travels.  Add-ons keep that shape.  They do not get a second channel:
 api.name, api.options        // the add-on's name, and Addon.client_options() from Python
 api.state()                  // the last snapshot; api.node(path) one entry of its node table
 api.selected(), api.range()  // the selection (a view path) and the range, as the editor holds them
+api.rangeIndices()           // the range's argument indices, as `children` in the editor's messages (null without one)
 api.select(path)             // select in the formula
 api.call(method, payload[, {quiet: true}])   // → Promise: the query's result, or the new snapshot for a change;
                              // quiet: no "Working…" overlay over the editor, the focus left alone - for a
                              // question the panel shows its own progress for (the LaTeX box reads as one types)
 api.send(msg)                // any editor message ({action: "apply", ...})
 api.status(text), api.error(text)
-api.h(tag, attrs, children)  // the editor's element helper; api.katex(); api.loadScript(url)
+api.h(tag, attrs, children)  // the editor's element helper; api.katex(); api.loadScript(url) - once per URL and page
 api.keep.read(name)          // → Promise of the text kept under `name` (or null); api.keep.write(name, text):
                              // this editor's keeper - the app's storage, the server's or the kernel's store,
                              // the browser's only on a standalone page.  Not SympyEditor.keep, which asks
@@ -326,7 +329,8 @@ report, the nodes the previous step did not have in green - how the tree
 evolved.  In the panel, click selects the same piece in the formula
 (argument paths and view paths agree except under fractions, where the
 nearest ancestor is selected), double-click edits a leaf's value or an inner
-node's head, drag drops a subtree under another node, `Delete` removes, the
+node's head, a drag with a mouse or a pen drops a subtree under another node
+(a finger scrolls the panel and never drags), `Delete` removes, the
 panel's fields add an argument or wrap.  Every edit is a method (`set_head`,
 `replace`, `delete`, `insert`, `wrap`, `move`) made with the editor's own path
 helpers on the real `args`, so SymPy's evaluation applies and undo works.
@@ -373,9 +377,8 @@ These are the decisions this PR leaves open on purpose:
    data)` carry an add-on's state under `export()["addon_state"]`, so a
    session switch keeps a rule set; `Document(addon_state=...)` gives it back
    when the add-on is on.  Persistence beyond a session is the add-on's:
-   the rules panel mirrors its library to `localStorage`, which the pages,
-   the apps' web views and JupyterLab all have, and in Jupyter the state is
-   also Python (`w.addon_state`).
+   the rules panel mirrors its library to its editor's keeper (`api.keep`),
+   and in Jupyter the state is also Python (`w.addon_state`).
 2. **Global registries.**  Kinds are per document (`doc.kinds`), so a
    switched-off add-on leaves no classification behind; rebuilders and printer
    methods for foreign classes are still process wide, which only shows when

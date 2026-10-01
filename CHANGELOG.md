@@ -2,6 +2,134 @@
 
 ## 0.1.2 — September 2026
 
+* **A row under the formula, and no floating bar.** The four arrows moved
+  from the tools to a row just beneath the formula, at its left; in a matrix
+  the row and column buttons join them, and on a touch screen the keyboard
+  button is an icon at the right end of that row, blinking when a selection
+  or a caret appears to show that the keyboard can be opened for it. The bar
+  that popped up under every selection is gone: Edit, Unwrap, Delete,
+  Isolate, Copy and Paste are in the tools, each in one fixed place.
+
+* **Typing in front of a term types onto that term.** With the caret after
+  the plus of ``x + 1``, in front of the ``1``, a typed ``r`` joined the
+  ``x`` on the other side of the plus and gave ``r*x + 1``; it now gives
+  ``x + r``, the caret belonging to the term it is drawn against. Likewise a
+  caret outside ``f(x, y)`` - left of the ``f``, right of the ``)`` - now
+  multiplies the call instead of typing into its first or last argument.
+
+* **Keep in green, Undo in red.** After a LaTeX or a handwritten reading is
+  applied, the two answers wear the colours of the change shown above them:
+  Keep the green of what came, Undo the change the red of what went - the
+  red weaker, a border and its words, since it is the way back and not a
+  danger.
+
+* **Free handwriting has room at the edge.** A stroke written with nothing
+  selected that reached the right edge of the formula area had nowhere to
+  go on; the area now opens space past it and scrolls there, and grows
+  downwards under a stroke by its bottom edge, as it already did when
+  writing over a selection. The formula does not move.
+
+* **The pen put away takes its ink.** Switching handwriting off clears the
+  strokes that were not applied, instead of leaving them on the formula.
+
+* **A saved file never runs code.** With the plot panel open, a ``.sympy``
+  file whose symbols or functions had crafted names ran them as Python when
+  the plot sampled the formula; the plot now renames every symbol before
+  anything is evaluated and refuses names it cannot. A file holding
+  ``factorial(10**8)`` or ``2**(10**9)`` no longer freezes the reader: such
+  numbers are kept as written. Pages generated from Python escape an
+  element id and a tutorial's options, and an add-on defined in a script no
+  longer takes every other ``.py`` beside the script into the page.
+
+* **Sessions shared by several editors.** Two pages of ``serve()``, two
+  widgets of a notebook or two windows of the app keep one list of
+  sessions, and each save wrote its own copy of it: the sessions the other
+  had made were gone. An editor now merges what it changed into the list as
+  kept. The last edit before a page is closed reaches ``serve()`` too, a
+  reload no longer adds a copy of the session it reopens, and a kept list
+  that is damaged no longer switches sessions off for good.
+
+* **Keys go to what is in front.** With the guide, the history or the
+  sessions drawer open, typing edited the formula behind it; toolbar buttons
+  took no Space or Enter; a character typed with AltGr or Option was
+  ignored over a selection; and Enter while an input method composed
+  committed the field. ``Lambda`` opened in a field came back as a function
+  called ``Lamda``, ``\int`` followed at once by Enter was not expanded, and
+  two templates typed in one field shared their empty boxes.
+
+* **Fixes (editor).** A file the editor refuses to open no longer leaves an
+  empty session behind, and two files opened at once both open; a method
+  picked from the menu while a caret is shown applies to the formula instead
+  of being typed into it; the function list arriving no longer closes a field
+  being typed in; a refused change of operator keeps the operator selected;
+  an add-on whose panel fails is not mounted again at every change;
+  ``destroy()`` stops the editor, its timers and its Python; a standalone
+  page whose add-ons cannot all be installed installs the others; a script
+  asked for twice is loaded once; ``Range``, set operations with symbolic
+  bounds and ``BlockDiagMatrix`` are no longer refused as invalid; a history
+  longer than ``max_history`` opens on the right step.
+
+* **Fixes (Python).** ``serve()``: *Done* is no longer lost when the page
+  has gone first, a malformed or deeply nested request is answered with an
+  error, the Host check takes only a well-formed host, and the listening
+  socket is closed after *Done*. The widget handles its messages in the
+  order they came and passes every ``Document`` option on
+  (``allow_invalid`` was dropped); a store with a file it cannot decode, or
+  a name with a lone surrogate, answers instead of failing. One malformed
+  ``addon.json`` no longer breaks every ``Document()``.
+
+* **Nothing but an expression is committed.** ``[x, 1]`` or ``None`` typed
+  as the formula, or an operation answering a list, broke the document; a
+  call whose result was text - a saved symbol's ``.name`` - was read back
+  as input and could run code from a file. Both are refused now.
+
+* **Edits keep to what was asked.** ``+y`` typed into ``x*z`` gives
+  ``x + y*z`` whichever side the caret is on, and ``<=`` typed at a caret
+  changes the operator. With *unevaluated* on, a change of operator leaves
+  the rest unevaluated (``2*3*4`` → ``2 + 3*4``). Unwrap no longer offers a
+  matrix's shape, an invalid node already in the formula no longer blocks
+  edits elsewhere, and *Move everything to the left* works on matrix
+  equations. A name declared as an explicit ``Matrix`` no longer makes its
+  session unopenable, and the Python script rebuilds unevaluated products
+  and unions exactly.
+
+* **Interrupt stops only what it was pressed for.** In the Android, iOS and
+  Mac apps, an Interrupt that landed as a message ended could leave it
+  listed as running, and the next press stopped whatever came after -
+  usually the opening of a session, which was then listed as broken.
+
+* **The apps stay offline, and builds ship what they list.** On iOS and the
+  Mac the page is not shown if the rules that keep it off the network cannot
+  be set up, and a printed report gets the same rules. A build makes
+  ``vendor/`` afresh, a download is kept only when it is whole (Pyodide's
+  packages checked against its lock, SymPy's wheel against its PyPI digest),
+  and ``--cdn`` is refused by every build that makes an app. Files opened
+  with the app are read in bounded pieces off the main thread; on the Mac a
+  file from the Finder goes to the window in front; a ``file://`` link no
+  longer ends the Android app. The web app deletes and reads only its own
+  caches. CI's browser jobs fail rather than skip when there is no browser.
+
+* **Add-ons: fixes.** *Plot*: a value typed beside a slider is read as
+  written (``pi/2``, ``1/3``), a folded plot asks for nothing, and an older
+  answer is no longer drawn over a newer one. *Expression tree*: a finger
+  scrolls and never drags a node, the first double-click edits, a field
+  left unchanged adds no step, and the fields act on the piece selected.
+  *Rewrite rules*: the panel follows the session opened, a range is matched
+  and rewritten as a range, each match of a rule has its own result, rules
+  that cannot work are refused when typed, and *Rewrite all* stops when the
+  expression only grows. *Console*: Use is for this namespace's outputs, a
+  script no longer overwrites your names, ``%`` is a magic only where a
+  statement begins, two consoles no longer read each other's output, what a
+  cell shows has a bound, and completion runs nothing of yours.
+  *Handwriting*: a hand resting on the screen no longer breaks the stroke,
+  ink stays with the formula when zoomed, the engine chosen is the
+  document's own, and a page is no longer told where the model is on the
+  machine that built it. *LaTeX*: SymPy's own LaTeX reads back as it was
+  (``f{\left(x \right)}``), names come out as SymPy writes them (``x_1``),
+  ``\frac{\partial^2 f}{\partial x \partial y}`` is a mixed derivative,
+  huge numbers no longer freeze the editor, and a reading is bounded in
+  length and time.
+
 * **File is always within reach.** The **≡** drawer - with *Open
   formula…*, *Save formula…* and the history as Python, a web page or on
   paper - used to show its button only when there were sessions or add-ons,

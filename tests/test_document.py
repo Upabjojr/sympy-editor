@@ -530,6 +530,42 @@ def test_insert_juxtaposition_and_junction_operators():
     assert d.expr == x + y + t
 
 
+def test_text_at_a_caret_joins_the_neighbour_on_its_side():
+    """A caret between two terms belongs to one of them (``attach``), and a
+    bare word typed there multiplies *that* one: in ``(x + 1)/(t - z + 3)``
+    an ``r`` typed in front of the ``1`` is ``x + r*1`` - it used to come
+    out as ``r*x + 1``, joined to the term on the other side of the plus."""
+    from sympy import cos, symbols
+    x, y, z, t, r = symbols("x y z t r")
+
+    def ins(expr, parent_src, left_src, right_src, attach, src):
+        d = Document(expr)
+        nodes = d.snapshot()["nodes"]
+        parent = next(k for k, v in nodes.items() if v["src"] == parent_src)
+        arg = lambda term: int(next(k for k, v in nodes.items()
+                                    if v["src"] == term and k.rsplit("/", 1)[0] == parent.rstrip("/")).rsplit("/", 1)[1])
+        left, right = arg(left_src), arg(right_src)
+        d.handle({"action": "insert", "path": parent, "index": right, "src": src,
+                  "left": left, "right": right, "attach": attach})
+        return d.expr
+
+    frac = (x + 1) / (t - z + 3)
+    assert ins(frac, "x + 1", "x", "1", "right", "r") == (x + r) / (t - z + 3)          # the reported case
+    assert ins(frac, "x + 1", "x", "1", "left", "r") == (r * x + 1) / (t - z + 3)       # after the x instead
+    assert ins(frac, "x + 1", "x", "1", "right", "2") == (x + 2) / (t - z + 3)
+    assert ins(frac, "x + 1", "x", "1", "right", "r +") == (x + r + 1) / (t - z + 3)    # an operator says otherwise
+    assert ins(frac, "x + 1", "x", "1", "left", "+ r") == (x + r + 1) / (t - z + 3)
+    assert ins(frac, "t - z + 3", "-z", "3", "right", "r") == (x + 1) / (t - z + 3 * r)  # the denominator likewise
+    assert ins(frac, "t - z + 3", "t", "-z", "left", "r") == (x + 1) / (r * t - z + 3)
+    assert ins(frac, "t - z + 3", "t", "-z", "right", "r") == (x + 1) / (t - r * z + 3)
+    # a plain sum, and one whose terms SymPy stores in another order than it shows
+    assert ins(x + y, "x + y", "x", "y", "right", "r") == x + r * y
+    assert ins(x + y, "x + y", "x", "y", "left", "r") == r * x + y
+    assert ins(x**2 + x, "x**2 + x", "x**2", "x", "right", "r") == x**2 + r * x
+    assert ins(x**2 + x, "x**2 + x", "x**2", "x", "left", "r") == r * x**2 + x
+    assert ins(cos(x) + y, "y + cos(x)", "y", "cos(x)", "right", "r") == y + r * cos(x)
+
+
 def test_unwrap_keeps_an_argument():
     from sympy import Integral, cos, sqrt, symbols
     x, y, t = symbols("x y t")
@@ -1852,3 +1888,313 @@ def test_a_history_built_from_text_reads_it_without_running_it(tmp_path):
     assert h.add("x**2 + 1") == x**2 + 1
     assert h.add("Pow(Symbol('x'), Integer(2))") == x**2
     assert h.add("Matrix([[1, 2]]).T") == Matrix([[1], [2]])        # the caller's own Python, as before
+
+
+def test_a_history_longer_than_is_kept_opens_on_the_step_it_was_at():
+    """A history longer than max_history keeps its last steps, and the index
+    counted from the first that was saved: a session of 250 steps left at the
+    hundredth opened on the hundred and fiftieth."""
+    from sympy_editor.document import SAVE_FORMAT
+    from sympy_editor.server import load_session
+    history = ["Integer(%d)" % i for i in range(250)]
+    labels = ["step %d" % i for i in range(250)]
+    doc = Document(x, history=history, index=100, labels=labels)
+    assert str(doc.expr) == "100" and len(doc.export()["history"]) == 200
+    assert doc.history_labels()["actions"][doc.export()["index"]] == "step 100"
+    assert str(Document(x, history=history, index=249).expr) == "249"
+    assert str(Document(x, history=history, index=10).expr) == "50"          # left out: the first that is kept
+    assert str(Document(x, history=history, index="many").expr) == "249"
+    assert str(load_session(Document(x), {"history": history, "index": 100}).expr) == "100"
+    assert str(load_session(Document(x), {"history": history, "index": "many"}).expr) == "249"
+    opened = Document(x)
+    opened.open_text(json.dumps({"sympy-editor": SAVE_FORMAT, "expr": "100",
+                                 "session": {"history": history, "index": 100, "labels": labels}}))
+    assert str(opened.expr) == "100"
+
+
+def test_a_listener_can_be_taken_off_and_one_that_fails_stops_nothing():
+    """open_text called the listeners one after the other with nothing
+    around them: one that raised made the file look refused, opened as it
+    was; and there was no way to stop listening."""
+    doc = Document(x)
+    seen = []
+
+    def fails(expr):
+        raise RuntimeError("not today")
+
+    doc.on_change(fails)
+    keep = doc.on_change(seen.append)
+    doc.open_text("y + 1")
+    assert str(doc.expr) == "y + 1" and [str(e) for e in seen] == ["y + 1"]
+    assert doc.off_change(keep) is True and doc.off_change(keep) is False
+    doc.set("y + 2")
+    assert len(seen) == 1
+
+
+def test_text_that_is_no_expression_is_refused_and_the_document_lives():
+    """``[x, 1]``, ``None`` or ``[]`` typed as the expression were committed
+    as they came - a list, None - and every message after them failed; an
+    op answering a list did the same."""
+    for src in ("[x, 1]", "None", "[]"):
+        doc = Document(x + 1)
+        snap = doc.handle({"action": "set", "src": src})
+        assert "not an expression" in snap["error"] and doc.expr == x + 1
+        assert doc.handle({"action": "replace", "path": "/1", "src": src})["error"]
+        assert doc.handle({"action": "snapshot"})["error"] is None and doc.expr == x + 1
+        assert "not an expression" in doc.handle({"action": "preview", "src": src})["error"]
+    from sympy_editor.ops import make_op
+    doc = Document(x + 1, ops={"listed": make_op("listed", lambda e: [e, 1], label="Listed")})
+    assert "not an expression" in doc.handle({"action": "apply", "path": "/", "op": "listed"})["error"]
+    assert doc.expr == x + 1 and doc.handle({"action": "snapshot"})["error"] is None
+    assert doc.apply("/", lambda e: 3) == 3                 # a number is one, as before
+
+
+def test_a_name_declared_as_an_explicit_matrix_opens_again():
+    """A name declared (or retyped) as an explicit Matrix is kept as its
+    entries, M[0, 0]...: reading its name as ``.name`` made the session and
+    the saved file of that document impossible to open."""
+    import json
+    doc = Document(x + 1)
+    doc.handle({"action": "declare", "name": "M", "type": "Matrix", "rows": 2, "cols": 2})
+    state = doc.export()
+    again = Document(0, history=state["history"], symbols=state["symbols"], format=1)
+    assert again.declared["M"] == MatrixSymbol("M", 2, 2).as_explicit()
+    opened = Document(0)
+    opened.open_text(doc.save_text())
+    assert "M" in opened.declared and opened.expr == x + 1
+    retyped = Document(x * y)
+    retyped.handle({"action": "retype", "name": "y", "type": "Matrix", "rows": 1, "cols": 1})
+    assert Document(0, **{k: v for k, v in retyped.export().items() if k != "format"}).declared
+    Document(0).open_text(retyped.save_text())
+    # what is no name at all is refused by name, not with an AttributeError
+    for symbols_ in (["Integer(3)"], [5], ["Matrix([[1, 2]])"]):
+        with pytest.raises(ValueError, match="not a name"):
+            Document(0, symbols=symbols_)
+        with pytest.raises(ValueError, match="not a name"):
+            Document(0).open_text(json.dumps({"sympy-editor": 1, "session": {"history": ["x"], "symbols": symbols_}}))
+
+
+def test_a_result_that_is_text_is_never_run():
+    """A call's result went through ``sympify``, which runs text as Python:
+    a saved file with a symbol named ``__import__(...) or x`` ran it when
+    ``.name`` was called on that symbol."""
+    import builtins
+    from sympy_editor.ops import make_op
+    ran = []
+    builtins._sympy_editor_test_ran = ran
+    evil = Symbol("__import__('builtins')._sympy_editor_test_ran.append(1) or x")
+    try:
+        doc = Document(evil)
+        snap = doc.handle({"action": "call", "path": "/", "func": ".name"})
+        assert "text" in snap["error"] and ran == [] and doc.expr == evil
+        texty = make_op("texty", lambda e: "__import__('builtins')._sympy_editor_test_ran.append(2) or 1")
+        doc = Document(x, ops={"texty": texty})
+        assert "text" in doc.handle({"action": "apply", "path": "/", "op": "texty"})["error"]
+        assert ran == [] and doc.expr == x
+    finally:
+        del builtins._sympy_editor_test_ran
+    assert Document(x**2).handle({"action": "call", "path": "/", "func": ".is_polynomial()"})["src"] == "True"
+
+
+def test_an_unevaluated_operator_leaves_the_rest_unevaluated():
+    """With "unevaluated" on, only the new node was built unevaluated: the
+    sum it went into was evaluated around it (2 + 3 + 4 with - over the
+    second + gave -4 + 5), and a product split by + had its halves
+    multiplied out (2*3*4 split after the 2 gave 2 + 12)."""
+    from sympy import Add, Mul, srepr
+    doc = Document(Add(2, 3, 4, evaluate=False))
+    doc.handle({"action": "operator", "path": "/", "left": 1, "right": 2, "op": "-", "lazy": True})
+    assert srepr(doc.expr) == srepr(Add(2, 3, -4, evaluate=False))
+    doc = Document(Mul(2, 3, 4, evaluate=False))
+    doc.handle({"action": "operator", "path": "/", "left": 0, "right": 1, "op": "+", "lazy": True})
+    assert str(doc.expr) == "2 + 3*4" and srepr(doc.expr) == srepr(Add(2, Mul(3, 4, evaluate=False), evaluate=False))
+    doc = Document(Mul(2, 3, 4, evaluate=False))
+    doc.handle({"action": "operator", "path": "/", "left": 0, "right": 1, "op": "+"})
+    assert doc.expr == 14                                    # evaluated, as before
+
+
+def test_everything_to_the_left_of_a_matrix_equation():
+    """``A = B`` of matrix symbols moved to the left was ``A - B = 0`` - a
+    matrix against the number zero, which SymPy decides is False."""
+    from sympy import Eq, ZeroMatrix
+    A, B = MatrixSymbol("A", 2, 2), MatrixSymbol("B", 2, 2)
+    doc = Document(Eq(A, B))
+    doc.apply("/", "to_left")
+    assert doc.expr == Eq(A - B, ZeroMatrix(2, 2))
+    doc = Document(Eq(Matrix([[x]]), Matrix([[1]])))
+    doc.apply("/", "to_left")
+    assert doc.expr.lhs == Matrix([[x - 1]]) and doc.expr.rhs == Matrix([[0]])
+    assert Document(Eq(x, 2)).apply("/", "to_left") == Eq(x - 2, 0)
+
+
+def test_a_matrix_offers_no_shape_to_keep():
+    """Unwrapping an explicit matrix offered, and kept, its numbers of rows
+    and columns (``Matrix([[x, y]])`` gave the choice 1 or 2); a matrix
+    symbol offered its name and dimensions."""
+    doc = Document(Matrix([[x, y]]))
+    assert "keep_choices" not in doc.snapshot()["nodes"]["/"]
+    assert "select an entry" in doc.handle({"action": "unwrap", "path": "/"})["error"]
+    assert doc.handle({"action": "unwrap", "path": "/", "keep": 0})["error"] and doc.expr == Matrix([[x, y]])
+    A = MatrixSymbol("A", 2, 2)
+    doc = Document(A * x)
+    nodes = doc.snapshot()["nodes"]
+    path = next(p for p, n in nodes.items() if n["src"] == "A")
+    assert "keep_choices" not in nodes[path]
+    assert "nothing inside" in doc.handle({"action": "unwrap", "path": path})["error"]
+    assert Document(x**2).snapshot()["nodes"]["/"]["keep_choices"] == [{"key": 0, "src": "x"}, {"key": 1, "src": "2"}]
+
+
+def test_an_invalid_node_already_there_blocks_no_edit_elsewhere():
+    """With invalid expressions not allowed, an invalid node the expression
+    already held - one kept while they were allowed, or given - made every
+    edit fail, anywhere: the whole tree was checked, not what changed."""
+    from sympy import Add
+    from sympy_editor.invalid import invalid
+    A, B = MatrixSymbol("A", 2, 2), MatrixSymbol("B", 3, 3)
+    bad = invalid("MatMul")(A, B)
+    doc = Document(Add(y, bad))
+    assert doc.handle({"action": "replace", "path": "/0", "src": "cos(y)"})["error"] is None
+    assert doc.handle({"action": "wrap", "path": "/", "func": "f"})["error"] is None
+    assert doc.expr == Function("f")(cos(y) + bad)
+    # what the edit brings in is still refused - a change inside the invalid
+    # node makes another one, which must be valid
+    inner = next(p for p, n in doc.snapshot()["nodes"].items() if n.get("invalid"))
+    assert "not a valid" in doc.handle({"action": "insert", "path": inner, "index": 2, "src": "B"})["error"]
+    assert "not a valid" in doc.handle({"action": "replace", "path": inner + "/1", "src": "Identity(3)"})["error"]
+    assert doc.expr == Function("f")(cos(y) + bad)
+
+
+def test_a_plus_typed_into_a_product_splits_it_whichever_side_the_caret_is_on():
+    """``+y`` between x and z of ``x*z`` gives x + y*z, and ``y+`` gives
+    x*y + z, the caret on either side: with the caret on x's side, ``+y``
+    gave z*(x + y), the half beyond the text left out of the split."""
+    for attach in ("left", "right", None):
+        for src, want in (("+y", x + y * Symbol("z")), ("-y", x - y * Symbol("z")),
+                          ("y+", x * y + Symbol("z")), ("+y+", x + y + Symbol("z"))):
+            doc = Document(x * Symbol("z"))
+            doc.handle({"action": "insert", "path": "/", "index": 1, "src": src, "left": 0, "right": 1,
+                        "attach": attach})
+            assert doc.expr == want, (src, attach, doc.expr)
+
+
+def test_a_relation_typed_at_a_caret_changes_the_operator():
+    """``<=`` typed between two arguments is an operator as ``<`` is, and
+    ``+-`` is none - ``text in OPERATORS`` was a substring test, so ``<=``
+    was spliced as text and ``+-`` refused as "not an operator"."""
+    from sympy import Eq, Le
+    z = Symbol("z")
+    doc = Document(Eq(x, z))
+    assert doc.handle({"action": "insert", "path": "/", "index": 1, "src": "<=", "left": 0, "right": 1})["error"] is None
+    assert doc.expr == Le(x, z)
+    doc = Document(x + z)
+    assert doc.handle({"action": "insert", "path": "/", "index": 1, "src": "+-", "left": 0, "right": 1})["error"] is None
+    assert doc.expr == x - z                                 # spliced, as typed: x +- z
+
+
+def test_an_addon_whose_label_fails_still_answers_its_query():
+    """``describe`` ran outside the try around the method: when it raised,
+    the panel's query got an error snapshot with no ``query`` in it."""
+    from sympy_editor import Addon
+
+    class Labelless(Addon):
+        name = "labelless"
+        label = "Labelless"
+
+        def describe(self, method, payload):
+            raise RuntimeError("no label today")
+
+        def handle(self, doc, method, payload):
+            return {"count": 3} if method == "count" else x + 2
+
+    doc = Document(x, addons=[Labelless()])
+    snap = doc.handle({"action": "addon", "addon": "labelless", "method": "count"})
+    assert snap["error"] is None and snap["query"]["result"] == {"count": 3}
+    doc.handle({"action": "addon", "addon": "labelless", "method": "change"})
+    assert doc.expr == x + 2 and doc.history_labels()["actions"][-1] == "Labelless: change"
+
+
+def test_the_script_rebuilds_unevaluated_products_and_unions():
+    """The script's unevaluated steps were written by ExactReprPrinter,
+    which put an unevaluated ``x*2`` back as ``2*x``; and a union of an
+    interval and a set, written under ``evaluate(False)``, raised as the
+    script ran: Union cannot build it unevaluated."""
+    from sympy import FiniteSet, Interval, Mul, srepr as sympy_srepr
+    from sympy_editor.document import srepr
+    A = MatrixSymbol("A", 2, 2)
+    for expr in (Mul(x, 2, evaluate=False), Mul(2, x, 3, evaluate=False), FiniteSet(1, x) | Interval(0, 1),
+                 A[0, 0] + x):
+        doc = Document(expr)
+        namespace = {"__name__": "script"}
+        exec(doc.python_script(), namespace)
+        assert srepr(namespace["steps"][0]) == srepr(doc.expr), (expr, doc.python_script())
+        assert sympy_srepr(namespace["steps"][0]) == sympy_srepr(doc.expr)
+
+
+def test_collect_groups_the_same_way_every_time():
+    """Collect took the free symbols as a list of a set, whose order changes
+    from one run to the next - and with it which symbol the terms were
+    grouped by first."""
+    from sympy import collect, default_sort_key
+    a, b = symbols("a b")
+    expr = a * x + a * y + b * x + b * y
+    wanted = collect(expr, sorted(expr.free_symbols, key=default_sort_key))
+    assert Document(expr).apply("/", "collect_terms") == wanted
+    import sympy_editor.ops as ops_source
+    import inspect
+    assert "default_sort_key" in inspect.getsource(ops_source._register_defaults)
+
+
+def test_the_small_things_a_document_is_told():
+    """``settings`` took ``"false"`` as on; a history of max_history 0 failed
+    with an IndexError; ``enable: "tree"`` switched on an add-on per letter;
+    a file's ``labels`` or ``symbols`` given as text were taken a character
+    each; ``rows=2.5`` resized to 2; a resize had no bound."""
+    import json
+    doc = Document(x, allow_invalid=True)
+    assert doc.handle({"action": "settings", "allow_invalid": "false"})["allow_invalid"] is False
+    for bad in (0, -3):
+        with pytest.raises(ValueError, match="max_history"):
+            Document(x, max_history=bad)
+    from sympy_editor import Addon
+
+    class Solo(Addon):
+        name = "solo"
+
+    snap = Document(x, available=[Solo()]).handle({"action": "addons", "enable": "solo"})
+    assert snap["error"] is None and snap["addons"] == ["solo"]          # one name, not four letters
+    opened = Document(0)
+    opened.open_text(json.dumps({"sympy-editor": 1, "session": {"history": ["x", "x + 1"], "labels": "Edit",
+                                                                "symbols": "Symbol('y')"}}))
+    assert opened.declared == {"y": y} and opened.expr == x + 1
+    assert Document(0, symbols="Symbol('y')").declared == {"y": y}
+    doc = Document(Matrix([[x]]))
+    for rows in (2.5, "2.5", True):
+        assert "whole numbers" in doc.handle({"action": "matrix", "op": "resize", "path": "/", "rows": rows,
+                                              "cols": 2})["error"]
+    assert "at most" in doc.handle({"action": "matrix", "op": "resize", "path": "/", "rows": 1000,
+                                    "cols": 1000})["error"]
+    assert doc.handle({"action": "matrix", "op": "resize", "path": "/", "rows": "2", "cols": 2.0})["error"] is None
+    assert doc.expr.shape == (2, 2)
+
+
+def test_method_lists_are_marked_sent_only_once_they_were():
+    """The type names were marked as sent while the snapshot was being made:
+    one that failed after that point never reached the page, and its method
+    lists were never sent again."""
+    from sympy_editor import Addon
+
+    class Failing(Addon):
+        name = "failing"
+        fail = True
+
+        def contribute(self, doc, snap, expr):
+            if Failing.fail:
+                raise RuntimeError("not now")
+
+    doc = Document(sin(x), addons=[Failing()])
+    doc._methods_sent.clear()
+    with pytest.raises(RuntimeError):
+        doc.snapshot()
+    Failing.fail = False
+    assert "sin" in doc.snapshot()["methods"]
+    assert "sin" not in doc.snapshot()["methods"]

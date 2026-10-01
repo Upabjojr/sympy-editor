@@ -45,7 +45,38 @@ A fraction over a differential is a derivative only when its numerator is a
 differential or `d^n` (`\frac{dy}{dx}`, `\frac{d}{dx} f`); anything else over
 `dx` divides (`\frac{1}{dx}` is `1/(d x)`), and a numerator that is `d^n`
 times something else (`\frac{d^2 y}{dx^2}`, `\frac{b d}{dt}`) is a choice
-between the two - a derivative by default when the `d` comes first.
+between the two - a derivative by default when the `d` comes first.  A row
+of differentials under the bar is a derivative by each of them
+(`\frac{\partial^2 f}{\partial x \partial y}`, `\frac{d^2 f}{dx\,dy}`).
+Anywhere but under a fraction bar or an integral, `d x` is the product `d*x`
+(`c + d x`, `b d x`).
+
+**What SymPy writes reads back.**  SymPy's own printer writes a function
+applied as `f{\left(x \right)}`, `\operatorname{asin}{\left(x \right)}`,
+`\Gamma\left(x\right)`: each is the function applied (SymPy's `asin`,
+`gamma`...), with the product still one of the choices.  A name under
+`\operatorname` followed by parentheses is applied - SymPy's function of that
+name when there is one (`\operatorname{sinc}(x)`), a new function otherwise;
+`f'(x)` is the function `fprime` applied.
+
+**Names** come out as SymPy spells them - `x_{1}` is `x_1`, `a_{ij}` is
+`a_ij`, `\hat{v}` is `vhat`, `\mathbf{A}` is `Abold`, `x'` is `xprime` -
+which print as the LaTeX they were read from *and* can be typed in the
+editor's source line.  (They used to be named as written, `x_{1}`, and a
+formula holding one could no longer be edited as text.)  A document that
+holds a name under its old spelling still has it found.
+
+**Limits.**  A reading is asked for at every pause in the typing, and the
+editor waits for it, so it is bounded: a text of at most 1000 characters
+(`MAX_LENGTH`) and a few seconds of work (`MAX_SECONDS`) - past either, it
+says so; the first twelve ambiguous parts are offered (`MAX_POINTS`, the
+answer's `"more"` counts the rest and the panel says how many), each with
+at most eight readings shown (`MAX_ALTERNATIVES`, the chosen one always
+among them).  A power or a factorial too large to work out
+(`10^{10^{8}}`, `20000!`, `2^{20000}`) is kept as written, unevaluated, and
+so is what is built on it.  Nothing a page sends makes a reading raise:
+whatever goes wrong is `{"ok": False, "error": ...}`.  One reader serves every
+document from any thread; a reading keeps what it works with to itself.
 
 ## Install
 
@@ -72,8 +103,11 @@ or switch it on in the editor's **Add-ons ▾** menu.
 `\frac{d^2 y}{dx^2}` are derivatives; `\text{...}` and `\operatorname{...}`
 naming multi-letter symbols; `\vec{v}`, `\hat{x}`, `\bar{x}`, `\mathbf{x}`...
 as decorated symbols; a power, a decorated symbol or a function followed by
-more factors (`x^2 y`, `\ln(x) y`); `a/bc` with the product as divisor;
-`\sqrt x` without braces.  Ambiguities are never resolved in the grammar -
+more factors (`x^2 y`, `\ln(x) y`); `a/bc` with the product as divisor, or
+the quotient as a factor; `\sqrt x` without braces; a function applied as
+SymPy writes it (`f{\left(x \right)}`, `f^{2}{\left(x \right)}`) and a name
+of several letters applied (`\operatorname{sinc}(x)`); subscripts of several
+letters and digits in braces (`x_{10}`, `a_{ij}`).  Ambiguities are never resolved in the grammar -
 that is `parser.py`'s work, and the user's.
 
 From Python:

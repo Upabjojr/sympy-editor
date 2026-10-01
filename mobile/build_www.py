@@ -11,7 +11,9 @@ network.  Where the host application has no Python of its own (the web app)
 the part of Pyodide that SymPy needs is vendored as well; ``--native`` (which
 ``--android`` implies, and the iOS build passes too) leaves it out, because
 both apps ship CPython and SymPy themselves.  Downloads are cached in
-``~/.cache/sympy-editor/`` (override with ``--cache``).
+``~/.cache/sympy-editor/`` (override with ``--cache``); ``vendor/`` in the
+output is made afresh by every build, so what an earlier one left there -
+another SymPy's wheel, another KaTeX's fonts - never travels with this one.
 
 Nothing here is specific to a platform: Android and iOS each wrap ``www/`` in
 a WebView (see ``mobile/android`` and ``mobile/ios``).
@@ -120,14 +122,91 @@ def demo_expression():
     return Integral(exp(-(x**2) / 2) / sqrt(2 * pi), (x, -oo, y)) + Sum(f(n) / n**2, (n, 1, oo)) - sin(x) / (x + 1)
 
 
-def fetch(url: str, dest: Path, cache: Path) -> Path:
-    """Download ``url`` into the cache once, then copy it to ``dest``."""
-    cached = cache / url.split("://", 1)[1]
-    if not cached.exists():
-        cached.parent.mkdir(parents=True, exist_ok=True)
-        print("  downloading", url)
-        with urllib.request.urlopen(url, timeout=120) as resp, open(cached, "wb") as out:
+#: The digests a download can be checked against, as ``(kind, hex)``.
+DIGESTS = {"sha256": hashlib.sha256, "blake2b-256": lambda: hashlib.blake2b(digest_size=32)}
+
+#: PyPI files a file under the BLAKE2b-256 digest of its content, so the
+#: address of a wheel says what the wheel must be.
+PYPI_FILE = re.compile(r"https://files\.pythonhosted\.org/packages/([0-9a-f]{2})/([0-9a-f]{2})/([0-9a-f]{60})/")
+
+
+def url_digest(url: str) -> tuple | None:
+    """The digest an address carries in itself (PyPI's do), or None."""
+    found = PYPI_FILE.match(url)
+    return ("blake2b-256", "".join(found.groups())) if found else None
+
+
+def digest_of(path: Path, kind: str) -> str:
+    digest = DIGESTS[kind]()
+    with open(path, "rb") as file:
+        for chunk in iter(lambda: file.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def damage(path: Path, digest: tuple | None = None) -> str | None:
+    """What is wrong with the file at ``path``, or None: its digest when one
+    is known, and what an archive says of itself when none is - a wheel or a
+    zip cut short has lost its directory, which is at the end."""
+    if digest is not None:
+        kind, wanted = digest
+        got = digest_of(path, kind)
+        return None if got == wanted.lower() else f"has the {kind} {got}, not {wanted}"
+    if path.suffix in (".whl", ".zip"):
+        try:
+            with zipfile.ZipFile(path) as archive:
+                broken = archive.testzip()
+        except (zipfile.BadZipFile, OSError, EOFError) as exc:
+            return f"is not a whole archive ({exc})"
+        return None if broken is None else f"is damaged (at {broken})"
+    return None
+
+
+def download(url: str, dest: Path, *, digest: tuple | None = None, timeout: float = 120) -> Path:
+    """Download ``url`` to ``dest``: all of it, or nothing.
+
+    It is written beside ``dest`` as ``<name>.part`` and takes its name only
+    once it is whole - as long as the server said it would be, and with the
+    ``digest`` it should have.  Written straight to ``dest``, a connection
+    that dropped left a piece there, which every later build took for the
+    file: a server announcing a megabyte and closing after a kilobyte is no
+    error to ``read``, only a short answer."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    part = dest.with_name(dest.name + ".part")
+    print("  downloading", url, flush=True)
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp, open(part, "wb") as out:
+            announced = resp.headers.get("Content-Length")
             shutil.copyfileobj(resp, out)
+        size = part.stat().st_size
+        if announced is not None and announced.strip().isdigit() and size != int(announced):
+            raise SystemExit(f"{url}: the download stopped at {size} bytes of {int(announced)}; "
+                             "nothing was kept of it - build again")
+        problem = damage(part, digest)
+        if problem:
+            raise SystemExit(f"{url}: what was downloaded {problem}; nothing was kept of it")
+        part.replace(dest)
+    finally:
+        part.unlink(missing_ok=True)
+    return dest
+
+
+def fetch(url: str, dest: Path, cache: Path, digest: tuple | None = None) -> Path:
+    """Download ``url`` into the cache once, then copy it to ``dest``.
+
+    What the cache holds is checked each time it is used, where there is
+    something to check it against (``digest``, or :func:`url_digest`, or the
+    archive's own directory): a copy that fails is deleted and the build
+    stops, rather than ship it - the next build downloads it again."""
+    cached = cache / url.split("://", 1)[1]
+    digest = digest or url_digest(url)
+    if cached.exists():
+        problem = damage(cached, digest)
+        if problem:
+            cached.unlink()
+            raise SystemExit(f"{cached} {problem}: the cached copy was deleted - build again to download {url} afresh")
+    else:
+        download(url, cached, digest=digest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(cached, dest)
     return dest
@@ -222,7 +301,6 @@ def vendor(out: Path, cache: Path, pyodide: bool = True, requirements=(), extra_
         fetch(katex_base + "fonts/" + font, kdir / "fonts" / font, cache)
 
     if not pyodide:
-        shutil.rmtree(out / "vendor" / "pyodide", ignore_errors=True)     # a leftover from an earlier build
         (out / "vendor" / "NOTICE.txt").write_text(notice(pyodide=False, extra=extra_notice), encoding="utf-8")
         return {"katexJs": "vendor/katex/katex.min.js", "katexCss": "vendor/katex/katex.min.css"}
 
@@ -237,10 +315,13 @@ def vendor(out: Path, cache: Path, pyodide: bool = True, requirements=(), extra_
         if name in files:
             continue
         info = lock["packages"][name]
-        files[name] = info["file_name"]
+        files[name] = info
         todo.extend(info["depends"])
-    for file_name in files.values():
-        fetch(pyodide_base + file_name, pdir / file_name, cache)
+    for info in files.values():
+        # the lock says what each of its packages must be: a file that is not
+        # that - cut short, or another one - stops the build
+        fetch(pyodide_base + info["file_name"], pdir / info["file_name"], cache,
+              digest=("sha256", info["sha256"]) if info.get("sha256") else None)
     wheel = SYMPY_WHEEL.rsplit("/", 1)[1]
     fetch(SYMPY_WHEEL, pdir / wheel, cache)
     python = ".".join(str(lock["info"]["python"]).split(".")[:2])
@@ -257,6 +338,24 @@ def vendor(out: Path, cache: Path, pyodide: bool = True, requirements=(), extra_
     if extra:
         urls["wheels"] = ["vendor/pyodide/" + w["file"] for w in extra]
     return urls
+
+
+def clear_vendored(out: Path, cache: Path | None = None) -> None:
+    """Take away what an earlier build vendored into ``out``: a build writes
+    ``vendor/`` afresh, so that it holds what this build lists and nothing
+    else.  The output directory stays from one build to the next, and what
+    was left in it went out with the rest - the wheel of the SymPy before a
+    bump, of a requirement an add-on no longer has, a whole ``vendor/`` under
+    a page that loads from the CDNs - into the APK, which takes the folder as
+    it is, and into the web app's precache, which lists what it finds.  The
+    downloads are not here but in the cache, which is not touched."""
+    vendored = out / "vendor"
+    if cache is not None and vendored.resolve() in (cache.resolve(), *cache.resolve().parents):
+        raise SystemExit(f"the download cache {cache} is inside {vendored}, which every build clears: "
+                         "give --cache a place of its own")
+    if vendored.is_symlink():            # the link goes, not what it points at
+        vendored.unlink()
+    shutil.rmtree(vendored, ignore_errors=True)
 
 
 def app_logo(debug: bool = False) -> str:
@@ -335,9 +434,9 @@ def build(out: Path, *, cdn: bool = False, cache: Path | None = None, expr=None,
     # Everything the page needs is in the bundle, the add-ons' requirements
     # included: an app, and the web app once installed, work with no network.
     urls, assets = None, {}
+    cache = cache or Path.home() / ".cache" / "sympy-editor"
+    clear_vendored(out, cache)
     if not cdn:
-        cache = cache or Path.home() / ".cache" / "sympy-editor"
-        shutil.rmtree(out / "vendor" / "addons", ignore_errors=True)     # a leftover from an earlier build
         assets, assets_notice = vendor_assets(doc, out, cache)
         urls = vendor(out, cache, pyodide=not native, requirements=pyodide_requirements(doc),
                       extra_notice=assets_notice)
@@ -363,6 +462,14 @@ def _write(out, doc, urls, title, head, native, debug, assets=None):
     return out
 
 
+#: What a build for an app says to ``--cdn`` (mobile/build.py, desktop/build.py
+#: and ``--android`` here): the apps have no network - Android's manifest
+#: takes the permission out, WebKit blocks every http(s) load on iOS and the
+#: Mac - so a page that loads KaTeX from a CDN is a blank one there.
+NO_CDN = ("--cdn: the apps never use the network, so their bundle carries everything; "
+          "use mobile/build_www.py --cdn for a page to open in a browser")
+
+
 def copy_android_assets(www: Path) -> Path:
     dest = HERE / "android" / "app" / "src" / "main" / "assets" / "www"
     if dest.exists():
@@ -374,7 +481,8 @@ def copy_android_assets(www: Path) -> Path:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", type=Path, default=HERE / "www", help="output directory (default: mobile/www)")
-    ap.add_argument("--cdn", action="store_true", help="do not vendor; load KaTeX and Pyodide from the CDNs")
+    ap.add_argument("--cdn", action="store_true",
+                    help="do not vendor; load KaTeX and Pyodide from the CDNs (a page for a browser: refused with --android)")
     ap.add_argument("--cache", type=Path, default=None, help="download cache directory")
     ap.add_argument("--android", action="store_true", help="also copy the bundle to mobile/android/app/src/main/assets/www")
     ap.add_argument("--enable-addons", action="store_true",
@@ -385,6 +493,8 @@ def main(argv=None) -> int:
     ap.add_argument("--debug", action="store_true",
                     help="a debug build: the title says so and the icon beside it wears the bug badge")
     args = ap.parse_args(argv)
+    if args.cdn and args.android:
+        sys.exit(NO_CDN)                 # before anything is written: the assets are the app's
     out = build(args.out, cdn=args.cdn, cache=args.cache, native=args.native or args.android,
                 title=args.title, debug=args.debug, enable_addons=args.enable_addons)
     size = sum(p.stat().st_size for p in out.rglob("*") if p.is_file())

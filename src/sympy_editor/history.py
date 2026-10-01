@@ -90,10 +90,17 @@ class History:
     def from_document(cls, doc, **kwargs) -> "History":
         """The history a :class:`~sympy_editor.Document` has accumulated."""
         hist = doc.history_labels()
-        out = cls(printer_settings=getattr(doc, "printer_settings", None), **kwargs)
+        settings = kwargs.pop("printer_settings", None)
+        actions = kwargs.pop("actions", None)
+        index = kwargs.pop("index", None)
+        out = cls(printer_settings=getattr(doc, "printer_settings", None) if settings is None else settings, **kwargs)
         out._exprs = list(doc._history)
         out._actions = list(hist["actions"])
-        out.index = kwargs.get("index", hist["index"])
+        if actions is not None:                 # the caller's captions instead of the document's
+            if len(actions) > len(out._exprs):
+                raise ValueError(f"{len(actions)} actions for {len(out._exprs)} steps")
+            out._actions[:len(actions)] = [a if a is not None else out._actions[i] for i, a in enumerate(actions)]
+        out.index = hist["index"] if index is None else index
         return out
 
     # -- reading ------------------------------------------------------------

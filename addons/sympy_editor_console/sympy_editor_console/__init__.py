@@ -20,8 +20,9 @@ A change made through it is a step of the formula's history like any edit.
 Methods: ``run`` (``{"code", "path", "children", "interactive"}``: a cell;
 ``{"incomplete": true}`` without running when ``interactive`` and the code
 is an unfinished block), ``script`` (``{"code", "name", "path",
-"children"}``), ``complete`` (``{"code", "pos"}``), ``use`` (``{"n", "path",
-"children"}``: ``Out[n]`` put in the formula), ``reset``.
+"children"}``), ``complete`` (``{"code", "pos"}``), ``use`` (``{"n", "token",
+"path", "children"}``: ``Out[n]`` of the namespace ``token`` put in the
+formula), ``reset``.
 """
 
 from __future__ import annotations
@@ -90,6 +91,13 @@ class ConsoleAddon(Addon):
             return {"token": console.token, "next": console.count}
         if method == "use":
             n = int(payload.get("n"))
+            # The numbers start again with every namespace: the Out[1] on the
+            # screen from before a reset is not the Out[1] of this one, and
+            # the button beside it put this one's value in the formula.
+            token = payload.get("token")
+            if token is not None and str(token) != console.token:
+                raise ValueError(f"Out[{n}] belongs to a namespace that is gone (a reset, another session, "
+                                 "or Python started again): run its input again to have the value")
             if n not in console.outputs:
                 raise ValueError(f"There is no Out[{n}] (the namespace was reset, or it had no value)")
             value = console.outputs[n]

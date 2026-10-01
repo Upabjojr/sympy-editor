@@ -207,6 +207,11 @@ class Addon:
         scripts and styles the add-on reads at import); an add-on that needs
         more (data files) adds them."""
         mod = importlib.import_module(self.module)
+        # A package only.  An add-on written in a script or a notebook has
+        # the module "__main__" (or a lone file): its directory is whatever
+        # lies beside it, and every .py there went into the page.
+        if not getattr(mod, "__path__", None):
+            return {}
         root = Path(getattr(mod, "__file__", "") or "").parent
         if not root.is_dir() or not (root / "__init__.py").is_file():
             return {}
@@ -255,10 +260,20 @@ def read_manifest(folder: Union[str, Path]) -> Optional[Dict[str, Any]]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    if not isinstance(data, dict) or not data.get("name") or not data.get("module"):
+    if not isinstance(data, dict):
         return None
-    data.setdefault("label", data["name"])
-    data.setdefault("requires", [])
+    name, module = data.get("name"), data.get("module")
+    # Text, and of the right shape: a name or a module of another type raised
+    # from inside the scan, and every Document() with it.
+    if not isinstance(name, str) or not NAME_RE.match(name):
+        return None
+    if not isinstance(module, str) or not all(part.isidentifier() for part in module.split(".")):
+        return None
+    if not isinstance(data.get("label", ""), str):
+        data["label"] = name
+    data.setdefault("label", name)
+    requires = data.get("requires", [])
+    data["requires"] = [r for r in requires if isinstance(r, str)] if isinstance(requires, list) else []
     data["folder"] = str(Path(folder).resolve())
     return data
 
@@ -272,15 +287,21 @@ def scan_addons(directory: Union[str, Path]) -> Dict[str, Dict[str, Any]]:
     repositories will be found later."""
     out: Dict[str, Dict[str, Any]] = {}
     root = Path(directory)
-    if not root.is_dir():
+    try:
+        folders = sorted(p for p in root.iterdir() if p.is_dir()) if root.is_dir() else []
+    except OSError:                    # a directory that cannot be read holds no add-on
         return out
-    for folder in sorted(p for p in root.iterdir() if p.is_dir()):
-        manifest = read_manifest(folder)
-        if manifest is None:
+    for folder in folders:
+        try:
+            manifest = read_manifest(folder)
+            if manifest is None:
+                continue
+            package = folder / manifest["module"].split(".")[0]
+            if package.is_dir() and str(folder.resolve()) not in sys.path:
+                sys.path.append(str(folder.resolve()))
+        except OSError:                # one folder that cannot be read: the others still count
             continue
-        if (folder / manifest["module"]).is_dir() and str(folder.resolve()) not in sys.path:
-            sys.path.append(str(folder.resolve()))
-        out[manifest["name"]] = manifest
+        out.setdefault(manifest["name"], manifest)     # two folders of one name: the first, as installed() does
     return out
 
 

@@ -41,8 +41,17 @@ SympyEditor.registerAddon("plot", {
     ]);
     var element = h("div", { class: "plot-panel" }, [bar, followRow, sliders, area, note]);
 
-    var values = {};        // the values given to the other free symbols, by name (none until the user gives one)
+    // The values given to the other free symbols, by name (none until the
+    // user gives one), each the text that was typed.  No prototype behind
+    // it: a name is any text, and a symbol called constructor would
+    // otherwise come with a value nobody gave.
+    var values = Object.create(null);
     var seq = 0, timer = null, plotly = null, plotlyFailed = false;
+    var loading = null;     // Plotly on its way: one load, however many answers come meanwhile
+    var waiting = null;     // ... and the answer to draw when it arrives, the latest one only
+    var gone = false;       // switched off: nothing is asked for or drawn any more
+    var box = null;         // the <details> the editor keeps the panel in
+    var stale = false;      // something changed while the panel was folded: asked for when it opens
     var lastVar = null;
     var sampled = null;     // [from, to] of the samples on show
     var yRange = null;      // [low, high] once a gesture has set one: y is otherwise
@@ -81,12 +90,35 @@ SympyEditor.registerAddon("plot", {
       return { path: api.selected() || "/" };
     }
 
+    /** Whether the panel is folded.  A picture nobody sees is not sampled:
+     *  every selection and every change was, the editor busy with each, and
+     *  all of it for nothing.  What was skipped is asked for once, when the
+     *  panel is opened.  The editor puts the panel in its <details> after
+     *  mount() has returned, so the box is looked for when first needed. */
+    function folded() {
+      if (!box && element.closest) {
+        box = element.closest("details");
+        if (box) box.addEventListener("toggle", unfold);
+      }
+      return !!box && !box.open;
+    }
+
+    function unfold() {
+      if (!box || !box.open || !stale) return;   // folded, or opened on a picture that is still right
+      stale = false;
+      request();
+    }
+
     function request() {
+      if (gone) return;
+      if (folded()) { stale = true; return; }
       clearTimeout(timer);
       timer = setTimeout(ask, 150);
     }
 
     function ask() {
+      if (gone) return;
+      if (folded()) { stale = true; return; }    // folded since it was asked for
       if (api.busy()) { request(); return; }     // after the edit in flight
       if (paused) return;                        // stopped following: only an explicit ask draws now
       if (inFlight) { wanted = true; return; }   // one at a time, and only the latest is wanted
@@ -94,15 +126,22 @@ SympyEditor.registerAddon("plot", {
       var began = Date.now();
       var my = ++seq;
       var t = target();
-      var payload = { path: t.path, var: varSel.value || lastVar || null, values: values,
+      // A copy: the call may wait its turn behind the editor's own request,
+      // and the answer is compared with what was sent, not with what has
+      // been typed since.
+      var sent = Object.create(null);
+      for (var name in values) sent[name] = values[name];
+      var payload = { path: t.path, var: varSel.value || lastVar || null, values: sent,
                       span: [parseFloat(from.value), parseFloat(to.value)], n: samples || opts.samples || 400 };
       if (t.children) payload.children = t.children;
       if (!(payload.span[0] < payload.span[1])) payload.span = opts.span || [-6, 6];
       api.call("samples", payload).then(function (res) {
         var giveUp = settle(began);
-        if (my !== seq) return;
+        if (gone || my !== seq) return;
+        waiting = null;               // an answer that waited for Plotly is an older one
+        if (folded()) { stale = true; return; }   // folded while Python was at it: drawn when it opens
         fillVars(res);
-        fillSliders(res);
+        fillSliders(res, sent);
         if (res.needs && res.needs.length) {
           // More than one free symbol and no value for the others: say so
           // and draw nothing, rather than guess.
@@ -116,7 +155,9 @@ SympyEditor.registerAddon("plot", {
         if (giveUp) pause();          // after the draw: the note it writes is the last word
       }, function (e) {
         settle(began);
-        if (my !== seq) return;
+        if (gone || my !== seq) return;
+        waiting = null;
+        if (folded()) { stale = true; return; }
         note.textContent = String(e && e.message || e);
         note.className = "plot-note error";
       });
@@ -176,33 +217,87 @@ SympyEditor.registerAddon("plot", {
       varSel.disabled = free.length < 2;
     }
 
-    function fillSliders(res) {
+    /** The row of a symbol.  Found by comparing the attribute, not by a
+     *  selector made of the name: a name is any text, and one with a
+     *  backslash in it (\alpha) never matched its own row - every sampling
+     *  added another - while one with a quote is no selector at all. */
+    function rowOf(name) {
+      for (var i = 0; i < sliders.children.length; i++) {
+        if (sliders.children[i].getAttribute("data-sym") === name) return sliders.children[i];
+      }
+      return null;
+    }
+
+    /** The text as a number, when it is one written out: NaN for anything
+     *  that has to be read (pi/2) or that only begins as a number (1/2, of
+     *  which parseFloat makes 1). */
+    function plain(text) {
+      text = String(text).trim();
+      return text ? Number(text) : NaN;
+    }
+
+    /** Put a slider where the number is, as far as it reaches. */
+    function place(range, v) {
+      if (isFinite(v)) range.value = String(Math.max(-3, Math.min(3, v)));
+    }
+
+    function fillSliders(res, sent) {
       var wanted = (res.free || []).filter(function (n) { return n !== res.var; });
       // A field and a slider per free symbol besides the axis: a value is
       // the user's to give (none is guessed); new symbols get an empty row,
       // vanished ones lose theirs, the rest keep their value.
-      var seen = {};
       wanted.forEach(function (name) {
-        seen[name] = true;
-        var row = sliders.querySelector('[data-sym="' + name + '"]');
-        if (row) return;
+        var row = rowOf(name);
+        if (row) {
+          // A value that had to be read: Python says which number it is, and
+          // the slider goes there - unless the field has changed since.
+          var field = row.querySelector(".plot-value");
+          var read = res.values ? res.values[name] : undefined;
+          if (typeof read === "number" && sent && sent[name] === field.value.trim() && !isFinite(plain(field.value))) {
+            place(row.querySelector("input[type=range]"), read);
+          }
+          return;
+        }
         var has = name in values;
-        var num = h("input", { type: "text", autocapitalize: "off", autocorrect: "off", class: "plot-num plot-value", placeholder: "value", title: "The value of " + name + " for the plot",
+        var num = h("input", { type: "text", autocapitalize: "off", autocorrect: "off", class: "plot-num plot-value", placeholder: "value", title: "The value of " + name + " for the plot: a number, or what is one (pi/2, sqrt(2))",
                                value: has ? String(values[name]) : "", spellcheck: "false", autocomplete: "off" });
-        var range = h("input", { type: "range", min: "-3", max: "3", step: "0.05", value: has ? String(values[name]) : "0", title: "Slide to change " + name });
-        var set = function (v) {
-          if (!isFinite(v)) { delete values[name]; request(); return; }
-          values[name] = v;
+        var range = h("input", { type: "range", min: "-3", max: "3", step: "0.05", value: "0", title: "Slide to change " + name });
+        if (has) place(range, plain(values[name]));
+        // The value goes to Python as it was typed, to be read there in the
+        // document's names.  It went through parseFloat here once: pi/2 was
+        // no value at all, 1/2 was 1 and 2e was 2.  An empty field is no
+        // value, and the panel asks for one again.
+        var set = function (text) {
+          text = String(text).trim();
+          if (text) values[name] = text; else delete values[name];
           request();
         };
-        range.addEventListener("input", function () { num.value = range.value; set(parseFloat(range.value)); });
-        num.addEventListener("input", function () { var v = parseFloat(num.value); if (isFinite(v)) range.value = String(Math.max(-3, Math.min(3, v))); set(v); });
+        range.addEventListener("input", function () { num.value = range.value; set(range.value); });
+        num.addEventListener("input", function () { place(range, plain(num.value)); set(num.value); });
         sliders.appendChild(h("label", { "data-sym": name, class: has ? "" : "plot-unset" }, [name + " = ", num, range]));
       });
       Array.prototype.slice.call(sliders.children).forEach(function (row) {
         var name = row.getAttribute("data-sym");
-        if (!seen[name]) { sliders.removeChild(row); delete values[name]; }
+        if (wanted.indexOf(name) < 0) { sliders.removeChild(row); delete values[name]; }
       });
+    }
+
+    /** Plotly, asked for once a page: by the first panel that draws, for
+     *  every editor of the page and for an add-on switched off and on again.
+     *  A load that failed is forgotten, so that a later panel tries again
+     *  (this one draws in SVG from then on). */
+    function loadPlotly() {
+      if (window.Plotly) return Promise.resolve(window.Plotly);
+      var loads = window.__sympyEditorPlotly || (window.__sympyEditorPlotly = {});
+      var url = opts.plotlyJs;
+      if (!loads[url]) {
+        loads[url] = api.loadScript(url).then(function () {
+          if (!window.Plotly) throw new Error("No Plotly in " + url);
+          return window.Plotly;
+        });
+        loads[url].then(null, function () { delete loads[url]; });
+      }
+      return loads[url];
     }
 
     function clearPlot() {
@@ -219,11 +314,20 @@ SympyEditor.registerAddon("plot", {
       Array.prototype.slice.call(sliders.children).forEach(function (row) { row.classList.remove("plot-unset"); });
       var xs = res.x;
       if (!plotly && !plotlyFailed && opts.plotlyJs) {
-        api.loadScript(opts.plotlyJs).then(function () {
-          plotly = window.Plotly || null;
-          if (!plotly) plotlyFailed = true;
-          draw(res);
-        }, function () { plotlyFailed = true; draw(res); });
+        // One load, and one answer waiting for it: the latest.  Every answer
+        // that came while Plotly was on its way used to start a load of its
+        // own and draw itself when that ended - sin(x) drawn under a
+        // selection that had moved on to something with no curve at all.
+        waiting = res;
+        if (!loading) {
+          loading = loadPlotly().then(function (lib) { plotly = lib; }, function () { plotlyFailed = true; }).then(function () {
+            var latest = waiting;
+            waiting = null;
+            if (!latest || gone) return;
+            if (folded()) { stale = true; return; }
+            draw(latest);
+          });
+        }
         return;
       }
       if (plotly) {
@@ -315,7 +419,7 @@ SympyEditor.registerAddon("plot", {
       requestAnimationFrame(function () {
         var pending = frame;
         frame = null;
-        if (!plotly || !pending) return;
+        if (!plotly || !pending || gone) return;
         delete pending.__queued;
         plotly.relayout(area, pending);
       });
@@ -579,12 +683,15 @@ SympyEditor.registerAddon("plot", {
       "<section><h3>Controls</h3><ul>",
       "<li><b>variable</b>: the symbol on the horizontal axis (the first free symbol to begin with); <b>from</b>/<b>to</b>: the span.</li>",
       "<li>With more than one free symbol nothing is drawn until the others have a value: each gets a field and a slider, and the value is substituted on the way to the plot \u2014 the formula stays symbolic. No value is ever guessed.</li>",
+      "<li>A value is a number, or anything that is one: <code>pi/2</code>, <code>1/3</code>, <code>sqrt(2)</code>. It is read as it was typed, the way the formula's own text is, and the slider goes where the number is. What is not a real number \u2014 <code>z</code>, <code>2e</code>, <code>I</code> \u2014 is said so under the picture; an emptied field is no value.</li>",
+      "<li>Two different symbols of the same name \u2014 an <code>x</code>, and an <code>x</code> declared real \u2014 cannot be told apart by the panel, which says so instead of drawing: give one of them another name.</li>",
       "<li><b>Drag</b> in the picture to move it \u2014 with the mouse or a finger, in either direction \u2014 and <b>turn the wheel</b> over it to zoom; double-click to come back to the whole thing. The <b>from</b>/<b>to</b> fields take the visible range, and the curve is sampled again over it \u2014 zooming in brings detail.</li>",
       "<li>On a touch screen, <b>pinch with two fingers</b> to zoom: apart for a closer look, together to come back out. Each axis takes the share the fingers moved along it \u2014 sideways for the span, up and down for the height, both for a pinch across the corner \u2014 and what is under the middle of the pinch stays where it is.</li>",
       "<li><b>Drag with one finger</b> to move the picture, in either direction: the span sideways, the height up and down.</li>",
       "<li>On a laptop, a <b>pinch on the trackpad</b> zooms both axes about the pointer. Double-click to come back to the whole picture.</li>",
       "<li>Sampling a function is Python's work, and some are slow. Only one sampling is ever out at a time, a gesture is drawn once a frame however fast the finger moves, and a slow function is given fewer points until it keeps up. If it stays too slow the picture stops following and offers to draw again \u2014 the axes still move, the curve is simply not sampled afresh until you ask.</li>",
       "<li>The picture follows every committed change \u2014 an edit, a transformation, an undo \u2014 and the selection.</li>",
+      "<li>A folded panel asks for nothing: while it is closed no change is sampled, and the picture is drawn afresh when it is opened.</li>",
       "</ul></section>"
     ].join("");
 
@@ -594,7 +701,19 @@ SympyEditor.registerAddon("plot", {
       help: HELP,
       onState: function (snap) { if (!snap.preview) request(); },
       onSelect: function () { if (follow.checked) request(); },
-      destroy: function () { clearTimeout(timer); seq++; }
+      // Switched off.  Stopping the timer was not enough: Plotly kept the
+      // picture - a listener on the window for each time the add-on had
+      // been on, holding a graph no longer on the page - and what was
+      // waiting here was still asked of Python afterwards.
+      destroy: function () {
+        gone = true;
+        clearTimeout(timer);
+        seq++;
+        wanted = false; waiting = null; frame = null; stale = false;
+        pinch = null; drag = null;
+        if (box) box.removeEventListener("toggle", unfold);
+        clearPlot();
+      }
     };
   }
 });

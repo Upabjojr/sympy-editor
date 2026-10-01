@@ -20,6 +20,7 @@ Environment for signing:
 from __future__ import annotations
 
 import argparse
+import gzip
 import os
 import platform
 import plistlib
@@ -27,8 +28,8 @@ import shutil
 import subprocess
 import sys
 import tarfile
-import urllib.request
 import zipfile
+import zlib
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -50,10 +51,21 @@ def run(cmd, cwd=None, env=None):
     subprocess.run(cmd, cwd=cwd, env=env, check=True)
 
 
+#: What a build for an app says to ``--cdn``, here and in desktop/build.py
+#: (and build_www.py, to ``--cdn --android``).  The apps have no network:
+#: Android's manifest takes the permission out, and WebKit blocks every
+#: http(s) load on iOS and the Mac.  A bundle that loads KaTeX from a CDN
+#: would be a blank page there.
+NO_CDN = ("--cdn: the apps never use the network, so their bundle carries everything; "
+          "use mobile/build_www.py --cdn for a page to open in a browser")
+
+
 def build_www(cdn: bool, *, android: bool = False, native: bool = False, debug: bool = False) -> None:
-    cmd = [sys.executable, str(HERE / "build_www.py")]
+    """The bundle of an app (mobile/www, which the three apps share).  Never
+    one that loads from the CDNs, whoever asks: see :data:`NO_CDN`."""
     if cdn:
-        cmd.append("--cdn")
+        sys.exit(NO_CDN)
+    cmd = [sys.executable, str(HERE / "build_www.py")]
     if android:
         cmd.append("--android")
     if native:
@@ -71,14 +83,46 @@ DEBUG_TITLE = "SymPy Editor (debug)"
 
 
 def download(url: str, dest: Path) -> Path:
-    """Fetch ``url`` once into ``dest`` (a file in the cache)."""
+    """Fetch ``url`` once into ``dest`` (a file in the cache): all of it, or
+    nothing - ``build_www.download`` writes it under another name until it is
+    as long as the server said, so a connection that dropped leaves no piece
+    here for the next build to take for the file."""
     if dest.is_file():
         return dest
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    print("  downloading", url, flush=True)
-    with urllib.request.urlopen(url, timeout=300) as resp, open(dest, "wb") as out:
-        shutil.copyfileobj(resp, out)
-    return dest
+    if str(HERE) not in sys.path:
+        sys.path.insert(0, str(HERE))
+    from build_www import download as whole
+
+    return whole(url, dest, timeout=300)
+
+
+def unpack(archive: Path, root: Path) -> Path:
+    """Unpack the downloaded ``archive`` into ``root``: all of it, or nothing.
+
+    Into a folder beside ``root`` that takes its name once everything is out:
+    unpacked in place, an archive that was cut short left the start of a
+    framework there, and every later build found the folder and used it.  An
+    archive that cannot be read is deleted, so that the next build downloads
+    it again instead of failing on the same file."""
+    part = root.with_name(root.name + ".part")
+    shutil.rmtree(part, ignore_errors=True)
+    part.mkdir(parents=True)
+    print(f"+ unpacking {archive.name}", flush=True)
+    try:
+        with tarfile.open(archive) as tar:
+            try:
+                tar.extractall(part, filter="tar")
+            except TypeError:                     # no extraction filter before 3.12
+                tar.extractall(part)
+        shutil.rmtree(root, ignore_errors=True)
+        part.replace(root)
+    except (tarfile.TarError, EOFError, gzip.BadGzipFile, zlib.error) as exc:
+        archive.unlink(missing_ok=True)
+        sys.exit(f"{archive} could not be unpacked ({exc}): the cached copy was deleted - "
+                 "build again to download it afresh")
+    finally:
+        shutil.rmtree(part, ignore_errors=True)
+    return root
 
 
 def sympy_version() -> str:
@@ -305,17 +349,10 @@ def ios_runtime() -> Path:
     root = CACHE / "python-apple-support" / PYTHON_APPLE_SUPPORT
     framework = root / "Python.xcframework"
     if not framework.is_dir():
-        archive = download(
+        unpack(download(
             f"https://github.com/beeware/Python-Apple-support/releases/download/"
             f"{PYTHON_APPLE_SUPPORT}/Python-{version}-iOS-support.{build}.tar.gz",
-            CACHE / "python-apple-support" / f"Python-{version}-iOS-support.{build}.tar.gz")
-        print(f"+ unpacking {archive.name}", flush=True)
-        root.mkdir(parents=True, exist_ok=True)
-        with tarfile.open(archive) as tar:
-            try:
-                tar.extractall(root, filter="tar")
-            except TypeError:                     # no extraction filter before 3.12
-                tar.extractall(root)
+            CACHE / "python-apple-support" / f"Python-{version}-iOS-support.{build}.tar.gz"), root)
     link = IOS / "Python.xcframework"
     if link.is_symlink() or link.exists():
         link.unlink() if link.is_symlink() else shutil.rmtree(link)
@@ -521,11 +558,7 @@ def main(argv=None) -> int:
                     help="iOS export method: development, ad-hoc, app-store-connect")
     args = ap.parse_args(argv)
     if args.cdn:
-        # The apps have no network: Android's manifest takes the permission out,
-        # iOS's web view refuses every address outside the bundle.  A bundle
-        # that loads KaTeX from a CDN would be a blank page there.
-        sys.exit("--cdn: the apps never use the network, so their bundle carries everything; "
-                 "use mobile/build_www.py --cdn for a page to open in a browser")
+        sys.exit(NO_CDN)
     made = (android_build(args.release, args.cdn) if args.platform == "android"
             else ios_build(args.simulator, args.cdn, args.method, args.run))
     print("\nBuilt:" if made else "\nNo artifacts found.")

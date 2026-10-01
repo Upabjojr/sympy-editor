@@ -2,7 +2,12 @@
 // BSD licence), extended for the LaTeX add-on:
 //   - \pi, \sigma, \iota and the uppercase Greek letters are symbols (greek_symbols.lark);
 //   - \partial reads like d: \frac{\partial f}{\partial x} is a derivative;
-//   - a/bc offers the product as the divisor, \sqrt x needs no braces;
+//   - a/bc offers the product as the divisor and the quotient as a factor,
+//     \sqrt x needs no braces;
+//   - a function is applied as SymPy writes it too - f{\left(x \right)},
+//     f^{2}{\left(x \right)} - and a name of several letters can be applied
+//     (\operatorname{sinc}(x));
+//   - a subscript in braces may be of several letters and digits (x_{10});
 //   - \text{...}, \operatorname{...} name multi-letter symbols like \mathit;
 //   - \vec{v}, \hat{x}, \bar{x}, \mathbf{x}... are decorated symbols;
 //   - a power or a decorated symbol may be followed by more factors (x^2 y);
@@ -136,12 +141,12 @@ PARTIAL: "\\partial"
 // disallow "d" as a variable name because we want to parse "d" as a differential symbol.
 SYMBOL: /[a-zA-Z]'*/
 GREEK_SYMBOL_WITH_PRIMES: GREEK_SYMBOL "'"*
-LATIN_SYMBOL_WITH_LATIN_SUBSCRIPT: /([a-zA-Z]'*)_(([A-Za-z0-9]|[a-zA-Z]+)|\{([A-Za-z0-9]|[a-zA-Z]+'*)\})/
+LATIN_SYMBOL_WITH_LATIN_SUBSCRIPT: /([a-zA-Z]'*)_(([A-Za-z0-9]|[a-zA-Z]+)|\{[A-Za-z0-9]+'*\})/
 LATIN_SYMBOL_WITH_GREEK_SUBSCRIPT: /([a-zA-Z]'*)_/ GREEK_SYMBOL | /([a-zA-Z]'*)_/ L_BRACE GREEK_SYMBOL_WITH_PRIMES R_BRACE
 // best to define the variant with braces like that instead of shoving it all into one case like in
 // /([a-zA-Z])_/ L_BRACE? GREEK_SYMBOL R_BRACE? because then we can easily error out on input like
 // r"h_{\theta"
-GREEK_SYMBOL_WITH_LATIN_SUBSCRIPT: GREEK_SYMBOL_WITH_PRIMES /_(([A-Za-z0-9]|[a-zA-Z]+)|\{([A-Za-z0-9]|[a-zA-Z]+'*)\})/
+GREEK_SYMBOL_WITH_LATIN_SUBSCRIPT: GREEK_SYMBOL_WITH_PRIMES /_(([A-Za-z0-9]|[a-zA-Z]+)|\{[A-Za-z0-9]+'*\})/
 GREEK_SYMBOL_WITH_GREEK_SUBSCRIPT: GREEK_SYMBOL_WITH_PRIMES /_/ (GREEK_SYMBOL | L_BRACE GREEK_SYMBOL_WITH_PRIMES R_BRACE)
 MULTI_LETTER_SYMBOL: /[a-zA-Z]+(\s+[a-zA-Z]+)*'*/
 
@@ -254,6 +259,7 @@ adjacent_expressions: (_one_letter_symbol | number) _expression_mul
     | decorated_symbol _expression_mul
     | multi_letter_symbol _expression_mul   // \mathit{ab} c - the handwriting's stand-in for a piece, too
     | _function _expression_mul   // \ln(x) y: the function may stop at its parentheses (a choice)
+    | div _expression_mul   // a/b c: the quotient may be a factor of what follows (a choice)
 
 _expression_func: _expression_core
     | group_round_parentheses
@@ -343,7 +349,18 @@ _general_binomial: CMD_BINOM group_curly_parentheses group_curly_parentheses
 
 list_of_expressions: _expression ("," _expression)*
 
-function_applied: _one_letter_symbol L_PAREN list_of_expressions R_PAREN
+// f(x), and f{\left(x \right)} as SymPy writes it (\left and \right are
+// ignored, so the braces are what is left of it); the name may be of several
+// letters (\operatorname{sinc}(x)).  Applied or multiplied is the reader's
+// choice, as ever.
+_function_name: _one_letter_symbol | multi_letter_symbol
+
+function_applied: _function_name L_PAREN list_of_expressions R_PAREN
+    | _function_name L_BRACE L_PAREN list_of_expressions R_PAREN R_BRACE
+
+// f^{2}{\left(x \right)}: the power of f(x), written as \sin^2 x is
+function_power: _function_name CARET _expression_core L_PAREN list_of_expressions R_PAREN
+    | _function_name CARET _expression_core L_BRACE L_PAREN list_of_expressions R_PAREN R_BRACE
 
 min: FUNC_MIN L_PAREN list_of_expressions R_PAREN
 
@@ -356,6 +373,7 @@ ket: BAR _expression CMD_RANGLE
 inner_product: CMD_LANGLE _expression BAR _expression CMD_RANGLE
 
 _function: function_applied
+    | function_power
     | abs | floor | ceil
     | _trigonometric_function | _inverse_trigonometric_function
     | _trigonometric_function_power

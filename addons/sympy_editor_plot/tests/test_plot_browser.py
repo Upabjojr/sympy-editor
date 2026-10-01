@@ -1,15 +1,16 @@
 """The plot panel in a real browser: the range fields, the refusal to guess
 values, the zoom, the guide.  Needs Playwright with Chromium and the KaTeX
 and Plotly CDNs (skipped otherwise)."""
+import math
 import sys
 import threading
 import time
 import urllib.request
-from contextlib import closing
+from contextlib import closing, contextmanager
 from pathlib import Path
 
 import pytest
-from sympy import sin, symbols
+from sympy import Symbol, cos, sin, symbols
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -20,7 +21,11 @@ from sympy_editor.html import default_urls  # noqa: E402
 from sympy_editor.server import EditorServer  # noqa: E402
 from sympy_editor_plot import ADDON, PLOTLY_JS  # noqa: E402
 
-x, a = symbols("x a")
+x, y, a = symbols("x y a")
+
+#: The editor of the page, and the picture's element.
+ED = "document.querySelector('.sympy-editor').__sympyEditor"
+AREA = "document.querySelector('.plot-area')"
 
 
 def _online(url):
@@ -403,3 +408,235 @@ def test_the_picture_stops_following_when_sampling_is_too_slow():
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+@contextmanager
+def _panel(doc, held=None):
+    """The plot panel of ``doc`` on a page of its own; ``page.errors`` is what
+    the page threw.  The server keeps nothing (``store=False``).  With
+    ``held`` (a list) Plotly does not arrive: its requests wait there until
+    the test lets them go (:func:`_release`)."""
+    srv = EditorServer(doc, port=0, store=False)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with playwright.sync_playwright() as p:
+            browser = _launch(p)
+            try:
+                page = browser.new_page(viewport={"width": 1100, "height": 900})
+                page.errors = []
+                page.on("pageerror", lambda e: page.errors.append(str(e)))
+                if held is not None:
+                    page.route("**/plotly*.js", lambda route: held.append(route))
+                page.goto(srv.url)
+                page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+                page.wait_for_selector(".se-addon-plot .plot-panel", timeout=30000)
+                # every message the editor sends from here on, as it was sent
+                page.evaluate("""() => { const ed = %s; window.__sent = [];
+                    const send = ed.backend.send.bind(ed.backend);
+                    ed.backend.send = function (m, r) { window.__sent.push(JSON.parse(JSON.stringify(m))); return send(m, r); }; }""" % ED)
+                yield page
+            finally:
+                browser.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def _release(held):
+    while held:
+        held.pop().continue_()
+
+
+def _sampled(page):
+    """The ``samples`` requests sent since the page was watched."""
+    return page.evaluate("window.__sent.filter(m => m.method === 'samples')")
+
+
+def _settle(page, ms=500):
+    """Past the panel's debounce, and whatever it then asked answered."""
+    page.wait_for_timeout(ms)
+    page.wait_for_function("!%s.busy" % ED)
+    page.wait_for_timeout(200)
+
+
+def test_a_value_is_sent_as_it_was_typed():
+    """The field's text went through parseFloat on its way out: ``pi/2``
+    was no value at all (the panel went on asking for one), ``1/2`` was 1,
+    ``-1/4`` was -1, ``3*2`` was 3 and ``2e`` was 2.  Python reads a value
+    in the document's names, so the text is what it is sent."""
+    doc = Document(y * sin(x), addons=[ADDON])
+    with _panel(doc) as page:
+        page.wait_for_selector(".se-addon-plot .plot-note.error", timeout=15000)       # x on the axis: y needs a value
+        field = page.locator(".plot-sliders .plot-value")
+        slider = page.locator(".plot-sliders input[type=range]")
+        for typed, value in [("pi/2", math.pi / 2), ("1/2", 0.5), ("-1/4", -0.25), ("3*2", 6.0), ("0.75", 0.75)]:
+            field.fill(typed)
+            # the curve is the one of that value: its last point is value * sin(6)
+            page.wait_for_function("(want) => { const d = %s.data; if (!d || !d[0]) return false;"
+                                   " const ys = d[0].y; return Math.abs(ys[ys.length - 1] - want) < 1e-9; }" % AREA,
+                                   arg=value * math.sin(6), timeout=30000)
+            assert _sampled(page)[-1]["values"] == {"y": typed}
+            assert "error" not in page.locator(".plot-note").get_attribute("class")
+            assert field.input_value() == typed                                      # and the field is left as typed
+            # the slider stands at the number the text is, as far as it reaches
+            assert abs(float(slider.input_value()) - max(-3.0, min(3.0, value))) <= 0.05, (typed, slider.input_value())
+        # the slider still writes its number in the field
+        slider.evaluate("(e) => { e.value = '1.5'; e.dispatchEvent(new Event('input', {bubbles: true})); }")
+        page.wait_for_function("(() => { const s = window.__sent.filter(m => m.method === 'samples'); return s.length && s[s.length - 1].values.y === '1.5'; })()")
+        assert field.input_value() == "1.5"
+        # what is no number is said so where the value was asked, not read as its first digits
+        field.fill("2e")
+        page.wait_for_function("document.querySelector('.plot-note').className.indexOf('error') >= 0")
+        assert "value of y" in page.locator(".plot-note").inner_text()
+        assert _sampled(page)[-1]["values"] == {"y": "2e"}
+        # an emptied field is no value: the panel asks for one again
+        field.fill("")
+        page.wait_for_function("document.querySelector('.plot-note').textContent.indexOf('give a value to y') >= 0")
+        assert _sampled(page)[-1]["values"] == {}
+        assert page.errors == []
+
+
+def test_the_latest_answer_is_the_one_drawn_when_plotly_arrives():
+    """Every answer that came while Plotly was loading started a load of its
+    own and drew itself when that ended, whatever had been asked since:
+    with ``y*sin(x)``, ``sin(x)`` selected and then the whole, the picture
+    showed ``sin(x)`` under a selection that has no curve - and the page had
+    a script tag per answer."""
+    doc = Document(y * sin(x), addons=[ADDON])
+    part = [path for path in ("/0", "/1") if doc.get(path) == sin(x)][0]
+    held = []
+    with _panel(doc, held=held) as page:
+        says = lambda text: page.wait_for_function(
+            "(t) => document.querySelector('.plot-note').textContent.indexOf(t) === 0", arg=text, timeout=15000)
+        for _ in range(3):
+            page.evaluate("(p) => %s.select(p)" % ED, part)
+            says("sin(x)")                                   # sampled, and waiting for Plotly to be drawn
+            page.evaluate("%s.select('/')" % ED)
+            says("y*sin(x) has 2 free symbols")              # the whole: y has no value, nothing to draw
+        assert page.evaluate("typeof window.Plotly") == "undefined"
+        assert page.evaluate("document.querySelectorAll('script[src*=plotly]').length") == 1
+        _release(held)
+        page.wait_for_function("typeof window.Plotly !== 'undefined'", timeout=60000)
+        page.wait_for_timeout(800)
+        assert page.evaluate("%s.selected" % ED) == "/"
+        assert page.locator(".plot-note").inner_text().startswith("y*sin(x) has 2 free symbols")
+        assert "error" in page.locator(".plot-note").get_attribute("class")
+        assert page.evaluate("(%s.data || []).length" % AREA) == 0
+        assert page.locator(".plot-area *").count() == 0
+        # and what is asked from now on is drawn by the Plotly that arrived
+        page.evaluate("(p) => %s.select(p)" % ED, part)
+        page.wait_for_selector(".plot-area svg.main-svg", timeout=30000)
+        assert page.evaluate("%s.data.length" % AREA) == 1
+        assert page.evaluate("document.querySelectorAll('script[src*=plotly]').length") == 1
+        assert page.errors == []
+
+
+def test_a_name_is_any_text_and_still_has_one_row():
+    """The row of a symbol was looked up with a selector made of its name:
+    ``\\alpha`` never matched its own row, so every sampling added another
+    one, and ``a"b`` is no selector at all - the page threw and the panel
+    stayed on the answer before.  A name that an object has anyway
+    (``constructor``) came with a value nobody gave."""
+    for name in (r"\alpha", 'a"b', "a]b", "constructor"):
+        doc = Document(x * Symbol(name), addons=[ADDON])
+        with _panel(doc) as page:
+            page.wait_for_selector(".se-addon-plot .plot-note.error", timeout=15000)
+            page.locator(".se-addon-plot select").select_option("x")
+            page.wait_for_function("(n) => { const r = document.querySelector('.plot-sliders label');"
+                                   " return r && r.getAttribute('data-sym') === n; }", arg=name)
+            rows = lambda: page.evaluate("[...document.querySelectorAll('.plot-sliders label')].map(l => l.getAttribute('data-sym'))")
+            assert rows() == [name]
+            # no value was given: the field is empty and the row says so
+            assert page.locator(".plot-sliders .plot-value").input_value() == ""
+            assert page.locator(".plot-sliders label.plot-unset").count() == 1
+            left = page.locator(".se-addon-plot .plot-bar .plot-num").first
+            for k in range(3):                               # sampled again, three times over
+                before = len(_sampled(page))
+                left.fill(str(-5 - k))
+                left.press("Tab")
+                page.wait_for_function("(n) => window.__sent.filter(m => m.method === 'samples').length > n", arg=before)
+                _settle(page)
+            assert rows() == [name], name
+            # the row works: a value, and the curve is drawn
+            page.locator(".plot-sliders .plot-value").fill("2")
+            page.wait_for_selector(".plot-area svg.main-svg, .plot-area svg.plot-svg", timeout=30000)
+            assert _sampled(page)[-1]["values"] == {name: "2"}
+            assert rows() == [name], name
+            assert page.errors == [], name
+
+
+def _listeners(cdp, expression):
+    """How many listeners of each event ``expression`` has."""
+    obj = cdp.send("Runtime.evaluate", {"expression": expression})["result"]["objectId"]
+    count = {}
+    for one in cdp.send("DOMDebugger.getEventListeners", {"objectId": obj})["listeners"]:
+        count[one["type"]] = count.get(one["type"], 0) + 1
+    return count
+
+
+def test_switched_off_the_plot_leaves_nothing_behind():
+    """Switching the add-on off only stopped its timer: Plotly kept the
+    picture - a listener on the window for every time the add-on had been
+    on, each holding a graph no longer on the page - and what the panel had
+    waiting was still asked of Python after it had gone."""
+    doc = Document(sin(x) + cos(x), addons=[ADDON])
+    with _panel(doc) as page:
+        page.wait_for_selector(".plot-area svg.main-svg", timeout=60000)
+        cdp = page.context.new_cdp_session(page)
+        switch = lambda **which: page.evaluate("(w) => %s.send(Object.assign({action: 'addons'}, w))" % ED, which)
+        switch(disable=["plot"])
+        page.wait_for_function("!document.querySelector('.se-addon-plot')")
+        _settle(page)
+        clean = _listeners(cdp, "window")
+        for _ in range(3):
+            switch(enable=["plot"])
+            page.wait_for_selector(".plot-area svg.main-svg", timeout=60000)
+            area = page.evaluate_handle(AREA)
+            # asked for again as it goes: a change of the span, and the switch
+            # before the panel's debounce has run out
+            page.evaluate("""() => { const f = document.querySelector('.se-addon-plot .plot-bar .plot-num');
+                f.value = '-4'; f.dispatchEvent(new Event('change', {bubbles: true})); }""")
+            page.evaluate("window.__sent.length = 0")
+            switch(disable=["plot"])
+            page.wait_for_function("!document.querySelector('.se-addon-plot')")
+            _settle(page, 800)
+            assert _sampled(page) == []
+            # the picture it left is no graph of Plotly's any more
+            assert area.evaluate("(a) => !a._fullLayout && !a.querySelector('svg')")
+        assert _listeners(cdp, "window") == clean
+        assert page.evaluate("document.querySelectorAll('script[src*=plotly]').length") == 1
+        assert page.errors == []
+
+
+def test_a_folded_panel_asks_nothing_until_it_is_opened():
+    """With the panel folded every selection and every change was still
+    sampled - Python's work, the editor busy with it each time - for a
+    picture nobody could see."""
+    doc = Document(sin(x) + cos(x), addons=[ADDON])
+    with _panel(doc) as page:
+        page.wait_for_selector(".plot-area svg.main-svg", timeout=60000)
+        _settle(page)
+        page.locator(".se-addon-plot > summary").click()
+        assert page.evaluate("document.querySelector('.se-addon-plot').open") is False
+        page.evaluate("window.__sent.length = 0")
+        for path in ("/0", "/1", "/0/0", "/"):
+            page.evaluate("(p) => %s.select(p)" % ED, path)
+            _settle(page)
+        page.evaluate("%s.send({action: 'apply', path: '/', op: 'expand'})" % ED)
+        _settle(page)
+        page.evaluate("%s.send({action: 'set', src: 'x**2 - 1'})" % ED)
+        _settle(page)
+        assert [m["action"] for m in page.evaluate("window.__sent")] == ["apply", "set"]
+        # opened: asked once, for what is there now
+        page.locator(".se-addon-plot > summary").click()
+        page.wait_for_function("document.querySelector('.plot-note').textContent === 'x**2 - 1'", timeout=15000)
+        page.wait_for_function("(() => { const d = %s.data; return d && d[0] && d[0].y[0] === 35; })()" % AREA)
+        _settle(page)
+        assert len(_sampled(page)) == 1
+        # folded and opened with nothing changed in between: nothing to ask
+        page.locator(".se-addon-plot > summary").click()
+        page.locator(".se-addon-plot > summary").click()
+        _settle(page)
+        assert len(_sampled(page)) == 1
+        assert page.evaluate("document.querySelector('.se-addon-plot').open") is True
+        assert page.errors == []

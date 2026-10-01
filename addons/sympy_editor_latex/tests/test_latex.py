@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from sympy import (Derivative, E, Eq, EulerGamma, Function, I, Integral, Limit, Matrix, Rational, Sum, Symbol, cos, exp, log, oo,
+from sympy import (Derivative, E, Eq, EulerGamma, Function, I, Integral, Limit, Matrix, Mul, Rational, Sum, Symbol, cos, exp, log, oo,
                    pi, sin, sqrt, symbols)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -54,12 +54,12 @@ READINGS = [
     (r"\begin{pmatrix} 1 & 2 \\ 3 & 4 \end{pmatrix}", Matrix([[1, 2], [3, 4]])),
     (r"E = mc^2", Eq(Symbol("E"), m * c**2)),      # E is a symbol unless switched
     (r"\infty", oo),
-    (r"\vec{v} \cdot \hat{x}", Symbol(r"\vec{v}") * Symbol(r"\hat{x}")),
-    (r"\bar x + \mathbf{A}", Symbol(r"\bar{x}") + Symbol(r"\mathbf{A}")),
+    (r"\vec{v} \cdot \hat{x}", Symbol("vvec") * Symbol("xhat")),
+    (r"\bar x + \mathbf{A}", Symbol("xbar") + Symbol("Abold")),
     (r"\text{foo} + \operatorname{bar}", Symbol("foo") + Symbol("bar")),
     (r"\mathit{ab} c", Symbol("ab") * c),              # a named symbol, then a factor (was refused)
-    (r"\mathit{ab}_d", Symbol("ab_{d}")),              # ... with a subscript, named as x_d is
-    (r"\mathit{ab}_{d}^{2} c", Symbol("ab_{d}") ** 2 * c),
+    (r"\mathit{ab}_d", Symbol("ab_d")),              # ... with a subscript, named as x_d is
+    (r"\mathit{ab}_{d}^{2} c", Symbol("ab_d") ** 2 * c),
     (r"\frac{1}{\mathit{ab}\,d}", 1 / (Symbol("ab") * Symbol("d"))),
     (r"\sigma^2 + \Delta x", Symbol("sigma") ** 2 + Symbol("Delta") * x),
     (r"\frac{1}{2} m v^2", m * Symbol("v") ** 2 / 2),
@@ -322,3 +322,286 @@ def test_a_fraction_over_a_differential_that_is_no_derivative_divides(reader):
     plain = reader.read(r"\frac{dy}{dx}")
     assert plain["expr"] == Derivative(y, x)
     assert not any(p["key"].startswith("derivative@") for p in plain["ambiguities"])     # no choice there
+
+
+def test_numbers_too_large_to_compute_are_kept_as_written(reader):
+    r"""``10^{10^{8}}``, ``20000!`` and ``2^{20000}`` were worked out while
+    the text was read - a number of a hundred million digits, the editor
+    frozen behind a quiet call with no Interrupt to press.  A power or a
+    factorial too large to compute is kept as written, and so is what is
+    built on it; the small ones are still worked out."""
+    import time
+    from sympy import Pow, binomial, factorial, srepr
+    for tex in (r"10^{10^{8}}", r"9^{9^{8}}", r"20000!", r"2^{20000}", r"\binom{20000}{10000}",
+                r"2^{20000} + x + x", r"\frac{d}{dx} 10^{10^{8}}", r"\operatorname{fibonacci}(100000)"):
+        start = time.time()
+        res = reader.read(tex)
+        assert res["ok"], (tex, res.get("error"))
+        assert time.time() - start < 5, tex
+        assert len(srepr(res["expr"])) < 400 and len(res["latex"]) < 200, tex   # nothing written out
+    assert reader.read(r"10^{10^{8}}")["expr"] == Pow(10, 10**8, evaluate=False)
+    assert reader.read(r"20000!")["expr"] == factorial(20000, evaluate=False)
+    assert reader.read(r"\binom{20000}{10000}")["src"] == "binomial(20000, 10000)"
+    assert reader.read(r"2^{10}")["expr"] == 1024 and reader.read(r"5!")["expr"] == 120
+    assert reader.read(r"\binom{5}{2}")["expr"] == binomial(5, 2) == 10
+    # and it goes into a document as it is
+    doc = Document(x, addons=[ADDON])
+    snap = doc.handle({"action": "addon", "addon": "latex", "method": "insert", "latex": r"2^{20000}", "path": "/"})
+    assert not snap.get("error") and doc.expr == Pow(2, 20000, evaluate=False)
+
+
+def test_a_differential_outside_an_integral_or_a_derivative_is_a_product(reader):
+    r"""``c + d x``, ``b d x`` and ``x dx`` came back with a ``Tuple`` inside
+    (the differential SymPy's transformer makes for an integral), which the
+    editor could neither show nor edit; a mixed partial derivative raised an
+    AttributeError.  Anywhere but under an integral or a fraction bar, ``d x``
+    is the product d*x - and a row of differentials under the bar is a
+    derivative by each of them."""
+    from sympy import srepr
+    d, f_ = symbols("d f")
+    for tex, want in [(r"c + d x", c + d * x), (r"b d x", b * d * x), (r"x dx", d * x ** 2), (r"d x", d * x),
+                      (r"a x + b y + c z + d w", a * x + b * y + c * z + d * Symbol("w")), (r"(c + d) x", (c + d) * x),
+                      (r"\frac{\partial^2 f}{\partial x \partial y}", Derivative(f_, x, y)),
+                      (r"\frac{d^2 f}{dx dy}", Derivative(f_, x, y)),
+                      (r"\frac{\partial^3 f}{\partial x^2 \partial y}", Derivative(f_, (x, 2), y)),
+                      (r"\frac{\partial^{2}}{\partial y\partial x} f", Derivative(f_, y, x)),
+                      (r"\frac{1}{dx dy}", 1 / (d ** 2 * x * y)),
+                      (r"\int x dx", Integral(x, x)), (r"\int \frac{dx}{x}", Integral(1 / x, x))]:
+        res = reader.read(tex)
+        assert res["ok"], (tex, res.get("error"))
+        assert res["expr"] == want, (tex, res["src"])
+        if not isinstance(res["expr"], (Derivative, Integral)):
+            assert "Tuple" not in srepr(res["expr"]), tex
+    # an operator with nothing to act on says so, whatever stands before it
+    for tex in (r"\frac{d}{dx}", r"x \frac{d}{dx}", r"\frac{d}{dx} + 1"):
+        res = reader.read(tex)
+        assert res["ok"] is False and "nothing after it to differentiate" in res["error"], (tex, res)
+    # the mixed partial goes into a document, which shows it and saves it
+    doc = Document(x, addons=[ADDON])
+    snap = doc.handle({"action": "addon", "addon": "latex", "method": "insert",
+                       "latex": r"\frac{\partial^2 f}{\partial x \partial y}", "path": "/"})
+    assert not snap.get("error") and doc.expr == Derivative(f_, x, y) and doc.snapshot()["latex"]
+
+
+def _round_trip_corpus():
+    """Expressions whose LaTeX, as SymPy's own printer writes it, reads back
+    as the expression itself (or one equal to it).  Not in it: what the
+    grammar has no rule for (``\\bmod``, ``cases``, ``\\wedge``), and a
+    name of several letters printed bare (``speed``), which is a product."""
+    from sympy import (Abs, Float, Max, Min, Ne, Product, Rational as R_, acos, asin, atan, binomial, cbrt, ceiling, conjugate,
+                       cosh, factorial, floor, gamma, im, re, root, sinh, tan, tanh)
+    k_, t_ = symbols("k t")
+    return [x + y, x - y, -x, x * y, x / y, x ** 2, x ** -2, sqrt(x), cbrt(x), x ** R_(3, 2), 1 / (x + 1), (x + 1) / (y - 1),
+            (x + 1) * (y - 1), -(x + 1), x - (y + z), 2 * x, R_(1, 2) * x, R_(-3, 4), 3 * x ** 2 * y,
+            sin(x), sin(x) ** 2, sin(2 * x), sin(x + y), sin(x) * cos(y), cos(x) ** 2 + sin(x) ** 2, tan(x), asin(x), acos(x),
+            atan(x), sinh(x), cosh(x), tanh(x), exp(x), exp(-x ** 2), exp(x + 1), log(x), log(x + 1), log(x) ** 2,
+            Abs(x), Abs(x + y), factorial(n), factorial(n + 1), binomial(n, k), floor(x), ceiling(x), conjugate(x), re(x), im(x),
+            gamma(x), Max(x, y), Min(x, y),
+            Integral(x ** 2, x), Integral(x ** 2, (x, 0, 1)), Integral(sin(x) * exp(x), x), Integral(x * y, (x, 0, 1), (y, 0, 2)),
+            Sum(k ** 2, (k, 1, n)), Product(k, (k, 1, n)), Limit(sin(x) / x, x, 0), Limit(1 / x, x, oo),
+            Derivative(f(x), x), Derivative(f(x), (x, 2)), Derivative(sin(x) * x, x), Derivative(f(x, y), x, y), f(x), f(x, y),
+            f(x + 1) ** 2, g(x) * f(y),
+            Eq(x, y), Ne(x, y), x < y, x <= y, x > y, x >= y, Eq(x ** 2 + 1, 0),
+            pi, E, I, oo, -oo, pi * x, E ** x, I * x, 2 + 3 * I, exp(I * pi * x), x * E,
+            Symbol("alpha") + Symbol("beta"), Symbol("theta") ** 2, Symbol("x_1") + Symbol("x_2"), Symbol("lamda"), Symbol("Omega"),
+            Symbol("x_i"), Symbol("alpha_1"), Symbol("xhat"), Symbol("v_max"), Symbol("a_ij"),
+            Matrix([[1, 2], [3, 4]]), Matrix([[x, y]]), Matrix([x, y]),
+            Float(0.5), Float(1.25) * x, x ** y, x ** (y + 1), (x ** y) ** z, 2 ** x, (x + 1) ** 2, (x * y) ** 2, x / (y * z),
+            1 / (x * y), x ** 2 * sin(x), 1 / sin(x), log(x, 2), sqrt(x + 1), sqrt(x) * y, 1 / sqrt(x), root(x, 5),
+            (-b + sqrt(b ** 2 - 4 * a * c)) / (2 * a), x ** 2 - 2 * x + 1, -x * y, -x ** 2, -2 * x + 3 * y - z, t_ * k_]
+
+
+def test_sympy_s_own_latex_reads_back_as_the_expression(reader):
+    r"""SymPy writes ``f{\left(x \right)}``, ``\operatorname{asin}{\left(x
+    \right)}``, ``\Gamma\left(x\right)`` - and those read as products
+    (``f*x``, ``asin*x``), so a formula copied out of SymPy, or out of the
+    editor itself, came back as something else.  Each is read as the
+    function applied, the product still offered where the text allows it."""
+    from sympy import Expr, asin, gamma, latex, simplify
+    wrong = []
+    for expr in _round_trip_corpus():
+        tex = latex(expr)
+        res = reader.read(tex)
+        if not res["ok"]:
+            wrong.append((expr, tex, res["error"]))
+            continue
+        got = res["expr"]
+        same = got == expr or (isinstance(expr, Expr) and isinstance(got, Expr) and simplify(got - expr) == 0)
+        if not same:
+            wrong.append((expr, tex, res["src"]))
+    assert not wrong, wrong
+    for tex, want, other in [(r"f{\left(x \right)}", f(x), "f*x"), (r"\operatorname{asin}{\left(x \right)}", asin(x), "asin*x"),
+                             (r"\Gamma\left(x\right)", gamma(x), "Gamma*x"), (r"f^{2}{\left(x + 1 \right)}", f(x + 1) ** 2, None)]:
+        res = reader.read(tex)
+        assert res["ok"] and res["expr"] == want, (tex, res.get("src"), res.get("error"))
+        if other:
+            assert any(o["src"] == other for amb in res["ambiguities"] for o in amb["options"]), (tex, res["ambiguities"])
+    assert reader.read(r"f{\left(x,y \right)}")["expr"] == f(x, y)
+
+
+def test_a_long_row_of_bare_functions_is_read_by_the_convention(reader):
+    r"""Seven logarithms in a row (``\ln x \ln y ... \ln u``) have more
+    readings than were weighed, and the conventional one - a product of
+    logarithms - was neither the first reading nor among the choices.  It
+    always is now; only what is shown of a part's readings is capped."""
+    from sympy_editor_latex.parser import MAX_ALTERNATIVES
+    names = "x y z a b c u v w".split()
+    for count in range(5, 10):
+        tex = " ".join(r"\ln " + v for v in names[:count])
+        res = reader.read(tex)
+        want = Mul(*[log(Symbol(v)) for v in names[:count]])
+        assert res["ok"] and res["expr"] == want, (count, res.get("src"))
+        assert any(o["src"] == str(want) for amb in res["ambiguities"] for o in amb["options"]), count
+        for amb in res["ambiguities"]:
+            assert len(amb["options"]) <= MAX_ALTERNATIVES
+            assert amb["options"][amb["choice"]]["src"] == str(want)            # the one read is the one marked
+
+
+def test_readings_in_two_threads_do_not_mix():
+    """One reader serves every document, and the widget and the server read
+    on threads of their own: what one reading kept on the shared reader (its
+    choices, its points) was read by the other midway, and each came back
+    with pieces of the other's answer."""
+    import json
+    import threading
+    shared = LatexReader()
+    shared.warm()
+    texts = [r"\sin x \cos y + \frac{d^2 y}{dx^2}", r"1 + 2 + 3 + 4 + \ln a \ln b + \frac{q d}{dt}"]
+
+    def answer(text):
+        res = dict(shared.read(text))
+        res.pop("expr")
+        return json.dumps(res, sort_keys=True)
+
+    alone = {t: answer(t) for t in texts}
+    wrong = []
+
+    def loop(text):
+        for _ in range(15):
+            try:
+                if answer(text) != alone[text]:
+                    wrong.append(text)
+            except Exception as exc:  # noqa: BLE001
+                wrong.append(repr(exc))
+
+    was = sys.getswitchinterval()
+    sys.setswitchinterval(1e-5)
+    try:
+        threads = [threading.Thread(target=loop, args=(t,)) for t in texts]
+        for th in threads:
+            th.start()
+        for th in threads:
+            th.join()
+    finally:
+        sys.setswitchinterval(was)
+    assert wrong == []
+
+
+def test_a_reading_is_bounded_in_length_and_in_time(reader, monkeypatch):
+    """A reading is asked for at every pause in the typing, the editor waiting
+    for it: a run of three hundred letters took eighteen seconds, a formula of
+    77 characters and eleven ambiguous parts seven.  The text has a length
+    limit, the reading a time limit - each with a message that says so - and
+    the choices are worked out within bounds."""
+    import time
+    from sympy_editor_latex import parser
+    res = reader.read("x" * (parser.MAX_LENGTH + 1))
+    assert res["ok"] is False and "too long" in res["error"] and str(parser.MAX_LENGTH) in res["error"]
+    monkeypatch.setattr(parser, "MAX_SECONDS", 0.3)
+    start = time.time()
+    res = reader.read("x" * 300)
+    assert res["ok"] is False and "too long to read" in res["error"]
+    assert time.time() - start < 5
+    monkeypatch.undo()
+    tex = r"\sin a \cos b + \cos a \sin b - \sin c \cos d - \cos c \sin d + \tan x \tan y"
+    start = time.process_time()
+    res = reader.read(tex)
+    assert res["ok"] and len(res["ambiguities"]) <= parser.MAX_POINTS
+    assert time.process_time() - start < 3
+
+
+def test_nothing_a_page_sends_makes_the_reading_raise(reader):
+    r"""A reading answers, whatever it is sent: ``choices`` of 1e400 raised an
+    OverflowError out of the reader, a number too large to write out a
+    ValueError, and a text that was not one was read as its ``str``
+    (``None`` became N*n*o*e)."""
+    key = "_expression_mul@0-13"
+    for bad in (1e400, float("nan"), float("inf"), "1", -1, 99, None, [1], 1.5):
+        res = reader.read(r"\sin x \cos y", choices={key: bad})
+        assert res["ok"] and res["expr"] == sin(x) * cos(y), (bad, res)
+        taken = res["choices"][key]
+        assert isinstance(taken, int) and 0 <= taken < 2, (bad, taken)
+    for choices, constants in (("abc", [1]), ({1: 1}, {"pi": "no"}), ([], None)):
+        assert reader.read(r"\sin x \cos y", choices=choices, constants=constants)["ok"]
+    # a derivative's choice out of range: the convention, and the choice echoed is the one taken
+    res = reader.read(r"\frac{d^2 y}{dx^2}", choices={"derivative@0-18": 5})
+    assert res["expr"] == Derivative(y, (x, 2)) and res["choices"]["derivative@0-18"] == 0
+    assert reader.read(r"2^{10000} \cdot 2^{10000}")["ok"]              # a product of two large numbers: kept as a product
+    for tex in (r"2^{-20000}", r"x \frac{d}{dx}"):
+        res = reader.read(tex)
+        assert res["ok"] is False and res["error"].startswith("This LaTeX could not be read"), (tex, res)
+    for latex in (None, 5, ["a"]):
+        assert reader.read(latex)["ok"] is False
+    doc = Document(x, addons=[ADDON])
+    for payload in ({}, {"latex": None}, {"latex": 5}):
+        snap = doc.handle(dict(payload, action="addon", addon="latex", method="read"))
+        assert snap["query"]["result"]["ok"] is False, payload
+
+
+def test_names_read_from_latex_can_be_typed_back_in_the_source_line():
+    r"""``x_{1}``, ``a_{ij}``, ``\hat{v}`` were named as they are written -
+    ``Symbol("x_{1}")`` - which the editor's source line cannot read back: with
+    one such name in the formula, no edit of the text went through.  They are
+    named as SymPy names them (``x_1``, ``a_ij``, ``vhat``), which print the
+    same; a document that holds an old spelling still has it found."""
+    doc = Document(x + 1, addons=[ADDON])
+    snap = doc.handle({"action": "addon", "addon": "latex", "method": "insert",
+                       "latex": r"x_1^2 + \hat{v} + a_{ij} + \alpha_{i} + x'", "path": "/"})
+    assert not snap.get("error")
+    assert {s.name for s in doc.expr.free_symbols} == {"x_1", "vhat", "a_ij", "alpha_i", "xprime"}
+    src = doc.snapshot()["src"]
+    again = doc.handle({"action": "replace", "path": "/", "src": src + " + 2"})
+    assert not again.get("error"), again.get("error")
+    from sympy import latex as to_latex
+    assert to_latex(Symbol("x_1")) == "x_{1}" and to_latex(Symbol("vhat")) == r"\hat{v}"
+    # a document made before: its x_{1} is the symbol a reading of x_{1} finds
+    old = Symbol("x_{1}", positive=True)
+    before = Document(old + 1, addons=[ADDON])
+    for tex in (r"x_{1}", r"x_1"):
+        got = ADDON.read(before, {"latex": tex})
+        assert got["ok"] and got["expr"] == old, (tex, got.get("src"))
+
+
+def test_the_lesser_ambiguities_are_offered_and_mismatched_environments_refused(reader):
+    r"""``a/bc`` offered no other reading, ``f'(x)`` was the product f'*x
+    and ``\operatorname{sinc}(x)`` could not be read as the function; and
+    ``\begin{pmatrix} ... \end{bmatrix}`` was taken for a matrix."""
+    from sympy import sinc
+    res = reader.read("a/bc")
+    assert res["expr"] == a / (b * c)
+    assert any(o["src"] == str(a * c / b) for amb in res["ambiguities"] for o in amb["options"])
+    res = reader.read("f'(x)")
+    assert res["src"] == "fprime(x)" and any(o["src"] == "fprime*x" for amb in res["ambiguities"] for o in amb["options"])
+    res = reader.read(r"\operatorname{sinc}(x)")
+    assert res["expr"] == sinc(x) and any(o["src"] == "sinc*x" for amb in res["ambiguities"] for o in amb["options"])
+    res = reader.read(r"\begin{pmatrix} a \end{bmatrix}")
+    assert res["ok"] is False and "closed by" in res["error"]
+    assert reader.read(r"\begin{pmatrix} a \end{pmatrix}")["expr"] == Matrix([[a]])
+
+
+def test_keep_and_undo_wear_the_colours_of_the_change():
+    """Keep is the green of what came, Undo the red of what went - the
+    editor's own diff colours, so they follow the theme - and the red is
+    the weaker of the two: its border and its words, no fill."""
+    import re
+    from pathlib import Path
+    import sympy_editor_latex
+    css = (Path(sympy_editor_latex.__file__).parent / "static" / "latex.css").read_text(encoding="utf-8")
+    rule = lambda sel: re.search(re.escape(sel) + r"\s*\{([^}]*)\}", css).group(1)
+    # under the row's own selector: `.ltx-applied-ask button` sets the plain
+    # look, and a bare `.ltx-keep` would lose to it
+    keep, back = rule(".ltx-applied-ask .ltx-keep"), rule(".ltx-applied-ask .ltx-back")
+    assert "background: rgba(var(--se-added-rgb)" in keep and "color: rgb(var(--se-added-rgb))" in keep
+    assert "color: rgb(var(--se-removed-rgb))" in back and "border-color: rgba(var(--se-removed-rgb)" in back
+    assert "background" not in back
+

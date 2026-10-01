@@ -185,7 +185,10 @@ def _register_defaults() -> None:
     register_op("cancel", sympy.cancel, label="Cancel")
     register_op("together", sympy.together, label="Together")
     register_op("apart", sympy.apart, label="Apart (partial fractions)")
-    register_op("collect_terms", lambda e: sympy.collect(e, list(e.free_symbols)), label="Collect")
+    # the symbols in a fixed order: a set's order changes from one run to the
+    # next, and with it how collect groups the terms
+    register_op("collect_terms", lambda e: sympy.collect(e, sorted(e.free_symbols, key=sympy.default_sort_key)),
+                label="Collect")
     register_op("trigsimp", sympy.trigsimp, label="Trig simplify")
     register_op("expand_trig", sympy.expand_trig, label="Expand trig")
     register_op("powsimp", sympy.powsimp, label="Power simplify")
@@ -334,6 +337,19 @@ def _with_function(e, f):
     return e.func(f(e.args[0]), *e.args[1:])
 
 
+def _to_left(e):
+    """``lhs - rhs`` against zero - a zero of the sides' shape for matrices
+    (``A = B`` of matrix symbols was ``A - B = 0``, which SymPy decides is
+    False)."""
+    diff = e.lhs - e.rhs
+    shape = getattr(diff, "shape", None) if isinstance(diff, (MatrixExpr, MatrixBase)) else None
+    if shape is not None:
+        zero = sympy.zeros(*shape).as_immutable() if isinstance(diff, MatrixBase) else sympy.ZeroMatrix(*shape)
+    else:
+        zero = sympy.S.Zero
+    return e.func(diff, zero)
+
+
 def _register_calculus_ops() -> None:
     ev = ("integral", "sum", "derivative", "limit")
     register_op("evaluate", lambda e: e.doit(), label="Evaluate", kinds=ev)
@@ -341,7 +357,7 @@ def _register_calculus_ops() -> None:
     register_op("expand_inside", lambda e: _with_function(e, sympy.expand), label="Expand the function inside", kinds=ev)
     register_op("simplify_inside", lambda e: _with_function(e, sympy.simplify), label="Simplify the function inside", kinds=ev)
     r = ("relational",)
-    register_op("to_left", lambda e: e.func(e.lhs - e.rhs, 0), label="Move everything to the left", kinds=r)
+    register_op("to_left", _to_left, label="Move everything to the left", kinds=r)
     register_op("swap_sides", lambda e: e.reversed, label="Swap sides", kinds=r)
     register_op("simplify_sides", lambda e: e.func(sympy.simplify(e.lhs), sympy.simplify(e.rhs)), label="Simplify both sides", kinds=r)
     register_op("expand_sides", lambda e: e.func(sympy.expand(e.lhs), sympy.expand(e.rhs)), label="Expand both sides", kinds=r)

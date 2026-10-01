@@ -54,11 +54,12 @@ final class FilesBridge: NSObject, WKScriptMessageHandler {
     /// The web view a report is printed from, held until it has loaded.
     private var printer: ReportPrinter?
 
-    #if os(macOS)
-    /// Every bridge alive, one per window: what quitting asks to keep their
-    /// pages' work (AppDelegate.applicationShouldTerminate).
+    /// Every bridge alive, one per window: where a file opened with the app
+    /// finds the window in front (HostChrome), and what quitting the Mac app
+    /// asks to keep their pages' work (AppDelegate.applicationShouldTerminate).
     static let live = NSHashTable<FilesBridge>.weakObjects()
 
+    #if os(macOS)
     /// Told once when the page has next kept something (keepWrite): a flush
     /// for quitting, or for a window closing, is waiting for it.
     private var waitingForKeep: [() -> Void] = []
@@ -69,14 +70,22 @@ final class FilesBridge: NSObject, WKScriptMessageHandler {
     private var closing: WKWebView?
     #endif
 
+    /// Whether this bridge's window is on its way out: no file goes to it.
+    var isClosing: Bool {
+        #if os(macOS)
+        return closing != nil
+        #else
+        return false
+        #endif
+    }
+
     override init() {
         super.init()
-        #if os(macOS)
         Self.live.add(self)
+        #if os(macOS)
         NotificationCenter.default.addObserver(self, selector: #selector(windowWillClose(_:)),
                                                name: NSWindow.willCloseNotification, object: nil)
         #endif
-        HostChrome.shared.files = self
         // Leaving the foreground, where the system may end the app without
         // another word: the page keeps now what it was about to keep.
         #if os(macOS)
@@ -95,11 +104,20 @@ final class FilesBridge: NSObject, WKScriptMessageHandler {
         #if os(macOS)
         webView?.evaluateJavaScript("window.SympyEditor && window.SympyEditor.flush && window.SympyEditor.flush();")
         #else
-        // A moment of background time for the write to reach keepWrite.
+        // A moment of background time for the write to reach keepWrite -
+        // asked for only when there is a page to write, and given back once:
+        // with no web view nothing ever ended it, and when the system called
+        // time on it, it was ended there and again a moment later.
+        guard let view = webView else { return }
         var task = UIBackgroundTaskIdentifier.invalid
-        task = UIApplication.shared.beginBackgroundTask { UIApplication.shared.endBackgroundTask(task) }
-        webView?.evaluateJavaScript("window.SympyEditor && window.SympyEditor.flush && window.SympyEditor.flush();") { _, _ in
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { UIApplication.shared.endBackgroundTask(task) }
+        let end: () -> Void = {
+            guard task != .invalid else { return }
+            UIApplication.shared.endBackgroundTask(task)
+            task = .invalid
+        }
+        task = UIApplication.shared.beginBackgroundTask { end() }
+        view.evaluateJavaScript("window.SympyEditor && window.SympyEditor.flush && window.SympyEditor.flush();") { _, _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { end() }
         }
         #endif
     }
@@ -144,7 +162,8 @@ final class FilesBridge: NSObject, WKScriptMessageHandler {
     /// The page has loaded: hand it what arrived meanwhile.
     func pageLoaded() {
         pageReady = true
-        let waiting = arrived
+        // ...and what arrived before there was any page at all
+        let waiting = arrived + HostChrome.shared.takeWaiting()
         arrived = []
         for (name, text) in waiting { deliver(name: name, text: text) }
     }
@@ -264,22 +283,32 @@ final class FilesBridge: NSObject, WKScriptMessageHandler {
             let keeper = Keeper(token: token, bridge: self)
             self.keeper = keeper
             picker.delegate = keeper
-            self.present(picker, from: view)
+            if !self.present(picker, from: view) {
+                // No panel came up, so no answer will come from one: the
+                // page would wait for ever.
+                self.keeper = nil
+                self.answer(token, nil, nil)
+            }
         }
         #endif
     }
 
-    /// Read a file the user chose and hand it to the page.
+    /// Read a file the user chose and hand it to the page: off the main
+    /// thread, which the panels answer on, and no more of it than a formula
+    /// can be (HostChrome.text, as for a file opened with the app) - it was
+    /// read whole, whatever its size, while the interface waited.
     fileprivate func read(_ url: URL, token: String) {
-        // A file outside the app needs its owner's leave to be read.
-        let reachable = url.startAccessingSecurityScopedResource()
-        defer { if reachable { url.stopAccessingSecurityScopedResource() } }
-        do {
-            let text = try String(contentsOf: url, encoding: .utf8)
-            answer(token, url.lastPathComponent, text)
-        } catch {
-            answer(token, nil, nil)
-            report("The file could not be read: \(error.localizedDescription)")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            // A file outside the app needs its owner's leave to be read.
+            let reachable = url.startAccessingSecurityScopedResource()
+            defer { if reachable { url.stopAccessingSecurityScopedResource() } }
+            do {
+                let text = try HostChrome.text(of: url)
+                self?.answer(token, url.lastPathComponent, text)
+            } catch {
+                self?.answer(token, nil, nil)
+                self?.report("The file could not be read: \(error.localizedDescription)")
+            }
         }
     }
 
@@ -485,17 +514,20 @@ final class FilesBridge: NSObject, WKScriptMessageHandler {
     }
 
     #if !os(macOS)
-    /// The view controller the page's WebView is in, which is what presents.
-    private func present(_ controller: UIViewController, from view: UIView) {
+    /// The view controller the page's WebView is in, which is what presents;
+    /// false when there is none, and nothing was shown.
+    @discardableResult
+    private func present(_ controller: UIViewController, from view: UIView) -> Bool {
         var responder: UIResponder? = view
         while let next = responder?.next {
             if let host = next as? UIViewController {
                 host.present(controller, animated: true)
-                return
+                return true
             }
             responder = next
         }
         report("The panel could not be opened")
+        return false
     }
     #endif
 
@@ -548,10 +580,21 @@ final class ReportPrinter: NSObject, WKNavigationDelegate {
         if #available(iOS 14.0, macOS 11.0, *) {
             config.defaultWebpagePreferences.allowsContentJavaScript = false
         }
-        let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 800, height: 1100), configuration: config)
-        web.navigationDelegate = self
-        self.web = web
-        web.loadHTMLString(html, baseURL: nil)
+        // The report carries all it shows, and this web view reaches for
+        // nothing either: it has the rules the page's has, and without them
+        // it prints nothing.
+        EditorView.offline { [weak self] rules in
+            guard let self = self else { return }
+            guard let rules = rules else {
+                self.done("The report could not be printed: the rules that keep it off the network could not be set up")
+                return
+            }
+            config.userContentController.add(rules)
+            let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 800, height: 1100), configuration: config)
+            web.navigationDelegate = self
+            self.web = web
+            web.loadHTMLString(self.html, baseURL: nil)
+        }
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,

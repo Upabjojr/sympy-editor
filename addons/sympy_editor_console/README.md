@@ -16,7 +16,12 @@ It has two tabs:
     <kbd>Ctrl</kbd>+<kbd>Enter</kbd> runs whatever is there.
   - `_`, `__`, `___`, `_n`, `Out` and `In` are there.
   - `obj?` describes an object and `obj??` shows its source.
-  - The line magics `%who`, `%whos`, `%time` and `%reset` work.
+  - The line magics `%who`, `%whos`, `%time` and `%reset` work. A magic is
+    a line of its own, where a statement would begin: a `%` that continues
+    the line before (`a = (10` / `%3)`) or sits inside a string is Python.
+    - `%reset` is a cell of its own. With anything else in the cell it is
+      refused: nothing is run and nothing is reset, since the other lines
+      would run in a namespace that is thrown away.
   - Completion comes in a menu at the caret. After a `.` it lists what the
     object already in memory has, marked method, property and so on (the
     private `_` names only once you type `_`). Nothing is called to find
@@ -24,6 +29,12 @@ It has two tabs:
     a dozen names begin that way, with your own names and the formula's
     first. <kbd>Tab</kbd> completes as far as every match agrees and shows
     them all.
+    - Past a property there is no menu (`obj.prop.`): the property would
+      have to be read, and reading it runs its code. What an object holds
+      is looked into (`obj.held.`), and so are `editor`'s own properties:
+      `editor.expr.` lists what the formula has.
+    - The names are the ones the object and its classes hold. A `__dir__`
+      or a `__getattr__` of the object's own is not asked.
     - <kbd>↑</kbd>/<kbd>↓</kbd> choose; <kbd>Enter</kbd>, <kbd>Tab</kbd> or a
       tap take one; <kbd>Esc</kbd> closes the menu.
     - <kbd>Enter</kbd> on a name already typed in full runs the input.
@@ -40,12 +51,26 @@ It has two tabs:
     again** to run its inputs once more, in order, stopping at the first
     error. **Clear** forgets it.
   - `display(obj)` shows a value typeset in the middle of the output.
+  - A cell shows 200,000 characters in at most 200 pieces (a print and a
+    `display` taking turns make one each), the LaTeX of what is displayed
+    counted with its text. Past that the output says `[… output cut]` and
+    the rest is dropped; the code runs to its end. A value whose text is
+    longer than 20,000 characters is cut there, and one too long to read
+    typeset is shown as text.
+    - Of what is kept between visits there is less: the last 60 cells, at
+      most 400,000 characters of them (the oldest go first), 40 outputs and
+      60,000 characters for a cell. An input longer than 20,000 characters
+      is kept cut, to be read: **Run all again** stops there.
   - A tap on an output (an `Out[n]` or a `display`) copies its text into the
     input at the cursor; a tap on an earlier input puts it back.
   - Run leaves you at the prompt, with the keyboard up. Once the transcript is
     long, it scrolls in its own box, with a scroll bar that stays visible.
   - **Use** beside an `Out[n]` puts that value in the formula. It goes over
     the selection, or replaces the whole formula when nothing is selected.
+    - The button is there while the value is. After a **Reset**, a `%reset`
+      or a change of session the numbers start again, so the outputs above
+      are text, as last time's are, and their **Use** is gone: run the
+      input again to have the value.
 - **Script** runs a whole file, typed in the panel or opened with **Open…**,
   the way `python script.py` runs it: in a namespace of its own, with
   `__name__ == "__main__"`. Afterwards, as with IPython's `%run`, what the
@@ -60,7 +85,9 @@ It has two tabs:
 SymPy is imported (`from sympy import *`). The formula's own symbols are
 available under their names, with their assumptions. Where SymPy has a
 function of the same name (`beta`, `gamma`), the formula's symbol wins, as it
-does in the editor. A name you assign yourself stays yours.
+does in the editor. A name you assign yourself stays yours, also after a
+script has run: a script leaves in the console what it assigned, not the
+formula's names it was given.
 
 `editor` is the formula:
 
@@ -97,6 +124,12 @@ Each document has its own namespace, so each session of the editor has one.
 The editor's **Interrupt** button stops a long computation. In a standalone
 page that restarts Python, and the variables go with it.
 
+What a cell prints is the output of the thread that runs it. Two consoles
+running at once (two widgets in a notebook) each keep their own, the prints
+of the rest of the process go where they always went, and `sys.stdout` is
+afterwards what it was. A thread that a cell starts prints to Python's own
+output, not to the cell.
+
 `input()` has no keyboard to wait on and says so. `!commands` have no shell
 to run in.
 
@@ -105,7 +138,8 @@ with the same trust as the editor's own input, which is already parsed by
 `parse_expr` (see the main README on the server's token).
 
 No dependency beyond sympy-editor: IPython is not needed. The IPython-like
-behaviour is built on the standard library (`ast`, `codeop`, `rlcompleter`).
+behaviour is built on the standard library (`ast`, `codeop`, `tokenize`,
+`inspect`).
 
 ## Methods
 
@@ -114,12 +148,13 @@ behaviour is built on the standard library (`ast`, `codeop`, `rlcompleter`).
 | `run` | `code`, `path`, `children`, `interactive` | `{n, items, out?, changed, select?, next, token}`, or `{incomplete: true}` when `interactive` and the block is unfinished |
 | `script` | `code`, `name`, `path`, `children` | `{items, changed, select?, next, token}` |
 | `complete` | `code`, `pos` | `{start, word, matches, kinds, total}`: `kinds[i]` says what `matches[i]` is (`function`, `method`, `property`, `class`, or a value's type) |
-| `use` | `n`, `path`, `children` | a change: `Out[n]` in the formula |
+| `use` | `n`, `token`, `path`, `children` | a change: `Out[n]` in the formula. `token` is the namespace the output was shown by; another one than the console's is refused |
 | `reset` | none | `{next, token}`: a new namespace, and a new `token` - the panel's cells from before are only text now |
 
 `items` is the output, in order: `{kind: "stdout" \| "stderr" \| "error",
-text}` and `{kind: "display", text, latex?}`. When a run changed the formula
-(`changed`), the panel asks for a fresh snapshot.
+text}` and `{kind: "display", text, latex?}`; `out` is `{text, latex?}`.
+`latex` is left out when it is longer than 20,000 characters. When a run
+changed the formula (`changed`), the panel asks for a fresh snapshot.
 
 ## Tests
 

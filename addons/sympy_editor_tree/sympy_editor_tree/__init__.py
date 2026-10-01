@@ -133,14 +133,56 @@ def tree_of(expr: Basic, max_nodes: int = 400, view_paths=None, shown: Optional[
     return root
 
 
-def _ipath(value) -> tuple:
-    """A payload path (a list of ints, or "0/1") as a tuple of ints."""
+def _whole(value, what) -> int:
+    """One step of a path, or an index: a whole number, zero or more.  What
+    ``int()`` would let through is not: ``1.5`` is no argument (it used to be
+    read as the first), ``True`` is not a number anyone meant, and ``-1`` is
+    Python's way to the last argument, which no node of the tree is known
+    by."""
+    number = None
+    if isinstance(value, bool):
+        pass
+    elif isinstance(value, int):
+        number = value
+    elif isinstance(value, float) and value.is_integer():     # 1.0: a whole number, as some JSON writes it
+        number = int(value)
+    elif isinstance(value, str) and value.isascii() and value.isdigit():
+        number = int(value)
+    if number is None or number < 0:
+        raise ValueError(f"Not {what}: {value!r} is not a whole number, zero or more")
+    return number
+
+
+def _ipath(value, expr: Optional[Basic] = None, what: str = "an argument path") -> tuple:
+    """A payload path (a list of whole numbers, or "0/1"; nothing at all is
+    the root) as a tuple of ints.  With ``expr``, a path that leads to a node
+    of it: every method reads its paths through here, so that all of them
+    refuse the same things in the same words, before anything is changed."""
     if isinstance(value, str):
         value = [p for p in value.strip("/").split("/") if p]
-    try:
-        return tuple(int(i) for i in (value or ()))
-    except (TypeError, ValueError):
-        raise ValueError(f"Not an argument path: {value!r}") from None
+    if value is None:
+        value = ()
+    if not isinstance(value, (list, tuple)):
+        raise ValueError(f"Not {what}: {value!r}")
+    path = tuple(_whole(i, what) for i in value)
+    node = expr
+    for depth, i in enumerate(path):
+        if node is None:
+            break
+        if i >= len(node.args):
+            where = "/" + "/".join(str(k) for k in path[:depth])
+            has = f"has {len(node.args)} argument{'' if len(node.args) == 1 else 's'}" if node.args else "is a leaf"
+            raise ValueError(f"Not {what}: /{'/'.join(str(k) for k in path)} - {node} at {where} {has}")
+        node = node.args[i]
+    return path
+
+
+def _index(value, count: int) -> int:
+    """Where among ``count`` arguments a new one goes: the end when nothing
+    is said, and no further than the end."""
+    if value is None:
+        return count
+    return min(_whole(value, "a place among the arguments"), count)
 
 
 def _head(name: str, namespace: Dict[str, Any]):
@@ -207,18 +249,18 @@ class TreeAddon(Addon):
         if method == "tree":                                  # a query: the tree alone
             return {"tree": tree_of(expr, self.max_nodes)}
         if method == "set_head":
-            path = _ipath(payload.get("path"))
+            path = _ipath(payload.get("path"), expr)
             node = get_at(expr, path)
             if not node.args:
                 raise ValueError("A leaf has no head to change: edit its value instead")
             head = _head(str(payload.get("head", "")), doc.namespace())
             return replace_at(expr, path, sympify(head(*node.args)))
         if method == "replace":
-            path = _ipath(payload.get("path"))
+            path = _ipath(payload.get("path"), expr)
             new = doc.parse(str(payload.get("src", "")), context=get_at(expr, path))
             return replace_at(expr, path, new)
         if method == "delete":
-            path = _ipath(payload.get("path"))
+            path = _ipath(payload.get("path"), expr)
             if not path:
                 raise ValueError("The root cannot be deleted: type a new expression instead")
             parent = get_at(expr, path[:-1])
@@ -226,12 +268,11 @@ class TreeAddon(Addon):
                 raise ValueError(f"{get_at(expr, path)} cannot be taken out of {parent}: {type(parent).__name__} needs it")
             return delete_at(expr, path)
         if method == "insert":
-            path = _ipath(payload.get("path"))
+            path = _ipath(payload.get("path"), expr)
             node = get_at(expr, path)
             new = doc.parse(str(payload.get("src", "")), context=node)
             args = list(node.args)
-            index = payload.get("index")
-            index = len(args) if index is None else max(0, min(int(index), len(args)))
+            index = _index(payload.get("index"), len(args))
             if not args and not isinstance(node, (Tuple,)):
                 # A leaf takes no argument: the new value is joined to it
                 # instead, as typing beside it in the formula would.
@@ -239,12 +280,17 @@ class TreeAddon(Addon):
             args.insert(index, new)
             return replace_at(expr, path, _with_args(node, args))
         if method == "wrap":
-            path = _ipath(payload.get("path"))
+            path = _ipath(payload.get("path"), expr)
             head = _head(str(payload.get("head", "")), doc.namespace())
             node = get_at(expr, path)
             return replace_at(expr, path, sympify(head(node)))
         if method == "move":
-            return self._move(expr, _ipath(payload.get("from")), _ipath(payload.get("to")), payload.get("index"))
+            src = _ipath(payload.get("from"), expr, "a path to move from")
+            dst = _ipath(payload.get("to"), expr, "a path to move to")
+            index = payload.get("index")
+            if index is not None:
+                index = _whole(index, "a place among the arguments")
+            return self._move(expr, src, dst, index)
         raise ValueError(f"The tree has no method {method!r}")
 
     @staticmethod

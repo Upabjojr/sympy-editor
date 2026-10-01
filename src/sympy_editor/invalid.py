@@ -173,7 +173,16 @@ def node_problem(node: Basic) -> Optional[str]:
             raise TypeError("a matrix cannot be added to a scalar")
         if isinstance(node, (sympy.Pow, sympy.MatPow)) and _matrixish(node.exp):
             raise TypeError("a matrix cannot be an exponent")
-        _rebuild_unevaluated(node, list(args))
+        try:
+            _rebuild_unevaluated(node, list(args))
+        except Exception:
+            # Some constructors cannot build unevaluated what they build
+            # otherwise - Range(0, 10), Interval(0, x) & Interval(y, 3),
+            # a union of open intervals - and the node is as valid as any:
+            # it is one SymPy refuses only when it refuses it evaluating too.
+            with sympy.evaluate(True):
+                rebuild(node, list(args))
+            return None
         if any(_unusual(a) for a in args):
             # evaluated even while the caller reads unevaluated (a saved
             # step): these checks only run when the constructor evaluates
@@ -597,8 +606,7 @@ class _Reader:
             for v in (a, b):
                 if isinstance(v, (str, list, tuple, dict)) or v is None:
                     raise UnsafeText("an operator on something that is not an expression")
-            if op == "pow" and not self.python_numbers and isinstance(a, Integer) and isinstance(b, Integer) \
-                    and abs(int(b)) > 10000:
+            if op == "pow" and not self.python_numbers and _heavy_power(a, b):
                 return sympy.Pow(a, b, evaluate=False)         # no huge powers computed while reading
             if op in ("add", "sub", "mul", "truediv", "pow", "matmul"):
                 return _se_binop(op, a, b)
@@ -639,6 +647,13 @@ class _Reader:
         for v in kwargs.values():
             _check_strings(v, takes_names)
         try:
+            if _heavy_call(fn, args):
+                # Nothing large is computed while reading: the call is kept
+                # as it is written (factorial(10**8), Pow(2, 10**9) - a file
+                # holding one kept the reader busy for good).
+                with sympy.evaluate(False):
+                    return fn(*[sympify(a) if isinstance(a, int) and not isinstance(a, bool) else a for a in args],
+                              **kwargs)
             if _builds_as_evaluated(fn):
                 with sympy.evaluate(True):
                     return fn(*args, **kwargs)
@@ -650,6 +665,45 @@ class _Reader:
                     or isinstance(fn, UndefinedFunction):
                 raise
             return invalid(fn.__name__)(*[_basic(a) for a in args])
+
+
+#: The largest whole number a function is evaluated at while reading, and
+#: the largest result of a power, in bits.
+_LARGE = 10000
+_LARGE_BITS = 40000
+
+
+def _whole(a: Any) -> Optional[int]:
+    """``a`` as a Python int when it is a whole number, else None."""
+    if isinstance(a, bool):
+        return None
+    if isinstance(a, (int, Integer)):
+        return int(a)
+    return None
+
+
+def _heavy_power(base: Any, exponent: Any) -> bool:
+    """Whether ``base ** exponent`` is a number too large to compute while
+    reading: whole or rational base, whole exponent."""
+    n = _whole(exponent)
+    if n is None or not isinstance(base, (int, sympy.Rational)) or isinstance(base, bool):
+        return False
+    base = sympify(base)
+    bits = max(int(base.p).bit_length(), int(base.q).bit_length())
+    return abs(n) > _LARGE or abs(n) * bits > _LARGE_BITS
+
+
+def _heavy_call(fn: Any, args) -> bool:
+    """Whether calling ``fn`` would compute with a large whole number: a
+    power of numbers (see :func:`_heavy_power`), or a function - SymPy's
+    ``factorial``, ``binomial``, ``fibonacci``..., or one that is not a
+    class - given a whole number above ``_LARGE``.  Sums, products, numbers
+    and containers hold such numbers without computing anything."""
+    if fn is sympy.Pow:
+        return len(args) == 2 and _heavy_power(args[0], args[1])
+    if isinstance(fn, type) and not issubclass(fn, Function):
+        return False
+    return any(abs(n) > _LARGE for n in map(_whole, args) if n is not None)
 
 
 def _builds_as_evaluated(fn: Any) -> bool:

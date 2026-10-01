@@ -138,5 +138,7 @@ def edit(expr, backend="auto", **kwargs):
 
         warnings.warn("anywidget is not installed: using the Pyodide (in-browser) editor; edits will not reach the kernel. "
                       "pip install 'sympy-editor[jupyter]' for the kernel-backed widget.", stacklevel=2)
+        for name in ("store", "save_dir"):     # the widget's own: a page keeps in the browser
+            kwargs.pop(name, None)
         return display_html(expr, **kwargs)
     return SympyEditorWidget(expr, **kwargs)
