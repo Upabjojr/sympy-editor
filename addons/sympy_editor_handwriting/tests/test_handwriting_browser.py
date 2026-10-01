@@ -1101,6 +1101,50 @@ def test_the_device_s_own_reader_can_be_asked_instead_of_the_model():
             _close(srv, browser)
 
 
+def test_picking_another_reader_reads_the_ink_again_at_once():
+    """The ink on the page was read by the reader chosen then: picking another
+    reads the same ink again straight away - nothing has to be written anew -
+    and picking the first one back does too."""
+    doc = Document(x, addons=[HandwritingAddon(LetterRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc, pen=False)
+        try:
+            page.add_init_script("""
+                window.__hostAsked = 0;
+                window.SympyEditorApp = Object.assign(window.SympyEditorApp || {}, {
+                    recognizeInk: function (token, json) {
+                        window.__hostAsked++;
+                        setTimeout(function () {
+                            window.SympyEditor.inkRead(token, JSON.stringify({candidates: [{latex: "w + 2"}]}));
+                        }, 10);
+                    }
+                });
+            """)
+            page.reload()
+            page.wait_for_selector(".se-stage .hw-ink", timeout=30000)
+            page.wait_for_selector(".se-view [data-path]")
+            menu = page.locator(".hw-engine")
+            page.locator('[data-cmd="addon:handwriting:pen"]').click()
+            assert _wait(lambda: menu.count() == 1 and menu.is_visible())
+
+            view = page.locator(".se-view").bounding_box()
+            _drag(page, view["x"] + 200, view["y"] + 60, view["x"] + 260, view["y"] + 100)
+            assert _wait(lambda: page.locator(".hw-cand").count() >= 1, 15)
+            by_model = page.locator(".hw-src").inner_text()
+            assert by_model != "w + 2" and page.evaluate("window.__hostAsked") == 0
+
+            menu.select_option("host")                       # no new stroke: the same ink, the other reader
+            assert _wait(lambda: page.locator(".hw-src").inner_text() == "w + 2", 15)
+            assert page.evaluate("window.__hostAsked") == 1
+            menu.select_option("math-ocr")                   # and back
+            assert _wait(lambda: page.locator(".hw-src").inner_text() == by_model, 15)
+            assert page.evaluate("window.__hostAsked") == 1
+            assert str(doc.expr) == "x"                      # read, not applied
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
 def test_the_writing_tools_stay_off_while_the_pen_is():
     """Everything but the Pen is for writing, so with the Pen off they are all
     off - and they stay off through what the editor does to its toolbar: a tap

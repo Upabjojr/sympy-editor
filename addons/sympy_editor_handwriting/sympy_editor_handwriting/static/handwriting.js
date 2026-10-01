@@ -143,7 +143,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       + "<li>What the reading did is shown under the editor - the formula as it was and as it now is, what went marked red and what came marked green - to <b>Keep</b> (which takes you back up to the formula) or to <b>Undo the change</b>; the editor's own Undo takes it back too.</li>"
       + "<li>Under the readings: what SymPy gets of the one in the formula, with the ways to read each part of the LaTeX that can be read more than one way, typeset, to pick from and a switch for each constant name. <b>\u270e LaTeX</b> opens the reading's own LaTeX to correct where a glyph was read wrong: what is typed there is read and goes into the formula like any other reading, and stays among them to pick again.</li>"
       + "<li>The reading is done by math-ocr's stroke model. It reads one formula at a time, and mixes up look-alike glyphs most (<code>1</code> and <code>|</code>, <code>V</code> and <code>v</code>).</li>"
-      + "<li>Where this device has a reader of its own - the app's (Apple's Vision) or the browser's - it is offered beside the model, in the menu at the top of the strip. It reads <i>text</i>, a line at a time: it knows nothing of fractions, exponents or roots, and what it reads is taken as typed. It is there for a device that carries no model, and for a line of ordinary algebra; the model is what reads mathematics. The choice is the document's, kept with its session; where the one chosen cannot read - the device's reader, on a device that has none - the first that can is asked.</li>"
+      + "<li>Where this device has a reader of its own - the app's (Apple's Vision) or the browser's - it is offered beside the model, in the menu at the top of the strip. It reads <i>text</i>, a line at a time: it knows nothing of fractions, exponents or roots, and what it reads is taken as typed. It is there for a device that carries no model, and for a line of ordinary algebra; the model is what reads mathematics. Picking another reader reads what is written again, at once. The choice is the document's, kept with its session; where the one chosen cannot read - the device's reader, on a device that has none - the first that can is asked.</li>"
       + "<li>Where nothing can read - no model beside this Python, or a page that runs its own Python, which carries none - the Pen is off and the strip under the formula says why.</li>"
       + "</ul></section>"
       + (status.notice ? '<section><h3>About the model</h3><p style="white-space: pre-wrap">' + plain(status.notice) + "</p></section>" : "");
@@ -954,6 +954,10 @@ SympyEditor.registerAddon("handwriting", (function () {
                        (e.note ? " \u2014 " + e.note : "")
                      : state.why, !state.ok);
         api.call("engine", { name: name }, { quiet: true }).then(function () {}, function () {});
+        // What is written is read again, at once, by the reader just picked:
+        // its readings are what the choice was made for, and the ones on show
+        // are the other reader's.  One that cannot read leaves them and says why.
+        if (state.ok && (strokes.length || readings.length)) read();
       }
 
       function idle() {

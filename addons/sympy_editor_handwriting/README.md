@@ -48,7 +48,7 @@ history marks a step, to **Keep** or to undo.
 ## What reads the strokes
 
 The add-on has more than one engine, and the strip's menu picks between the
-ones this page has:
+ones this page has; picking another reads the ink on the page again, at once:
 
 | Engine | Where it reads | What it reads |
 | --- | --- | --- |
