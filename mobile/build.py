@@ -20,11 +20,8 @@ Environment for signing:
 from __future__ import annotations
 
 import argparse
-<<<<<<< Updated upstream
 import gzip
-=======
 import hashlib
->>>>>>> Stashed changes
 import os
 import platform
 import plistlib
@@ -138,14 +135,18 @@ def unpack(archive: Path, root: Path) -> Path:
     part.mkdir(parents=True)
     print(f"+ unpacking {archive.name}", flush=True)
     try:
-        with tarfile.open(archive) as tar:
-            try:
-                tar.extractall(part, filter="tar")
-            except TypeError:                     # no extraction filter before 3.12
-                tar.extractall(part)
+        if archive.suffix == ".zip":              # ONNX Runtime's archive
+            with zipfile.ZipFile(archive) as zf:
+                zf.extractall(part)
+        else:
+            with tarfile.open(archive) as tar:
+                try:
+                    tar.extractall(part, filter="tar")
+                except TypeError:                     # no extraction filter before 3.12
+                    tar.extractall(part)
         shutil.rmtree(root, ignore_errors=True)
         part.replace(root)
-    except (tarfile.TarError, EOFError, gzip.BadGzipFile, zlib.error) as exc:
+    except (tarfile.TarError, zipfile.BadZipFile, EOFError, gzip.BadGzipFile, zlib.error) as exc:
         archive.unlink(missing_ok=True)
         sys.exit(f"{archive} could not be unpacked ({exc}): the cached copy was deleted - "
                  "build again to download it afresh")
@@ -435,9 +436,7 @@ def ios_onnxruntime() -> Path:
         if digest != ONNXRUNTIME_IOS_SHA256:
             archive.unlink()
             sys.exit(f"{name}: sha256 {digest}, not the pinned {ONNXRUNTIME_IOS_SHA256}")
-        print(f"+ unpacking {archive.name}", flush=True)
-        with zipfile.ZipFile(archive) as zf:
-            zf.extractall(root)
+        unpack(archive, root)
     check_no_network(framework)
     link = IOS / "onnxruntime.xcframework"
     if link.is_symlink() or link.exists():

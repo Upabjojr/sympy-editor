@@ -164,14 +164,11 @@ def _on_android() -> bool:
     return "ANDROID_ROOT" in os.environ and importlib.util.find_spec("java") is not None
 
 
-<<<<<<< Updated upstream
 def _in_a_page() -> bool:
     """Pyodide: this Python runs in a browser's page."""
     return sys.platform == "emscripten"
 
 
-def _android_status() -> Dict[str, Any]:
-=======
 #: The module the iOS app builds into its interpreter: ONNX Runtime's C API,
 #: as much of it as :class:`_NativeSession` needs.
 IOS_MODULE = "_sympy_ort"
@@ -188,7 +185,6 @@ def _in_app() -> bool:
 
 
 def _app_status() -> Dict[str, Any]:
->>>>>>> Stashed changes
     if importlib.util.find_spec(APP_MODEL_PACKAGE) is None or importlib.util.find_spec("mathocr") is None:
         return {"available": False, "reason": "This build of the app carries no handwriting model "
                                               "(one built beside a math-ocr checkout does)"}
@@ -635,19 +631,14 @@ class StrokeRecognizer:
     def status(self) -> Dict[str, Any]:
         """Whether recognition can run here - and if not, why - without
         loading anything."""
-<<<<<<< Updated upstream
-        if _on_android():
-            return _android_status()
+        if _in_app():
+            return _app_status()
         if _in_a_page():
             # Pyodide: there is no onnxruntime for it and no model in the
             # page - "pip install onnxruntime" is no advice to give there.
             return {"available": False,
                     "reason": "A page that runs its own Python carries no handwriting model: the model reads "
-                              "beside a Python of this machine - the local server, Jupyter - and in the Android app"}
-=======
-        if _in_app():
-            return _app_status()
->>>>>>> Stashed changes
+                              "beside a Python of this machine - the local server, Jupyter - and in the Android and iOS apps"}
         if importlib.util.find_spec("onnxruntime") is None:
             return {"available": False, "reason": "onnxruntime is not installed in this Python (pip install onnxruntime)"}
         # The reasons name folders, never where they are: they are shown in

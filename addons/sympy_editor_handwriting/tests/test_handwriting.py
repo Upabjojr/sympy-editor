@@ -392,7 +392,6 @@ def test_the_pieces_to_read_with_come_as_latex():
     assert sorted(got.values()) == sorted([r"\sin{\left(x \right)}", r"\frac{1}{y}"]) and "/9/9" not in got
 
 
-<<<<<<< Updated upstream
 # ---- what a page is asked to install, and what it is told -------------------
 
 def _checkout(tmp_path, meta='{"mode": "stroke"}'):
@@ -648,7 +647,6 @@ def test_keep_and_undo_wear_the_colours_of_the_change():
     assert "color: rgb(var(--se-removed-rgb))" in back and "border-color: rgba(var(--se-removed-rgb)" in back
     assert "background" not in back
 
-=======
 def test_the_ios_session_speaks_bytes_to_the_apps_module(monkeypatch):
     """In the iOS app ONNX Runtime is a module built into the interpreter that
     knows nothing of numpy: tensors cross as (type code, shape, buffer), and
@@ -687,4 +685,3 @@ def test_the_ios_session_speaks_bytes_to_the_apps_module(monkeypatch):
 
     # only the iOS app's interpreter has the module: nowhere else is it "in an app"
     assert not recognizer._on_ios()
->>>>>>> Stashed changes
