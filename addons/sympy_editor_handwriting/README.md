@@ -142,6 +142,7 @@ or, from Python, `serve(expr, addons=["handwriting", "latex"])`.
   git-ignored.  The model's `NOTICE` (the terms it is distributed under), when
   its export has one, goes into the app with it, and the add-on's guide shows
   it; a build without one warns.
+<<<<<<< Updated upstream
 * **Not** in a self-contained Pyodide page, the web site or the iOS app, so
   `addon.json` keeps it out of their bundles.  A page that runs its own Python
   and has the add-on all the same (`save_html(expr, ..., addons=["handwriting"])`)
@@ -175,6 +176,20 @@ readings that are no list or carry no text, `children` that are no whole
 numbers.  A reading that holds the placeholder (`\mathit{nestedpiece}`) with
 no piece to put there - a path that is gone, arguments the node has not - is
 refused rather than read with the placeholder's name in it.
+=======
+* **In the iOS app** (`python mobile/build.py ios`): there is no onnxruntime
+  wheel for iOS, so ONNX Runtime's own iOS library (`onnxruntime.xcframework`,
+  pinned and downloaded by the build) is linked into the app, and a module
+  built into the app's interpreter - `_sympy_ort`,
+  `mobile/ios/SymPyEditor/OrtModule.m` - gives the add-on's Python a session
+  to run the model in.  NumPy is BeeWare's build for iOS.  The build stages
+  all of it, with the add-on, math-ocr's two modules, the model and its
+  `NOTICE`, in a folder of its own (`mobile/ios/ink`, `ios_ink` in
+  `mobile/build.py`), git-ignored: NumPy is built per platform, and the Mac
+  app shares the rest of the iOS app's Python.
+* **Not** in a self-contained Pyodide page, the web site or the Mac app, so
+  `addon.json` keeps it out of their bundles.
+>>>>>>> Stashed changes
 
 ## Two things the model's output needs
 
@@ -194,7 +209,7 @@ any later version** (`AGPL-3.0-or-later`, the text in [`LICENSE`](LICENSE)).
 Copyright (c) 2026 Francesco Bonazzi.
 
 The same licence as sympy-editor and its other add-ons.  Whoever distributes
-the add-on, or a build that carries it (the Android app does), or lets people
+the add-on, or a build that carries it (the Android and iOS apps do), or lets people
 use it over a network, must offer them its source under the same licence.
 
 What it runs on keeps its own terms: SymPy (BSD-3-Clause), NumPy

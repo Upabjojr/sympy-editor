@@ -253,3 +253,18 @@ add-on new in an update starts on).  What an add-on `requires`
 checks they match the manifests - and `app_packages` on iOS.  See
 `addons/README.md`; adding an add-on from a repository at run time is the
 step not taken yet, and the folder layout is shaped for it.
+
+**Handwriting** is the one add-on staged apart (`"bundle": false` in its
+manifest), because it needs a model and native code.  Both apps take the
+model from a math-ocr checkout beside this one (`stage_ink`; without it the
+app is built without handwriting) and run it in ONNX Runtime: the Maven
+library on Android, and on iOS `onnxruntime.xcframework` - pinned in
+`build.py`, downloaded to the cache, linked into the app as a static library
+and given to the app's Python as the built-in module `_sympy_ort`
+(`ios/SymPyEditor/OrtModule.m`), since no onnxruntime wheel exists for iOS.
+It is 1.28, not Android's 1.29: the later iOS library carries a telemetry
+uploader, and the build refuses any library that imports a networking API
+(`check_no_network`), so the app cannot send anything through it.
+The iOS build puts the add-on, the model and NumPy (BeeWare's iOS wheel, for
+the device or the simulator being built for) in `ios/ink/`, a folder the Mac
+app does not share.

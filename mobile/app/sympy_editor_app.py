@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import sys
 import threading
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
@@ -31,6 +32,17 @@ from sympy_editor.document import Document, Interrupted, interrupt_thread
 #: same way.
 ADDONS_DIR = Path(__file__).resolve().parent / "addons"
 BUNDLED_ADDONS = register_addons_folder(ADDONS_DIR) if ADDONS_DIR.is_dir() else {}
+
+#: What the iOS app carries for the handwriting add-on, in a folder of its own
+#: beside this one (``ink/``, staged by ``mobile/build.py``): NumPy built for
+#: iOS, math-ocr's two modules and its model, and the add-on itself.  Apart
+#: from the rest because the Mac app shares this folder and SymPy's, and none
+#: of that is a Mac's.  Android stages the same things beside this module.
+INK_DIR = Path(__file__).resolve().parent.parent / "ink"
+if (INK_DIR / "addons").is_dir():
+    if str(INK_DIR) not in sys.path:
+        sys.path.append(str(INK_DIR))
+    BUNDLED_ADDONS.update(register_addons_folder(INK_DIR / "addons"))
 
 #: The keyword arguments this version's Document takes.  A session saved by a
 #: newer app can carry settings it does not know (the app's storage outlives

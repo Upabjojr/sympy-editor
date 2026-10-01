@@ -1630,6 +1630,45 @@ def test_the_bundle_carries_what_its_add_ons_load_from_a_cdn(tmp_path):
     assert "Plotly.js (the plot add-on)" in (out / "vendor" / "NOTICE.txt").read_text(encoding="utf-8")
 
 
+def test_the_ios_app_reads_handwriting_with_onnxruntime():
+    """iOS has no onnxruntime wheel: ONNX Runtime's own library is linked
+    into the app and handed to its Python as a built-in module, and what the
+    add-on reads with is staged in a folder the Mac app does not share."""
+    yaml = pytest.importorskip("yaml")
+    target = yaml.safe_load((ROOT / "mobile/ios/project.yml").read_text(encoding="utf-8"))["targets"]["SymPyEditor"]
+    assert any(d.get("framework") == "onnxruntime.xcframework" and d.get("embed") is False
+               for d in target["dependencies"])                       # a static library: linked, not embedded
+    assert "ink" in {s["path"] for s in target["sources"] if isinstance(s, dict)}
+    script = "\n".join(s["script"] for s in target["postBuildScripts"])
+    assert " ink;" in script[script.index("process_dylibs") - 200:]   # NumPy's extension modules made into frameworks
+
+    objc = (ROOT / "mobile/ios/SymPyEditor/PythonRuntime.m").read_text(encoding="utf-8")
+    assert objc.index('PyImport_AppendInittab("_sympy_ort"') < objc.index("Py_PreInitialize(")
+    assert 'setenv("ORT_DISABLE_TELEMETRY", "1", 1)' in objc
+    module = (ROOT / "mobile/ios/SymPyEditor/OrtModule.m").read_text(encoding="utf-8")
+    assert "PyInit__sympy_ort" in module and "DisableTelemetryEvents" in module and "CreateSessionFromArray" in module
+
+    build = (ROOT / "mobile/build.py").read_text(encoding="utf-8")
+    assert "ONNXRUNTIME_IOS_SHA256" in build and "ios_ink(simulator)" in build
+    # ONNX Runtime 1.29's iOS library uploads telemetry (NSURLSession, to Microsoft's
+    # collector): the pinned one does not, and the build refuses any that could
+    sys.path.insert(0, str(ROOT / "mobile"))
+    import build as mobile_build
+    assert tuple(int(n) for n in mobile_build.ONNXRUNTIME_IOS.split(".")) < (1, 29)
+    assert "check_no_network(framework)" in build
+    assert {"NSURLSession", "_nw_", "_socket", "_getaddrinfo"} <= set(mobile_build.ONNXRUNTIME_FORBIDDEN)
+    assert "events.data.microsoft.com" in mobile_build.ONNXRUNTIME_FORBIDDEN_TEXT
+    app = (ROOT / "mobile/app/sympy_editor_app.py").read_text(encoding="utf-8")
+    assert 'INK_DIR / "addons"' in app
+    ignored = (ROOT / ".gitignore").read_text(encoding="utf-8")
+    assert "mobile/ios/ink/" in ignored and "mobile/ios/onnxruntime.xcframework" in ignored   # the model never reaches git
+
+    # the Mac app shares the iOS app's Python folders, and must get none of this
+    mac = (ROOT / "desktop/macos/project.yml").read_text(encoding="utf-8")
+    assert "onnxruntime" not in mac and "ios/ink" not in mac and "OrtModule" not in mac
+    assert "#if !TARGET_OS_OSX" in objc
+
+
 def test_the_apps_have_no_network():
     """The privacy statement says the apps send nothing, and they must not be
     able to: ONNX Runtime's Android library asks for INTERNET and starts a

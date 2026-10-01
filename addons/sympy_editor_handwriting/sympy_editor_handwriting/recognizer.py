@@ -23,6 +23,12 @@ In the Android app (Chaquopy) there is no onnxruntime for Python: the model
 runs in onnxruntime-android, the Maven library, through Chaquopy's Java
 bridge (:class:`_JavaSession`), and math-ocr's two modules and the model come
 with the app - its build stages them beside its Python (mobile/build.py).
+
+The iOS app has no onnxruntime for Python either: ONNX Runtime's own iOS
+library is linked into the app, which gives its Python a small built-in
+module, ``_sympy_ort`` (mobile/ios/SymPyEditor/OrtModule.m), and the model
+runs through that (:class:`_NativeSession`).  NumPy is BeeWare's build for
+iOS; the rest is staged as on Android.
 """
 from __future__ import annotations
 
@@ -141,7 +147,7 @@ def with_braces(tokens: Sequence[str]) -> List[str]:
     return out
 
 
-#: The model as the Android app carries it: a package of its own.
+#: The model as the apps carry it: a package of its own.
 APP_MODEL_PACKAGE = "mathocr_model"
 #: The model's attribution and licence terms, a file beside its weights.
 MODEL_NOTICE = "NOTICE"
@@ -158,22 +164,42 @@ def _on_android() -> bool:
     return "ANDROID_ROOT" in os.environ and importlib.util.find_spec("java") is not None
 
 
+<<<<<<< Updated upstream
 def _in_a_page() -> bool:
     """Pyodide: this Python runs in a browser's page."""
     return sys.platform == "emscripten"
 
 
 def _android_status() -> Dict[str, Any]:
+=======
+#: The module the iOS app builds into its interpreter: ONNX Runtime's C API,
+#: as much of it as :class:`_NativeSession` needs.
+IOS_MODULE = "_sympy_ort"
+
+
+def _on_ios() -> bool:
+    """The iOS app's CPython, with ONNX Runtime built into it."""
+    return sys.platform == "ios" and IOS_MODULE in sys.builtin_module_names
+
+
+def _in_app() -> bool:
+    """In one of the apps: the model and math-ocr's modules come with it."""
+    return _on_android() or _on_ios()
+
+
+def _app_status() -> Dict[str, Any]:
+>>>>>>> Stashed changes
     if importlib.util.find_spec(APP_MODEL_PACKAGE) is None or importlib.util.find_spec("mathocr") is None:
         return {"available": False, "reason": "This build of the app carries no handwriting model "
                                               "(one built beside a math-ocr checkout does)"}
     if importlib.util.find_spec("numpy") is None:
         return {"available": False, "reason": "numpy is not in this build of the app"}
-    try:
-        from java import jclass
-        jclass("ai.onnxruntime.OrtEnvironment")
-    except Exception:  # noqa: BLE001 - a missing class is a Java exception
-        return {"available": False, "reason": "onnxruntime-android is not in this build of the app"}
+    if _on_android():
+        try:
+            from java import jclass
+            jclass("ai.onnxruntime.OrtEnvironment")
+        except Exception:  # noqa: BLE001 - a missing class is a Java exception
+            return {"available": False, "reason": "onnxruntime-android is not in this build of the app"}
     import pkgutil
     try:
         notice = read_notice(pkgutil.get_data(APP_MODEL_PACKAGE, MODEL_NOTICE))
@@ -268,6 +294,32 @@ class _JavaSession:
             return [self._array(result.get(self._outputs.index(n))) for n in (names or self._outputs)]
         finally:
             result.close()
+
+
+class _NativeSession:
+    """The iOS app's ONNX Runtime behind the same one call, ``run(None,
+    feeds)``: the app's built-in module takes and gives tensors as (type code,
+    shape, bytes) - it knows nothing of numpy - and this turns them into
+    arrays.  An input is read where it lies, not copied."""
+
+    CODES = {"f": "float32", "q": "int64", "?": "bool"}
+
+    def __init__(self, model: bytes, threads: int = 1) -> None:
+        ort = importlib.import_module(IOS_MODULE)
+        self._session = ort.Session(model, max(1, int(threads)))
+        self._outputs = list(self._session.output_names)
+
+    def run(self, names, feeds):
+        import numpy as np
+        given = {}
+        for name, value in feeds.items():
+            arr = np.asarray(value)
+            code = "?" if arr.dtype == np.bool_ else "q" if arr.dtype == np.int64 else "f"
+            arr = np.ascontiguousarray(arr, dtype=self.CODES[code])
+            given[name] = (code, tuple(int(n) for n in arr.shape), arr)
+        got = [np.frombuffer(data, dtype=self.CODES[code]).reshape(shape)
+               for code, shape, data in self._session.run(given)]
+        return [got[self._outputs.index(n)] for n in (names or self._outputs)]
 
 
 #: Delimiters that open and close a pair, and those that do both.
@@ -583,6 +635,7 @@ class StrokeRecognizer:
     def status(self) -> Dict[str, Any]:
         """Whether recognition can run here - and if not, why - without
         loading anything."""
+<<<<<<< Updated upstream
         if _on_android():
             return _android_status()
         if _in_a_page():
@@ -591,6 +644,10 @@ class StrokeRecognizer:
             return {"available": False,
                     "reason": "A page that runs its own Python carries no handwriting model: the model reads "
                               "beside a Python of this machine - the local server, Jupyter - and in the Android app"}
+=======
+        if _in_app():
+            return _app_status()
+>>>>>>> Stashed changes
         if importlib.util.find_spec("onnxruntime") is None:
             return {"available": False, "reason": "onnxruntime is not installed in this Python (pip install onnxruntime)"}
         # The reasons name folders, never where they are: they are shown in
@@ -621,7 +678,7 @@ class StrokeRecognizer:
             st = self.status()
             if not st["available"]:
                 raise RuntimeError(st["reason"])
-            if _on_android():
+            if _in_app():
                 import pkgutil
                 inkml = importlib.import_module("mathocr.data.inkml")
                 tokenizer = importlib.import_module("mathocr.tokenizer")
@@ -637,7 +694,8 @@ class StrokeRecognizer:
                     return importlib.resources.files(APP_MODEL_PACKAGE).joinpath(name).read_bytes()
 
                 threads = int(self._threads or os.environ.get("MATHOCR_THREADS", 1))
-                enc, dec = _JavaSession(data("encoder.onnx"), threads), _JavaSession(data("decoder_step.onnx"), threads)
+                session = _JavaSession if _on_android() else _NativeSession
+                enc, dec = session(data("encoder.onnx"), threads), session(data("decoder_step.onnx"), threads)
                 tok = tokenizer.Tokenizer(json.loads(data("vocab.json").decode("utf-8")))
                 self._loaded = (enc, dec, tok, inkml, tokenizer, _meta(json.loads(data("meta.json").decode("utf-8"))))
                 return self._loaded

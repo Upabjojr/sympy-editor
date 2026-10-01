@@ -392,6 +392,7 @@ def test_the_pieces_to_read_with_come_as_latex():
     assert sorted(got.values()) == sorted([r"\sin{\left(x \right)}", r"\frac{1}{y}"]) and "/9/9" not in got
 
 
+<<<<<<< Updated upstream
 # ---- what a page is asked to install, and what it is told -------------------
 
 def _checkout(tmp_path, meta='{"mode": "stroke"}'):
@@ -647,3 +648,43 @@ def test_keep_and_undo_wear_the_colours_of_the_change():
     assert "color: rgb(var(--se-removed-rgb))" in back and "border-color: rgba(var(--se-removed-rgb)" in back
     assert "background" not in back
 
+=======
+def test_the_ios_session_speaks_bytes_to_the_apps_module(monkeypatch):
+    """In the iOS app ONNX Runtime is a module built into the interpreter that
+    knows nothing of numpy: tensors cross as (type code, shape, buffer), and
+    the session turns them into arrays on the way back, in the order asked."""
+    import sys
+    import types
+    np = pytest.importorskip("numpy")
+    from sympy_editor_handwriting import recognizer
+
+    seen = {}
+
+    class Session:
+        output_names = ["memory", "mask"]
+
+        def __init__(self, model, threads):
+            seen["made"] = (model, threads)
+
+        def run(self, feeds):
+            seen["feeds"] = {name: (code, shape, bytes(memoryview(data))) for name, (code, shape, data) in feeds.items()}
+            return [("f", (1, 2), np.array([[1.5, 2.5]], dtype=np.float32).tobytes()),
+                    ("?", (1, 2), np.array([[True, False]]).tobytes())]
+
+    monkeypatch.setitem(sys.modules, recognizer.IOS_MODULE, types.SimpleNamespace(Session=Session))
+    session = recognizer._NativeSession(b"model", threads=0)
+    assert seen["made"] == (b"model", 1)
+    src = np.arange(6, dtype=np.float64).reshape(1, 3, 2)[:, ::-1]          # not float32, not contiguous
+    mask, memory = session.run(["mask", "memory"], {"src": src, "src_len": np.array([3], dtype=np.int64),
+                                                   "pad": np.array([True, False])})
+    assert memory.dtype == np.float32 and memory.tolist() == [[1.5, 2.5]]
+    assert mask.dtype == np.bool_ and mask.tolist() == [[True, False]]
+    code, shape, data = seen["feeds"]["src"]
+    assert (code, shape) == ("f", (1, 3, 2))
+    assert np.frombuffer(data, dtype=np.float32).tolist() == [4, 5, 2, 3, 0, 1]
+    assert seen["feeds"]["src_len"][:2] == ("q", (1,)) and seen["feeds"]["pad"][:2] == ("?", (2,))
+    assert [a.tolist() for a in session.run(None, {})] == [[[1.5, 2.5]], [[True, False]]]
+
+    # only the iOS app's interpreter has the module: nowhere else is it "in an app"
+    assert not recognizer._on_ios()
+>>>>>>> Stashed changes

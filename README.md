@@ -633,6 +633,7 @@ follow.
 | SymPy wheel (PyPI) | BSD-3 | loaded by the browser into Pyodide (the newest SymPy, ahead of Pyodide's own package) |
 | lark, sympy-matching, NumPy, onnxruntime, Plotly.js | MIT / BSD-3 | the add-ons' own: LaTeX, rewrite rules, plot, handwriting |
 | Chaquopy, ONNX Runtime for Android, androidx, Kotlin | MIT / Apache-2.0 | the Android app is built on them |
+| ONNX Runtime for iOS, NumPy (BeeWare's build) | MIT / BSD-3 | the iOS app's handwriting runs on them |
 | Python-Apple-support (BeeWare) | MIT | the iOS and Mac apps' CPython |
 | CPython, with OpenSSL, libffi, XZ, bzip2, SQLite, mpdecimal | PSF-2.0 / Apache-2.0 / MIT / 0BSD / bzip2 / public domain / BSD-2 | the apps' Python interpreter |
 

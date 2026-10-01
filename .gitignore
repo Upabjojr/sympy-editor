@@ -34,6 +34,10 @@ mobile/ios/SymPyEditor/Info.plist
 mobile/ios/Python.xcframework
 mobile/ios/app/
 mobile/ios/app_packages/
+# ONNX Runtime (linked into the cache) and what the handwriting add-on reads
+# with in the iOS app - NumPy, math-ocr's modules and its model: never committed
+mobile/ios/onnxruntime.xcframework
+mobile/ios/ink/
 mobile/android/gradle/wrapper/gradle-wrapper.jar
 
 # the Mac app: the Xcode project, the interpreter and the plist are generated

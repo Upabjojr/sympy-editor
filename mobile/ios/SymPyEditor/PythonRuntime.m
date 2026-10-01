@@ -1,6 +1,10 @@
 #import "PythonRuntime.h"
 
 #import <Python/Python.h>
+#import <TargetConditionals.h>
+#if !TARGET_OS_OSX
+#import "OrtModule.h"
+#endif
 
 NSErrorDomain const SymPyEditorPythonErrorDomain = @"org.sympy.editor.python";
 
@@ -129,6 +133,18 @@ static BOOL packagesAdded = NO;
 /// the same way (PyGILState_Ensure).
 - (BOOL)initializeWithResources:(NSString *)resources error:(NSError **)error {
     PyStatus status;
+
+#if !TARGET_OS_OSX
+    // ONNX Runtime, which the handwriting add-on's model runs on, is a module
+    // built into the app (OrtModule.m): there is no wheel of it for iOS.  It
+    // must be in the table before the interpreter starts, and it is told to
+    // send nothing anywhere before it is ever loaded.
+    setenv("ORT_DISABLE_TELEMETRY", "1", 1);
+    if (PyImport_AppendInittab("_sympy_ort", PyInit__sympy_ort) < 0) {
+        if (error) *error = pythonError(@"cannot register the ONNX Runtime module");
+        return NO;
+    }
+#endif
 
     // An isolated interpreter: it must read nothing of the environment, and
     // it cannot write .pyc files next to a bundle that is already signed.

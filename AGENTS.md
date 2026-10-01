@@ -1192,6 +1192,28 @@ pip package.  The rule is minimal wrapping and maximal sharing:
   import of onnxruntime on the desktop too.  A new dependency is checked for
   what it connects to (`test_the_apps_have_no_network`, and
   `aapt2 dump permissions` on a built APK lists none).
+- **Handwriting in the apps.**  The add-on is staged apart from the others
+  (`"bundle": false`), with math-ocr's two modules and its model
+  (`stage_ink`), and the model runs in ONNX Runtime behind the one call the
+  beam search makes, `run(None, feeds)`: `_JavaSession` on Android (the Maven
+  library through Chaquopy), `_NativeSession` on iOS.  There is no
+  onnxruntime wheel for iOS, so `onnxruntime.xcframework` (pinned by version
+  and checksum in `build.py`, a static library) is linked into the app and
+  `OrtModule.m` makes it the built-in module `_sympy_ort` - registered with
+  `PyImport_AppendInittab` before the interpreter starts, tensors in and out
+  as (type code, shape, bytes), no NumPy on the C side.  NumPy itself is
+  BeeWare's iOS wheel, per platform (device / simulator), so the iOS build
+  stages all of it in `mobile/ios/ink/` (`ios_ink`), which
+  `sympy_editor_app.py` puts on the path when it is there - never in `app/`
+  or `app_packages/`, which the Mac app shares.  `PythonRuntime.m` is shared
+  too: its ONNX lines are under `#if !TARGET_OS_OSX`.  The iOS library is
+  pinned to 1.28 on purpose: from 1.29 it carries Microsoft's telemetry
+  client (an NSURLSession uploader to `mobile.events.data.microsoft.com`),
+  and iOS has no permission to remove as Android's manifest does.
+  `check_no_network` reads every iOS slice with `nm` and `strings` and stops
+  the build if the library imports a networking API or names the collector -
+  an off-switch (`ORT_DISABLE_TELEMETRY`, still set) is not a guarantee.
+  Bump the version only to a release that passes it.
 - **Glyphs a platform may lack are drawn, not typed.**  iOS has no character
   for the arrows, the keyboard, the hamburger or ✕: the arrows, the
   full-screen brackets and the keyboard are SVG (`arrowSvg`, `expandSvg`,

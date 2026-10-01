@@ -99,9 +99,12 @@ androidx.appcompat 1.7, androidx.webkit 1.11 and what they depend on   Apache-2.
 Kotlin standard library  Apache-2.0
 The handwriting model, when the build carries one, is not part of this project:
 it comes with a NOTICE of its own, beside the app's Python, which states the
-terms it is distributed under.
+terms it is distributed under.  The iOS app carries it the same way.
 iOS and the Mac:
 Python-Apple-support 3.13 (BeeWare's build of CPython)  MIT  https://github.com/beeware/Python-Apple-support
+iOS:
+ONNX Runtime for iOS 1.28 (the handwriting model runs on it)  MIT  https://onnxruntime.ai
+NumPy (BeeWare's build for iOS)  BSD-3  https://numpy.org
 """
 
 

@@ -92,7 +92,15 @@ KaTeX and Plotly.js as above, vendored in the bundle, and:
 | CPython (in it) | PSF-2.0 | with the libraries built into it: OpenSSL 3 (Apache-2.0), libffi (MIT), XZ/liblzma (0BSD), bzip2 (bzip2 licence), mpdecimal (BSD-2-Clause) |
 | SymPy, mpmath, lark, sympy-matching, omnimatch, multiset | as above | the app's Python (`app_packages`), installed by pip at build time |
 
-The handwriting add-on is not in these apps.
+The iOS app alone, for the handwriting add-on (the Mac app does not carry it):
+
+| Component | Licence | Note |
+| --- | --- | --- |
+| [ONNX Runtime for iOS](https://onnxruntime.ai) 1.28 | MIT | the handwriting model runs on it (not 1.29, whose iOS library carries a telemetry uploader; the build refuses a library with networking in it): `onnxruntime.xcframework`, a static library linked into the app and reached through `mobile/ios/SymPyEditor/OrtModule.m`; its `LICENSE` is staged beside the model (`mobile/build.py`, `ios_onnxruntime`, `ios_ink`) |
+| [NumPy](https://numpy.org) 2.5 (BeeWare's build for iOS) | BSD-3-Clause | the handwriting add-on's features and beam search; its wheel carries the licences of what it bundles |
+
+The handwriting model comes into the iOS app the way it does into the Android
+one, with its own `NOTICE` and under the same terms (above).
 
 ## Development only
 
