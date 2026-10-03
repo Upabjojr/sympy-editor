@@ -430,7 +430,11 @@ Two conventions between printer, document and front end:
   editor keeps a list of sessions through the keeper (`Keep`, name `sessions`:
   the app's files, the server's or the kernel's store, `localStorage` only on
   a plain page - see docs/file-format.md), saves
-  the current one after each committed change (debounced `_saveSession`)
+  the current one after each committed change (debounced `_saveSession`;
+  never behind a request in flight - it waits for the request to end, and
+  after an Interrupt for the user's next request, `_saveWhenIdle`: sent
+  behind a computation it was thrown away with it, and in a Pyodide page it
+  was what restarted Python, the loading overlay coming up by itself)
   and switches with `backend.openDocument(state)` (Pyodide: a new document
   id in the shared runtime).  All of it lives in a lateral drawer
   (`.se-drawer`, `position: fixed`, the ≡ toolbar button, Esc / backdrop /

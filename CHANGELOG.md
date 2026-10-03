@@ -154,7 +154,11 @@
   red); after an Interrupt, the "Loading Python runtime…" overlay of the
   restarted Python goes away once it is ready, instead of covering the page;
   the Interrupt button no longer vanishes when the function list arrives
-  while a long call is computing. Everywhere: the *New session* chooser
+  while a long call is computing; and Python no longer restarts by itself
+  right after an Interrupt, covering the page for a quarter of a minute -
+  it restarts for the next thing you ask. Everywhere: a session save that
+  comes due during a long computation waits for it instead of being lost
+  with it when it is interrupted; the *New session* chooser
   stays open while the list is refreshed in the background, and an example
   started as a new session opens as written (the quadratic formula came
   back as ``sqrt(-1*4*a*c + b**2)``).

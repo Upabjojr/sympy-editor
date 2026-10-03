@@ -1665,6 +1665,61 @@ def test_long_computation_shows_spinner_and_can_be_interrupted(browser):
         srv.server_close()
 
 
+def test_a_session_save_waits_for_the_request_in_flight(browser):
+    """A save that came due during a long computation was sent behind it:
+    Interrupt then threw it away, and in a page running its own Python it was
+    the request that restarted Python - the loading overlay came up by itself
+    and closed the menu being opened.  It waits for the request to end now,
+    and after an interrupted one for the next request the user makes."""
+    import time
+    from sympy_editor.ops import Op, get_ops
+
+    def forever(expr):
+        while True:
+            time.sleep(0.001)
+
+    ops = get_ops()
+    ops["forever"] = Op("forever", "Take forever", forever)
+    doc = Document(x + 1, ops=ops)
+    srv = EditorServer(doc, port=0, store=False,
+                       options={"sessions": True, "workingAfter": 100, "interruptAfter": 300})
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        page = _open(browser, srv.url)
+        ed = "document.querySelector('.sympy-editor').__sympyEditor"
+        assert _wait(lambda: page.evaluate(f"!!{ed}._sessionsReady"), timeout=10)
+        time.sleep(1.2)                                       # the start-up save is over
+        page.evaluate(f"""() => {{ var ed = {ed}, send = ed.backend.send.bind(ed.backend);
+            window.sent = [];
+            ed.backend.send = function (m, r) {{ window.sent.push(m.action); return send(m, r); }}; }}""")
+        exports = lambda: page.evaluate("window.sent.filter(a => a === 'export').length")
+        page.evaluate(f"{ed}._scheduleSessionSave()")         # due in 0.8 s: in the middle of what follows
+        _pick(page, ".se-ops", "forever")
+        button = page.locator(".se-interrupt")
+        assert _wait(lambda: button.is_visible(), timeout=5)
+        time.sleep(1.0)
+        assert exports() == 0                                 # not behind the computation
+        _next_state(page, lambda: button.click())
+        assert "Interrupted" in page.locator(".se-error").inner_text()
+        time.sleep(1.2)
+        assert exports() == 0                                 # nor on its own after the interrupt
+        _next_state(page, lambda: _pick(page, ".se-ops", "expand"))
+        assert _wait(lambda: exports() == 1, timeout=3)       # after the next request
+        # one counting down as Interrupt is pressed: it would go off just after
+        _pick(page, ".se-ops", "forever")
+        assert _wait(lambda: button.is_visible(), timeout=5)
+        page.evaluate(f"{ed}._scheduleSessionSave()")
+        _next_state(page, lambda: button.click())
+        time.sleep(1.2)
+        assert exports() == 1
+        _next_state(page, lambda: _pick(page, ".se-ops", "expand"))
+        assert _wait(lambda: exports() == 2, timeout=3)
+        assert page.errors == []
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 def test_a_request_leaves_the_toolbar_alone_and_a_press_meanwhile_waits(browser):
     """A plot following the selection asks Python something at every change,
     and the toolbar greyed out for each request: it blinked.  Nothing on it

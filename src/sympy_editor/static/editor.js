@@ -5769,6 +5769,12 @@ var SympyEditor = (function () {
         this.busy = false;
         this.root.classList.remove("se-busy");
         this._updateToolbar();
+        var stopped = this._interrupting;
+        this._interrupting = false;
+        if (this._saveWhenIdle && !stopped) {
+          this._saveWhenIdle = false;
+          this._scheduleSessionSave();
+        }
       }
     }
 
@@ -5799,6 +5805,12 @@ var SympyEditor = (function () {
     /** Stop the request in progress (the Interrupt button of the overlay). */
     interrupt() {
       if (!this.busy || !this.backend || !this.backend.interrupt) return;
+      this._interrupting = true;
+      if (this._sessionSaveTimer) {                 // one counting down goes after the next request too
+        clearTimeout(this._sessionSaveTimer);
+        this._sessionSaveTimer = null;
+        this._saveWhenIdle = true;
+      }
       this.interruptBtn.disabled = true;
       this._showLoading("Interrupting…");
       var self = this;
@@ -6201,6 +6213,13 @@ var SympyEditor = (function () {
      *  gets the answer, flagged `export`, and calls _storeSession). */
     _saveSession() {
       if (!this._sessionsReady || this.closed || !this.backend) return;
+      // Not behind a request in flight: queued after a long computation it
+      // was lost with it when Interrupt stopped Python, and in a page that
+      // runs its own Python it was the request that restarted it - the
+      // "Loading Python runtime…" overlay came up by itself and took the
+      // menu being opened away.  It goes when the request ends (send), or
+      // after the next one when that one was interrupted.
+      if (this.busy) { this._saveWhenIdle = true; return; }
       var self = this;
       Promise.resolve(this.backend.send({ action: "export" }, function () {})).then(function (snap) {
         if (snap) self._storeSession(snap);
