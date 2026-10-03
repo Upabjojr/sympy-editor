@@ -784,6 +784,10 @@ def _quick_document(mod, name):
     return doc
 
 
+@pytest.mark.skipif(sys.version_info[:2] == (3, 11), reason=(
+    "CPython 3.11: a thread traced after PyThreadState_SetAsyncExc(ident, NULL) took back "
+    "an exception that had already fired hangs at the next function it enters; the apps "
+    "run 3.12 (Android) and 3.13 (iOS), and the sweep needs the tracer"))
 def test_an_interrupt_wherever_it_lands_in_a_message_leaves_nothing_behind():
     """An interrupt fires where the Python thread next enters a function.
     When that was the function that ends a message, it was raised before

@@ -90,8 +90,12 @@ def _forget(ident: int) -> None:
         if _running is not None and _running[0] == ident:
             _running = None
         if _delivered == ident:
+            # Only then can one be pending.  Not unconditionally: on CPython
+            # 3.11 taking back an exception that is not there leaves the
+            # interpreter's "pending" flag up, and a traced thread then
+            # hangs at the next function it enters.
             _delivered = None
-        cancel_interrupt(ident)
+            cancel_interrupt(ident)
 
 
 def cancel_interrupt(ident: int) -> None:

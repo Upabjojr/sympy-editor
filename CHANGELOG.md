@@ -2,6 +2,14 @@
 
 ## 0.1.2 — September 2026
 
+* **Handwriting in the iOS app.** The pen reads what is written on an
+  iPhone or an iPad as it does on Android, on the device: ONNX Runtime is
+  linked into the app (there is no wheel of it for iOS) and runs the stroke
+  model for the app's Python. It is pinned to a release with no telemetry
+  in it, and the build refuses a library that could reach the network.
+  Picking another reader in the panel reads the ink on show again at once,
+  instead of waiting for the next stroke.
+
 * **A row under the formula, and no floating bar.** The four arrows moved
   from the tools to a row just beneath the formula, at its left; in a matrix
   the row and column buttons join them, and on a touch screen the keyboard
