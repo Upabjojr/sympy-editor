@@ -591,3 +591,36 @@ def test_a_refused_rule_and_a_refused_name_say_why(tmp_path):
         page.locator(".se-addon-matching .mt-head button", has_text="Rewrite all").click()
         page.wait_for_function("!document.querySelector('.se-error').hidden && document.querySelector('.se-error').textContent.includes('No rule matches')")
         assert not doc.can_undo and page.locator('.se-toolbar [data-cmd="undo"]').is_disabled()
+
+
+def test_a_query_slower_than_the_overlay_is_asked_once(tmp_path):
+    """On a phone a query for the matches took longer than the 0.4 s after
+    which the editor shows its "Working…" overlay.  Taking the overlay down
+    redrew the selection, the redraw told the panel the selection had
+    changed, and the panel asked again: a request every half second for
+    ever.  A selection that has not moved asks nothing now."""
+    doc = Document(sin(x)**2 + cos(x)**2, addons=[ADDON])
+    real = doc.handle
+
+    def slow(message, *a, **k):
+        if isinstance(message, dict) and message.get("method") == "matches":
+            time.sleep(0.6)                        # past workingAfter (400 ms)
+        return real(message, *a, **k)
+
+    doc.handle = slow
+    with _panel(doc, tmp_path) as page:
+        _add(page, "sin(a_)**2 + cos(a_)**2 -> 1")
+        page.wait_for_timeout(1500)
+        page.wait_for_function(f"!{ED}.busy")
+        page.evaluate(f"""() => {{ const ed = {ED}; window.__sent = [];
+            const send = ed.backend.send.bind(ed.backend);
+            ed.backend.send = function (m, r) {{ window.__sent.push(m.method || m.action); return send(m, r); }}; }}""")
+        page.evaluate(f"{ED}.select('/0')")
+        page.wait_for_timeout(5000)                 # eight rounds of the old loop
+        asked = page.evaluate("window.__sent.filter(m => m === 'matches').length")
+        assert 1 <= asked <= 2, asked
+        page.evaluate("window.__sent = []")
+        for _ in range(3):                          # the selection drawn again, the overlay going
+            page.evaluate(f"{ED}._applySelection(); {ED}._showLoading('Working…'); {ED}._hideLoading()")
+        page.wait_for_timeout(1500)
+        assert page.evaluate("window.__sent.filter(m => m === 'matches').length") == 0

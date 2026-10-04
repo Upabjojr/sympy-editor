@@ -191,6 +191,9 @@ api.select(path)             // select in the formula
 api.call(method, payload[, {quiet: true}])   // → Promise: the query's result, or the new snapshot for a change;
                              // quiet: no "Working…" overlay over the editor, the focus left alone - for a
                              // question the panel shows its own progress for (the LaTeX box reads as one types)
+                             // without it the overlay still waits `backgroundAfter` (2.5 s), not the editor's
+                             // 0.4 s: an add-on's work does not block the editor unless it hangs.  A query's
+                             // answer carries the result only, not a snapshot of the formula
 api.send(msg)                // any editor message ({action: "apply", ...})
 api.status(text), api.error(text)
 api.h(tag, attrs, children)  // the editor's element helper; api.katex(); api.loadScript(url) - once per URL and page
@@ -204,6 +207,14 @@ api.saveFile(name, mime, text)   // offer text as a file, as the editor saves it
                              // the share sheet, or a download
 api.editor                   // the Editor itself, for what the above does not cover
 ```
+
+`onSelect(path, range)` is called when the selection really changes - another
+node, range, operator or caret - and once after each new state; never for the
+same selection drawn again (a relayout, a zoom, the "Working…" overlay going
+away).  A panel that asks Python about the selection may still remember what
+it asked for last and ask nothing for the same target: on a phone a query
+outlasts the overlay's 0.4 s, and asking again on every redraw made each
+answer bring the next question, for ever.
 
 `def.mount(api)` returns `{element, title, help, onState(snap), onSelect(path,
 range), onZoom(zoom), onBack(), commands: {cmd: fn}, destroy(), historyStep(step, i, prev),

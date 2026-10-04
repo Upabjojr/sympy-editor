@@ -12,8 +12,8 @@ android {
         applicationId = "org.sympy.editor"
         minSdk = 24          // the app's CPython (Chaquopy 16) needs Android 7.0
         targetSdk = 36
-        versionCode = 13          // 0.1.2; every release Android accepts as an update needs a higher one
-        versionName = "0.1.2"
+        versionCode = 14          // 0.1.3; every release Android accepts as an update needs a higher one
+        versionName = "0.1.3"
         // Chaquopy ships a CPython runtime per ABI: these two cover phones,
         // tablets and the emulator (every other ABI is long obsolete).
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }

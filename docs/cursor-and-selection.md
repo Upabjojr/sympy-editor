@@ -194,7 +194,29 @@ parts go. The first box is selected; **Tab** moves to the next, **Shift+Tab**
 back. The boxes are the placeholder symbols `_1`, `_2`… in the source line.
 
 Tab also moves between empty slots when there are any; with none, Tab puts a
-caret beside the selection.
+caret beside the selection. Tab in an open field applies what was typed and
+then selects the next box (Shift+Tab the one before), so a fraction is filled
+with `1` Tab `2`; a field left as it was just moves on. When what was typed
+holds boxes of its own (a `\frac` typed into a box), its first box comes
+first.
+
+The **palette** — the `√ ∫ Σ ▾` button beside Paste —
+offers the same constructions as buttons drawn the way they look: fraction,
+power, square root, absolute value, exponential, logarithm, factorial,
+binomial, integral, definite integral, derivative, limit, sum, product, a
+2 × 2 matrix. Where it puts one depends on the state, as for typing:
+
+- **a caret**: the construction goes in at the caret with its boxes empty (a
+  new term in a sum, a factor in a product);
+- **a selection or a range**: the selection becomes the construction's main
+  part — `x` selected and ∫ pressed gives `∫ x d□`; the matrix takes it as
+  its first entry;
+- **nothing selected**: the whole formula is the main part; an empty formula
+  becomes the construction;
+- **an operator selected**: the button is greyed out.
+
+The first empty box is selected after it. Arrows walk the palette, Enter or
+Space presses, Esc (and Back on Android) close it.
 
 Each template typed gets boxes of its own: `\frac` twice in one field gives
 four boxes, not two pairs with the same names, and none takes the name of a

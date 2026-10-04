@@ -108,6 +108,9 @@
   .se-block { order: 2; }
   .se-block[data-block="session"] { order: 0; }
   .se-block[data-block="sessions"] { order: 1; margin-left: auto; }
+  /* the clipboard block takes the rest of its line: Copy and Paste at its
+   * left, the palette at the right end (on a line of its own as well) */
+  .se-block[data-block="clip"] { flex: 1 1 auto; }
   /* ends the line the drawer's button is on, so nothing sits to its right */
   .se-linebreak { display: block; flex-basis: 100%; height: 0; order: 1; }
 }
@@ -129,8 +132,9 @@
   /* (the column rules above carry a pseudo-class, so this needs the extra
    * class to win: a wide block takes the whole row) */
   /* the arrows went under the formula, so the second row holds two blocks:
-   * the clipboard keeps the right-hand column */
-  .se-block[data-block="clip"] { grid-column: 3; justify-self: end; }
+   * the clipboard takes the middle and right-hand columns - Copy and Paste
+   * at their left, the palette at the right edge */
+  .se-block[data-block="clip"] { grid-column: 2 / -1; justify-self: stretch; }
   .se-block.se-block-wide { grid-column: 1 / -1; justify-self: stretch; }
 }
 .se-toolbar button[data-cmd^="zoom"] { padding-left: 0.35rem; padding-right: 0.35rem; min-width: 1.9em; font-variant-numeric: tabular-nums; }
@@ -237,6 +241,44 @@
   font-size: 12px;
 }
 .se-pick-menu[hidden], .se-fn-form[hidden], .se-addons-menu[hidden] { display: none; }
+/* The palette (√ ∫ Σ): its button reads as a menu like the pickers beside
+ * it, and opens a grid of constructions drawn as they will look. */
+.se-palette-btn { display: inline-flex; align-items: center; gap: 0.3rem; margin-left: auto; }   /* Copy and Paste left, the palette right */
+.se-palette-label .katex { font-size: 1em; }
+.se-palette-caret { font-size: 0.8em; opacity: 0.7; }
+.se-palette-menu {
+  position: absolute;
+  z-index: 40;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(3.8rem, auto));
+  gap: 0.25rem;
+  padding: 0.35rem;
+  max-width: calc(100% - 8px);
+  background: var(--se-bg);
+  color: var(--se-fg);
+  border: 1px solid var(--se-border);
+  border-radius: 0.4rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+}
+.se-palette-menu[hidden] { display: none; }
+.se-palette-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 3.4rem;
+  padding: 0.25rem 0.5rem;
+  font: inherit;
+  font-size: 13px;
+  color: inherit;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 0.3rem;
+  cursor: pointer;
+}
+.se-palette-item:focus-visible { outline: none; border-color: rgba(var(--se-accent), 0.6); box-shadow: 0 0 0 2px rgba(var(--se-accent), 0.3); }
+.se-palette-item:active { background: rgba(var(--se-accent), 0.2); }
+.se-palette-item .katex { font-size: 1em; }
+@media (max-width: 30rem) { .se-palette-menu { grid-template-columns: repeat(4, minmax(3.4rem, auto)); } }
 /* the Add-ons menu: a check box per add-on the document can switch */
 .se-addons-menu { min-width: 14rem; max-width: 28rem; padding: 0.3rem 0.4rem; display: flex; flex-direction: column; gap: 0.2rem; }
 .se-addon-row { display: flex; align-items: baseline; gap: 0.4rem; padding: 0.15rem 0.3rem; border-radius: 0.3rem; cursor: pointer; }
@@ -1038,6 +1080,7 @@
     padding: 0.45rem 0.7rem;
     min-height: 2.2rem;
   }
+  .se-palette-item { font-size: 15px; min-height: 3rem; }
   .se-lazy { font-size: 14px; }
   .se-lazy-box, .se-allow-invalid-box { width: 1.1rem; height: 1.1rem; }
   .se-mat-handle { width: 24px; height: 24px; margin: -10px 0 0 -10px; }   /* a finger's target */
@@ -1055,6 +1098,7 @@
     box-shadow: var(--se-btn-edge), var(--se-btn-shadow-hover);
   }
   .se-pick:hover:not(:disabled) { border-color: rgba(var(--se-accent), 0.55); }
+  .se-palette-item:hover { background: rgba(var(--se-accent), 0.1); border-color: rgba(var(--se-accent), 0.35); }
   .se-opbar button:hover:not(:disabled) {
     background: rgba(var(--se-accent), 0.14);
     box-shadow: inset 0 0 0 1px rgba(var(--se-accent), 0.25);

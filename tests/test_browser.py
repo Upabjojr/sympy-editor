@@ -2754,7 +2754,7 @@ def test_help_button_shows_the_guide(browser, serve_expr):
     # the guide is the whole tool: everything the editor grew is in it
     for expected in ("full screen", "slideshow", "save", "sessions", "( ) apply",
                      "the same thing seen twice", "container", "print or pdf", ".sympy file", "back",
-                     "credits and licences", "katex", "sympy", "notice.txt"):
+                     "credits and licences", "katex", "sympy", "notice.txt", "the palette"):
         assert expected in text, expected
     page.keyboard.press("Escape")                     # Esc closes it
     assert page.locator(".se-help-view").count() == 0
@@ -2950,7 +2950,9 @@ def test_the_tools_are_laid_out_in_columns(browser, serve_expr):
 def test_the_tools_stay_in_blocks_on_a_narrow_screen(browser, serve_expr):
     """No room for three columns on a phone: the blocks spread across each
     line instead, one against the left edge and one against the right, so
-    the strip still reads as a grid and nothing hangs in the middle."""
+    the strip still reads as a grid and nothing hangs in the middle.  The
+    clipboard block takes its whole line: Copy and Paste at the left, the
+    palette at the right."""
     srv, doc = serve_expr(x + y)
     page = browser.new_page(viewport={"width": 384, "height": 780})
     page.goto(srv.url)
@@ -2962,12 +2964,15 @@ def test_the_tools_stay_in_blocks_on_a_narrow_screen(browser, serve_expr):
             const r = el.getBoundingClientRect();
             if (!r.width || !r.height) continue;
             const key = Math.round(r.top);
-            (by[key] = by[key] || []).push({left: r.left - strip.left, right: strip.right - r.right});
+            (by[key] = by[key] || []).push({block: el.dataset.block, left: r.left - strip.left, right: strip.right - r.right});
         }
         return Object.keys(by).sort((a, b) => a - b).map(k => by[k]);
     }""")
     assert len(lines) >= 3, lines
     for line in lines:
+        if len(line) == 1 and line[0]["block"] == "clip":
+            assert line[0]["left"] <= 1 and line[0]["right"] <= 1, lines   # Copy and Paste left, the palette right
+            continue
         assert line[0]["left"] <= 1, lines                          # every line starts at the left edge
         if len(line) > 1:
             assert line[-1]["right"] <= 1, lines                    # and, with something to spread, ends at the right
@@ -4846,6 +4851,88 @@ SympyEditor.registerAddon("demo", {
     return Demo(), Boxed
 
 
+def test_an_addon_hears_of_the_selection_when_it_changes(browser):
+    """onSelect went out at every redraw of the selection - a relayout, a
+    zoom, the "Working…" overlay going away - and a panel that asks Python
+    something about the selection asked again each time: on a phone, where a
+    query outlasts the 0.4 s before the overlay, every answer brought the next
+    question, for ever (the plot and the rules panels both did).  It goes out
+    when the node, the range, the operator or the caret is another one, and
+    once after each new state."""
+    addon, Boxed = _demo_addon()
+    doc = Document(x + y, addons=[addon])
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        page = _open(browser, srv.url)
+        page.wait_for_selector(".se-addon-demo .demo-panel")
+        page.evaluate(f"""() => {{ const ed = {_ED}; window.__heard = [];
+            for (const a of ed._addons) {{ const on = a.inst.onSelect;
+                a.inst.onSelect = function (p) {{ window.__heard.push(p || null); return on.apply(this, arguments); }}; }} }}""")
+        heard = lambda: page.evaluate("window.__heard")
+        page.evaluate(f"{_ED}.select('/0')")
+        assert heard() == ["/0"]
+        for _ in range(3):                                  # drawn again: nothing new to hear
+            page.evaluate(f"{_ED}._applySelection(); {_ED}._showLoading('Working…'); {_ED}._hideLoading(); {_ED}.setZoom(1.2); {_ED}.setZoom(1)")
+        assert heard() == ["/0"]
+        page.evaluate(f"{_ED}.select('/1')")                # another node
+        page.evaluate(f"{_ED}.select(null); {_ED}._caretAtEnd('end')")   # nothing, then a caret
+        assert heard()[1:3] == ["/1", None] and len(heard()) == 4, heard()
+        page.evaluate(f"{_ED}._hideCaret(); {_ED}._applySelection()")    # the caret going is a change
+        assert len(heard()) == 5
+        page.evaluate(f"{_ED}.select('/0')")
+        _next_state(page, lambda: page.evaluate(f"{_ED}.send({{action: 'replace', path: '/1', src: 'z'}})"))
+        assert len(heard()) >= 7                            # a new state: heard again, the same node or not
+        assert page.errors == []
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_an_addons_requests_do_not_block_the_editor_while_it_loads(browser):
+    """The add-ons load after the formula is on screen - switched on, then
+    each panel asking Python what it needs - and on a phone every such request
+    took half a second, past the 0.4 s after which the editor puts up its
+    blocking "Working…" overlay: it flashed over the formula again and again.
+    An add-on's request (and switching one on) waits `backgroundAfter`
+    before blocking anything; one that really hangs still gets the overlay
+    and its Interrupt."""
+    import time as _time
+    addon, Boxed = _demo_addon()
+    doc = Document(x + y, addons=[addon])
+    real = doc.handle
+    delay = {"s": 0.0}
+
+    def slow(message, *a, **k):
+        if isinstance(message, dict) and message.get("method") == "count":
+            _time.sleep(delay["s"])
+        return real(message, *a, **k)
+
+    doc.handle = slow
+    srv = EditorServer(doc, port=0, options={"workingAfter": 300, "backgroundAfter": 1500, "interruptAfter": 300})
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        page = _open(browser, srv.url)
+        overlay = page.locator(".se-loading")
+        delay["s"] = 1.0                                    # past workingAfter, short of backgroundAfter
+        page.locator(".demo-count").click()
+        page.wait_for_timeout(700)
+        assert overlay.is_hidden()                           # the formula stays usable
+        page.wait_for_function("document.querySelector('.demo-panel').getAttribute('data-count') === '2'")
+        assert overlay.is_hidden()
+        delay["s"] = 2.5                                    # one that hangs: the overlay comes, later
+        page.locator(".demo-count").click()
+        page.wait_for_timeout(800)
+        assert overlay.is_hidden()
+        assert _wait(lambda: overlay.is_visible(), timeout=3)
+        assert page.locator(".se-interrupt").is_visible()   # and the way out with it
+        assert _wait(lambda: overlay.is_hidden(), timeout=5)
+        assert page.errors == []
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 def test_addon_panel_tools_and_calls(browser):
     addon, Boxed = _demo_addon()
     doc = Document(x + y, addons=[addon])
@@ -5881,6 +5968,154 @@ def test_two_templates_at_once_have_slots_of_their_own(browser, serve_expr):
     page = _open(browser, srv.url)
     text = page.evaluate("SympyEditor.expandCommands('\\\\sum \\\\int ', 10, ['_1']).text")
     assert text == "Sum(_2, (_3, _4, _5)) Integral(_6, _7) "
+
+
+def _palette(page, key):
+    """Open the toolbar's palette (√ ∫ Σ) and press the construction `key`."""
+    page.locator('.se-toolbar [data-cmd="palette"]').click()
+    page.locator(".se-palette-menu").wait_for(state="visible")
+    seq = int(page.locator(".sympy-editor").first.get_attribute("data-seq") or 0)
+    page.locator(f'.se-palette-item[data-template="{key}"]').click()
+    page.wait_for_function("s => +document.querySelector('.sympy-editor').getAttribute('data-seq') > s",
+                           arg=seq, timeout=180000)
+    _idle(page)
+
+
+def _selected_src(page):
+    return page.evaluate(f"(() => {{ var e = {_ED}; return e.selected ? e.state.nodes[e.selected].src : null; }})()")
+
+
+def test_the_palette_puts_a_construction_at_the_caret_or_around_the_selection(scenario):
+    """A formula editor's buttons for fractions, roots, integrals, sums,
+    limits...: at a caret the construction goes in with empty slots, around a
+    selection the selection becomes its main part (built, not computed), and
+    with nothing selected it takes the whole formula.  The first empty slot is
+    selected after it, so typing fills it."""
+    s = scenario(x + y)
+    page = s.page
+    _palette(page, "sqrt")                                  # nothing selected: the whole formula
+    assert s.source == "sqrt(x + y)"
+    s.key("Control+z")
+    _idle(page)
+    s.select(s.path_of("x"))
+    _palette(page, "integral")                              # a selection: its main part
+    assert s.source == "y + Integral(x, _1)" and _selected_src(page) == "_1"
+    s.type("x").enter()                                     # the slot is selected: typing fills it
+    assert s.source == "y + Integral(x, x)"
+    s.select(s.path_of("y"))
+    _palette(page, "definite")
+    assert s.source == "Integral(x, x) + Integral(y, (_1, _2, _3))"
+    for _ in range(3):
+        _next_state(page, lambda: s.key("Control+z"))
+        _idle(page)
+    assert s.source == "x + y"
+    page.evaluate(f"{_ED}.select(null)")
+    page.locator(".se-view").focus()
+    s.key("ArrowRight")                                     # nothing selected: a caret at the end
+    assert page.locator(".se-caret").count() == 1
+    _palette(page, "frac")                                  # a caret: a new term, slots empty
+    assert s.source == "_1/_2 + x + y" and _selected_src(page) == "_1"
+
+
+def test_the_palette_wraps_a_range_builds_and_fills_an_empty_formula(browser, serve_expr):
+    srv, doc = serve_expr(x + y + z)
+    page = _open(browser, srv.url)
+    page.evaluate(f"{_ED}.select('/0'); {_ED}.range = {{ parent: '/', anchor: 0, focus: 1 }}; {_ED}._applySelection()")
+    _palette(page, "frac")                                  # two terms of three: the range is the numerator
+    assert str(doc.expr) == "z + (x + y)/_1" and _selected_src(page) == "_1"
+    page.keyboard.press("Control+z")
+    _idle(page)
+    _select(page, "/")
+    page.keyboard.press("Delete")                           # an empty formula: the construction is the formula
+    page.locator("input.se-inline-empty").wait_for()
+    _palette(page, "sum")
+    assert str(doc.expr) == "Sum(_1, (_2, _3, _4))"
+    from sympy import Integer
+    srv2, doc2 = serve_expr(Integer(4))
+    page2 = _open(browser, srv2.url)
+    _palette(page2, "sqrt")                                 # built, not computed: √4 stays √4
+    assert str(doc2.expr) == "sqrt(4)"
+    _palette(page2, "matrix")                               # no function places it: the first entry, as it is
+    assert str(doc2.expr) == "Matrix([[sqrt(4), _1], [_2, _3]])"
+    assert page.errors == [] and page2.errors == []
+
+
+def test_the_palette_is_a_menu(browser, serve_expr):
+    """Drawn by KaTeX, under its button, walked with the arrows, closed by
+    Esc, by a press elsewhere and by Back; an operator selected greys it out,
+    since an operator is not something to put in a fraction."""
+    srv, doc = serve_expr(x + y)
+    page = _open(browser, srv.url)
+    btn = page.locator('.se-toolbar [data-cmd="palette"]')
+    assert btn.locator(".katex").count() == 1             # its own label is drawn too
+    # beside Paste, at the right of that row - not in the apply row, under Transform
+    paste = page.locator('.se-toolbar [data-cmd="paste"]').bounding_box()
+    assert page.locator('.se-block[data-block="clip"] [data-cmd="palette"]').count() == 1
+    assert abs(btn.bounding_box()["y"] + btn.bounding_box()["height"] / 2 - paste["y"] - paste["height"] / 2) < 2
+    assert btn.bounding_box()["x"] > paste["x"]
+    # Copy and Paste at the left of their block, the palette at the right end of the row
+    strip = page.locator(".se-tools").bounding_box()
+    clip = page.locator('.se-block[data-block="clip"]').bounding_box()
+    copy = page.locator('.se-toolbar [data-cmd="copy"]').bounding_box()
+    assert abs(copy["x"] - clip["x"]) <= 1
+    assert abs(btn.bounding_box()["x"] + btn.bounding_box()["width"] - (strip["x"] + strip["width"])) <= 1
+    assert btn.bounding_box()["x"] - (paste["x"] + paste["width"]) > 50          # apart, not packed together
+    btn.click()
+    menu = page.locator(".se-palette-menu")
+    menu.wait_for(state="visible")
+    items = page.locator(".se-palette-item")
+    assert items.count() == 15 and page.locator(".se-palette-item .katex").count() == 15
+    assert page.locator(".se-palette-item .katex-error").count() == 0
+    assert btn.get_attribute("aria-expanded") == "true"
+    assert menu.bounding_box()["y"] >= btn.bounding_box()["y"] + btn.bounding_box()["height"] - 1
+    focused = lambda: page.evaluate("document.activeElement.dataset.template || null")
+    assert focused() == "frac"
+    page.keyboard.press("ArrowRight")
+    assert focused() == "pow"
+    page.keyboard.press("ArrowDown")                        # one row down: five to a row
+    assert focused() == "factorial"
+    page.keyboard.press("Escape")
+    assert menu.is_hidden() and page.evaluate("document.activeElement.classList.contains('se-view')")
+    assert str(doc.expr) == "x + y"                        # keys in the menu never reached the formula
+    btn.click()
+    menu.wait_for(state="visible")
+    page.mouse.click(5, 5)                                  # a press elsewhere
+    assert menu.is_hidden()
+    btn.click()
+    menu.wait_for(state="visible")
+    assert page.evaluate("SympyEditor.back()") is True and menu.is_hidden()
+    plus = page.evaluate("""() => { for (const el of document.querySelectorAll('.se-view *')) {
+            if (el.querySelector('[data-path]')) continue;
+            if ((el.textContent || '').trim() === '+') { const r = el.getBoundingClientRect();
+                return [r.left + r.width / 2, r.top + r.height / 2]; } } return null; }""")
+    page.mouse.click(plus[0], plus[1])
+    assert _wait(lambda: page.evaluate(f"!!{_ED}.junction"))
+    assert btn.is_disabled()
+    assert page.errors == []
+
+
+def test_tab_in_a_field_goes_on_to_the_next_slot(browser, serve_expr):
+    """Filling a fraction is "1 Tab 2".  Tab in the field used to move the
+    focus away: the blur applied the 1, the fraction stayed selected and the
+    2 replaced all of it.  Shift+Tab goes back; a field left as it was just
+    moves on."""
+    srv, doc = serve_expr(x)
+    page = _open(browser, srv.url)
+    _palette(page, "definite")                              # Integral(x, (_1, _2, _3)): x is the integrand
+    assert _selected_src(page) == "_1"
+    page.keyboard.type("t")
+    _next_state(page, lambda: page.keyboard.press("Tab"))
+    _idle(page)
+    assert str(doc.expr) == "Integral(x, (t, _2, _3))" and _selected_src(page) == "_2"
+    page.keyboard.type("0")
+    _next_state(page, lambda: page.keyboard.press("Shift+Tab"))
+    _idle(page)
+    assert str(doc.expr) == "Integral(x, (t, 0, _3))" and _selected_src(page) == "_3"   # back, round the end
+    page.keyboard.type("1")
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    _idle(page)
+    assert str(doc.expr) == "Integral(x, (t, 0, 1))"
+    assert page.errors == []
 
 
 def test_the_whole_expression_is_deleted_without_a_source_line(browser, serve_expr):

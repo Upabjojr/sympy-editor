@@ -128,6 +128,11 @@ def test_methods_query_change_and_error():
     snap = doc.handle({"action": "addon", "addon": "demo", "method": "count"})
     assert snap["query"] == {"addon": "demo", "method": "count", "result": {"n": 2}}
     assert not doc.can_undo                          # a query commits nothing
+    # and its answer is the query alone: the whole snapshot riding along was
+    # most of its cost (half a second on a phone) and every front end drops it
+    assert "latex" not in snap and "nodes" not in snap and snap["error"] is None and isinstance(snap["seq"], int)
+    failed = doc.handle({"action": "addon", "addon": "demo", "method": "no_such_method"})
+    assert "latex" not in failed and failed["query"]["error"]
     snap = doc.handle({"action": "addon", "addon": "demo", "method": "box_it"})
     assert doc.expr == Boxed(x + y) and snap["addon"] == {"name": "demo", "method": "box_it"}
     assert doc.history_labels()["actions"][-1] == "Demo did box_it"

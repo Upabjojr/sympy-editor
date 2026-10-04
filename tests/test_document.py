@@ -1196,6 +1196,27 @@ def test_a_lambda_is_applied_to_its_arguments():
         Document(x + 1).call("/", "3 +")
 
 
+def test_wrap_into_a_template_puts_the_node_itself_in_its_place():
+    """The palette's matrix: the selection is the first entry, a place no
+    function call puts it.  The node goes there as it is - its text read back
+    made sqrt(4) a 2 - and a matrix symbol stays one entry (read in the
+    matrix's context the stand-in was a matrix symbol, spread as a block)."""
+    from sympy import sqrt as _sqrt
+    doc = Document(_sqrt(4, evaluate=False))
+    doc.wrap("/", "Matrix([[$, _1], [_2, _3]])")
+    assert str(doc.expr) == "Matrix([[sqrt(4), _1], [_2, _3]])"
+    assert len(doc.snapshot()["placeholders"]) == 3
+    doc.undo()
+    assert str(doc.expr) == "sqrt(4)"
+    A = MatrixSymbol("A", 2, 2)
+    assert str(Document(A).wrap("/", "Matrix([[$, _1], [_2, _3]])")) == "Matrix([[A, _1], [_2, _3]])"
+    # a name of the expression's own that looks like the stand-in is not taken for it
+    selection_ = Symbol("selection_")
+    assert str(Document(selection_**2).wrap("/", "Matrix([[$, selection_]])")) == "Matrix([[selection_**2, selection_]])"
+    with pytest.raises(ValueError):
+        Document(x).wrap("/", "Matrix([[$, $]])")          # one place only
+
+
 def test_wrapping_in_a_container_builds_the_container():
     """Matrix(x) is an error in SymPy - a matrix wants its contents, not an
     argument - so wrapping an expression in Matrix did nothing at all.  It

@@ -169,6 +169,7 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | LaTeX shortcuts in the field | | `\theta` becomes `θ` as you type (Greek letters, `\infty`, `\sin`, `\cdot`, `\le`...); Greek letters are SymPy's names (`θ` is `theta`, `λ` is `lamda`, `∞` is `oo`) |
 | A function at a caret | function box | With a caret shown and nothing selected, the function is added at the caret with an empty box for its argument (`sin(□)`), the box selected to fill |
 | Templates | `\int`, `\sum`, `\prod`, `\lim`, `\diff`, `\frac`, `\binom`, `\matrix` | The whole construction, with faint empty boxes where its parts go: the first box is selected, type to fill it, Tab moves to the next (Shift+Tab back). The boxes are the symbols `_1`, `_2`... in the source line |
+| The palette | The `√ ∫ Σ ▾` button | Fraction, power, square root, integrals, sums, limits, matrices… as buttons drawn the way they look: at the caret it goes in with empty boxes, around the selection (or the whole formula) the selection becomes its main part, unevaluated. Then the first box is selected; Tab in a field goes on to the next |
 | A refused edit | | The message shows under the formula and the formula flickers red for half a second |
 | Edit selection's existing text | double-click / **Edit** | Enter |
 | Apply / cancel an edit | click elsewhere applies | Enter / Esc |

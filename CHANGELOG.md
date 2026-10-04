@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.1.3 — unreleased
+
+* **The palette: fractions, roots, integrals, sums and limits as buttons.**
+  The **√ ∫ Σ ▾** button beside Paste opens what a
+  mathematical formula editor offers as buttons, each drawn the way it will
+  look: fraction, power, square root, absolute value, exponential,
+  logarithm, factorial, binomial, integral, definite integral, derivative,
+  limit, sum, product and a 2 × 2 matrix. With a caret it goes in at the
+  caret with its boxes empty; with a selection - or a range of terms - the
+  selection becomes its main part (``x`` and ∫ give ``∫ x d□``), built and
+  not computed, so ``√4`` stays ``√4``; with nothing selected it takes the
+  whole formula, and an empty formula becomes it. The first empty box is
+  selected after it, ready to type into. ``Document.wrap`` also takes a
+  template with ``$`` where the node goes (``Matrix([[$, _1], [_2, _3]])``).
+
+* **No more endless "Working (plot: samples)…".** On a phone, with the plot
+  or the rules panel open, the app could keep asking Python the same thing
+  every half second, the overlay blinking for ever: a query there takes
+  longer than the 0.4 s after which the editor shows its overlay, taking the
+  overlay down redrew the selection, and every redraw told the panels the
+  selection had changed - so each answer brought the next question. The
+  panels now hear of the selection only when it changes, and ask nothing for
+  what they already show.
+
+* **The add-ons load without blocking the editor.** After the formula
+  appeared, each panel asking Python what it needed brought up the blocking
+  "Working…" overlay on a phone - four times at every start. An add-on's
+  question is now answered with its answer alone, not with a copy of the
+  whole formula as well (half a second each on a phone, a few hundredths
+  now), and add-on work waits two and a half seconds before it blocks
+  anything; the formula can be used meanwhile.
+
+* **Tab goes on to the next box.** Tab in a field while the formula has empty
+  boxes applies what was typed and selects the next box (Shift+Tab the one
+  before): a fraction is filled with ``1`` Tab ``2``. It used to take the
+  focus away, leaving the whole construction selected, so the ``2`` replaced
+  all of it.
+
 ## 0.1.2 — September 2026
 
 * **Handwriting in the iOS app.** The pen reads what is written on an

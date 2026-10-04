@@ -581,7 +581,7 @@ licence; the licence is:</p>""")
         title="Privacy", description="SymPy Editor collects no data: the mathematics stays on your device.",
         lead="The short version: the editor computes on your device, and nothing you type is sent anywhere by us.",
         body=cards,
-        footer="This page describes SymPy Editor 0.1.2 (September 2026). "
+        footer="This page describes SymPy Editor 0.1.3 (October 2026). "
                "If the facts change, this page changes with them."),
         encoding="utf-8")
 

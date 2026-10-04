@@ -199,7 +199,15 @@ it first.
 
 ## 10. History
 
-Tab walks the empty slots in reading order.  Undo and redo walk the steps; going to a step in the history view makes it the
+Tab walks the empty slots in reading order.  A construction of the palette
+put around a selection is *built*, not computed: the selection goes in as it
+is, so `4` under √ stays `√4` and `x + y` in a sum's body stays `x + y`
+(`Document.wrap`, unevaluated as `wrap` always is); the matrix, which no
+function call places, takes the selection as its first entry the same way
+(`wrap` with a template, `$` where the node goes — the node itself, never its
+text read back).  Put around a range of a sum, the construction replaces the
+terms of the range and the other terms stay; one that cannot stand there is
+refused like any edit (a matrix added to a scalar).  Undo and redo walk the steps; going to a step in the history view makes it the
 current expression (and drops what was after it on the next edit). An edit
 made from Python (`doc.set(...)`) is a step like any other. The history and
 everything about the session travel together: see

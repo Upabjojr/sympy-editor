@@ -200,6 +200,13 @@ SympyEditor.registerAddon("matching", {
       return t;
     }
 
+    // What the matches on show were asked for, so that a selection that has
+    // not moved asks nothing (onSelect): a selection drawn again - the
+    // editor's overlay going away after a slow query is one - used to ask
+    // again, and on a phone each answer brought the next question, for ever.
+    var askedKey = null;
+    function selectionKey() { var t = target(); return JSON.stringify([t.path, t.children || null, rules.length]); }
+
     function askMatches() {
       clearTimeout(timer);
       timer = setTimeout(function () {
@@ -208,7 +215,9 @@ SympyEditor.registerAddon("matching", {
         var my = ++seq;
         updateSaveButton();
         if (!rules.length) { hits.textContent = ""; return; }
-        api.call("matches", target()).then(function (res) {
+        var t = target();
+        askedKey = JSON.stringify([t.path, t.children || null, rules.length]);
+        api.call("matches", t).then(function (res) {
           if (my !== seq) return;
           showHits(res);
         }, function () { /* a stale selection: nothing to show */ });
@@ -393,7 +402,7 @@ SympyEditor.registerAddon("matching", {
         else if (latest !== null) resync();
         askMatches();
       },
-      onSelect: function () { askMatches(); },
+      onSelect: function () { if (selectionKey() !== askedKey) askMatches(); },
       destroy: function () { gone = true; clearTimeout(timer); seq++; }
     };
   }

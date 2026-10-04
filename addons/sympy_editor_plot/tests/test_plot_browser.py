@@ -640,3 +640,38 @@ def test_a_folded_panel_asks_nothing_until_it_is_opened():
         assert len(_sampled(page)) == 1
         assert page.evaluate("document.querySelector('.se-addon-plot').open") is True
         assert page.errors == []
+
+
+def test_a_sampling_slower_than_the_overlay_asks_once():
+    """On a phone a sampling took about 0.5 s, past the 0.4 s after which the
+    editor shows its "Working…" overlay.  Taking the overlay down redrew the
+    selection, every redraw told the add-ons the selection had changed, and
+    the panel - following the selection - asked again: a request every 0.6 s
+    for ever, the overlay blinking.  A selection that has not moved asks
+    nothing now (the editor tells only a real change, and the panel ignores
+    the target it already drew)."""
+    doc = Document(sin(x) + cos(x), addons=[ADDON])
+    real = doc.handle
+
+    def slow(message, *a, **k):
+        if isinstance(message, dict) and message.get("method") == "samples":
+            time.sleep(0.6)                        # past workingAfter (400 ms)
+        return real(message, *a, **k)
+
+    doc.handle = slow
+    with _panel(doc) as page:
+        _settle(page, 1500)
+        page.evaluate("window.__sent = []")
+        path = page.evaluate("Object.keys(%s.state.nodes).find(p => %s.state.nodes[p].src === 'sin(x)')" % (ED, ED))
+        page.evaluate("%s.select(%r)" % (ED, path))
+        page.wait_for_timeout(5000)                 # eight rounds of the old loop
+        asked = _sampled(page)
+        assert 1 <= len(asked) <= 2, [m.get("path") for m in asked]
+        assert asked[-1]["path"] == path
+        _settle(page)
+        page.evaluate("window.__sent = []")
+        for _ in range(3):                          # the selection drawn again: a relayout, the overlay going
+            page.evaluate("%s._applySelection(); %s._showLoading('Working…'); %s._hideLoading()" % (ED, ED, ED))
+        page.wait_for_timeout(1500)
+        assert _sampled(page) == []
+        assert page.errors == []

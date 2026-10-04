@@ -40,6 +40,7 @@ var SympyEditor = (function () {
     previewDelay: 250,   // ms after the last keystroke in the source line before it is previewed
     workingAfter: 400,   // ms a request may take before the spinner overlay appears
     interruptAfter: 2000, // ms after which the overlay offers to interrupt the computation
+    backgroundAfter: 2500, // the same for the add-ons' own requests and their switching on: their loading must not block the editor (see send)
     sessions: false,     // a list of sessions (expressions with their own history), kept (see Keep)
     unevaluated: false,  // the "unevaluated" toggle starts on: transformations build Determinant(M), Integral(f, x)... rather than computing
     rememberAddons: false, // add-ons are switched on and off for the whole editor, not per session, and the
@@ -150,6 +151,7 @@ var SympyEditor = (function () {
     "<li>LaTeX shortcuts in any field: \\theta becomes \u03b8 as you type (Greek letters, \\infty, \\le\u2026).</li>",
     "<li>With a caret shown and nothing selected, a function from the box is <i>added</i> at the caret \u2014 sin gives sin(\u25a1), the box selected for you to fill \u2014 instead of being applied to the whole expression.</li>",
     "<li>Templates: \\int, \\sum, \\prod, \\lim, \\diff, \\frac, \\binom, \\matrix typed in a field put the whole construction in, with faint empty boxes where its parts go. The first box is selected: type to fill it, <kbd>Tab</kbd> moves to the next box (<kbd>Shift</kbd>+<kbd>Tab</kbd> back). The boxes are the symbols _1, _2\u2026 in the source line.</li>",
+    "<li>The palette: the <b>\u221a \u222b \u03a3 \u25be</b> button beside <b>Paste</b> opens the constructions as buttons drawn the way they look \u2014 fraction, power, square root, absolute value, exponential, logarithm, factorial, binomial, integral, definite integral, derivative, limit, sum, product, 2 \u00d7 2 matrix. With a caret it goes in at the caret, its boxes empty; with a selection (or a range) the selection becomes its main part \u2014 x selected and \u222b pressed gives \u222b x d\u25a1, nothing computed, so \u221a4 stays \u221a4; with nothing selected it takes the whole formula. Then the first empty box is selected: type, <kbd>Tab</kbd>, type\u2026 (<kbd>Tab</kbd> in a field applies it and goes on to the next box). Arrows walk the palette, <kbd>Esc</kbd> closes it.</li>",
     "<li>An edit that cannot be read as an expression is refused: the message shows under the formula, and the formula flickers red for half a second.</li>",
     "<li>So is an edit SymPy refuses to build — a product of matrices whose shapes do not match, sin(x, y). Tick <b>allow invalid</b> to keep it instead: it is shown as its constructor in red with its arguments in brackets (Invalid(MatMul, A, B) in the source line), and it becomes the ordinary expression again as soon as an edit inside it makes it valid.</li>",
     "</ul></section>",
@@ -353,6 +355,32 @@ var SympyEditor = (function () {
     diff: "Derivative(_1, _2)", partial: "Derivative(_1, _2)",
     frac: "(_1)/(_2)", binom: "binomial(_1, _2)", matrix: "Matrix([[_1, _2], [_3, _4]])"
   };
+  // The palette (the toolbar's √∫Σ menu): the constructions a mathematical
+  // formula editor offers as buttons, each drawn as it will look.  At a caret
+  // `insert` goes in, its slots empty; on a selection - or the whole formula,
+  // with nothing selected - the selection becomes the construction's main part:
+  // `wrap` is the function it is put inside (Document.wrap, unevaluated, `args`
+  // after it) or a template with `$` where it goes (a matrix's first entry,
+  // which no function call places).  Nothing here has a slot for the
+  // selection but its first.  root(x, n) is not offered: SymPy draws it
+  // as a power, x^(1/n), never as a root sign.
+  var MATH_PALETTE = [
+    { key: "frac", title: "Fraction", icon: "\\frac{\\square}{\\square}", insert: "(_1)/(_2)", wrap: "Mul", args: "1/_1" },
+    { key: "pow", title: "Power", icon: "\\square^{\\square}", insert: "(_1)**(_2)", wrap: "Pow", args: "_1" },
+    { key: "sqrt", title: "Square root", icon: "\\sqrt{\\square}", insert: "sqrt(_1)", wrap: "sqrt" },
+    { key: "abs", title: "Absolute value", icon: "\\left|\\square\\right|", insert: "Abs(_1)", wrap: "Abs" },
+    { key: "exp", title: "Exponential", icon: "e^{\\square}", insert: "exp(_1)", wrap: "exp" },
+    { key: "log", title: "Logarithm", icon: "\\log(\\square)", insert: "log(_1)", wrap: "log" },
+    { key: "factorial", title: "Factorial", icon: "\\square!", insert: "factorial(_1)", wrap: "factorial" },
+    { key: "binomial", title: "Binomial coefficient", icon: "\\binom{\\square}{\\square}", insert: "binomial(_1, _2)", wrap: "binomial", args: "_1" },
+    { key: "integral", title: "Integral", icon: "\\int \\square\\, d\\square", insert: "Integral(_1, _2)", wrap: "Integral", args: "_1" },
+    { key: "definite", title: "Definite integral", icon: "\\int_{\\square}^{\\square} \\square\\, d\\square", insert: "Integral(_1, (_2, _3, _4))", wrap: "Integral", args: "(_1, _2, _3)" },
+    { key: "derivative", title: "Derivative", icon: "\\frac{d}{d\\square} \\square", insert: "Derivative(_1, _2)", wrap: "Derivative", args: "_1" },
+    { key: "limit", title: "Limit", icon: "\\lim_{\\square \\to \\square} \\square", insert: "Limit(_1, _2, _3)", wrap: "Limit", args: "_1, _2" },
+    { key: "sum", title: "Sum", icon: "\\sum_{\\square=\\square}^{\\square} \\square", insert: "Sum(_1, (_2, _3, _4))", wrap: "Sum", args: "(_1, _2, _3)" },
+    { key: "product", title: "Product", icon: "\\prod_{\\square=\\square}^{\\square} \\square", insert: "Product(_1, (_2, _3, _4))", wrap: "Product", args: "(_1, _2, _3)" },
+    { key: "matrix", title: "Matrix (2 × 2)", icon: "\\begin{bmatrix} \\square & \\square \\\\ \\square & \\square \\end{bmatrix}", insert: "Matrix([[_1, _2], [_3, _4]])", wrap: "Matrix([[$, _1], [_2, _3]])" }
+  ];
   for (var t in TEMPLATES) if (!(t in COMMANDS)) COMMANDS[t] = TEMPLATES[t];
   for (var g in GREEK) if (!(g in COMMANDS)) COMMANDS[g] = GREEK[g];
   // ε read back is "epsilon": the variant is typed as its name, which SymPy
@@ -1669,6 +1697,21 @@ var SympyEditor = (function () {
       btn("copy", "Copy", "Copy the SymPy source of the selection, or of the whole expression (Ctrl+C / Ctrl+X / Ctrl+V work on selections and carets)");
       if (!o.readOnly) {
         btn("paste", "Paste", "Paste the clipboard over the selection, or at the caret (Ctrl+V)");
+        // The palette: fractions, roots, integrals, sums, limits... as
+        // buttons drawn the way they will look (see MATH_PALETTE and
+        // insertTemplate), beside Paste at the right of that row - a thing
+        // put into the formula, as a paste is; in the apply row it ended up
+        // under the Transform menu.  Its label is drawn by KaTeX once it is
+        // there (_drawPaletteLabel): as characters, √ ∫ Σ came from whatever
+        // font each platform had.
+        var palBtn = h("button", { type: "button", "data-cmd": "palette", class: "se-palette-btn", "aria-haspopup": "true",
+                                   "aria-expanded": "false", "aria-label": "Insert a construction",
+                                   title: "Fractions, roots, integrals, sums, limits, matrices\u2026: inserted at the caret, or put around the selection (the whole formula when nothing is selected)" },
+                        [h("span", { class: "se-palette-label" }, ["\u221a \u222b \u03a3"]), h("span", { class: "se-palette-caret", "aria-hidden": "true" }, ["\u25be"])]);
+        current.appendChild(palBtn);
+        this.buttons.palette = palBtn;
+        this.paletteMenu = h("div", { class: "se-palette-menu", role: "menu", "aria-label": "Insert a construction", hidden: "" });
+        root.appendChild(this.paletteMenu);
         // 7. everything that can be applied, on a row of its own, in two
         //    groups boxed apart, and the toggle at the right.  The four
         //    menus are one control (Picker): a box that lists its values
@@ -2093,6 +2136,7 @@ var SympyEditor = (function () {
      *  panel goes in a box under the formula, its tools in a block of the
      *  toolbar.  Nothing happens when it is mounted already. */
     _mountAddon(d) {
+      this._selectNotified = null;      // the new one has heard nothing yet
       if (this._mountedAddon(d.name)) return;
       // One that failed to mount is not tried again at every snapshot - each
       // edit, each preview mounted it once more, to fail once more - until
@@ -2231,7 +2275,7 @@ var SympyEditor = (function () {
       if (!enable.length && !disable.length) return Promise.resolve();
       this._enforcingAddons = true;
       var self = this;
-      return Promise.resolve(this.send({ action: "addons", enable: enable, disable: disable })).then(function (snap) {
+      return Promise.resolve(this.send({ action: "addons", enable: enable, disable: disable }, { background: true })).then(function (snap) {
         self._enforcingAddons = false;
         return snap;
       }, function () { self._enforcingAddons = false; });
@@ -2272,7 +2316,7 @@ var SympyEditor = (function () {
           box.addEventListener("change", function () {
             var msg = { action: "addons" };
             msg[box.checked ? "enable" : "disable"] = [a.name];
-            self.send(msg);
+            self.send(msg, { background: true });           // an add-on loading: see send
           });
           var text = [a.label || a.name];
           if (a.requires && a.requires.length) text.push(h("small", {}, [" needs " + a.requires.join(", ")]));
@@ -2289,6 +2333,133 @@ var SympyEditor = (function () {
       this._placeUnder(this.addonsMenu, this.addonsBtn);
       var first = this.addonsMenu.querySelector("input");
       if (first) first.focus({ preventScroll: true });
+    }
+
+    /* ---- the palette (√ ∫ Σ): constructions as buttons ---- */
+
+    togglePalette() {
+      if (!this.paletteMenu) return;
+      if (!this.paletteMenu.hidden) { this.closePalette(true); return; }
+      this.openPalette();
+    }
+
+    /** Open the palette under its button.  Where it will act is taken now -
+     *  the caret, or the selection - since the buttons take the focus, and a
+     *  caret the formula drew a moment ago is what the user pointed at. */
+    openPalette() {
+      var menu = this.paletteMenu, btn = this.buttons.palette, self = this;
+      if (!menu || !btn || btn.disabled) return;
+      this._paletteCaret = this.caret && !this.selected && !this.range ? Object.assign({}, this.caret) : null;
+      if (!menu.firstChild) {
+        MATH_PALETTE.forEach(function (t) {
+          var item = h("button", { type: "button", class: "se-palette-item", role: "menuitem", "data-template": t.key,
+                                   title: t.title, "aria-label": t.title });
+          item.addEventListener("click", function (ev) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            self.closePalette(false);
+            self.insertTemplate(t.key);
+          });
+          menu.appendChild(item);
+        });
+        menu.addEventListener("keydown", function (ev) { self._paletteKey(ev); });
+      }
+      this._drawPalette();
+      menu.hidden = false;
+      btn.setAttribute("aria-expanded", "true");
+      this._placeUnder(menu, btn);
+      var first = menu.querySelector(".se-palette-item");
+      if (first) first.focus({ preventScroll: true });
+      // A press anywhere else closes it, as a menu does.
+      this._paletteAway = function (ev) {
+        if (menu.contains(ev.target) || btn.contains(ev.target)) return;
+        self.closePalette(false);
+      };
+      document.addEventListener("pointerdown", this._paletteAway, true);
+    }
+
+    closePalette(refocus) {
+      var menu = this.paletteMenu;
+      if (!menu || menu.hidden) return;
+      menu.hidden = true;
+      if (this.buttons.palette) this.buttons.palette.setAttribute("aria-expanded", "false");
+      if (this._paletteAway) document.removeEventListener("pointerdown", this._paletteAway, true);
+      this._paletteAway = null;
+      if (refocus) this.view.focus({ preventScroll: true });
+    }
+
+    /** Keys in the palette: arrows walk the grid, Enter/Space press, Esc and
+     *  Tab leave.  None of them reaches the formula's own handler. */
+    _paletteKey(ev) {
+      var items = Array.prototype.slice.call(this.paletteMenu.querySelectorAll(".se-palette-item"));
+      var at = items.indexOf(document.activeElement);
+      ev.stopPropagation();
+      if (ev.key === "Escape" || ev.key === "Tab") { ev.preventDefault(); this.closePalette(true); return; }
+      if (at < 0) return;
+      var top = items[0].offsetTop, cols = items.filter(function (b) { return b.offsetTop === top; }).length || 1;
+      var to = { ArrowRight: at + 1, ArrowLeft: at - 1, ArrowDown: at + cols, ArrowUp: at - cols,
+                 Home: 0, End: items.length - 1 }[ev.key];
+      if (to === undefined) return;
+      ev.preventDefault();
+      items[Math.max(0, Math.min(items.length - 1, to))].focus({ preventScroll: true });
+    }
+
+    /** Draw the palette's buttons (and its own label) with KaTeX, once it
+     *  has loaded: until then they read as their names. */
+    _drawPalette() {
+      var katex = window.katex, menu = this.paletteMenu;
+      if (!menu) return;
+      MATH_PALETTE.forEach(function (t) {
+        var item = menu.querySelector('[data-template="' + t.key + '"]');
+        if (!item || item.getAttribute("data-drawn")) return;
+        if (katex) {
+          try {
+            katex.render("\\displaystyle " + t.icon, item, { throwOnError: false, displayMode: false });
+            item.setAttribute("data-drawn", "1");
+            return;
+          } catch (e) { /* drawn as its name below */ }
+        }
+        item.textContent = t.title;
+      });
+      this._drawPaletteLabel();
+    }
+
+    _drawPaletteLabel() {
+      var label = this.buttons.palette && this.buttons.palette.querySelector(".se-palette-label");
+      if (!label || label.getAttribute("data-drawn") || !window.katex) return;
+      try {
+        window.katex.render("\\sqrt{\\square}\\ \\textstyle\\int\\ \\sum", label, { throwOnError: false });
+        label.setAttribute("data-drawn", "1");
+      } catch (e) { /* the characters stay */ }
+    }
+
+    /** Put the construction `key` (MATH_PALETTE) in the formula: at the caret
+     *  its empty form; around the selection - a node, a range, or the whole
+     *  formula when nothing is selected - with the selection as its main part,
+     *  built and not computed (√4 stays √4).  An empty formula becomes the
+     *  construction.  The first empty slot is selected after it, so typing
+     *  fills it and Tab goes to the next. */
+    insertTemplate(key) {
+      var t = MATH_PALETTE.filter(function (p) { return p.key === key; })[0];
+      if (!t || this.opts.readOnly || this.closed || !this.state || this.junction) return false;
+      var names = this._placeholderNames();
+      if (this.emptyField) {
+        this.send({ action: "set", src: freshSlots(t.insert, names, "") });
+        return true;
+      }
+      var gap = this.caret || this._paletteCaret;
+      this._paletteCaret = null;
+      if (gap && !this.selected && !this.range) {
+        this._insertAtCaret(gap, freshSlots(t.insert, names, ""));
+        return true;
+      }
+      var path = this.range ? this.range.parent : (this.selected || "/");
+      var msg = { action: "wrap", path: path, func: freshSlots(t.wrap, names, ""),
+                  args: t.args ? freshSlots(t.args, names, "") : "" };
+      if (this.range) msg.children = this._rangeIndices();
+      this.send(msg);
+      this.view.focus({ preventScroll: true });
+      return true;
     }
 
     /** What an add-on's front end can do with this editor. */
@@ -2362,7 +2533,7 @@ var SympyEditor = (function () {
       var run = async function () {
         while (self.busy && !self.closed) await new Promise(function (r) { setTimeout(r, 25); });
         if (self.closed) throw new Error("The session is closed");
-        var snap = await self.send(msg, options);
+        var snap = await self.send(msg, Object.assign({ background: true }, options || {}));
         if (!snap) throw new Error("No answer");
         if (snap.query && snap.query.error) throw new Error(snap.query.error);   // the method failed: the caller's to show
         if (snap.error) throw new Error(snap.error);
@@ -2371,6 +2542,24 @@ var SympyEditor = (function () {
       var chain = (this._addonChain || Promise.resolve()).then(run, run);
       this._addonChain = chain.then(function () {}, function () {});
       return chain;
+    }
+
+    /** Tell the add-ons the selection changed - when it did: the node, the
+     *  range, the operator or the caret is another one, or the formula is
+     *  (setState and a newly mounted add-on clear the memory).  It used to go
+     *  out at every redraw of the selection, and taking the "Working…"
+     *  overlay down is one: a plot following the selection whose sampling
+     *  took longer than `workingAfter` (a phone) asked again on every answer
+     *  - a request every 0.6 s for ever, the overlay blinking. */
+    _notifySelect() {
+      if (!this._addons || !this._addons.length) return;
+      var c = this.caret, r = this.range, j = this.junction;
+      var key = (this.selected || "") + "|" + (r ? r.parent + ":" + r.anchor + ":" + r.focus : "")
+        + "|" + (j ? j.path + ":" + j.left : "")
+        + "|" + (c ? c.path + ":" + c.index + ":" + (c.extend || "") + ":" + (c.attach || "") : "");
+      if (key === this._selectNotified) return;
+      this._selectNotified = key;
+      this._addonsNotify("onSelect", this.selected, this.range);
     }
 
     _addonsNotify(hook) {
@@ -2416,7 +2605,8 @@ var SympyEditor = (function () {
           // Nor when it opened something over the formula (the guide, the
           // history, the drawer), which has the keyboard while it is open.
           var over = !!(self.helpView || self.historyView || (self.drawer && !self.drawer.hidden))
-            || cmd === "help" || cmd === "history" || cmd === "drawer";
+            || cmd === "help" || cmd === "history" || cmd === "drawer"
+            || (cmd === "palette" && self.paletteMenu && !self.paletteMenu.hidden);
           if (cmd !== "edit" && cmd !== "keyboard" && active !== self.source && active !== self.input
               && active !== self.emptyField && !inAddon && !over && !self._typingHere()) self.view.focus({ preventScroll: true });
         }
@@ -2776,6 +2966,7 @@ var SympyEditor = (function () {
       if (!snap || this.destroyed) return;     // an answer that comes after destroy() finds nobody
       if (snap.export) { this._storeSession(snap); return; }   // the answer to a save, not a new state
       if (snap.query) return;                                   // an add-on's query: answered, nothing changed
+      this._selectNotified = null;      // a new state: the add-ons hear of the selection again (_notifySelect)
       if (snap.preview) {
         // The source line being typed: a string that does not parse leaves
         // the rendering as it is and only marks the line.
@@ -2824,14 +3015,21 @@ var SympyEditor = (function () {
         sel = selectionAfter(sel, previous.nodes, snap.nodes || {});
       }
       while (sel && !(sel in this.tree)) sel = parentPath(sel);
+      var toSlot = snap.preview ? null : this._slotAfterCommit;
+      if (!snap.preview) this._slotAfterCommit = null;
       if (!snap.preview && !same && snap.placeholders && snap.placeholders.length) {
         // A template just typed (\int): its first new slot is what to fill next.
-        var had = {};
+        var had = {}, fresh = false;
         var prevSlots = (previous && previous.placeholders) || [];
         for (var hi = 0; hi < prevSlots.length; hi++) { var pn = previous.nodes && previous.nodes[prevSlots[hi]]; if (pn) had[pn.src] = true; }
         for (var ni = 0; ni < snap.placeholders.length; ni++) {
           var nn = snap.nodes[snap.placeholders[ni]];
-          if (nn && !had[nn.src]) { sel = snap.placeholders[ni]; break; }
+          if (nn && !had[nn.src]) { sel = snap.placeholders[ni]; fresh = true; break; }
+        }
+        // Otherwise, after Tab in a field (_commitToSlot): the slot it named.
+        for (var ti = 0; !fresh && toSlot && ti < toSlot.length; ti++) {
+          var hit = snap.placeholders.filter(function (p) { return snap.nodes[p] && snap.nodes[p].src === toSlot[ti]; })[0];
+          if (hit) { sel = hit; break; }
         }
       }
       this.selected = sel;
@@ -3509,7 +3707,7 @@ var SympyEditor = (function () {
 
     _applySelection(quiet) {
       this._updateScrollArrows();
-      this._addonsNotify("onSelect", this.selected, this.range);
+      this._notifySelect();
       this._placeMatrixHandle();
       var old = this.view.querySelectorAll(".se-selected");
       for (var i = 0; i < old.length; i++) old[i].classList.remove("se-selected");
@@ -4280,14 +4478,21 @@ var SympyEditor = (function () {
       this._fnCaret = null;
       var src = /\(/.test(text) ? text : text + "(_1)";
       src = freshSlots(src, this._placeholderNames(), "");
-      // A new term in a sum, a new factor in a product: typed text at a
-      // caret joins its neighbour by juxtaposition (a product), which is
-      // right in a product and not in a sum.
-      var parent = this.state && this.state.nodes ? this.state.nodes[gap.path] : null;
-      if (!gap.extend && parent && parent.type === "Add") src = "+ " + src;
       this.fnInput.value = "";
       this._hideFnMenu();
       this._hideFnForm();
+      this._insertAtCaret(gap, src);
+      return true;
+    }
+
+    /** A whole construction (a function with its slots, a template of the
+     *  palette) added at the caret `gap`: a new term in a sum, a new factor
+     *  in a product - typed text at a caret joins its neighbour by
+     *  juxtaposition (a product), which is right in a product and not in a
+     *  sum. */
+    _insertAtCaret(gap, src) {
+      var parent = this.state && this.state.nodes ? this.state.nodes[gap.path] : null;
+      if (!gap.extend && parent && parent.type === "Add") src = "+ " + src;
       var self = this, msg = this._insertMessage(gap, src);
       // The box may have just asked for the function list: wait for the
       // editor to be free rather than drop the insertion (send drops while busy).
@@ -4847,7 +5052,7 @@ var SympyEditor = (function () {
       if (this.caretEl.parentNode) this.caretEl.parentNode.removeChild(this.caretEl);
       // showing one notifies the add-ons (through _applySelection); its going
       // must too, or a panel's "Add to cursor" would outlive the caret
-      if (had && this._addons) this._addonsNotify("onSelect", this.selected, this.range);
+      if (had && this._addons) this._notifySelect();
     }
 
     /** The operator glyph under the pointer - the "+" of a sum, the "\u22c5" of a
@@ -5513,7 +5718,33 @@ var SympyEditor = (function () {
         if (composing(ev)) return;
         if (ev.key === "Enter") { ev.preventDefault(); self.commitEdit(); }
         else if (ev.key === "Escape") { ev.preventDefault(); self.cancelEdit(); }
+        else if (ev.key === "Tab" && self.state && self.state.placeholders && self.state.placeholders.length) {
+          ev.preventDefault();
+          self._commitToSlot(ev.shiftKey ? -1 : 1);
+        }
       });
+    }
+
+    /** Tab in a field while the formula has empty slots: what was typed is
+     *  applied, then the next slot (Shift+Tab: the one before) is selected -
+     *  filling a fraction is "1 Tab 2".  The browser's own Tab used to move
+     *  the focus away, the blur applied the field and the selection stayed
+     *  on the construction, so the 2 replaced the whole fraction.  Slots are
+     *  followed by name, since their paths move with the change. */
+    _commitToSlot(step) {
+      var s = this.state, slots = s.placeholders, path = this.editing;
+      var at = path !== null ? slots.indexOf(path) : -1, names = [];
+      for (var i = 1; i <= slots.length; i++) {
+        var k = at < 0 ? (step > 0 ? i - 1 : slots.length - i) : (at + step * i + slots.length * i) % slots.length;
+        var n = s.nodes[slots[k]];
+        if (n && slots[k] !== path && names.indexOf(n.src) < 0) names.push(n.src);
+      }
+      this._slotAfterCommit = names;
+      this.commitEdit();
+      if (!this.busy) {                         // nothing to apply: just the next slot
+        this._slotAfterCommit = null;
+        this._selectPlaceholder(step);
+      }
     }
 
     /** The names of the formula's empty slots (_1, _2...), so a template
@@ -5691,6 +5922,7 @@ var SympyEditor = (function () {
           if (this.caret) return this.beginInsert("");
           if (this.range) return this.beginRangeEdit();
           return this.beginEdit(this.selected || "/");
+        case "palette": return this.togglePalette();
         case "copy": return this.copySource();
         case "paste": return this.pasteClipboard();
         case "zoomin": return this.setZoom(this.zoom * ZOOM_STEP);
@@ -5739,14 +5971,21 @@ var SympyEditor = (function () {
       // A request that takes a while dims the formula and gets the spinner
       // overlay, and after a few seconds the offer to interrupt it (where the
       // backend can).  A quick one shows nothing at all, nor a quiet one.
+      // The add-ons' own requests and their switching on (`background`) wait
+      // much longer before they block anything: on a phone each took half a
+      // second, and the panels loading after the formula flashed the
+      // overlay over it again and again.  One that really hangs still gets
+      // the overlay and its Interrupt, later.
+      var background = !!(options && options.background);
+      var after = background ? Math.max(this.opts.workingAfter, this.opts.backgroundAfter) : this.opts.workingAfter;
       var working = quiet ? null : setTimeout(function () {
         self.root.classList.add("se-busy");
         self._workingLabel = self._workingText(msg);
         self._showLoading(self._workingLabel);
-      }, this.opts.workingAfter);
+      }, after);
       var offer = quiet ? null : setTimeout(function () {
         if (self.backend.interrupt && (!self.backend.canInterrupt || self.backend.canInterrupt())) self.interruptBtn.hidden = false;
-      }, this.opts.interruptAfter);
+      }, background ? Math.max(after, this.opts.interruptAfter) : this.opts.interruptAfter);
       var wasSrepr = this.state ? this.state.srepr : null;
       try {
         var snap = await this.backend.send(msg, function (text) { self._report(text); });
@@ -6133,6 +6372,7 @@ var SympyEditor = (function () {
         if (cancel) { cancel.click(); return true; }
       }
       if (this.fnForm && !this.fnForm.hidden) { this._hideFnForm(); return true; }
+      if (this.paletteMenu && !this.paletteMenu.hidden) { this.closePalette(true); return true; }
       if (this.editing !== null || this.inserting) { this.cancelEdit(); return true; }
       if (this.junction || this.range || this.selected) { this.select(null); return true; }
       if (this.caret) { this._hideCaret(); this._applySelection(); return true; }
@@ -7272,6 +7512,11 @@ var SympyEditor = (function () {
       set("redo", dis || !s.can_redo);
       set("edit", dis);
       set("keyboard", dis);
+      // the palette works at a caret, on a selection or on the whole formula;
+      // an operator is not something to put inside a fraction
+      set("palette", dis || !!this.junction);
+      if (b.palette && b.palette.disabled) this.closePalette(false);
+      this._drawPaletteLabel();
       // In a matrix (the matrix itself, or anything in one of its entries):
       // its rows and columns, beside the arrows.
       var mctx = dis ? null : this._matrixContext();
@@ -7321,6 +7566,7 @@ var SympyEditor = (function () {
      *  listener left behind would keep its editor alive. */
     destroy() {
       this.flush();
+      this.closePalette(false);           // its listener is on the document
       // From here on nothing is sent and no answer is taken: a request on its
       // way used to come back to an editor that was gone, which drew it,
       // mounted its add-ons again and wrote the sessions.  And a field left

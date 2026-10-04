@@ -1937,7 +1937,14 @@ class Document:
 
         Nothing is evaluated: wrapping ``4`` in ``sqrt`` gives ``sqrt(4)``, not
         ``2`` - this builds the expression, :meth:`call` computes with it.
+
+        ``func`` may also be a template with ``$`` where the node goes -
+        ``"Matrix([[$, _1], [_2, _3]])"``, a place no function call puts it
+        (the palette's matrix).  The node itself is put there, not its text
+        read back: ``sqrt(4)`` stays ``sqrt(4)``.
         """
+        if "$" in (func or ""):
+            return self._wrap_template(path, func, children)
         if not (func or "").strip():
             raise ValueError("No function to wrap in (cos, sqrt, Integral, f...)")
         m = re.match(r"^\s*([A-Za-z_][A-Za-z_0-9]*)\s*(?:\((.*)\))?\s*$", func or "", re.S)
@@ -1966,6 +1973,29 @@ class Document:
             result = invalid(fn.__name__)(target, *extra)
         if not isinstance(result, Basic):
             raise ValueError(f"{name} returned {type(result).__name__}, not an expression")
+        if children is not None:
+            return self._commit(self._replace_range(self.expr, p, children, result))
+        return self._commit(self._replace_at(self.expr, p, result))
+
+    def _wrap_template(self, path: PathLike, template: str, children=None) -> Basic:
+        """:meth:`wrap` into a template: ``$`` stands for the node.  The text
+        is read with a name of its own in that place, which is then swapped
+        for the node - the node is never printed and parsed again."""
+        if template.count("$") != 1:
+            raise ValueError(f"A template takes the selection in one place ($): {template!r}")
+        p = self._path(path)
+        target = self._extract_range(self.expr, p, children) if children is not None else self._get_at(self.expr, p)
+        taken = set(self.namespace())
+        marker = "selection_"
+        while marker in taken or marker in template:
+            marker += "_"
+        # not in the target's context: in a matrix's, the stand-in would be read as a
+        # matrix symbol, which Matrix spreads out as a block
+        built = self.parse(template.replace("$", marker))
+        stand_in = [a for a in built.atoms(Symbol, MatrixSymbol) if self._symbol_name(a) == marker]
+        if len(stand_in) != 1:
+            raise ValueError(f"Cannot wrap in {template!r}")
+        result = built.xreplace({stand_in[0]: target})
         if children is not None:
             return self._commit(self._replace_range(self.expr, p, children, result))
         return self._commit(self._replace_at(self.expr, p, result))
@@ -2558,6 +2588,17 @@ class Document:
                 "kind_labels": dict(self.kind_labels), "methods": {}, "addons": list(self.addons),
                 "addons_available": [], "placeholders": [], "error": error}
 
+    def _query_answer(self, query: Dict[str, Any]) -> Dict[str, Any]:
+        """The answer to an add-on's query: the query and nothing else.  It
+        used to ride on a whole snapshot - the formula printed and annotated
+        twice, its node table, its source spans - which every front end
+        throws away for a query (nothing changed), and which was most of its
+        cost: half a second on a phone for each, enough to bring up the
+        editor's "Working…" overlay while the panels loaded.  ``seq`` and
+        the undo flags are the document's own, unchanged."""
+        return {"seq": self._seq, "query": query, "error": None,
+                "can_undo": self.can_undo, "can_redo": self.can_redo}
+
     def _handle_addon(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """One of an add-on's methods (see :meth:`Addon.handle`): a dict
         answer is a query, put under ``snap["query"]`` with nothing changed;
@@ -2583,13 +2624,9 @@ class Document:
             # with it) and nowhere else: the editor's own error line is for
             # the editor's own edits.  The plot asking for samples of a piece
             # that has none is not an error of the formula.
-            snap = self.snapshot()
-            snap["query"] = {"addon": name, "method": method, "error": f"{type(exc).__name__}: {exc}"}
-            return snap
+            return self._query_answer({"addon": name, "method": method, "error": f"{type(exc).__name__}: {exc}"})
         if isinstance(result, dict):
-            snap = self.snapshot()
-            snap["query"] = {"addon": name, "method": method, "result": result}
-            return snap
+            return self._query_answer({"addon": name, "method": method, "result": result})
         if result is not None:
             self._commit(self._coerce(result))
         snap = self.snapshot()

@@ -79,6 +79,11 @@ SympyEditor.registerAddon("plot", {
 
     function fmt(v) { return Number(v).toPrecision(4).replace(/\.?0+$/, ""); }
 
+    // The target last asked for (path and range), so that a selection that
+    // has not moved asks nothing (onSelect).
+    var drawnKey = null;
+    function targetKey(t) { return t.path + (t.children ? ":" + t.children.join(",") : ""); }
+
     function target() {
       if (!follow.checked) return { path: "/" };
       var r = api.range();
@@ -126,6 +131,7 @@ SympyEditor.registerAddon("plot", {
       var began = Date.now();
       var my = ++seq;
       var t = target();
+      drawnKey = targetKey(t);
       // A copy: the call may wait its turn behind the editor's own request,
       // and the answer is compared with what was sent, not with what has
       // been typed since.
@@ -700,7 +706,10 @@ SympyEditor.registerAddon("plot", {
       title: "Plot",
       help: HELP,
       onState: function (snap) { if (!snap.preview) request(); },
-      onSelect: function () { if (follow.checked) request(); },
+      // Only for another target: a selection drawn again names the one on
+      // show, and asking again for it is how the panel once sampled in a
+      // loop (each answer's overlay going away redrew the selection).
+      onSelect: function () { if (follow.checked && targetKey(target()) !== drawnKey) request(); },
       // Switched off.  Stopping the timer was not enough: Plotly kept the
       // picture - a listener on the window for each time the add-on had
       // been on, holding a graph no longer on the page - and what was

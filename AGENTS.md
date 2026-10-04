@@ -410,7 +410,14 @@ Two conventions between printer, document and front end:
   `MatrixSymbol(name, rows, cols)`, `Function(name)`, `IndexedBase(name)`.
 - **Long computations.**  `Editor.send` shows the spinner overlay after
   `workingAfter` ms and the Interrupt button after `interruptAfter` ms when
-  the backend has `interrupt()` (and `canInterrupt()` allows).  Backends:
+  the backend has `interrupt()` (and `canInterrupt()` allows).  An add-on's
+  request (`_addonCall`) and switching add-ons on (`_enforceAddons`, the
+  Add-ons menu) are `background`: they wait `backgroundAfter` (2.5 s) before
+  blocking anything - add-on loading must not block the editor, and on a
+  phone each panel's first request flashed the overlay over the formula; one
+  that hangs still gets it, and its Interrupt, then.  And a query's answer is
+  the query alone (`Document._query_answer`): the whole snapshot it used to
+  carry was most of its cost, and every front end throws it away.  Backends:
   the HTTP server takes `{"action": "interrupt"}` on another connection and
   raises `Interrupted` in the thread holding the lock
   (`interrupt_thread`, `PyThreadState_SetAsyncExc`); the widget runs each
@@ -548,8 +555,10 @@ Two conventions between printer, document and front end:
   `test_help_button_shows_the_guide` checks a phrase from each area.
 - **Tool blocks and columns.**  Every tool lives in a `.se-block`
   (`data-block`: session, zoom, sessions, edit, clip, apply - the arrows are
-  in the row under the formula, and `clip` is pinned to the right-hand
-  column in their place) built by
+  in the row under the formula, and `clip` takes the middle and right-hand
+  columns in their place: Copy and Paste at its left, the palette's button
+  at the right edge - `margin-left: auto`; narrow, the block fills the rest
+  of its line the same way) built by
   the `block()` helper, and a block never breaks apart.  Under 44rem the
   blocks spread across each line (`justify-content: space-between`); from
   44rem `.se-tools` becomes a three-column grid and `:nth-child(3n+1/2/0)`
@@ -923,6 +932,38 @@ Two conventions between printer, document and front end:
   box remembers the caret when it takes the focus (`_fnCaret`): loading the
   function list re-renders the formula, which drops the live caret, and the
   insertion waits while the editor is busy rather than being dropped.
+- **The palette.**  `MATH_PALETTE` in editor.js lists the constructions a
+  mathematical formula editor offers as buttons (fraction, power, √, |·|, e^,
+  log, !, binomial, ∫, definite ∫, d/dx, lim, Σ, Π, a 2 × 2 matrix), each
+  with its KaTeX `icon`, the source it `insert`s at a caret and what it
+  `wrap`s a selection in.  The `√ ∫ Σ ▾` button (`buttons.palette`,
+  `data-cmd="palette"`, at the right end of the clipboard block's row,
+  Copy and Paste at that block's left - never under the Transform menu,
+  where it landed in the apply row)
+  opens `.se-palette-menu`, a grid of `.se-palette-item`s drawn by KaTeX on
+  first open (`_drawPalette`; the button's own label is drawn when KaTeX is
+  there, `_drawPaletteLabel`).  `insertTemplate(key)` routes like typing: at
+  a caret (`this.caret`, or `_paletteCaret` taken when the menu opened - the
+  items take the focus) through `_insertAtCaret`, the same path as a
+  function picked at a caret (`+ ` in front in a sum); on a selection, a
+  range (`children`) or the root with nothing selected, a `wrap` message -
+  `Document.wrap`, which builds unevaluated; with the empty field open, a
+  `set`.  `freshSlots` numbers the slots afresh.  A `wrap` whose `func` holds
+  `$` is a template (`Document._wrap_template`): read with a stand-in name
+  there, then the node itself `xreplace`d in - the matrix's first entry,
+  where no function call puts the selection; never send the selection's text
+  back to be parsed (`sqrt(4)` came back as `2`).  The template is read
+  outside the node's context, or a matrix's stand-in became a matrix symbol
+  that `Matrix` spread out as a block.  A menu: arrows walk it, Esc / Tab /
+  a press elsewhere / Back close it; greyed out on an operator.  The n-th
+  root is left out on purpose: SymPy draws `root(x, n)` as `x^(1/n)`.
+- **Tab in a field.**  With empty slots in the formula, Tab (Shift+Tab) in an
+  inline field is `_commitToSlot`: the field is applied and the next
+  (previous) slot is selected - by name (`_slotAfterCommit`, read in
+  `setState`), since paths move with the change; a template typed in the
+  field still wins with its own first slot, and a field that sends nothing
+  just moves on.  The browser's own Tab took the focus away, the blur
+  applied the field and the selection stayed on the construction.
 - **Name resolution.**  `Document.parse` uses `parse_expr(local_dict=namespace())`:
   declared/used names win, then SymPy's globals, then new symbols.
   `` `name` `` (backticks) forces a Symbol for that parse; `_collision_note`
@@ -959,7 +1000,13 @@ carries it unchanged.  The front end part is a plain script (`Addon.js`,
 `loadAddons` puts the CSS in the page and runs the script once,
 `Editor._mountAddons` gives each a box under the source line (`.se-addons`,
 `.se-addon-<name>`) and a toolbar block (`data-block="addon:<name>"`), and
-`onState`/`onSelect`/`onZoom`/`destroy` follow the editor; a tool button of
+`onState`/`onSelect`/`onZoom`/`destroy` follow the editor (`onSelect`
+through `_notifySelect`: only for a selection that is another one - node,
+range, operator, caret - or the first after a new state or a mount, never
+for one merely drawn again; every redraw used to tell it, the "Working…"
+overlay going away included, and on a phone the plot and the rules panels
+asked Python again on each answer, for ever - keep it that way, and keep the
+panels' own guard, `drawnKey` / `askedKey`); a tool button of
 an add-on's own is the add-on's to enable - `_updateToolbar` only takes them
 away when there is nothing to work on (closed, no state), and leaves alone any
 marked `data-addon-off="1"` (the handwriting add-on's eraser, with no pen:

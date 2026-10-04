@@ -49,7 +49,7 @@ from .printer import (
 from .server import EditorServer, serve
 from .tutorial import save_tutorial_html, to_tutorial_html
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 __all__ = [
     "Addon",
