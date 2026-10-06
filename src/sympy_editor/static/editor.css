@@ -406,7 +406,7 @@
 /* at start, while the last session is being opened: the page's own
  * expression is a stand-in, not shown (mount, se-restoring) */
 .sympy-editor.se-restoring .se-view > *,
-.sympy-editor.se-restoring .se-source,
+.sympy-editor.se-restoring .se-source-box,
 .sympy-editor.se-restoring .se-addons { visibility: hidden; }
 
 /* loading overlay: in front of the whole editor while Python loads */
@@ -601,7 +601,7 @@
  * appears under a selection. */
 .sympy-editor.se-full > .se-toolbar,
 .sympy-editor.se-full > .se-status,
-.sympy-editor.se-full > .se-source,
+.sympy-editor.se-full > .se-source-box,
 .sympy-editor.se-full > .se-symbols { display: none; }
 .sympy-editor.se-full .se-fullbtn { opacity: 0.45; }
 .sympy-editor.se-full .se-view {
@@ -647,9 +647,21 @@
 @keyframes se-blink { 50% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .se-view .se-selected::after { animation: none; } }
 
+/* The Python line in its folding box: the summary a small label, as the
+ * Symbols panel's. */
+.se-source-box { margin-top: 0.25rem; }
+.se-source-summary {
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  font-size: 12px;
+  color: var(--se-muted);
+  width: max-content;
+}
+.se-source-summary:focus-visible { outline: 2px solid rgba(var(--se-accent), 0.55); outline-offset: 1px; border-radius: 0.2rem; }
 .se-source {
   display: block;
-  margin-top: 0.25rem;
+  margin-top: 0.15rem;
   padding: 0.2rem 0.4rem;
   font-family: var(--se-mono);
   font-size: 12px;
@@ -664,6 +676,61 @@
 .se-source.se-dirty { border-left: 3px solid rgba(var(--se-accent), 0.9); padding-left: 0.3rem; }
 .se-source.se-invalid { border-left-color: var(--se-error); }
 .se-source mark { background: rgba(var(--se-accent), 0.25); color: inherit; border-radius: 2px; }
+
+/* Python colouring (pyRender): the source line, and the console add-on's
+ * input, script and transcript.  Colours chosen to read on the light and
+ * the dark theme. */
+.sympy-editor, .se-addon-console {
+  --se-py-kw: #8250df;
+  --se-py-const: #0550ae;
+  --se-py-num: #0a7ea4;
+  --se-py-str: #0a6b2b;
+  --se-py-com: #6e7781;
+  --se-py-class: #953800;
+  --se-py-fn: #6639ba;
+  --se-py-builtin: #0550ae;
+  --se-py-attr: #116329;
+  --se-py-sym: var(--se-fg);
+  --se-py-op: #cf222e;
+  --se-py-br: var(--se-fg);
+  --se-py-magic: #bf3989;
+}
+@media (prefers-color-scheme: dark) {
+  .sympy-editor, .se-addon-console {
+    --se-py-kw: #d2a8ff;
+    --se-py-const: #79c0ff;
+    --se-py-num: #56d4dd;
+    --se-py-str: #7ee787;
+    --se-py-com: #8b949e;
+    --se-py-class: #ffa657;
+    --se-py-fn: #d2a8ff;
+    --se-py-builtin: #79c0ff;
+    --se-py-attr: #a5d6ff;
+    --se-py-op: #ff7b72;
+    --se-py-magic: #f778ba;
+  }
+}
+.se-py-kw { color: var(--se-py-kw); font-weight: 600; }
+.se-py-const { color: var(--se-py-const); }
+.se-py-num { color: var(--se-py-num); }
+.se-py-str { color: var(--se-py-str); }
+.se-py-com { color: var(--se-py-com); font-style: italic; }
+.se-py-class { color: var(--se-py-class); }
+.se-py-fn { color: var(--se-py-fn); }
+.se-py-builtin { color: var(--se-py-builtin); }
+.se-py-attr { color: var(--se-py-attr); }
+.se-py-sym { color: var(--se-py-sym); }
+.se-py-op { color: var(--se-py-op); }
+.se-py-br { color: var(--se-py-br); }
+.se-py-magic { color: var(--se-py-magic); font-weight: 600; }
+/* the bracket by the text cursor and its partner; one without a partner red */
+.se-py-br.se-py-match {
+  background: rgba(var(--se-accent), 0.22);
+  outline: 1px solid rgba(var(--se-accent), 0.65);
+  border-radius: 2px;
+  font-weight: 700;
+}
+.se-py-br.se-py-unmatched { background: rgba(180, 35, 24, 0.2); color: var(--se-error); border-radius: 2px; font-weight: 700; }
 
 .se-error {
   margin-top: 0.3rem;

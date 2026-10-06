@@ -1124,6 +1124,64 @@ def test_caret_aligns_with_the_previous_character(browser, serve_expr):
     assert page.errors == []
 
 
+def _select_source_text(page, start, end):
+    """Select characters start..end of the source line - coloured, it is
+    a span per token, so the offsets are walked through its text nodes."""
+    page.evaluate("""([s, e]) => {
+        const root = document.querySelector('.se-source');
+        const find = (want) => {
+            const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+            let n, seen = 0;
+            while ((n = w.nextNode())) { if (want <= seen + n.nodeValue.length) return [n, want - seen]; seen += n.nodeValue.length; }
+        };
+        const a = find(s), b = find(e);
+        window.getSelection().setBaseAndExtent(a[0], a[1], b[0], b[1]);
+    }""", [start, end])
+
+
+def test_the_python_line_is_coloured_and_folds(browser, serve_expr):
+    """The source line is coloured as Python - classes, functions, numbers,
+    operators, brackets - with the bracket by the text cursor and its
+    partner marked; the line has its own undo (recolouring rewrites it,
+    which the browser's undo does not survive), and it folds away under a
+    "Python" summary, the fold remembered."""
+    from sympy import Integral
+    srv, doc = serve_expr(Integral(sin(x) ** 2, (x, 0, pi)) + 3)
+    page = _open(browser, srv.url)
+    src = page.locator(".se-source")
+    assert src.inner_text() == "Integral(sin(x)**2, (x, 0, pi)) + 3"
+    assert src.locator(".se-py-class").first.inner_text() == "Integral"
+    assert src.locator(".se-py-fn").first.inner_text() == "sin"
+    assert src.locator(".se-py-const").first.inner_text() == "pi"
+    assert src.locator(".se-py-op").first.inner_text() == "**"
+    assert [t for t in src.locator(".se-py-num").all_inner_texts()] == ["2", "0", "3"]
+    # the bracket by the cursor and its partner
+    text = src.inner_text()
+    src.focus()
+    _select_source_text(page, len("Integral("), len("Integral("))
+    page.wait_for_function("document.querySelectorAll('.se-source .se-py-match').length === 2")
+    marked = page.evaluate("[...document.querySelectorAll('.se-source .se-py-match')].map(e => +e.dataset.at)")
+    assert marked == [len("Integral"), text.index(" + 3") - 1]
+    # typed text is coloured as it comes, and Ctrl+Z takes it back
+    _select_source_text(page, len(text), len(text))
+    page.keyboard.type(" + cos(x)")
+    assert src.locator(".se-py-fn").last.inner_text() == "cos"
+    page.keyboard.press("Control+z")
+    assert _wait(lambda: not src.inner_text().endswith(")"))
+    page.keyboard.press("Escape")
+    assert src.inner_text() == text
+    # it folds, and stays folded on the next visit
+    box = page.locator(".se-source-box")
+    assert box.evaluate("d => d.open") and src.is_visible()
+    page.locator(".se-source-summary").click()
+    assert not box.evaluate("d => d.open") and src.is_hidden()
+    page.reload()
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    assert _wait(lambda: not page.locator(".se-source-box").evaluate("d => d.open"))
+    page.locator(".se-source-summary").click()
+    assert page.errors == []
+
+
 def test_source_line_is_linked_to_the_rendering(browser, serve_expr):
     srv, doc = serve_expr(x**2 + sin(y) / 3)
     page = _open(browser, srv.url)
@@ -1133,7 +1191,7 @@ def test_source_line_is_linked_to_the_rendering(browser, serve_expr):
     # selecting "sin(y)" in the source selects that node in the rendering
     start = text.index("sin(y)")
     src.focus()                                               # a user selection: the line has focus
-    page.evaluate("""([s, e]) => { const t = document.querySelector('.se-source').firstChild; window.getSelection().setBaseAndExtent(t, s, t, e); }""", [start, start + 6])
+    _select_source_text(page, start, start + 6)
     page.wait_for_function("document.querySelector('.se-status').textContent === 'sin: sin(y)'")
     assert page.locator(".se-selected").count() == 1
     # selecting in the rendering highlights the source text
@@ -4207,9 +4265,10 @@ def test_dragging_over_the_source_line_selects_in_the_formula(browser, serve_exp
     where = page.evaluate("""() => {
         const src = document.querySelector('.se-source'), text = src.textContent;
         const i = text.indexOf('sin(x)');
+        const at = (want) => { const w = document.createTreeWalker(src, NodeFilter.SHOW_TEXT); let n, seen = 0; while ((n = w.nextNode())) { if (want <= seen + n.nodeValue.length) return [n, want - seen]; seen += n.nodeValue.length; } };   // coloured: a span per token
         const r = document.createRange();
-        r.setStart(src.firstChild, i);
-        r.setEnd(src.firstChild, i + 'sin(x)'.length);
+        r.setStart(...at(i));
+        r.setEnd(...at(i + 'sin(x)'.length));
         const b = r.getBoundingClientRect();
         return {left: b.left, right: b.right, y: (b.top + b.bottom) / 2};
     }""")
@@ -4403,8 +4462,9 @@ def test_a_caret_in_the_source_line_is_a_caret_in_the_formula(browser, serve_exp
         page.evaluate("""(off) => {
             const src = document.querySelector('.se-source');
             src.focus();
+            const at = (want) => { const w = document.createTreeWalker(src, NodeFilter.SHOW_TEXT); let n, seen = 0; while ((n = w.nextNode())) { if (want <= seen + n.nodeValue.length) return [n, want - seen]; seen += n.nodeValue.length; } };
             const r = document.createRange();
-            r.setStart(src.firstChild, off);
+            r.setStart(...at(off));
             r.collapse(true);
             const s = getSelection(); s.removeAllRanges(); s.addRange(r);
         }""", offset)

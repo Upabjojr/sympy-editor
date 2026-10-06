@@ -226,6 +226,26 @@ Two conventions between printer, document and front end:
   the document selection, which would move focus into the editable line);
   Enter sends `set`, Esc reverts.  `beginEdit("/")`
   edits there - the rendering is never swapped for a text field.
+- **Python colouring.**  `pyTokens` (a hand-written tokenizer: keywords,
+  constants, builtins, classes by shape - capitalised with a lower-case
+  letter -, functions as called names, attributes, symbols, numbers,
+  strings, comments, operators, brackets, IPython magics), `pyRender` (a
+  span per token, `.se-py-<kind>`, a bracket with `data-at`; the source
+  line's `<mark>` and `.se-source-caret` cut tokens where they fall) and
+  `pyBracketPair`/`pyShowBrackets` (`.se-py-match` on the bracket by the
+  cursor and its partner, `.se-py-unmatched` alone) are exposed as
+  `SympyEditor.python`.  Every write of the source line goes through
+  `_writeSource`; typing is recoloured on input with the selection kept as
+  text offsets (`textOffsetOf`, `selectTextOffsets`), so the line keeps its
+  own undo (`_undoSource`, Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y) - the browser's
+  does not survive a rewrite.  The line sits in `details.se-source-box`
+  ("Python", open by `sourceOpen`, kept as `source-open` through the
+  keeper).  The console add-on colours its transcript with `render` and its
+  textareas with `colourField`: a `pre.pc-hl` under the field, glyph for
+  glyph (same font, padding, border width; no bold or italic), the field's
+  text transparent, the value setter wrapped so text set from code is
+  coloured too.  Tests that put a selection in the line walk its text nodes
+  (`_select_source_text`): it is no longer one text node.
 - **Function box.**  `{"action": "call", "path", "func": "diff(x)"}` →
   `Document.call`: a public callable of `sympy` is called as `f(node, *args)`,
   a `.name`/attribute of the node otherwise; extra args are parsed in the

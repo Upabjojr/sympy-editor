@@ -2,6 +2,14 @@
 
 ## 0.1.3 — unreleased
 
+* **Python, coloured, and out of the way when not wanted.** The source line
+  under the formula is coloured as Python - classes, functions, numbers,
+  strings, comments, operators - and the bracket by the text cursor is
+  marked with its partner (an unmatched one in red); typing is coloured as
+  it comes, with the line's own Ctrl+Z. Its **Python** heading folds it
+  away, and it stays folded. The Python console add-on colours its input,
+  its script and its transcript the same way.
+
 * **The keyboard and a screen reader get around.** Help, the history and
   the ≡ drawer are dialogs now: the focus goes in when they open, Tab stays
   inside, and the button that opened them has the focus again when they

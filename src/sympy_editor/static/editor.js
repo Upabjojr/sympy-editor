@@ -26,6 +26,8 @@ var SympyEditor = (function () {
     displayMode: true,   // KaTeX display mode (centered, large operators)
     toolbar: true,       // show the button bar
     showSource: true,    // show str(expr) under the rendering
+    sourceOpen: true,    // ... in a box which is open at first (then as the user leaves it)
+    rememberSourceOpen: true,   // keep whether the box is open, as the zoom is kept
     readOnly: false,     // selection only, no editing
     finishButton: false, // "Done" button (used by the HTTP server backend)
     preload: true,       // Pyodide pages: start loading Python at page load, not at the first edit
@@ -149,7 +151,7 @@ var SympyEditor = (function () {
     "<li><b>Unwrap</b> (<kbd>Backspace</kbd>) removes the node but keeps an argument: cos(\u03b8) \u2192 \u03b8; it asks which one when there is a choice. On a symbol or a number, which has nothing inside, <kbd>Backspace</kbd> deletes.</li>",
     "<li><b>Extract</b> keeps only the selection, which becomes the whole formula; <b>Copy</b>/<b>Paste</b> and <kbd>Ctrl</kbd>+<kbd>C</kbd>/<kbd>X</kbd>/<kbd>V</kbd> work on selections and carets.</li>",
     "<li><kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> redoes.</li>",
-    "<li>The source line under the formula is the whole expression as SymPy text: edit it there too (Enter applies, Esc reverts).</li>",
+    "<li>The source line under the formula is the whole expression as SymPy text, coloured as Python (classes, functions, numbers, strings\u2026; the bracket by the text cursor and its partner are marked): edit it there too (Enter applies, Esc reverts, <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes typing). Its <b>Python</b> heading folds it away, and it stays as you left it.</li>",
     "<li>The line and the formula are the same thing seen twice, and follow each other both ways: select text and that sub-expression is selected above; select above and its text is marked here \u2014 put the cursor in one and a caret appears in the other, at the same place.</li>",
     "</ul></section>",
     "<section><h3>Typing between things</h3><ul>",
@@ -755,6 +757,236 @@ var SympyEditor = (function () {
       el.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
     });
     return el;
+  }
+
+  /* ---- Python code: colouring and bracket matching ----
+   *
+   * One tokenizer for every piece of Python the editor shows: the source
+   * line under the formula, and the console add-on's input, script and
+   * transcript (SympyEditor.python).  Hand-written, no library: it only has
+   * to tell keywords, names, numbers, strings, comments, operators and
+   * brackets apart, and to tell the names of SymPy apart by their shape -
+   * a capitalised name with a lower-case letter in it is a class (Symbol,
+   * Integral, MatrixSymbol), a name called is a function (sin(x)), a name
+   * after a dot an attribute, the other names symbols (x, A, alpha, _1).
+   * Every token covers its characters exactly and the tokens cover the
+   * whole text, so the coloured copy has the same textContent as the
+   * text.  A string or a bracket left open (a line being typed) is fine:
+   * the string runs to the end of its line, the bracket has no partner. */
+  var PY_KEYWORDS = {};
+  ("and as assert async await break class continue def del elif else except finally for from global if " +
+   "import in is lambda nonlocal not or pass raise return try while with yield").split(" ").forEach(function (w) { PY_KEYWORDS[w] = true; });
+  // Python's own constants, and SymPy's (as `from sympy import *` gives them)
+  var PY_CONSTANTS = {};
+  "True False None Ellipsis NotImplemented pi E I oo zoo nan S".split(" ").forEach(function (w) { PY_CONSTANTS[w] = true; });
+  var PY_BUILTINS = {};
+  ("abs all any ascii bin bool breakpoint bytearray bytes callable chr classmethod compile complex delattr dict dir " +
+   "divmod enumerate eval exec filter float format frozenset getattr globals hasattr hash help hex id input int " +
+   "isinstance issubclass iter len list locals map max memoryview min next object oct open ord pow print property " +
+   "range repr reversed round set setattr slice sorted staticmethod str sum super tuple type vars zip display").split(" ")
+    .forEach(function (w) { PY_BUILTINS[w] = true; });
+  var PY_OPEN = { "(": ")", "[": "]", "{": "}" };
+  var PY_CLOSE = { ")": "(", "]": "[", "}": "{" };
+
+  /** The tokens of `text`: `{s, e, k}` (start, end, kind), kinds "kw",
+   *  "const", "builtin", "class", "fn", "attr", "sym", "num", "str",
+   *  "com", "op", "br" (one bracket), "magic" (an IPython %magic or a ?
+   *  help suffix) and "sp" (white space).  `ipython`: a line which starts
+   *  with % is a magic. */
+  function pyTokens(text, ipython) {
+    var toks = [], i = 0, n = text.length, lineStart = true;
+    var push = function (s, e, k) { toks.push({ s: s, e: e, k: k }); };
+    while (i < n) {
+      var c = text[i], start = i;
+      if (c === "\n") { push(i, i + 1, "sp"); i++; lineStart = true; continue; }
+      if (c === " " || c === "\t" || c === "\r") {
+        while (i < n && (text[i] === " " || text[i] === "\t" || text[i] === "\r")) i++;
+        push(start, i, "sp"); continue;
+      }
+      var atLine = lineStart; lineStart = false;
+      if (c === "#") { while (i < n && text[i] !== "\n") i++; push(start, i, "com"); continue; }
+      if (ipython && atLine && (c === "%" || c === "!")) {
+        while (i < n && /[%!\w.]/.test(text[i])) i++;
+        push(start, i, "magic"); continue;
+      }
+      // strings, with their prefixes (r, b, f, u and pairs of them)
+      var m = /^([rRbBuUfF]{0,2})('''|"""|'|")/.exec(text.slice(i, i + 5));
+      if (m) {
+        var q = m[2], raw = /[rR]/.test(m[1]);
+        i += m[0].length;
+        while (i < n) {
+          // a backslash escapes the next character (in a raw string it only
+          // keeps a quote from ending it)
+          if (text[i] === "\\" && i + 1 < n) { i += 2; continue; }
+          if (text.startsWith(q, i)) { i += q.length; break; }
+          if (q.length === 1 && text[i] === "\n") break;     // an open one-line string ends with its line
+          i++;
+        }
+        push(start, Math.min(i, n), "str"); i = Math.min(i, n); continue;
+      }
+      if (/[0-9]/.test(c) || (c === "." && /[0-9]/.test(text[i + 1] || ""))) {
+        var num = /^(?:0[xX][0-9a-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|(?:[0-9][0-9_]*)?\.?[0-9_]*(?:[eE][+-]?[0-9_]+)?[jJ]?)/.exec(text.slice(i));
+        i += Math.max(1, num ? num[0].length : 1);
+        push(start, i, "num"); continue;
+      }
+      if (/[A-Za-z_À-￿]/.test(c)) {
+        while (i < n && /[\wÀ-￿]/.test(text[i])) i++;
+        var word = text.slice(start, i), k;
+        var before = start - 1;
+        while (before >= 0 && (text[before] === " " || text[before] === "\t")) before--;
+        var after = i;
+        while (after < n && (text[after] === " " || text[after] === "\t")) after++;
+        var called = text[after] === "(";
+        if (before >= 0 && text[before] === "." && !/[0-9]/.test(text[before - 1] || "")) k = called ? "fn" : "attr";
+        else if (PY_KEYWORDS[word]) k = "kw";
+        else if (PY_CONSTANTS[word]) k = "const";
+        else if (/^[A-Z]/.test(word) && /[a-z]/.test(word)) k = "class";
+        else if (PY_BUILTINS[word] && called) k = "builtin";
+        else if (called) k = "fn";
+        else k = "sym";
+        push(start, i, k); continue;
+      }
+      if (PY_OPEN[c] || PY_CLOSE[c]) { push(i, i + 1, "br"); i++; continue; }
+      if (ipython && c === "?" ) {
+        while (i < n && text[i] === "?") i++;
+        push(start, i, "magic"); continue;
+      }
+      var op = /^(?:\*\*=?|\/\/=?|<<=?|>>=?|->|:=|[=!<>]=|[-+*\/%@&|^~<>=:.,;])/.exec(text.slice(i, i + 3));
+      i += op ? op[0].length : 1;
+      push(start, i, op ? "op" : "sym");
+    }
+    return toks;
+  }
+
+  /** The pair of bracket tokens (indices into `toks`) to show at text
+   *  offset `at`: the bracket just before `at`, else the one just after;
+   *  `[i, j]` with `j` the partner, -1 for none (an unbalanced bracket),
+   *  or null when no bracket touches `at`.  Brackets inside strings and
+   *  comments are their tokens', not brackets. */
+  function pyBracketPair(toks, text, at) {
+    var here = -1;
+    for (var t = 0; t < toks.length; t++) {
+      if (toks[t].k !== "br") continue;
+      if (toks[t].e === at) { here = t; break; }
+      if (toks[t].s === at && here < 0) here = t;
+    }
+    if (here < 0) return null;
+    var ch = text[toks[here].s], depth = 0, step = PY_OPEN[ch] ? 1 : -1;
+    for (var u = here; u >= 0 && u < toks.length; u += step) {
+      if (toks[u].k !== "br") continue;
+      var b = text[toks[u].s];
+      if (step === 1 ? PY_OPEN[b] : PY_CLOSE[b]) depth++;
+      else {
+        depth--;
+        if (depth === 0) {
+          var ok = step === 1 ? PY_OPEN[ch] === b : PY_CLOSE[ch] === b;
+          return [here, ok ? u : -1];
+        }
+      }
+    }
+    return [here, -1];
+  }
+
+  /** Fill `el` with `text` coloured: a span per token (class
+   *  se-py-<kind>, a bracket with data-at=<its offset>).  `opts.mark`:
+   *  `[lo, hi]` wrapped in a <mark>; `opts.caret`: an offset where a
+   *  `.se-source-caret` span goes (the formula's caret mirrored);
+   *  `opts.ipython`: IPython syntax.  Returns the tokens. */
+  function pyRender(el, text, opts) {
+    opts = opts || {};
+    text = text || "";
+    var toks = pyTokens(text, opts.ipython);
+    var cuts = [];
+    if (opts.mark && opts.mark[1] > opts.mark[0]) cuts.push(opts.mark[0], opts.mark[1]);
+    var caret = typeof opts.caret === "number" ? opts.caret : -1;
+    if (caret >= 0) cuts.push(caret);
+    el.textContent = "";
+    var markEl = null;
+    var target = function (at) {
+      if (opts.mark && at >= opts.mark[0] && at < opts.mark[1]) {
+        if (!markEl) { markEl = document.createElement("mark"); el.appendChild(markEl); }
+        return markEl;
+      }
+      return el;
+    };
+    var caretDone = caret < 0;
+    var putCaret = function (at) {
+      if (!caretDone && caret === at) {
+        target(at).appendChild(h("span", { class: "se-source-caret", "aria-hidden": "true" }));
+        caretDone = true;
+      }
+    };
+    toks.forEach(function (tok) {
+      // a token cut by the mark's ends or the caret goes in pieces, so that
+      // the <mark> and the caret sit between characters, as in plain text
+      var points = [tok.s];
+      cuts.forEach(function (c) { if (c > tok.s && c < tok.e) points.push(c); });
+      points.sort(function (a, b) { return a - b; });
+      points.push(tok.e);
+      for (var p = 0; p + 1 < points.length; p++) {
+        var s = points[p], e = points[p + 1];
+        putCaret(s);
+        var piece = text.slice(s, e), node;
+        if (tok.k === "sp") node = document.createTextNode(piece);
+        else {
+          node = document.createElement("span");
+          node.className = "se-py-" + tok.k;
+          if (tok.k === "br") node.setAttribute("data-at", String(tok.s));
+          node.textContent = piece;
+        }
+        target(s).appendChild(node);
+      }
+    });
+    putCaret(text.length);
+    return toks;
+  }
+
+  /** The character offset in `root`'s text of the DOM point (node, off). */
+  function textOffsetOf(root, node, off) {
+    var r = document.createRange();
+    r.selectNodeContents(root);
+    try { r.setEnd(node, off); } catch (e) { return null; }
+    return r.toString().length;
+  }
+
+  /** Put the document selection of `root` from text offset `a` to `b`. */
+  function selectTextOffsets(root, a, b) {
+    var find = function (want) {
+      var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null), node, seen = 0, last = null;
+      while ((node = walker.nextNode())) {
+        var len = node.nodeValue.length;
+        if (want <= seen + len) return [node, want - seen];
+        seen += len; last = node;
+      }
+      return last ? [last, last.nodeValue.length] : [root, root.childNodes.length];
+    };
+    var p = find(a), q = b === a ? p : find(b);
+    var sel = window.getSelection();
+    if (!sel) return;
+    var r = document.createRange();
+    r.setStart(p[0], p[1]);
+    r.setEnd(q[0], q[1]);
+    sel.removeAllRanges();
+    sel.addRange(r);
+  }
+
+  /** Mark the bracket pair at text offset `at` among the bracket spans of
+   *  `el` (rendered by pyRender with `toks`): se-py-match on both, or
+   *  se-py-unmatched on a bracket without a partner; the marks set before
+   *  are cleared.  `at` null clears them. */
+  function pyShowBrackets(el, toks, text, at) {
+    var old = el.querySelectorAll(".se-py-match, .se-py-unmatched");
+    for (var o = 0; o < old.length; o++) old[o].classList.remove("se-py-match", "se-py-unmatched");
+    if (at === null || at === undefined || !toks) return null;
+    var pair = pyBracketPair(toks, text, at);
+    if (!pair) return null;
+    var span = function (t) { return el.querySelector('.se-py-br[data-at="' + toks[t].s + '"]'); };
+    var a = span(pair[0]);
+    if (pair[1] < 0) { if (a) a.classList.add("se-py-unmatched"); return pair; }
+    var b = span(pair[1]);
+    if (a) a.classList.add("se-py-match");
+    if (b) b.classList.add("se-py-match");
+    return pair;
   }
 
   /** Put `panel` (absolutely positioned in `root`) under `anchor`, kept
@@ -1978,7 +2210,27 @@ var SympyEditor = (function () {
       // paste handler inserts text, and only textContent is ever read.
       if (!o.readOnly) this.source.setAttribute("contenteditable", "true");
       this.sourceDirty = false;
-      if (o.showSource) root.appendChild(this.source);
+      // The line in a box of its own that folds away, so the formula need
+      // not always be shown twice: open at first (o.sourceOpen), then as it
+      // was left (kept as "source-open"); an edit of the whole expression
+      // opens it, since that is typed there.
+      this.sourceBox = h("details", { class: "se-source-box" }, [
+        h("summary", { class: "se-source-summary", title: "The formula as SymPy Python code: show or hide it" }, ["Python"]),
+        this.source
+      ]);
+      this.sourceBox.open = o.sourceOpen !== false;
+      if (o.rememberSourceOpen !== false) {
+        var keptOpen = Keep.local("source-open");
+        if (keptOpen === "0" || keptOpen === "1") this.sourceBox.open = keptOpen === "1";
+        var selfBox = this;
+        Keep.read("source-open", this).then(function (kept) {
+          if (kept === "0" || kept === "1") selfBox.sourceBox.open = kept === "1";
+        }, function () { /* nothing kept */ });
+        this.sourceBox.addEventListener("toggle", function () {
+          Keep.write("source-open", selfBox.sourceBox.open ? "1" : "0", selfBox);
+        });
+      }
+      if (o.showSource) root.appendChild(this.sourceBox);
 
       // Symbols panel: what each name stands for (Symbol, MatrixSymbol with
       // its shape, explicit Matrix...) with controls to change it.
@@ -2929,17 +3181,29 @@ var SympyEditor = (function () {
       });
       this.source.addEventListener("focus", function () {
         // plain text to edit: the highlight and the caret marker step aside
-        if (self.source.querySelector("mark, .se-source-caret")) self.source.textContent = self.source.textContent;
+        if (self.source.querySelector("mark, .se-source-caret")) self._writeSource(self.source.textContent);
       });
-      this.source.addEventListener("input", function () {
+      this.source.addEventListener("input", function (ev) {
+        // the typed text coloured again, the caret where it was; not while
+        // an input method composes (rewriting the line would end it)
+        if (!(ev && ev.isComposing)) self._recolourSource();
         self.sourceDirty = true;
         self.source.classList.add("se-dirty");
         self._setStatus("Enter applies the edited source, Esc reverts it");
         self._schedulePreview();
       });
+      this.source.addEventListener("compositionend", function () { self._recolourSource(); });
       this.source.addEventListener("keydown", function (ev) {
         ev.stopPropagation();
         if (composing(ev)) return;
+        // the line's own undo: recolouring rewrites its content, which the
+        // browser's undo of an editable element does not survive
+        var mod = ev.ctrlKey || ev.metaKey;
+        if (mod && !ev.altKey && (ev.key === "z" || ev.key === "Z" || ev.key === "y")) {
+          ev.preventDefault();
+          self._undoSource(ev.key === "y" || ev.shiftKey);
+          return;
+        }
         if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); self.commitSource(); }
         else if (ev.key === "Escape") { ev.preventDefault(); self.revertSource(); self.view.focus({ preventScroll: true }); }
       });
@@ -2953,7 +3217,7 @@ var SympyEditor = (function () {
       // and disposes of many editors, and each would otherwise stay alive).
       this._docListeners = [];
       var onDocument = function (kind, fn) { document.addEventListener(kind, fn); self._docListeners.push([kind, fn]); };
-      onDocument("selectionchange", function () { self._onSourceSelection(); });
+      onDocument("selectionchange", function () { self._onSourceSelection(); self._sourceBrackets(); });
       // A press on the view released outside it: forget that pointer too.
       var endOutside = function (ev) {
         if (self._pointers[ev.pointerId] && !self.view.contains(ev.target)) endPointer(ev, ev.type === "pointercancel");
@@ -3180,7 +3444,7 @@ var SympyEditor = (function () {
         if (focused) { field.focus({ preventScroll: true }); try { field.setSelectionRange(pos, pos); } catch (e) { /* ignore */ } }
       }
       if (!this.state.preview) {           // a preview leaves the line being typed alone
-        this.source.textContent = this.state.src || "";
+        this._writeSource(this.state.src || "");
         this.sourceDirty = false;
         this.source.classList.remove("se-dirty");
       }
@@ -4633,13 +4897,7 @@ var SympyEditor = (function () {
       // are one document, so what is marked in one is marked in the other.
       if (!paths.length && this.caret) {
         var at = this._sourceOffsetOf(this.caret);
-        if (at !== null && at <= text.length) {
-          this.source.textContent = "";
-          this.source.appendChild(document.createTextNode(text.slice(0, at)));
-          this.source.appendChild(h("span", { class: "se-source-caret", "aria-hidden": "true" }));
-          this.source.appendChild(document.createTextNode(text.slice(at)));
-          return;
-        }
+        if (at !== null && at <= text.length) { this._writeSource(text, { caret: at }); return; }
       }
       var spans = this.state.spans || {};
       var lo = Infinity, hi = -Infinity;
@@ -4648,11 +4906,77 @@ var SympyEditor = (function () {
         if (!sp) { lo = Infinity; break; }
         lo = Math.min(lo, sp[0]); hi = Math.max(hi, sp[1]);
       }
-      this.source.textContent = "";
-      if (!paths.length || lo === Infinity || hi > text.length) { this.source.textContent = text; return; }
-      this.source.appendChild(document.createTextNode(text.slice(0, lo)));
-      this.source.appendChild(h("mark", {}, [text.slice(lo, hi)]));
-      this.source.appendChild(document.createTextNode(text.slice(hi)));
+      if (!paths.length || lo === Infinity || hi > text.length) { this._writeSource(text); return; }
+      this._writeSource(text, { mark: [lo, hi] });
+    }
+
+    /** Write `text` in the source line, coloured as Python (`opts`: the
+     *  `mark` and `caret` of pyRender).  Every change of the line from code
+     *  goes through here; what the user types is recoloured on input. */
+    _writeSource(text, opts) {
+      text = text || "";
+      if (this._srcHistory && text !== this.source.textContent && !(opts && (opts.mark || typeof opts.caret === "number"))) {
+        this._srcHistory = null;                 // a new text from outside: the line's undo starts again
+      }
+      this._srcText = text;
+      this._srcToks = pyRender(this.source, text, opts);
+    }
+
+    /** Colour the line again after the user typed in it, the selection kept
+     *  as text offsets, and remember the text before for the line's undo. */
+    _recolourSource() {
+      var el = this.source, text = el.textContent;
+      if (text === this._srcText && el.querySelector("span")) return;
+      var sel = window.getSelection(), a = null, b = null;
+      if (sel && sel.rangeCount && el.contains(sel.anchorNode)) {
+        var r = sel.getRangeAt(0);
+        a = textOffsetOf(el, r.startContainer, r.startOffset);
+        b = textOffsetOf(el, r.endContainer, r.endOffset);
+      }
+      var hist = this._srcHistory || (this._srcHistory = { back: [], forward: [] });
+      if (this._srcText !== undefined && this._srcText !== text) {
+        hist.back.push({ text: this._srcText, at: this._srcCaret === undefined ? this._srcText.length : this._srcCaret });
+        if (hist.back.length > 200) hist.back.shift();
+        hist.forward = [];
+      }
+      this._srcText = text;
+      this._srcToks = pyRender(el, text);
+      if (a !== null) {
+        selectTextOffsets(el, a, b === null ? a : b);
+        this._srcCaret = b === null ? a : b;
+      }
+      this._sourceBrackets();
+    }
+
+    /** Ctrl+Z (`redo` false) or Ctrl+Shift+Z / Ctrl+Y in the source line. */
+    _undoSource(redo) {
+      var hist = this._srcHistory;
+      if (!hist) return;
+      var from = redo ? hist.forward : hist.back, to = redo ? hist.back : hist.forward;
+      if (!from.length) return;
+      var step = from.pop();
+      to.push({ text: this.source.textContent, at: this._srcCaret === undefined ? 0 : this._srcCaret });
+      this._srcText = step.text;
+      this._srcToks = pyRender(this.source, step.text);
+      selectTextOffsets(this.source, step.at, step.at);
+      this._srcCaret = step.at;
+      this.sourceDirty = step.text !== ((this.committed && this.committed.src) || (this.state && this.state.src) || "");
+      this.source.classList.toggle("se-dirty", this.sourceDirty);
+      this._schedulePreview();
+    }
+
+    /** Mark the bracket next to the text cursor in the source line and its
+     *  partner (or the bracket alone, when it has none). */
+    _sourceBrackets() {
+      if (!this.source) return;
+      var el = this.source, sel = window.getSelection();
+      var at = null;
+      if (document.activeElement === el && sel && sel.rangeCount && sel.isCollapsed && el.contains(sel.anchorNode)) {
+        at = textOffsetOf(el, sel.anchorNode, sel.anchorOffset);
+        this._srcCaret = at;
+      }
+      if (!this._srcToks || el.textContent !== this._srcText) at = null;
+      pyShowBrackets(el, this._srcToks, this._srcText || "", at);
     }
 
     /** A selection made in the source line selects the innermost node whose
@@ -4769,7 +5093,7 @@ var SympyEditor = (function () {
 
     revertSource() {
       var base = this.committed || this.state;
-      this.source.textContent = base ? base.src : "";
+      this._writeSource(base ? base.src : "");
       this.sourceDirty = false;
       this.source.classList.remove("se-dirty");
       this.source.classList.remove("se-invalid");
@@ -4829,7 +5153,7 @@ var SympyEditor = (function () {
       this.emptyField = input;
       this._wireField(input, 10);                                  // sizing and "\command" expansion (its Enter/Esc do nothing here)
       input.addEventListener("input", function () {
-        self.source.textContent = input.value;                     // the line follows; a parsable text is previewed
+        self._writeSource(input.value);                             // the line follows; a parsable text is previewed
         self.sourceDirty = true;
         self.source.classList.add("se-dirty");
         self._schedulePreview();
@@ -4842,7 +5166,7 @@ var SympyEditor = (function () {
           if (!src) return;
           // the field stays until the answer: a refused text is kept to fix
           // (setState ends it when the expression is committed)
-          self.source.textContent = src;
+          self._writeSource(src);
           self.send({ action: "set", src: src });
         } else if (ev.key === "Escape") {
           ev.preventDefault();
@@ -4874,6 +5198,13 @@ var SympyEditor = (function () {
       this.view.classList.remove("se-typing");
     }
 
+    /** Give the source line the keyboard, its box opened first (a closed
+     *  box's content cannot take the focus). */
+    _focusSource() {
+      if (this.sourceBox && !this.sourceBox.open) this.sourceBox.open = true;
+      this.source.focus();
+    }
+
     /** Put the keyboard in the source line with everything selected. */
     editSource(text) {
       if (this.opts.readOnly) return false;
@@ -4883,22 +5214,23 @@ var SympyEditor = (function () {
       var sel = window.getSelection();
       if (text !== undefined) {
         // Start over: the line holds only `text` (possibly nothing) until Enter applies it.
-        this.source.textContent = text;
+        this._writeSource(text);
         this.sourceDirty = true;
         this.source.classList.add("se-dirty");
         if (!text) {
           // The formula is gone until something is typed - in a field where it was.
           this.select(null);
           this.view.classList.add("se-empty");
-          if (!this.beginEmptyInput()) this.source.focus();
+          if (!this.beginEmptyInput()) this._focusSource();
           return true;
         }
-        this.source.focus();
+        this._focusSource();
         this._schedulePreview();
-        if (sel && this.source.firstChild) sel.collapse(this.source.firstChild, this.source.firstChild.length);
+        // the end of the line (a coloured line is spans, not one text node)
+        if (sel) selectTextOffsets(this.source, text.length, text.length);
         this._setStatus("Editing the whole expression – Enter applies, Esc restores the previous one");
       } else {
-        this.source.focus();
+        this._focusSource();
         if (sel && this.source.firstChild) sel.selectAllChildren(this.source);
         this._setStatus("Editing the whole expression as SymPy source – Enter applies, Esc reverts");
       }
@@ -8633,6 +8965,11 @@ var SympyEditor = (function () {
     },
     loadAddons: loadAddons,
     addons: addonDefs,
+    /** Python colouring and bracket matching, for the add-ons that show
+     *  code (the console): tokens(text, ipython), render(el, text, opts),
+     *  showBrackets(el, toks, text, at), bracketPair(toks, text, at). */
+    python: { tokens: pyTokens, render: pyRender, showBrackets: pyShowBrackets, bracketPair: pyBracketPair,
+              textOffsetOf: textOffsetOf, selectTextOffsets: selectTextOffsets },
     toDisplay: toDisplay,
     toSource: toSource,
     expandCommands: expandCommands,

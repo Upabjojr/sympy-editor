@@ -99,6 +99,47 @@ def test_in_and_out_as_ipython():
         assert not doc.can_undo                                             # nothing of it touched the formula
 
 
+def test_the_code_is_coloured_as_python():
+    """The input, the script and the transcript are coloured as the source
+    line is (SympyEditor.python): a coloured copy under each field, glyph
+    for glyph, the field's own text transparent over it; the bracket by
+    the caret and its partner are marked."""
+    doc = Document(sin(x) + x, addons=[ADDON])
+    with _page(doc) as page:
+        field = page.locator(".se-addon-console .pc-input")
+        field.click()
+        field.fill("y = Symbol('y')  # a name\nsin(y) + 2.5")
+        under = page.locator(".se-addon-console .pc-input-wrap .pc-hl")
+        assert under.locator(".se-py-class").first.inner_text() == "Symbol"
+        assert under.locator(".se-py-fn").first.inner_text() == "sin"
+        assert under.locator(".se-py-str").first.inner_text() == "'y'"
+        assert under.locator(".se-py-com").first.inner_text() == "# a name"
+        assert under.locator(".se-py-num").last.inner_text() == "2.5"
+        # the copy is the field's text, and sits exactly under it
+        assert page.evaluate("""() => {
+            const f = document.querySelector('.se-addon-console .pc-input');
+            const u = document.querySelector('.se-addon-console .pc-input-wrap .pc-hl');
+            const a = f.getBoundingClientRect(), b = u.getBoundingClientRect();
+            return u.textContent === f.value + '\\n' && Math.abs(a.left - b.left) < 1 && Math.abs(a.top - b.top) < 1
+                && getComputedStyle(f).color === 'rgba(0, 0, 0, 0)';
+        }""")
+        # the caret after "(" of sin(: that bracket and its partner are marked
+        at = "y = Symbol('y')  # a name\nsin(".__len__()
+        field.evaluate("(f, at) => { f.focus(); f.setSelectionRange(at, at); }", at)
+        page.wait_for_function("document.querySelectorAll('.se-addon-console .pc-input-wrap .se-py-match').length === 2")
+        # set from code too (the history, a completion): coloured
+        page.keyboard.press("Escape")
+        field.evaluate("f => { f.value = 'Integral(x, x)'; }")
+        assert under.locator(".se-py-class").first.inner_text() == "Integral"
+        # the transcript
+        entry = _enter(page, "factor(x**2 - 1)")
+        assert entry.locator(".pc-code .se-py-fn").first.inner_text() == "factor"
+        assert entry.locator(".pc-code .se-py-num").count() == 2
+        # and the script
+        page.locator(".se-addon-console .pc-tab[data-mode=script]").click()
+        assert page.locator(".se-addon-console .pc-script-wrap .pc-hl .se-py-com").count() >= 1
+
+
 def test_an_unfinished_block_asks_for_more():
     doc = Document(x, addons=[ADDON])
     with _page(doc) as page:

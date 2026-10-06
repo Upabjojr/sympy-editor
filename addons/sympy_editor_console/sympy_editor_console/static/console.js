@@ -68,6 +68,52 @@
         ta.setAttribute("wrap", "off");
         return ta;
       }
+      /* ---- Python coloured as it is typed ----
+       * A textarea cannot colour its own text, so a <pre> under it carries
+       * the coloured copy (SympyEditor.python, the source line's colouring)
+       * and the textarea's own text is transparent over it, its caret and
+       * selection still drawn.  The copy follows every change - typed, and
+       * set from code (the value setter is wrapped: history, completion,
+       * a file opened...) - and the field's scrolling; the bracket by the
+       * caret and its partner are marked as in the source line. */
+      var PY = window.SympyEditor && window.SympyEditor.python;
+      var coloured = [];
+      function colourField(ta) {
+        if (!PY) return ta;
+        var under = h("pre", { class: "pc-hl", "aria-hidden": "true" });
+        var wrap = h("div", { class: "pc-hl-wrap " + ta.className.replace(/\bpc-code-field\b/, "").trim() + "-wrap" }, [under]);
+        var toks = null;
+        var paint = function () {
+          var text = ta.value;
+          toks = PY.render(under, text, { ipython: ta === input });
+          under.appendChild(document.createTextNode("\n"));          // an empty last line keeps its height
+          sync();
+        };
+        var sync = function () { under.scrollTop = ta.scrollTop; under.scrollLeft = ta.scrollLeft; };
+        var brackets = function () {
+          if (document.activeElement !== ta || ta.selectionStart !== ta.selectionEnd) { PY.showBrackets(under, null); return; }
+          PY.showBrackets(under, toks, ta.value, ta.selectionStart);
+        };
+        var proto = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value");
+        Object.defineProperty(ta, "value", {
+          configurable: true,
+          get: function () { return proto.get.call(this); },
+          set: function (v) { proto.set.call(this, v); paint(); brackets(); }
+        });
+        ta.addEventListener("input", function () { paint(); brackets(); });
+        ta.addEventListener("scroll", sync);
+        ta.addEventListener("blur", function () { PY.showBrackets(under, null); });
+        ta.classList.add("pc-hl-field");
+        coloured.push({ field: ta, brackets: brackets, paint: paint });
+        wrap.appendChild(ta);
+        paint();
+        return wrap;
+      }
+      function onSelectionChange() {
+        for (var c = 0; c < coloured.length; c++) if (document.activeElement === coloured[c].field) coloured[c].brackets();
+      }
+      if (PY) document.addEventListener("selectionchange", onSelectionChange);
+
       function button(label, title, cls) {
         return h("button", { type: "button", class: "pc-btn" + (cls ? " " + cls : ""), title: title || label }, [label]);
       }
@@ -85,7 +131,7 @@
       var input = codeField("pc-input", 1, "Python - Enter runs, Shift+Enter a new line");
       var runBtn = button("Run", "Run the input (Enter; Ctrl+Enter runs an unfinished block too)", "pc-run");
       var hint = h("div", { class: "pc-hint" });
-      var inputRow = h("div", { class: "pc-input-row" }, [prompt, input, runBtn]);   // and the completion menu
+      var inputRow = h("div", { class: "pc-input-row" }, [prompt, colourField(input), runBtn]);   // and the completion menu
       var consolePane = h("div", { class: "pc-pane pc-console" }, [log, inputRow, hint]);
 
       /* ---- the script ---- */
@@ -98,7 +144,7 @@
       var scriptOut = h("div", { class: "pc-log pc-script-out" });
       var scriptPane = h("div", { class: "pc-pane pc-scripting" }, [
         h("div", { class: "pc-script-bar" }, [nameField, openBtn, saveBtn, h("span", { class: "pc-fill" }), runScriptBtn]),
-        script, scriptOut]);
+        colourField(script), scriptOut]);
 
       var element = h("div", { class: "pc-panel" }, [tabs, consolePane, scriptPane]);
 
@@ -297,6 +343,7 @@
         var n = res && res.n != null ? res.n : "?";
         var entry = h("div", { class: "pc-entry" + (restored ? " pc-restored" : "") });
         var codeEl = h("pre", { class: "pc-code", title: "Tap to put it back in the input" }, [code]);
+        if (PY) PY.render(codeEl, code, { ipython: true });
         codeEl.addEventListener("click", function () { input.value = code; autosize(); input.focus(); });
         entry.appendChild(h("div", { class: "pc-in" }, [h("span", { class: "pc-prompt pc-prompt-in" }, ["In [" + n + "]:"]), codeEl]));
         if (res) {
@@ -820,6 +867,7 @@
         },
         destroy: function () {
           gone = true;
+          if (PY) document.removeEventListener("selectionchange", onSelectionChange);
           // What was typed in the last moment is kept now - the timer that
           // would have kept it goes with the panel - and the menu's own timer
           // must not ask Python for a panel that is not there.

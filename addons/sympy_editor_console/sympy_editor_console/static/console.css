@@ -85,6 +85,28 @@
 .se-addon-console .pc-code-field:focus, .se-addon-console .pc-name:focus { outline: 2px solid rgba(var(--se-accent), 0.5); outline-offset: -1px; }
 .se-addon-console .pc-input { flex: 1 1 12rem; min-width: 0; resize: none; overflow-x: auto; }
 .se-addon-console .pc-script { width: 100%; min-height: 12em; resize: vertical; overflow: auto; }
+
+/* Coloured fields (colourField): the coloured copy under the textarea,
+ * glyph for glyph - same font, size, padding, border width and wrapping -
+ * and the textarea's own text transparent over it. */
+.se-addon-console .pc-hl-wrap { position: relative; min-width: 0; display: flex; }
+.se-addon-console .pc-input-wrap { flex: 1 1 12rem; }
+.se-addon-console .pc-script-wrap { width: 100%; }
+.se-addon-console .pc-hl-wrap > .pc-code-field { flex: 1 1 auto; width: 100%; position: relative; z-index: 1;
+  color: transparent; caret-color: var(--se-fg); -webkit-text-fill-color: transparent; }
+.se-addon-console .pc-hl-wrap > .pc-code-field::placeholder { color: var(--se-muted); -webkit-text-fill-color: var(--se-muted); }
+.se-addon-console .pc-hl-wrap > .pc-code-field::selection { background: rgba(var(--se-accent), 0.3); }
+.se-addon-console .pc-hl {
+  position: absolute; inset: 0; margin: 0; z-index: 0; pointer-events: none;
+  font-family: var(--se-mono); font-size: 13px; line-height: 1.4; tab-size: 4;
+  padding: 0.25rem 0.4rem; border: 1px solid transparent; border-radius: 0.3rem;
+  white-space: pre; overflow: hidden; color: var(--se-fg); background: var(--se-field);
+  box-sizing: border-box;
+}
+.se-addon-console .pc-hl-wrap > .pc-code-field { background: transparent; }
+/* nothing that changes a glyph's width under a field: bold and italic stay out */
+.se-addon-console .pc-hl .se-py-kw, .se-addon-console .pc-hl .se-py-magic { font-weight: inherit; }
+.se-addon-console .pc-hl .se-py-com { font-style: inherit; }
 .se-addon-console .pc-name { width: 12rem; max-width: 50%; }
 .se-addon-console .pc-hint { color: var(--se-muted); font-family: var(--se-mono); font-size: 11.5px; min-height: 1em; word-break: break-word; }
 .se-addon-console .pc-hint:empty { display: none; }
@@ -95,7 +117,7 @@
 /* A finger's targets. */
 @media (any-pointer: coarse) {
   .se-addon-console .pc-btn, .se-addon-console .pc-tab { font-size: 14px; padding: 0.45rem 0.7rem; min-height: 36px; }
-  .se-addon-console .pc-code-field, .se-addon-console .pc-name { font-size: 16px; }   /* iOS zooms into anything smaller */
+  .se-addon-console .pc-code-field, .se-addon-console .pc-name, .se-addon-console .pc-hl { font-size: 16px; }   /* iOS zooms into anything smaller */
   .se-addon-console .pc-log { font-size: 13px; }
 }
 
