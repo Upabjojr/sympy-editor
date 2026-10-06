@@ -865,8 +865,10 @@ Two conventions between printer, document and front end:
   width nor move the tools, either of which moves the formula under the
   pointer between two clicks.  **On a phone the formula comes first**: under
   44rem the root is a column flex box, `.se-stage` and `.se-keyrow` carry
-  `order: -1` and `.se-toolbar` `order: 1`, so the screen reads formula,
-  arrows, status line, source line, Symbols, add-on panels, then the tools -
+  `order: -1`, `.se-toolbar` `order: 1` and `.se-addons` `order: 2`, so the
+  screen reads formula, arrows, status line, source line, Symbols, the
+  tools, then the add-on panels (open, the panels are the tallest thing on
+  the page; the tools must not be a scroll below them) -
   seven rows of buttons used to stand between the top of the screen and the
   work (`test_status_line_names_the_selection_on_its_own_line` checks the
   order at both widths; full screen is not affected, it hides the toolbar).  The tools sit in `.se-tools` in three logical rows -

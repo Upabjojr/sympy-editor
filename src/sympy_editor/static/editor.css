@@ -135,6 +135,9 @@
   .sympy-editor:not(.se-full) { display: flex; flex-direction: column; }
   .sympy-editor:not(.se-full) > .se-toolbar { order: 1; margin: 0.4rem 0 0; }
   .sympy-editor:not(.se-full) > .se-stage, .sympy-editor:not(.se-full) > .se-keyrow { order: -1; }
+  /* the add-on panels after the tools: open, they are the tallest thing on
+   * the page, and the tools were a long scroll below them */
+  .sympy-editor:not(.se-full) > .se-addons { order: 2; }
   .sympy-editor:not(.se-full) > .se-status { margin: 0 0 0.2rem; }
   .se-block { order: 2; }
   .se-block[data-block="session"] { order: 0; }
