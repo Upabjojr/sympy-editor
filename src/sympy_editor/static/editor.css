@@ -132,6 +132,10 @@
  * first one (order: the DOM keeps the reading order for a screen reader). */
 .se-linebreak { display: none; }
 @media (max-width: 43.999rem) {
+  .sympy-editor:not(.se-full) { display: flex; flex-direction: column; }
+  .sympy-editor:not(.se-full) > .se-toolbar { order: 1; margin: 0.4rem 0 0; }
+  .sympy-editor:not(.se-full) > .se-stage, .sympy-editor:not(.se-full) > .se-keyrow { order: -1; }
+  .sympy-editor:not(.se-full) > .se-status { margin: 0 0 0.2rem; }
   .se-block { order: 2; }
   .se-block[data-block="session"] { order: 0; }
   .se-block[data-block="sessions"] { order: 1; margin-left: auto; }
@@ -445,8 +449,11 @@
   /* its own full line under the tool rows: it is always visible, and its
    * text can never change the toolbar's width (which would move the
    * formula under the pointer between two clicks) */
-  flex: 0 0 100%;
+  display: block;
+  flex: 0 0 auto;
+  width: 100%;
   min-width: 0;
+  margin-bottom: 0.3rem;
   min-height: 1.3em;         /* one line, whether or not there is text */
   padding-left: 0.2rem;
   color: var(--se-muted);
@@ -572,6 +579,7 @@
  * since it is the only thing to aim at), the row of arrows under the formula and the operator palette that
  * appears under a selection. */
 .sympy-editor.se-full > .se-toolbar,
+.sympy-editor.se-full > .se-status,
 .sympy-editor.se-full > .se-source,
 .sympy-editor.se-full > .se-symbols { display: none; }
 .sympy-editor.se-full .se-fullbtn { opacity: 0.45; }
@@ -912,7 +920,9 @@
 .se-help-cols { max-width: 64rem; margin: 0 auto; column-width: 26rem; column-gap: 2.2rem; }
 .se-help-body section { break-inside: avoid; margin: 0 0 1.1rem; }
 .se-help-body h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--se-muted); margin: 0 0 0.35rem; }
-.se-help-body ul { margin: 0; padding-left: 1.1rem; font-size: 13.5px; line-height: 1.55; }
+.se-help-body ul, .se-help-body ol { margin: 0; padding-left: 1.1rem; font-size: 13.5px; line-height: 1.55; }
+.se-help-start { padding: 0.6rem 0.9rem 0.7rem; border: 1px solid var(--se-rule); border-radius: 0.5rem; background: rgba(var(--se-accent), 0.06); }
+.se-help-start li { margin: 0.3rem 0; }
 .se-help-body li { margin: 0.18rem 0; }
 .se-help-body kbd { font-family: var(--se-mono); font-size: 0.85em; border: 1px solid var(--se-border); border-bottom-width: 2px; border-radius: 0.25rem; padding: 0 0.3em; background: rgba(127, 127, 127, 0.08); }
 .se-history-frame { flex: 1; width: 100%; border: 0; background: transparent; }

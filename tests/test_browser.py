@@ -3059,13 +3059,19 @@ def test_status_line_names_the_selection_on_its_own_line(browser, serve_expr):
         assert status.inner_text() == "Symbol: y"
         box = status.bounding_box()
         assert box["width"] > 120 and box["height"] >= 12, (width, box)
-        # its own line: under every tool, so their text can never squeeze it
-        below = page.evaluate("""() => {
+        # its own line, beside no tool, so their text can never squeeze it:
+        # under every tool on a wide screen; on a phone the tools go under
+        # the formula and the status line stays with the formula, under the
+        # arrows and above every tool
+        placed = page.evaluate("""(wide) => {
             const s = document.querySelector('.se-status').getBoundingClientRect();
-            const tools = [...document.querySelectorAll('.se-tools > *')].map(e => e.getBoundingClientRect());
-            return tools.every(t => !t.height || s.top >= t.bottom - 1);
-        }""")
-        assert below, width
+            const keys = document.querySelector('.se-keyrow').getBoundingClientRect();
+            const view = document.querySelector('.se-stage').getBoundingClientRect();
+            const tools = [...document.querySelectorAll('.se-tools > *')].map(e => e.getBoundingClientRect()).filter(t => t.height);
+            if (wide) return tools.every(t => s.top >= t.bottom - 1) && s.bottom <= view.top + 1;
+            return tools.every(t => s.bottom <= t.top + 1) && s.top >= keys.bottom - 1 && view.bottom <= keys.top + 1;
+        }""", width > 700)
+        assert placed, width
         page.close()
 
 

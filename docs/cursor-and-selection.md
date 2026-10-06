@@ -41,6 +41,11 @@ resting state; a caret is what you get when you point *between* things.
 
 ## 3. Pointing with a finger
 
+On a screen narrower than 44rem the formula comes first: under it the four
+arrows, the line naming the selection, the source line, and only then the
+tools - where the thumbs are, and not between the top of the screen and the
+work.
+
 Touch has no hover, no double-click and no keyboard, so three gestures differ.
 Everything else is as above.
 

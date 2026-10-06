@@ -129,11 +129,18 @@ var SympyEditor = (function () {
   // The in-page guide (the toolbar's "?"): every gesture, key and tool.
   var HELP_HTML = [
     '<div class="se-help-cols">',
+    "<section class=\"se-help-start\"><h3>Quick start</h3><ol>",
+    "<li><b>Click</b> (tap) a part of the formula to select it; <kbd>\u2191</kbd> takes the part around it, <kbd>Esc</kbd> lets go.</li>",
+    "<li><b>Type</b> to replace what is selected - 2x, sin x, |x|, x = 2, as you would write it - and press <kbd>Enter</kbd>.</li>",
+    "<li><b>Click between</b> two terms for a caret and type there; click a <b>+</b> or a <b>\u00d7</b> to change the operator.</li>",
+    "<li><b>Transform \u25be</b> simplifies, expands, factors, differentiates, integrates, solves; the menu beside it has the tools of the selected kind (an integral, a matrix, an equation).</li>",
+    "<li><b>History</b> shows every step and takes you back to any; <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes the last.</li>",
+    "</ol></section>",
     "<section><h3>Selecting</h3><ul>",
     "<li>Click the middle of anything to select it; with a mouse, click the same spot again for the enclosing expression (a second tap with a finger edits instead: see <i>On a phone or tablet</i>).</li>",
     "<li><kbd>\u2191</kbd> enclosing, <kbd>\u2193</kbd> inside, <kbd>\u2190</kbd>/<kbd>\u2192</kbd> siblings, <kbd>Esc</kbd> deselects (the same four arrows are in the row under the formula).</li>",
     "<li>With a mouse, drag across terms to select a range (a finger rests first: see <i>On a phone or tablet</i>); <kbd>Shift</kbd>+<kbd>\u2190</kbd>/<kbd>\u2192</kbd> grows and shrinks it. Dragging to the edge of the view scrolls the formula along and keeps taking in what appears, so a range can reach what lies beyond the screen.</li>",
-    "<li>The line under the tools names the selection: its type and SymPy form.</li>",
+    "<li>The line under the tools (under the arrows, on a phone, where the tools come after the formula) names the selection: its type and SymPy form.</li>",
     "</ul></section>",
     "<section><h3>Editing</h3><ul>",
     "<li>Just type over a selection to replace it; <kbd>Enter</kbd> or a double-click edits its existing text in place.</li>",
@@ -1824,8 +1831,12 @@ var SympyEditor = (function () {
         }
       }
       this.status = h("span", { class: "se-status", "aria-live": "polite" });
-      this.toolbar.appendChild(this.status);
       if (o.toolbar) root.appendChild(this.toolbar);
+      // The status line is a line of the root, right under the tools (a
+      // block as wide as the editor: its text cannot move the formula), so
+      // that on a phone, where the tools go under the formula, it can stay
+      // beside the formula it describes.
+      root.appendChild(this.status);
 
       this.view = h("div", {
         class: "se-view", tabindex: "0", role: "application",

@@ -850,11 +850,18 @@ Two conventions between printer, document and front end:
   the formula view, whose handler would swallow Esc otherwise); opening
   the history view closes it.  Keep HELP_HTML in step with README's table
   when gestures change.
-- **Layout stability.**  `.sympy-editor` is `display: block` and
-  `.se-status` has its own full line under the tool rows (`flex: 0 0 100%;
-  min-width: 0; min-height: 1.3em`): the status text must never change the
-  container's width nor move the tools, either of which moves the formula
-  under the pointer between two clicks.  The tools sit in `.se-tools` in three logical rows -
+- **Layout stability.**  `.sympy-editor` is `display: block` (a column flex
+  box under 44rem, see below) and `.se-status` is a full-width line of the
+  root right after the toolbar (`display: block; width: 100%; min-width: 0;
+  min-height: 1.3em`): the status text must never change the container's
+  width nor move the tools, either of which moves the formula under the
+  pointer between two clicks.  **On a phone the formula comes first**: under
+  44rem the root is a column flex box, `.se-stage` and `.se-keyrow` carry
+  `order: -1` and `.se-toolbar` `order: 1`, so the screen reads formula,
+  arrows, status line, source line, Symbols, add-on panels, then the tools -
+  seven rows of buttons used to stand between the top of the screen and the
+  work (`test_status_line_names_the_selection_on_its_own_line` checks the
+  order at both widths; full screen is not affected, it hides the toolbar).  The tools sit in `.se-tools` in three logical rows -
   session/timeline + zoom, edits + clipboard, and
   the two groups of pickers (actions, library) + the toggle - forced by `.se-break` spans
   (`flex-basis: 100%`), with `.se-sep` rules between the blocks of a row;
