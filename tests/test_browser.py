@@ -1342,6 +1342,49 @@ def test_keys_typed_while_busy_open_the_field_afterwards(browser, serve_expr):
     assert page.errors == []
 
 
+def test_the_overlays_are_dialogs_for_the_keyboard(browser, serve_expr):
+    """Help and the drawer take the focus when they open, keep Tab inside,
+    and give the focus back to the button that opened them: it used to stay
+    on the page behind, where Tab wandered while the editor ignored keys."""
+    srv, doc = serve_expr(x + y)
+    page = _open(browser, srv.url)
+    page.locator('.se-toolbar [data-cmd="help"]').focus()
+    page.keyboard.press("Enter")
+    view = page.locator(".se-help-view")
+    assert view.is_visible() and view.get_attribute("aria-modal") == "true"
+    assert page.evaluate("document.activeElement.classList.contains('se-history-close')")
+    for _ in range(3):
+        page.keyboard.press("Tab")
+        assert page.evaluate("document.querySelector('.se-help-view').contains(document.activeElement)")
+    page.keyboard.press("Shift+Tab")
+    assert page.evaluate("document.querySelector('.se-help-view').contains(document.activeElement)")
+    page.keyboard.press("Escape")
+    assert page.locator(".se-help-view").count() == 0
+    assert page.evaluate("document.activeElement.getAttribute('data-cmd')") == "help"
+    # the drawer the same
+    page.locator('.se-toolbar [data-cmd="drawer"]').focus()
+    page.keyboard.press("Enter")
+    assert _wait(lambda: page.locator(".se-drawer").is_visible())
+    assert page.locator(".se-drawer").get_attribute("aria-modal") == "true"
+    assert page.evaluate("document.querySelector('.se-drawer').contains(document.activeElement)")
+    for _ in range(4):
+        page.keyboard.press("Tab")
+        assert page.evaluate("document.querySelector('.se-drawer').contains(document.activeElement)")
+    page.keyboard.press("Escape")
+    assert _wait(lambda: page.locator(".se-drawer").is_hidden())
+    assert page.evaluate("document.activeElement.getAttribute('data-cmd')") == "drawer"
+    # a picker names its list and the active row for a screen reader
+    box = page.locator(".se-ops")
+    box.focus()
+    page.keyboard.press("ArrowDown")
+    menu_id = box.get_attribute("aria-controls")
+    assert menu_id and page.locator(f"#{menu_id}[role=listbox]").is_visible()
+    active = box.get_attribute("aria-activedescendant")
+    assert active and page.locator(f"#{active}").get_attribute("aria-selected") == "true"
+    assert page.locator(f"#{active}").inner_text().strip() == "Expand"       # the first row was active on opening
+    assert page.errors == []
+
+
 def test_array_tools_ask_for_their_axes(browser, serve_expr):
     """The array type menu offers the tools; the ones that take axes ask."""
     from sympy import Array

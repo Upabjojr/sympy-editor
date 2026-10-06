@@ -442,6 +442,23 @@ var SympyEditor = (function () {
    *  | ~ on a German, Italian, French or Spanish keyboard, Option on a Mac.
    *  Refused with the shortcuts, "\int" typed over a selection came out
    *  as "int". */
+  /** Keep Tab inside `box` (a dialog): from its last control Tab goes to
+   *  its first, Shift+Tab the other way - the page behind is not for the
+   *  keyboard while it is open. */
+  function trapTab(box, ev) {
+    if (ev.key !== "Tab") return;
+    var all = box.querySelectorAll("a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, iframe, [tabindex]:not([tabindex='-1'])");
+    var items = [];
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      if (el.offsetParent !== null || el.getClientRects().length) items.push(el);
+    }
+    if (!items.length) { ev.preventDefault(); return; }
+    var first = items[0], last = items[items.length - 1], at = document.activeElement;
+    if (ev.shiftKey && (at === first || !box.contains(at))) { ev.preventDefault(); last.focus(); }
+    else if (!ev.shiftKey && (at === last || !box.contains(at))) { ev.preventDefault(); first.focus(); }
+  }
+
   function typesCharacter(ev) {
     if (!ev.key || ev.key.length !== 1) return false;
     if (!ev.ctrlKey && !ev.metaKey && !ev.altKey) return true;
@@ -760,16 +777,22 @@ var SympyEditor = (function () {
    *  `onEscape`, `onTyped(text)` (true when the text was taken as typed)
    *  and `freeText` (Enter on a text that matches nothing picks the text).
    *  The list lives on `root`, floating over the page. */
+  var pickerCount = 0;
   function Picker(root, opts) {
     var self = this;
     this.opts = opts;
     this.root = root;
     this.items = [];
     this.active = -1;
+    // The list has an id and the box points at it, every row has an id and
+    // the box names the active one (aria-activedescendant): a screen reader
+    // used to hear nothing of the list as ↑/↓ walked it.
+    this.id = "se-pick-" + (++pickerCount);
     this.input = h("input", { class: "se-pick " + (opts.className || ""), type: "text",
       placeholder: opts.placeholder || "", title: opts.title || "", spellcheck: "false", autocomplete: "off",
-      role: "combobox", "aria-expanded": "false", "aria-autocomplete": "list", "aria-haspopup": "listbox" });
-    this.menu = h("div", { class: "se-pick-menu", hidden: "", role: "listbox", "data-for": opts.className || "" });
+      role: "combobox", "aria-expanded": "false", "aria-autocomplete": "list", "aria-haspopup": "listbox",
+      "aria-controls": this.id, "aria-label": (opts.placeholder || "").replace(/\s*\u25be\s*$/, "") || opts.title || "" });
+    this.menu = h("div", { class: "se-pick-menu", id: this.id, hidden: "", role: "listbox", "data-for": opts.className || "" });
     this.input.addEventListener("focus", function () { if (opts.onFocus) opts.onFocus(); self.open(); });
     this.input.addEventListener("click", function () { if (self.menu.hidden) self.open(); });   // a focused box clicked again reopens
     this.input.addEventListener("input", function () { self.open(); });
@@ -831,7 +854,7 @@ var SympyEditor = (function () {
     this.menu.textContent = "";
     for (var j = 0; j < list.length; j++) {
       var item = list[j];
-      this.menu.appendChild(h("div", { class: "se-pick-item", role: "option", "data-name": item.value, title: item.doc || "" }, [
+      this.menu.appendChild(h("div", { class: "se-pick-item", role: "option", id: this.id + "-" + j, "aria-selected": "false", "data-name": item.value, title: item.doc || "" }, [
         h("span", { class: "se-pick-name" }, [item.label || item.value]),
         h("span", { class: "se-pick-doc" }, [item.doc || ""])
       ]));
@@ -853,13 +876,19 @@ var SympyEditor = (function () {
   };
   Picker.prototype._rows = function () { return this.menu.querySelectorAll(".se-pick-item"); };
   Picker.prototype._highlight = function () {
-    var rows = this._rows();
+    var rows = this._rows(), activeId = "";
     for (var i = 0; i < rows.length; i++) {
       rows[i].classList.toggle("se-active", i === this.active);
-      if (i === this.active && rows[i].scrollIntoView) {
-        try { rows[i].scrollIntoView({ block: "nearest" }); } catch (e) { /* no options object */ }
+      rows[i].setAttribute("aria-selected", i === this.active ? "true" : "false");
+      if (i === this.active) {
+        activeId = rows[i].id;
+        if (rows[i].scrollIntoView) {
+          try { rows[i].scrollIntoView({ block: "nearest" }); } catch (e) { /* no options object */ }
+        }
       }
     }
+    if (activeId) this.input.setAttribute("aria-activedescendant", activeId);
+    else this.input.removeAttribute("aria-activedescendant");
   };
 
   /* ------------------------------------------------------------------ */
@@ -2022,7 +2051,7 @@ var SympyEditor = (function () {
         // switches when there are some (_fillAddonsMenu), else File.
         var heading = o.sessions ? "Sessions" : "File";
         this.drawerHeading = h("strong", {}, [heading]);
-        this.drawer = h("aside", { class: "se-drawer", hidden: "", role: "dialog", "aria-label": heading }, [
+        this.drawer = h("aside", { class: "se-drawer", hidden: "", role: "dialog", "aria-modal": "true", "aria-label": heading }, [
           h("div", { class: "se-drawer-head" }, [this.drawerHeading, close])
         ].concat(this.addonsPane ? [this.addonsPane] : [])
          .concat(this.filesPane ? [this.filesPane] : [])
@@ -6697,10 +6726,33 @@ var SympyEditor = (function () {
       requestAnimationFrame(function () { self.drawer.classList.add("se-open"); self.backdrop.classList.add("se-open"); });
       // Esc closes it wherever the focus is (its buttons come and go as the list is redrawn).
       if (!this._drawerKey) {
-        this._drawerKey = function (ev) { if (ev.key === "Escape") { ev.preventDefault(); self.closeDrawer(); } };
+        this._drawerKey = function (ev) {
+          if (ev.key === "Escape") { ev.preventDefault(); self.closeDrawer(); }
+          else trapTab(self.drawer, ev);
+        };
         document.addEventListener("keydown", this._drawerKey);
       }
+      // A dialog: the focus goes in (to its close button) and comes back
+      // to the button that opened it when it closes.
+      this._drawerOpener = this._opener();
+      var first = this.drawer.querySelector("button");
+      if (first) first.focus({ preventScroll: true });
       if (this._sessionsReady) this._saveSession();   // brings the history list up to date
+    }
+
+    /** The control the focus is on, when it is one of the editor's own
+     *  (what an overlay gives the focus back to). */
+    _opener() {
+      var at = document.activeElement;
+      return at && at !== document.body && this.root.contains(at) ? at : null;
+    }
+
+    /** The focus back to `opener` after an overlay, or to the formula. */
+    _refocus(opener) {
+      if (opener && this.root.contains(opener) && !opener.disabled && !opener.hidden && opener.offsetParent !== null) {
+        try { opener.focus({ preventScroll: true }); return; } catch (e) { /* fall through */ }
+      }
+      this.view.focus({ preventScroll: true });
     }
 
     closeDrawer() {
@@ -6710,7 +6762,9 @@ var SympyEditor = (function () {
       this.backdrop.classList.remove("se-open");
       this.drawer.hidden = true;
       this.backdrop.hidden = true;
-      this.view.focus({ preventScroll: true });
+      var back = this._drawerOpener;
+      this._drawerOpener = null;
+      this._refocus(back);
     }
 
     /* ---- the history report ---- */
@@ -6944,7 +6998,8 @@ var SympyEditor = (function () {
                   addonTools.length ? [h("span", { class: "se-head-group se-head-addons" }, addonTools)] : [],
                   [h("span", { class: "se-head-group" }, [save]),
                    h("span", { class: "se-head-group se-head-close" }, [close])]));
-      var view = h("div", { class: "se-history-view", role: "dialog", "aria-label": "History" }, [head, frame]);
+      var view = h("div", { class: "se-history-view", role: "dialog", "aria-modal": "true", "aria-label": "History" }, [head, frame]);
+      this._historyOpener = this._opener();
       save.addEventListener("change", function () {
         var how = save.value;
         save.selectedIndex = 0;
@@ -7021,9 +7076,13 @@ var SympyEditor = (function () {
       var body = h("div", { class: "se-help-body" });
       // an add-on's guide in the columns of the editor's own, not across the whole width
       body.innerHTML = html ? (html.indexOf("se-help-cols") >= 0 ? html : '<div class="se-help-cols">' + html + "</div>") : HELP_HTML;
-      var view = h("div", { class: "se-history-view se-help-view", role: "dialog", "aria-label": heading }, [head, body]);
+      var view = h("div", { class: "se-history-view se-help-view", role: "dialog", "aria-modal": "true", "aria-label": heading }, [head, body]);
       close.addEventListener("click", function () { self.closeHelp(); });
-      this._helpKey = function (ev) { if (ev.key === "Escape") { ev.preventDefault(); self.closeHelp(); } };
+      this._helpOpener = this._opener();
+      this._helpKey = function (ev) {
+        if (ev.key === "Escape") { ev.preventDefault(); self.closeHelp(); }
+        else trapTab(view, ev);
+      };
       view.addEventListener("keydown", this._helpKey);           // (the editor's own handler stops Esc from reaching the document)
       document.addEventListener("keydown", this._helpKey);
       this.helpView = view;
@@ -7036,7 +7095,9 @@ var SympyEditor = (function () {
       if (this._helpKey) { document.removeEventListener("keydown", this._helpKey); this._helpKey = null; }
       if (this.helpView.parentNode) this.helpView.parentNode.removeChild(this.helpView);
       this.helpView = null;
-      this.view.focus({ preventScroll: true });
+      var back = this._helpOpener;
+      this._helpOpener = null;
+      this._refocus(back);
     }
 
     closeHistory() {
@@ -7044,7 +7105,9 @@ var SympyEditor = (function () {
       if (this._historyKey) { document.removeEventListener("keydown", this._historyKey); this._historyKey = null; }
       if (this.historyView.parentNode) this.historyView.parentNode.removeChild(this.historyView);
       this.historyView = null;
-      this.view.focus({ preventScroll: true });
+      var back = this._historyOpener;
+      this._historyOpener = null;
+      this._refocus(back);
     }
 
     /** Jump to step `index` of the current session's history. */

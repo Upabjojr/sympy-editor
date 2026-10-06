@@ -2,6 +2,14 @@
 
 ## 0.1.3 — unreleased
 
+* **The keyboard and a screen reader get around.** Help, the history and
+  the ≡ drawer are dialogs now: the focus goes in when they open, Tab stays
+  inside, and the button that opened them has the focus again when they
+  close (it used to stay on the page behind, where Tab wandered while the
+  editor ignored keys). The four pickers name their list and the active
+  row (`aria-activedescendant`), so ↑/↓ are heard, and the glyph-only
+  buttons have names.
+
 * **On a phone the formula comes first.** The tools - seven rows of them at
   a phone's width - stood between the top of the screen and the formula;
   now the formula, the arrows, the line naming the selection and the

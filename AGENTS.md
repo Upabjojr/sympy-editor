@@ -842,6 +842,14 @@ Two conventions between printer, document and front end:
   Pyodide out of the bundle (~1 MB instead of ~24 MB).  A debug build turns
   on WebView debugging: `adb forward tcp:9222 localabstract:webview_devtools_remote_<pid>`
   and Playwright's `connect_over_cdp` then drive the app on the device.
+- **Overlays are dialogs.**  Help, the history view and the drawer carry
+  `aria-modal`, take the focus when they open (their close button), keep
+  Tab inside (`trapTab`, from their own keydown handlers) and give the
+  focus back to the control that opened them (`_opener()` at opening,
+  `_refocus(opener)` at closing - the formula view when it is gone).  The
+  pickers' list and rows have ids, and `_highlight` sets
+  `aria-activedescendant` and `aria-selected`.  A new overlay should do the
+  same; `test_the_overlays_are_dialogs_for_the_keyboard` is the check.
 - **Help view.**  The toolbar's "?" (`showHelp`/`closeHelp`) overlays
   `HELP_HTML` - the whole gesture/key/tool guide, static content in
   `.se-help-body` (multi-column via `column-width`), dressed as the
