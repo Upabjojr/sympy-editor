@@ -277,7 +277,14 @@ finishes the composition — it never commits the field.
 
 **A refused edit never changes the selection.** The message appears under the
 formula and the formula flickers red for half a second; what was selected
-stays selected.
+stays selected, and the text that was refused comes back in its field, the
+caret at its end, to be corrected rather than typed again.
+
+**Nothing typed is lost to a request.** A character typed while Python is
+still answering - an add-on asking after a tap, a Simplify computing - is
+kept, Backspace takes it back, and the field opens with all of it once the
+answer is in: at the caret, over the range or over the selection, wherever
+the answer left them.
 
 **Scrolling and zooming never take the pointing away.** A formula scrolled -
 by a finger, the wheel, the edge arrows, or by the pen bringing its space to

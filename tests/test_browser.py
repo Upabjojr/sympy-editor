@@ -223,7 +223,7 @@ def test_ops_undo_redo_delete_and_errors(browser, served):
     page.keyboard.type("x +")
     page.keyboard.press("Enter")
     page.wait_for_selector(".se-error:not([hidden])")
-    assert "parse" in page.locator(".se-error").inner_text().lower()
+    assert "cannot read" in page.locator(".se-error").inner_text().lower()
     assert doc.expr == -(x**2) / y
     assert page.errors == []
 
@@ -1242,6 +1242,104 @@ def test_glyph_buttons_have_a_name(browser, serve_expr):
                      "zoomout": "Zoom out", "zoomin": "Zoom in"}
     assert page.locator('.se-toolbar [data-cmd="isolate"]').inner_text() == "Extract"
     assert page.locator(".se-lazy").first.inner_text().strip() == "keep unevaluated"
+
+
+def test_a_refused_edit_keeps_its_text_in_the_field(browser, serve_expr):
+    """A text SymPy cannot read comes back in the field, the caret at its
+    end, with the reason under the formula - it used to be gone with the
+    error, and typed again from nothing."""
+    srv, doc = serve_expr(x + y)
+    page = _open(browser, srv.url)
+    _click(page, "/1")                                        # y
+    page.keyboard.type("z+")
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    assert doc.expr == x + y
+    err = page.locator(".se-error")
+    assert err.is_visible() and err.inner_text().startswith('Cannot read "z+"')
+    field = page.locator(".se-inline")
+    field.wait_for(state="visible")
+    assert field.input_value() == "z+"
+    assert page.evaluate("document.activeElement.classList.contains('se-inline')")
+    assert page.evaluate("[document.activeElement.selectionStart, document.activeElement.selectionEnd]") == [2, 2]
+    page.keyboard.type("1")
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    assert doc.expr == x + z + 1
+    assert err.is_hidden()
+    # mathematics as it is written: 2x, |x|, an equation, a bracket left open
+    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "z"))
+    page.keyboard.type("2|x|")
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    assert doc.expr == x + 2 * sympy.Abs(x) + 1
+    page.locator(".se-source").click()
+    page.keyboard.press("Control+a")
+    page.keyboard.type("sin(x) = 2")
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    assert doc.expr == sympy.Eq(sin(x), 2)
+    page.locator(".se-source").click()
+    page.keyboard.press("Control+a")
+    page.keyboard.type("cos(x")                                # the bracket is closed for the user
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    assert doc.expr == sympy.cos(x)
+    assert page.errors == []
+
+
+def test_solve_for_asks_for_the_unknown(browser, serve_expr):
+    """Solve for… in the Transform menu asks which symbol, picked from the
+    selection's own, and the solutions come back as a set."""
+    srv, doc = serve_expr(sympy.Eq(x**2, 4))
+    page = _open(browser, srv.url)
+    _click(page, "/")
+    _pick(page, ".se-ops", "solve_for")
+    form = page.locator(".se-fn-form")
+    form.wait_for(state="visible")
+    assert doc.expr == sympy.Eq(x**2, 4)                      # nothing until the unknown is given
+    choose = form.locator("select").first
+    assert choose.locator("option").all_inner_texts() == ["x"]
+    _next_state(page, lambda: form.locator(".se-fn-apply").click())
+    assert doc.expr == sympy.FiniteSet(-2, 2)
+    # Substitute… takes its two texts
+    _select(page, "/")
+    _pick(page, ".se-ops", "substitute")
+    form.wait_for(state="visible")
+    inputs = form.locator("input")
+    inputs.nth(0).fill("2")
+    inputs.nth(1).fill("y")
+    _next_state(page, lambda: form.locator(".se-fn-apply").click())
+    assert doc.expr == sympy.FiniteSet(-y, y)                 # SymPy sees the 2 inside -2 too
+    assert page.errors == []
+
+
+def test_keys_typed_while_busy_open_the_field_afterwards(browser, serve_expr):
+    """A character typed while a request runs (an add-on asking after a tap,
+    a Simplify computing) used to be dropped: no field could open under a
+    formula about to be re-drawn.  It is kept and typed once the answer is
+    in - over the selection, at the caret - and Backspace takes it back."""
+    srv, doc = serve_expr(x + y)
+    page = _open(browser, srv.url)
+    _click(page, "/1")                                        # y selected
+    page.evaluate(f"{_ED}.busy = true")                       # a request in flight
+    page.keyboard.type("zq")
+    page.keyboard.press("Backspace")
+    assert page.locator(".se-inline").count() == 0            # nothing opens meanwhile
+    assert page.evaluate(f"{_ED}._typedWhileBusy") == "z"
+    page.evaluate(f"{_ED}.busy = false")
+    field = page.locator(".se-inline")
+    field.wait_for(state="visible")
+    assert field.input_value() == "z"
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    assert doc.expr == x + z
+    # at a caret the same: the text goes in there
+    page.keyboard.press("Escape")
+    page.keyboard.press("ArrowLeft")                          # a caret at the start of the formula
+    assert _wait(lambda: page.evaluate(f"!!{_ED}.caret"))
+    page.evaluate(f"{_ED}.busy = true")
+    page.keyboard.type("2")
+    page.evaluate(f"{_ED}.busy = false")
+    field.wait_for(state="visible")
+    assert field.input_value() == "2"
+    _next_state(page, lambda: page.keyboard.press("Enter"))
+    assert doc.expr == 2 * x + z
+    assert page.errors == []
 
 
 def test_array_tools_ask_for_their_axes(browser, serve_expr):
@@ -5314,7 +5412,7 @@ def test_a_template_leaves_placeholders_and_a_refused_edit_flickers(browser, ser
     page.keyboard.type("x +")
     page.keyboard.press("Enter")
     page.wait_for_function("!document.querySelector('.se-error').hidden")
-    assert "parse" in page.locator(".se-error").inner_text().lower()
+    assert "cannot read" in page.locator(".se-error").inner_text().lower()
     assert page.evaluate("document.querySelector('.sympy-editor').classList.contains('se-flash')")
     page.wait_for_function("!document.querySelector('.sympy-editor').classList.contains('se-flash')", timeout=3000)
     assert page.errors == []

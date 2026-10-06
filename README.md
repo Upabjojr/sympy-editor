@@ -183,6 +183,7 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | Matrix ↔ array | "Matrix ▾ → As array"; "Array ▾ → As matrix (rank 2)" — a `MatrixSymbol` becomes an `ArraySymbol` (entries stay implicit), an explicit matrix an explicit array | |
 | Array tools | "Array ▾" (for explicit arrays *and* array symbols): permute axes `(1, 0)`, contract axes `(0, 1)`, diagonal over axes, reshape, rank, explicit entries | |
 | Reshape | "Matrix ▾" / "Array ▾" → Reshape… — a matrix reshaped to a rank other than 2 becomes an array | |
+| Differentiate, integrate, solve, substitute | **Transform ▾** → Differentiate… (by `x`, `x, 2`, `x, y`), Integrate… (over `x` or `(x, 0, 1)`), Solve for… (an unknown picked from the selection's symbols; the solutions as a set), Substitute… (replace / with) - each asks for what it needs, and the first three build `Derivative`, `Integral`, `Subs` with **keep unevaluated** on | |
 | Derive by array | **Transform ▾** → Derive by array… — by `x` or `[x, y]`, for an expression (its gradient), a matrix or an array, symbolic or explicit | |
 | Copy / cut / paste a part | **Copy** / **Paste** (toolbar) | Ctrl+C / Ctrl+X copy the selection's SymPy source; Ctrl+V pastes over a selection or at a caret |
 | Apply any SymPy function | the **function box** in the toolbar (the library group, beside Methods): it lists every function of SymPy, type to narrow the list, pick one; a function that needs parameters asks for them (symbol parameters offer the selection's free symbols — `solve` on `sin(x)cos(y)` asks x or y); `diff(x)`, `.T`, `det()` typed in full apply as written | |
@@ -220,7 +221,13 @@ edges scroll a screen at a time; and vertical swipes still scroll the page.
 Transformations act on the selected sub-expression only (on the whole formula
 when nothing is selected).
 
-Typed input is parsed with `sympy.parsing.sympy_parser.parse_expr` in the
+Typed input is read as mathematics is written: `2x`, `3(x + 1)`, `sin x`,
+`sin^2 x`, `|x|` for an absolute value, `x = 2` for an equation (`Eq`), `e`
+for Euler's number, `x^2` or `x**2` for a power; a bracket left open at the
+end is closed.  A name is one symbol however long (`xy`, as SymPy spells it);
+`Document(parser="split")` splits names into letters instead
+(`xyz` → `x*y*z`), and `parser="strict"` is Python's syntax alone (`2*x`).
+Underneath, `sympy.parsing.sympy_parser.parse_expr` reads the text in the
 context of the expression, so existing symbols keep their assumptions and
 undefined functions (and `MatrixSymbol`s / `IndexedBase`s) are reused.  Names
 that do not occur in the current expression become plain symbols - unless the

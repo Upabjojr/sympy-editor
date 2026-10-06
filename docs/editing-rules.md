@@ -154,7 +154,27 @@ matrix symbol's its name), which cannot stand in its place, so none is
 offered and Unwrap says to select an entry. **Move everything to the left**
 of a matrix equation compares with a zero matrix of its shape.
 
-## 7. Names
+## 7. Typed text and names
+
+A text typed into a field, the source line or the empty view is read as
+mathematics is written, before SymPy sees it (`friendly_source`,
+`Document.parse`):
+
+| Typed | Read as |
+| --- | --- |
+| `2x`, `3(x + 1)`, `(x + 1)(x - 1)`, `2 3` | products: multiplication is implicit (`parser="implicit"`, the default) |
+| `sin x`, `sin^2 x` | `sin(x)`, `sin(x)**2`: a function applies to what follows it |
+| `xy` | one symbol, as SymPy spells it (`parser="split"` makes it `x*y`; `parser="strict"` reads Python's syntax alone: `2x` is refused) |
+| `\|x\|`, `\|x - 1\| < 2` | `Abs(x)`: a `\|` with nothing before it (or an operator) opens a pair, the next one closes it; between two operands it is still *or* |
+| `x = 2`, `x == 2` | the equation `Eq(x, 2)` - one `=` outside brackets; `<=`, `>=`, `!=` and a keyword argument (`n=5`) are left alone |
+| `sin(x`, `f(x, (y` | the brackets left open at the end are closed |
+| `e`, `e^x` | Euler's number - the formula draws it as `e`, so a symbol of that name typed over it looked the same and was another thing; a declared or used `e` wins, and the status line says what was read |
+| `` `gamma` `` | a variable, when SymPy has a function or a constant of that name |
+
+A text SymPy cannot read is refused in words - `Cannot read "x+": something is
+missing or out of place` - never with Python's class in front, and the field
+keeps the text for the fix.  A name read as SymPy's own (`E`, `I`, `gamma`)
+is noted in the status line, with the error when there is one.
 
 **Declare** puts a name in scope for typed input — a `Symbol` (with
 assumptions), a `MatrixSymbol` or explicit `Matrix` of a given shape, or an

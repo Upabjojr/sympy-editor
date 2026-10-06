@@ -167,12 +167,12 @@ def test_a_value_is_read_as_typed_and_answered_as_a_number():
         res = _samples(doc, path="/", var="x", values={"y": text}, span=[0, 1], n=3)
         assert res["needs"] == [] and abs(res["values"]["y"] - number) < 1e-12, text
         assert abs(res["curves"][0]["y"][2] - number * math.sin(1)) < 1e-9, text
-    for text, reason in [("2e", "cannot be read"), ("pi/", "cannot be read"), ("", "cannot be read"),
+    for text, reason in [("2+", "cannot be read"), ("pi/", "cannot be read"), ("", "cannot be read"),
                          ("z", "names z"), ("I", "real number"), ("oo", "real number"), ("[1, 2]", "real number")]:
         said = _error(doc, path="/", var="x", values={"y": text}, span=[0, 1], n=3)
         assert "The value of y must be a" in said and reason in said, (text, said)
     # a value nobody asked for - of the axis, of a symbol that is not there - is not read at all
-    res = _samples(doc, path="/", var="x", values={"y": "2", "x": "2e", "w": "pi/"}, span=[0, 1], n=3)
+    res = _samples(doc, path="/", var="x", values={"y": "2", "x": "2+", "w": "pi/"}, span=[0, 1], n=3)
     assert res["values"] == {"y": 2.0}
     assert doc.can_undo is False and doc.last_note is None
 

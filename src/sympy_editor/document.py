@@ -33,6 +33,9 @@ from sympy.tensor.array import NDimArray
 from sympy.tensor.array.expressions import ArraySymbol, OneArray, ZeroArray
 from sympy.parsing.sympy_parser import (
     convert_xor,
+    function_exponentiation,
+    implicit_application,
+    implicit_multiplication,
     implicit_multiplication_application,
     parse_expr,
     standard_transformations,
@@ -716,6 +719,150 @@ def _no_new_name(name: str):
     raise UnsafeText(f"unknown name {name!r}")
 
 
+
+#: How typed text is read, by name: the parser transformations each mode adds
+#: to SymPy's standard ones (and ``^`` for a power).  ``implicit`` is the
+#: default: ``2x``, ``3(x + 1)``, ``sin x``, ``sin^2 x``, names kept whole.
+PARSERS: Dict[str, tuple] = {
+    "strict": (),
+    "implicit": (implicit_multiplication, implicit_application, function_exponentiation),
+    "split": (implicit_multiplication_application,),
+}
+
+_OPENERS = {"(": ")", "[": "]", "{": "}"}
+_BAR_AFTER = set("+-*/^(,=<>&|[{%")   # after one of these a | opens an absolute value
+
+
+def friendly_source(src: str) -> str:
+    """What a typed text means before SymPy reads it - the notation a
+    mathematician writes, turned into SymPy's syntax:
+
+    * ``|x|`` is ``Abs(x)``: a ``|`` with nothing before it, after an
+      operator or touching what comes before (``2|x|``) opens a pair, and
+      the next one closes it; between two operands with a space on each
+      side (``x | y``) it is still the operator "or";
+    * one ``=`` (or ``==``) outside brackets makes an equation,
+      ``Eq(left, right)``; ``<=``, ``>=`` and ``!=`` stay what they are;
+    * brackets left open at the end are closed, so ``sin(x`` reads.
+    """
+    out: List[str] = []
+    bars: List[int] = []            # nesting depth at which each open | sits
+    depth = 0
+    i, n = 0, len(src)
+    while i < n:
+        ch = src[i]
+        if ch == "|":
+            prev = next((c for c in reversed(out) if not c.isspace()), "")
+            spaced = i > 0 and src[i - 1].isspace() and i + 1 < n and src[i + 1].isspace()
+            if bars and bars[-1] == depth and prev not in _BAR_AFTER:
+                out.append(")")                        # closes the pair
+                bars.pop()
+                depth -= 1
+            elif prev == "" or prev[-1] in _BAR_AFTER or not spaced:
+                # nothing before it, an operator, or an operand touching it
+                # (2|x|): the bar opens; between two operands with room on
+                # both sides (x | y) it is the operator "or"
+                out.append("*Abs(" if prev and (prev[-1].isalnum() or prev[-1] in ")]}") else "Abs(")
+                depth += 1
+                bars.append(depth)
+            else:
+                out.append("|")
+            i += 1
+            continue
+        if ch in _OPENERS:
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        out.append(ch)
+        i += 1
+    while bars:
+        out.append(")")
+        bars.pop()
+        depth -= 1
+    text = "".join(out)
+    # Brackets left open at the end are closed in order.
+    stack: List[str] = []
+    for ch in text:
+        if ch in _OPENERS:
+            stack.append(_OPENERS[ch])
+        elif ch in ")]}" and stack and stack[-1] == ch:
+            stack.pop()
+    text += "".join(reversed(stack))
+    # One = outside brackets: an equation.
+    depth = 0
+    cut = None
+    for j, ch in enumerate(text):
+        if ch in _OPENERS:
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif ch == "=" and depth == 0:
+            if j and text[j - 1] in "<>!=":
+                continue
+            if j + 1 < len(text) and text[j + 1] == "=":
+                if cut is not None:
+                    return text
+                cut = (j, j + 2)
+            elif cut is not None:
+                return text                            # two of them: not ours to read
+            else:
+                cut = (j, j + 1)
+    if cut is not None:
+        left, right = text[:cut[0]].strip(), text[cut[1]:].strip()
+        if left and right:
+            text = f"Eq({left}, {right})"
+    return text
+
+
+def parse_error(src: str, exc: BaseException) -> str:
+    """What went wrong reading ``src``, in words: SymPy's parser answers
+    with Python's own messages ("invalid syntax (<string>, line 1)",
+    "'Integer' object is not callable") and the class in front."""
+    shown = src if len(src) <= 60 else src[:57] + "…"
+    msg = str(exc)
+    if isinstance(exc, IndexError):                    # the parser's transformations tripping over a stray bracket
+        return f'Cannot read "{shown}": something is missing or out of place'
+    if isinstance(exc, (SyntaxError, tokenize.TokenError)):
+        low = msg.lower()
+        at = ""
+        offset = getattr(exc, "offset", None)
+        if isinstance(offset, int) and 0 < offset <= len(src) + 1:
+            at = f" at column {offset}"
+        if "eof" in low or "never closed" in low or "unexpected end" in low:
+            reason = "it ends too early"
+        elif "unmatched" in low or "closing parenthesis" in low:
+            reason = "a closing bracket has no opening one"
+        elif "invalid decimal literal" in low or "invalid syntax" in low or "invalid character" in low:
+            reason = f"something is missing or out of place{at}"
+        else:
+            reason = msg.split("(<string>")[0].strip().rstrip(",") or "it is not an expression"
+        return f'Cannot read "{shown}": {reason}'
+    if isinstance(exc, TypeError) and "not callable" in msg:
+        m = re.search(r"'(\w+)' object is not callable", msg)
+        kind = m.group(1) if m else "that"
+        if kind in ("Integer", "Rational", "Float", "int", "float"):
+            return f'Cannot read "{shown}": a number cannot be applied like a function - write 2*(x + 1), not 2(x + 1)'
+        if kind == "Symbol":
+            return f'Cannot read "{shown}": a symbol is not a function - declare it as one in Symbols, or write a * (b)'
+        return f'Cannot read "{shown}": {kind} is not a function'
+    return f'Cannot read "{shown}": {msg or type(exc).__name__}'
+
+
+def describe_error(exc: BaseException) -> str:
+    """The error a front end shows: the message in words, the class only
+    when it is all there is - a refused edit used to read "ValueError:
+    Could not parse 'x+': invalid syntax (<string>, line 1)"."""
+    if isinstance(exc, SympifyError):                  # str() of it starts with its class name
+        obj = exc.expr
+        kind = "a function" if isinstance(obj, sympy.FunctionClass) else f"a {type(obj).__name__}"
+        return f"{_short(obj)} is {kind}, not an expression"
+    msg = str(exc).strip()
+    if not msg:
+        return type(exc).__name__
+    if isinstance(exc, (ValueError, TypeError, AttributeError, NotImplementedError, ZeroDivisionError)):
+        return msg
+    return f"{msg} ({type(exc).__name__})"
+
 class Document:
     """An editable SymPy expression with undo history.
 
@@ -726,7 +873,15 @@ class Document:
     printer_settings
         Extra :func:`sympy.latex` settings.
     parser
-        ``"strict"`` (default) or ``"implicit"`` (allows ``2x``, ``sin x``).
+        How typed text is read.  ``"implicit"`` (default) reads mathematics
+        as it is written: ``2x``, ``3(x + 1)``, ``sin x`` and ``sin^2 x``,
+        names kept whole (``xy`` is one symbol, as SymPy spells it);
+        ``"split"`` also splits names into letters (``xyz`` is ``x*y*z``,
+        SymPy's ``implicit_multiplication_application``); ``"strict"`` is
+        Python's syntax alone (``2*x``).  Whichever is set, see
+        :func:`friendly_source` for what every mode reads: ``x = 2`` as an
+        equation, ``|x|`` as an absolute value, brackets left open at the end
+        closed.
     ops
         Mapping of op name to :class:`~sympy_editor.ops.Op`; defaults to the
         global registry.
@@ -773,7 +928,7 @@ class Document:
         expr: Union[Basic, str],
         *,
         printer_settings: Optional[Dict[str, Any]] = None,
-        parser: str = "strict",
+        parser: str = "implicit",
         ops: Optional[Dict[str, Op]] = None,
         max_history: int = 200,
         symbols=(),
@@ -794,8 +949,8 @@ class Document:
             history, index, labels = session.get("history"), session.get("index"), session.get("labels")
             symbols, addon_state = session.get("symbols") or (), session.get("addon_state")
             allow_invalid = _flag(session.get("allow_invalid", allow_invalid))
-        if parser not in ("strict", "implicit"):
-            raise ValueError("parser must be 'strict' or 'implicit'")
+        if parser not in PARSERS:
+            raise ValueError("parser must be one of " + ", ".join(repr(name) for name in PARSERS))
         self.printer_settings = dict(printer_settings or {})
         self.parser = parser
         #: Whether an edit SymPy refuses to build (``A*B`` of matrices whose
@@ -2098,12 +2253,11 @@ class Document:
         rather than as plain symbols - so typing ``C.T`` over ``B`` in
         ``A*B`` works, and ``C`` in a matrix product is a matrix.
         """
-        src = (src or "").strip()
-        if not src:
+        typed = (src or "").strip()
+        if not typed:
             raise ValueError("Empty input")
-        transformations = standard_transformations + (convert_xor,)
-        if self.parser == "implicit":
-            transformations = transformations + (implicit_multiplication_application,)
+        src = friendly_source(typed)
+        transformations = standard_transformations + (convert_xor,) + PARSERS[self.parser]
         local = self.namespace()
         # `name` in backticks is a variable even if SymPy has a function or a
         # constant of that name (`sin`, `E`, `gamma`...); the backticks go.
@@ -2126,6 +2280,18 @@ class Document:
                     local[name] = made
                     break
         local.setdefault("Invalid", Invalid)
+        # A new name followed by a bracket is a function, as SymPy's own
+        # reading has it (f(x) is an undefined function applied): with
+        # multiplication implicit the parser would read a new symbol times
+        # what is in the brackets.  A used symbol stays one: x(y + 1) is x*(y + 1).
+        for name in self._called_names(src, local):
+            local[name] = Function(name)
+        # A bare `e` is Euler's number, which the formula draws as `e`: a
+        # symbol of that name typed over it looked the same and was another
+        # thing.  A declared or used `e` wins, and the note says how to get one.
+        if "e" not in local and "e" in new_names:
+            local["e"] = sympy.E
+            new_names.remove("e")
         self.last_note = self._collision_note(src, local)
         try:
             return sympify(parse_expr(src, local_dict=local, transformations=transformations))
@@ -2138,12 +2304,22 @@ class Document:
                 return tolerant_parse(src, local, transformations)
             except Exception:
                 pass
-        raise ValueError(f"Could not parse {src!r}: {error}") from None
+        raise ValueError(parse_error(typed, error)) from None
+
+    def _with_note(self, error: str) -> str:
+        """The error with the note of the parse that failed, when there is
+        one: `gamma` typed as a variable is read as SymPy's function and
+        refused as "not an expression" - the note says how to get a variable."""
+        note = self.last_note
+        if note and note not in error:
+            error = f"{error} ({note})"
+        return error
 
     @staticmethod
     def _collision_note(src: str, local: Dict[str, Any]) -> Optional[str]:
         """A hint when a typed name that is not a known symbol was read as one
-        of SymPy's functions or constants (``E``, ``I``, ``gamma``...)."""
+        of SymPy's functions or constants (``E``, ``I``, ``gamma``...) - not
+        for ``pi`` and ``oo``, which nobody means as a variable."""
         try:
             tokens = list(tokenize.generate_tokens(io.StringIO(src).readline))
         except (tokenize.TokenError, SyntaxError):
@@ -2157,12 +2333,23 @@ class Document:
             if prev == "." or nxt == "(":          # attributes and calls are meant as functions
                 continue
             obj = getattr(sympy, tok.string, None)
-            if obj is not None and tok.string not in taken:
-                taken.append(tok.string)
+            if obj is None or tok.string in taken or tok.string in ("pi", "oo"):
+                continue
+            # `sin x`: a function applied without brackets is meant as one
+            applied = (i + 1 < len(tokens) and tokens[i + 1].type in (tokenize.NAME, tokenize.NUMBER)
+                       and not keyword.iskeyword(nxt))
+            if callable(obj) and not isinstance(obj, sympy.Basic) and applied:
+                continue
+            taken.append(tok.string)
+        if local.get("e") is sympy.E and "e" not in taken and re.search(r"(?<![\w.])e(?![\w(])", src):
+            taken.append("e")
         if not taken:
             return None
         names = ", ".join(taken)
-        return (f"{names}: read as SymPy's {'constant/function' if len(taken) == 1 else 'constants/functions'}; "
+        known = {"e": "Euler's number", "E": "Euler's number", "I": "the imaginary unit"}
+        what = known[taken[0]] if len(taken) == 1 and taken[0] in known else \
+            f"SymPy's {'constant/function' if len(taken) == 1 else 'constants/functions'}"
+        return (f"{names}: read as {what}; "
                 f"for a variable write `{taken[0]}` in backticks or declare it in Symbols")
 
     @staticmethod
@@ -2181,6 +2368,26 @@ class Document:
             if (tok.type == tokenize.NAME and not keyword.iskeyword(tok.string)
                     and prev != "." and nxt != "(" and tok.string not in local
                     and not hasattr(sympy, tok.string) and tok.string not in names):
+                names.append(tok.string)
+            prev = tok.string
+        return names
+
+    @staticmethod
+    def _called_names(src: str, local: Dict[str, Any]) -> List[str]:
+        """The new identifiers in ``src`` that are called (``f(x)``): not in
+        ``local``, not SymPy's, not attribute names."""
+        try:
+            tokens = list(tokenize.generate_tokens(io.StringIO(src).readline))
+        except (tokenize.TokenError, SyntaxError):
+            return []
+        names: List[str] = []
+        prev = ""
+        for i, tok in enumerate(tokens):
+            nxt = tokens[i + 1].string if i + 1 < len(tokens) else ""
+            if (tok.type == tokenize.NAME and not keyword.iskeyword(tok.string)
+                    and prev != "." and nxt == "(" and tok.string not in local
+                    and not hasattr(sympy, tok.string) and not PLACEHOLDER_RE.match(tok.string)
+                    and tok.string not in names):
                 names.append(tok.string)
             prev = tok.string
         return names
@@ -2403,7 +2610,7 @@ class Document:
                 raise ValueError(f"{_short(parsed)} is a {type(parsed).__name__}, not an expression")
             snap = self.snapshot(expr=parsed)
         except Exception as exc:
-            snap = self.snapshot(error=f"{type(exc).__name__}: {exc}")
+            snap = self.snapshot(error=self._with_note(describe_error(exc)))
         snap["preview"] = True
         if self.last_note and not snap["error"]:
             snap["note"] = self.last_note
@@ -2562,7 +2769,7 @@ class Document:
                 snap["note"] = self.last_note
             return snap
         except Exception as exc:
-            error = f"{type(exc).__name__}: {exc}"
+            error = self._with_note(describe_error(exc))
             try:
                 return self.snapshot(error=error)
             except Exception as again:

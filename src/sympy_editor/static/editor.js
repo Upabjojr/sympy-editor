@@ -137,6 +137,7 @@ var SympyEditor = (function () {
     "</ul></section>",
     "<section><h3>Editing</h3><ul>",
     "<li>Just type over a selection to replace it; <kbd>Enter</kbd> or a double-click edits its existing text in place.</li>",
+    "<li>Write mathematics as you would on paper: 2x, 3(x + 1), sin x, sin\u00b2 x, |x| for an absolute value, x = 2 for an equation, e for Euler's number, pi, oo for \u221e, x^2 or x**2 for a power. A bracket left open at the end is closed for you. A name is one symbol however long (xy), and `name` in backticks is a variable even when SymPy has a function of that name (`gamma`). A refused text stays in the field, with the reason under the formula.</li>",
     "<li><b>Delete</b> removes the selection. Deleting the whole expression empties the view: type the new one right there. Deleting one side of a power leaves the other alone, the power unwrapped: the exponent of <i>x</i>\u00b2 gone leaves <i>x</i>, a root sign gone leaves what was under it, and e<sup><i>x</i></sup> without its exponent is e.</li>",
     "<li><b>Unwrap</b> (<kbd>Backspace</kbd>) removes the node but keeps an argument: cos(\u03b8) \u2192 \u03b8; it asks which one when there is a choice. On a symbol or a number, which has nothing inside, <kbd>Backspace</kbd> deletes.</li>",
     "<li><b>Extract</b> keeps only the selection, which becomes the whole formula; <b>Copy</b>/<b>Paste</b> and <kbd>Ctrl</kbd>+<kbd>C</kbd>/<kbd>X</kbd>/<kbd>V</kbd> work on selections and carets.</li>",
@@ -161,7 +162,7 @@ var SympyEditor = (function () {
     "<li>In a sum, * binds just the two terms (x + y + z \u2192 xy + z); in a product, + splits it there (x\u22c5y\u22c5z \u2192 x + yz).</li>",
     "</ul></section>",
     "<section><h3>Applying functions</h3><ul>",
-    "<li>The four menus at the foot of the tools are one kind of box: it lists everything it offers when it takes the focus, narrows the list as you type, and \u2191/\u2193 + <kbd>Enter</kbd> (or a click) pick. The first group holds the <b>actions</b>: <b>Transform \u25be</b> for the general operations, and a second menu with the operations for the selection's type (Matrix, Integral, Equation\u2026). Picking one applies it at once, to the selection or, with nothing selected, to the whole expression.</li>",
+    "<li>The four menus at the foot of the tools are one kind of box: it lists everything it offers when it takes the focus, narrows the list as you type, and \u2191/\u2193 + <kbd>Enter</kbd> (or a click) pick. The first group holds the <b>actions</b>: <b>Transform \u25be</b> for the general operations - Simplify, Expand, Factor\u2026 and <i>Differentiate\u2026</i>, <i>Integrate\u2026</i>, <i>Solve for\u2026</i>, <i>Substitute\u2026</i>, which ask for their variable first -, and a second menu with the operations for the selection's type (Matrix, Integral, Equation\u2026). Picking one applies it at once, to the selection or, with nothing selected, to the whole expression.</li>",
     "<li><b>Add-ons</b>, at the top of what <b>\u2261</b> opens, switches on or off the add-ons installed beside the editor \u2014 a panel under the formula, tools, node types from other packages \u2014 without restarting anything; what an add-on kept waits for it to come back. In the apps every add-on is on until switched off, and a switch holds for every session and is remembered between launches. (A read-only editor has no \u2261, and there the switches keep a button of their own on the strip.)</li>",
     "<li>In a <b>matrix</b> or an <b>array</b> the four arrows move as it is drawn: <kbd>\u2190</kbd>/<kbd>\u2192</kbd> along the row, <kbd>\u2191</kbd>/<kbd>\u2193</kbd> between the rows \u2014 for the selection and for the caret alike. At the edge the usual meaning takes over: <kbd>\u2191</kbd> in the top row selects the matrix itself (again, its own parent), <kbd>\u2190</kbd>/<kbd>\u2192</kbd> step out of it. An array of any rank works the same way, because the rule follows the drawing: a rank-3 array is a row of matrices, so <kbd>\u2192</kbd> at the right edge of one block enters the next on the same line.</li>",
     "<li>In a <b>matrix</b> (the matrix, or anything in one of its entries) the row under the formula adds, beside the arrows, <b>+ row</b>, <b>+ col</b>, <b>\u2212 row</b>, <b>\u2212 col</b>: a new row or column of empty slots after the selected one (after the last, for the matrix itself), or the selected one taken away. The grip at the matrix\u2019s bottom-right corner <b>reshapes</b> it: the same entries laid out another way (SymPy\u2019s reshape, in reading order), so it snaps to the shapes that hold them all \u2014 12 entries go 1\u00d712, 2\u00d76, 3\u00d74, 4\u00d73, 6\u00d72, 12\u00d71 and nowhere else. Nothing is added or lost; the outline shows the shape it will take. To grow or shrink the matrix, use + row / + col / \u2212 row / \u2212 col.</li>",
@@ -3845,6 +3846,17 @@ var SympyEditor = (function () {
       var ro = this.opts.readOnly;
       var t = this.selected ? this.tree[this.selected] : null;
       var handled = true;
+      // A character typed while a request runs - an add-on asking Python
+      // after a tap, a Simplify still computing - cannot open a field (the
+      // answer re-renders the formula and would take it away): it is kept,
+      // and typed into the field once the request ends.  It used to be lost.
+      if (!ro && this.busy && !this.input && (this.selected || this.caret || this.range)
+          && !this.view.classList.contains("se-empty") && (typed || (k === "Backspace" && this._typedWhileBusy))) {
+        ev.preventDefault(); ev.stopPropagation();
+        this._typedWhileBusy = typed ? (this._typedWhileBusy || "") + k : this._typedWhileBusy.slice(0, -1);
+        this._replayTyped();
+        return;
+      }
       if (!ro && typed && this.view.classList.contains("se-empty")) {
         ev.preventDefault();
         this.beginEmptyInput(k);                                   // everything was deleted: type the new expression here
@@ -5872,7 +5884,16 @@ var SympyEditor = (function () {
       }
       if (!src || src === original) return;
       var msg = { action: path === "/" ? "set" : "replace", path: path, src: src };
-      this.send(msg);
+      var me = this, before = this.state ? this.state.srepr : null, node = path;
+      var reply = this.send(msg);
+      if (reply && reply.then) reply.then(function (snap) {
+        // Refused: the field opens again with the text still in it, the
+        // caret at its end, so a typo is fixed rather than typed over - the
+        // text used to be gone with the error.
+        if (snap && snap.error && me.state === snap && snap.srepr === before
+            && me.editing === null && !me.inserting && !me.input && node in (snap.nodes || {}))
+          me.beginEdit(node, src, true);
+      });
     }
 
     cancelEdit(silent) {
@@ -6043,6 +6064,26 @@ var SympyEditor = (function () {
           this._scheduleSessionSave();
         }
       }
+    }
+
+    /** Type what came while the editor was busy into a field, once it is
+     *  not: at the caret, over the range or the selection as the keys would
+     *  have, wherever the answer left them (the selection follows a change). */
+    async _replayTyped() {
+      if (this._replaying) return;
+      this._replaying = true;
+      try {
+        while (this.busy && !this.closed) await this._pause();
+      } finally {
+        this._replaying = false;
+      }
+      var text = this._typedWhileBusy || "";
+      this._typedWhileBusy = "";
+      if (!text || this.closed || this.input || this.opts.readOnly) return;
+      if (this.caret) this.beginInsert(text);
+      else if (this.range) this.beginRangeEdit(text);
+      else if (this.selected && this.selected !== "/") this.beginEdit(this.selected, text, true);
+      else if (this.selected) this.beginEdit("/", text);
     }
 
     /** Wait for the request in flight to end.  False if something asked for

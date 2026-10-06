@@ -447,7 +447,7 @@ def test_the_app_python_module_edits_documents():
     assert snap["error"] is None and snap["src"] == "1"
     # an edit that cannot work comes back as an error inside the snapshot
     snap = json.loads(app.handle("d1", json.dumps({"action": "set", "src": "x +"})))
-    assert snap["error"] and "parse" in snap["error"].lower()
+    assert snap["error"] and "cannot read" in snap["error"].lower()
     # documents are independent, and unknown ones are refused
     json.loads(app.new_doc("d2", srepr(x * y), "{}"))
     assert json.loads(app.handle("d1", '{"action": "snapshot"}'))["src"] == "1"

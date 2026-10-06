@@ -2,6 +2,38 @@
 
 ## 0.1.3 — unreleased
 
+* **Differentiate, integrate, solve and substitute from the Transform
+  menu.** The four things a student looks for first were names to know in
+  the function box; they are operations now, **Differentiate…** (by `x`,
+  `x, 2`, `x, y`), **Integrate…** (over `x` or `(x, 0, 1)`), **Solve
+  for…** (the unknown picked from the selection's symbols; the solutions
+  come back as a set, which can be edited on) and **Substitute…**, each
+  asking for what it needs, the first three building `Derivative`,
+  `Integral` and `Subs` with *keep unevaluated* on. An integral's own menu
+  says "Evaluate (doit)" and "Numeric (evalf)" in the general menu's
+  words, where it said "Evaluate" and "Numeric value".
+
+* **Nothing typed is lost to a request.** A character typed while Python
+  was still answering - an add-on asking after a tap, a Simplify computing
+  - was dropped, since the field it would open could not survive the answer
+  re-drawing the formula. It is kept now (Backspace takes it back), and the
+  field opens with all of it the moment the answer is in - at the caret,
+  over the range or over the selection, wherever the answer left them.
+
+* **Type mathematics as it is written.** `2x`, `3(x + 1)`, `sin x`,
+  `sin^2 x`, `|x|` for an absolute value, `x = 2` for an equation and `e`
+  for Euler's number are read as meant, and a bracket left open at the end
+  is closed: every one of them was refused before, `x = 2` with "invalid
+  syntax" (an equation could not be typed at all), and a typed `e` was a
+  symbol drawn exactly like the number it was not. Multiplication is implicit
+  by default now (`Document(parser="implicit")`; names stay whole, `xy` is
+  one symbol - `parser="split"` splits them, `parser="strict"` is Python's
+  syntax as before). A text that cannot be read is refused in words -
+  `Cannot read "x+": something is missing or out of place` - instead of
+  `ValueError: Could not parse 'x+': invalid syntax (<string>, line 1)`,
+  every error shown has lost the Python class in front of it, and the
+  refused text stays in the field, the caret at its end, for the fix.
+
 * **Small things in the way of a first hour.** Backspace on a symbol or a
   number deletes it (the answer used to be "2 has nothing inside to keep",
   with the Unwrap button beside it greyed out). The focus comes back to the

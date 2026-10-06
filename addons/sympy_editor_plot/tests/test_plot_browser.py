@@ -485,10 +485,10 @@ def test_a_value_is_sent_as_it_was_typed():
         page.wait_for_function("(() => { const s = window.__sent.filter(m => m.method === 'samples'); return s.length && s[s.length - 1].values.y === '1.5'; })()")
         assert field.input_value() == "1.5"
         # what is no number is said so where the value was asked, not read as its first digits
-        field.fill("2e")
+        field.fill("2+")
         page.wait_for_function("document.querySelector('.plot-note').className.indexOf('error') >= 0")
         assert "value of y" in page.locator(".plot-note").inner_text()
-        assert _sampled(page)[-1]["values"] == {"y": "2e"}
+        assert _sampled(page)[-1]["values"] == {"y": "2+"}
         # an emptied field is no value: the panel asks for one again
         field.fill("")
         page.wait_for_function("document.querySelector('.plot-note').textContent.indexOf('give a value to y') >= 0")

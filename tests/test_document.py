@@ -60,7 +60,7 @@ def test_delete_and_apply():
 def test_handle_reports_errors_without_changing_state():
     doc = Document(x + y)
     snap = doc.handle({"action": "replace", "path": "/0", "src": "x +"})
-    assert snap["error"] and "parse" in snap["error"].lower()
+    assert snap["error"] and snap["error"].startswith("Cannot read")
     assert doc.expr == x + y
     snap = doc.handle({"action": "apply", "path": "/", "op": "nope"})
     assert "Unknown operation" in snap["error"]
@@ -108,6 +108,90 @@ def test_implicit_parser():
     assert doc.expr == 2 * x + 3 * y
     with pytest.raises(ValueError):
         Document(x, parser="weird")
+
+
+def test_typed_mathematics_is_read_as_written():
+    """What a student types is what the formula means: implicit products,
+    a function applied without brackets, |x|, x = 2, e, a bracket left
+    open - and names kept whole, as SymPy spells them."""
+    from sympy import Abs, E, Eq, exp, pi, sin
+    from sympy_editor.document import friendly_source
+    z = Symbol("z")
+    doc = Document(x + y)                                  # the default parser
+    read = lambda src: doc.parse(src)
+    assert read("2x") == 2 * x
+    assert read("3(x + 1)") == 3 * (x + 1)
+    assert read("(x + 1)(x - 1)") == (x + 1) * (x - 1)
+    assert read("sin x") == sin(x)
+    assert read("sin^2 x") == sin(x) ** 2
+    assert read("xy") == Symbol("xy")                     # one name, not x*y
+    assert read("|x|") == Abs(x)
+    assert read("|x - 1| + |y|") == Abs(x - 1) + Abs(y)
+    assert read("x | y") == x | y                          # between two operands it is still "or"
+    assert read("x = 2") == Eq(x, 2)
+    assert read("x == 2") == Eq(x, 2)
+    assert read("x <= 2") == (x <= 2)
+    assert read("Eq(x, 2)") == Eq(x, 2)
+    assert read("sin(x") == sin(x)                         # closed for the user
+    assert read("f(x, (y") == Function("f")(x, y)
+    assert read("e^x") == exp(x) and read("e") == E
+    assert "Euler" in doc.last_note                        # ... and said so
+    assert read("`e`") == Symbol("e")                      # a variable, on request
+    with_e = Document(Symbol("e") + 1)                     # a used (or declared) e wins
+    assert with_e.parse("2e") == 2 * Symbol("e") and with_e.last_note is None
+    assert read("pi*x") == pi * x and doc.last_note is None            # pi needs no note
+    assert friendly_source("evalf(n=5)") == "evalf(n=5)"   # a keyword argument is not an equation
+    assert friendly_source("x = y = 2") == "x = y = 2"     # two of them: not ours to read
+    # the other modes
+    assert Document(x, parser="split").parse("2xyz") == 2 * x * y * z
+    strict = Document(x, parser="strict")
+    with pytest.raises(ValueError, match="Cannot read"):
+        strict.parse("2x")
+    assert strict.parse("|x|") == Abs(x) and strict.parse("x = 2") == Eq(x, 2)
+
+
+def test_the_transform_menu_differentiates_integrates_solves_and_substitutes():
+    """What a student looks for first is in the general menu, as operations
+    that ask for their variable - they used to be names to know in the
+    function box only."""
+    from sympy import Derivative, Eq, FiniteSet, Integral, Rational, Subs, sqrt
+    labels = [op["label"] for op in Document(x).snapshot()["ops"]]
+    assert ["Differentiate…", "Integrate…", "Solve for…", "Substitute…"] == [l for l in labels if l in ("Differentiate…", "Integrate…", "Solve for…", "Substitute…")]
+    assert Document(x ** 3).apply("/", "differentiate", args=["x"]) == 3 * x ** 2
+    assert Document(x ** 3).apply("/", "differentiate", args=["x, 2"]) == 6 * x
+    assert Document(x * y).apply("/", "differentiate", args=["x, y"]) == 1
+    assert Document(x ** 2).apply("/", "differentiate", args=["x"], lazy=True) == Derivative(x ** 2, x)
+    assert Document(x ** 2).apply("/", "integrate", args=["x"]) == x ** 3 / 3
+    assert Document(x ** 2).apply("/", "integrate", args=["(x, 0, 1)"]) == Rational(1, 3)
+    assert Document(x ** 2).apply("/", "integrate", args=["x, 0, 1"]) == Rational(1, 3)
+    assert Document(x ** 2).apply("/", "integrate", args=["x"], lazy=True) == Integral(x ** 2, x)
+    assert Document(x ** 2 - 1).apply("/", "solve_for", args=["x"]) == FiniteSet(-1, 1)
+    assert Document(Eq(x ** 2, y)).apply("/", "solve_for", args=["x"]) == FiniteSet(-sqrt(y), sqrt(y))
+    assert Document(x ** 2 + x).apply("/", "substitute", args=["x", "y + 1"]) == (y + 1) ** 2 + y + 1
+    assert Document(x ** 2 + x).apply("/", "substitute", args=["x", "2"], lazy=True) == Subs(x ** 2 + x, x, 2)
+    doc = Document(x ** 2)
+    assert "needs" in doc.handle({"action": "apply", "path": "/", "op": "differentiate"})["error"]
+    # the calculus kinds say Evaluate the same way the general menu does
+    calc = {op["name"]: op["label"] for op in Document(Integral(x, x)).snapshot()["ops"]}
+    assert calc["evaluate"] == calc["doit"] == "Evaluate (doit)" and calc["numeric"] == calc["evalf"] == "Numeric (evalf)"
+
+
+def test_a_refused_text_is_explained_in_words():
+    """Python's class and its "(<string>, line 1)" are gone from the message
+    a front end shows; what the parser could not read says what is wrong."""
+    doc = Document(x + y)
+    bad = doc.handle({"action": "replace", "path": "/0", "src": "x+"})
+    assert bad["error"] == 'Cannot read "x+": something is missing or out of place'
+    assert doc.handle({"action": "replace", "path": "/0", "src": "x +)"})["error"].startswith('Cannot read "x +)": ')
+    assert doc.handle({"action": "preview", "src": "2)("})["error"].startswith("Cannot read")
+    # SymPy's own refusals: the message alone, the class only when it is all there is
+    gone = doc.handle({"action": "unwrap", "path": "/"})["error"]
+    assert "ValueError" not in gone and "terms" in gone
+    assert doc.handle({"action": "nonsense"})["error"] == "Unknown action: 'nonsense'"
+    # a name read as SymPy's function, refused as not an expression: the note says how to get a variable
+    err = doc.handle({"action": "replace", "path": "/0", "src": "gamma"})["error"]
+    assert "not an expression" in err and "`gamma`" in err
+    assert doc.expr == x + y
 
 
 def test_listeners_and_custom_ops(monkeypatch):
@@ -848,7 +932,7 @@ def test_preview_renders_without_committing():
     assert "/" in snap["nodes"] and snap["nodes"]["/"]["src"] == "x*y"
     assert doc.expr == x + 1 and not doc.can_undo                   # nothing committed
     bad = doc.handle({"action": "preview", "src": "x*("})
-    assert bad["preview"] is True and "Could not parse" in bad["error"] and bad["src"] == "x + 1"
+    assert bad["preview"] is True and bad["error"].startswith('Cannot read "x*(": ') and bad["src"] == "x + 1"
     noted = doc.handle({"action": "preview", "src": "E*x"})
     assert "E" in noted["note"] and noted["error"] is None
 

@@ -199,6 +199,24 @@ def _register_defaults() -> None:
     register_op("doit", lambda e: e.doit(), label="Evaluate (doit)")
     register_op("evalf", lambda e: e.evalf(), label="Numeric (evalf)")
     register_op("negate", lambda e: -e, label="Negate", lazy=lambda e: sympy.Mul(-1, e, evaluate=False))
+    # What a student looks for first - differentiate, integrate, solve,
+    # substitute - as operations that ask for their variable, not only as
+    # names to know in the function box.
+    register_op("differentiate", lambda e, *by: sympy.diff(e, *_variables(by)), label="Differentiate…",
+                params=[("by, e.g. x or x, 2 or x, y", "text", False, None)],
+                lazy=lambda e, *by: sympy.Derivative(e, *_variables(by)),
+                doc="The derivative by a variable - x, 2 for the second derivative, x, y for a mixed one.")
+    register_op("integrate", lambda e, *over: sympy.integrate(e, *_variables(over)), label="Integrate…",
+                params=[("over, e.g. x or (x, 0, 1)", "text", False, None)],
+                lazy=lambda e, *over: sympy.Integral(e, *_variables(over)),
+                doc="The integral over a variable, or over (x, a, b) between limits.")
+    register_op("solve_for", _solve_for, label="Solve for…",
+                params=[("unknown", "symbol", False, None)],
+                doc="The values of the unknown that make the equation hold - or the expression zero.")
+    register_op("substitute", lambda e, old, new: e.subs(old, new), label="Substitute…",
+                params=[("replace", "text", False, None), ("with", "text", False, None)],
+                lazy=lambda e, old, new: sympy.Subs(e, old, new),
+                doc="Replace a symbol or a sub-expression by another, everywhere in the selection.")
     # Not tied to a kind: an expression, a matrix or an array can all be
     # differentiated by a list of symbols, and the result gains their axes.
     register_op("derive_by_array", _derive_by_array, label="Derive by array…",
@@ -299,6 +317,31 @@ def _reshape(e, shape):
         raise ValueError(f"Cannot reshape {tuple(e.shape)} into {dims}: {exc}") from None
 
 
+def _variables(given) -> tuple:
+    """The variables an operation was asked for: ``x`` is ``(x,)``, ``x, 2``
+    and ``(x, 0, 1)`` come as one Tuple and are spread out."""
+    if len(given) == 1 and isinstance(given[0], (sympy.Tuple, tuple, list)):
+        items = tuple(given[0])
+        # (x, 0, 1): the limits of an integral stay together, as SymPy takes them
+        if len(items) == 3 and getattr(items[0], "is_Symbol", False) and not getattr(items[1], "is_Symbol", False):
+            return (sympy.Tuple(*items),)
+        return items
+    return tuple(given)
+
+
+def _solve_for(e, unknown):
+    """The solutions as a set: a ``FiniteSet`` of what ``solve`` finds, which
+    the editor can show and go on editing (a Python list it cannot)."""
+    solutions = sympy.solve(e, unknown)
+    if isinstance(solutions, dict):
+        solutions = [solutions.get(unknown)] if unknown in solutions else list(solutions.values())
+    if not isinstance(solutions, (list, tuple)):
+        return solutions
+    if any(isinstance(sol, dict) for sol in solutions):
+        raise ValueError(f"{unknown} alone does not determine the solution: solve for one unknown of an equation")
+    return sympy.FiniteSet(*solutions)
+
+
 def _derive_by_array(e, wrt):
     """Differentiate by one symbol, or by a list/array of them - the result
     gains their axes (a matrix by [x, y] becomes a rank-3 array)."""
@@ -352,8 +395,10 @@ def _to_left(e):
 
 def _register_calculus_ops() -> None:
     ev = ("integral", "sum", "derivative", "limit")
-    register_op("evaluate", lambda e: e.doit(), label="Evaluate", kinds=ev)
-    register_op("numeric", lambda e: e.evalf(), label="Numeric value", kinds=ev)
+    # The same words as the general menu's: an integral's Evaluate is the
+    # whole formula's Evaluate on that one node.
+    register_op("evaluate", lambda e: e.doit(), label="Evaluate (doit)", kinds=ev)
+    register_op("numeric", lambda e: e.evalf(), label="Numeric (evalf)", kinds=ev)
     register_op("expand_inside", lambda e: _with_function(e, sympy.expand), label="Expand the function inside", kinds=ev)
     register_op("simplify_inside", lambda e: _with_function(e, sympy.simplify), label="Simplify the function inside", kinds=ev)
     r = ("relational",)
