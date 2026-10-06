@@ -863,15 +863,22 @@ Two conventions between printer, document and front end:
   root right after the toolbar (`display: block; width: 100%; min-width: 0;
   min-height: 1.3em`): the status text must never change the container's
   width nor move the tools, either of which moves the formula under the
-  pointer between two clicks.  **On a phone the formula comes first**: under
-  44rem the root is a column flex box, `.se-stage` and `.se-keyrow` carry
-  `order: -1`, `.se-toolbar` `order: 1` and `.se-addons` `order: 2`, so the
-  screen reads formula, arrows, status line, source line, Symbols, the
+  pointer between two clicks.  **The toolbar is two strips**, `.se-tools`
+  both: `.se-tools-head` (the session block - undo, redo, History, ?, Done -,
+  the zoom and the drawer's button) and `.se-tools-main` (the edits, the
+  clipboard, the menus, and the add-ons' own blocks: `this.tools` points at
+  it from the split on, so `block()` and `_mountAddon` land there).  Wide,
+  the two are rows of the same three-column grid.  **On a phone the formula
+  comes first, under the head strip**: under 44rem the root is a column flex
+  box and `.se-toolbar` is `display: contents`, so its strips are items of
+  the column - the head strip `order: -2`, `.se-stage` and `.se-keyrow`
+  `-1`, the main strip `1`, `.se-addons` `2` - and the screen reads session
+  row, formula, arrows, status line, source line, Symbols, the editing
   tools, then the add-on panels (open, the panels are the tallest thing on
-  the page; the tools must not be a scroll below them) -
-  seven rows of buttons used to stand between the top of the screen and the
-  work (`test_status_line_names_the_selection_on_its_own_line` checks the
-  order at both widths; full screen is not affected, it hides the toolbar).  The tools sit in `.se-tools` in three logical rows -
+  the page; the tools must never come after them, and the session row must
+  never leave the top - the owner's call, on the device).
+  `test_status_line_names_the_selection_on_its_own_line` checks the order
+  at both widths; full screen is not affected, it hides the toolbar.  The tools sit in `.se-tools` in three logical rows -
   session/timeline + zoom, edits + clipboard, and
   the two groups of pickers (actions, library) + the toggle - forced by `.se-break` spans
   (`flex-basis: 100%`), with `.se-sep` rules between the blocks of a row;

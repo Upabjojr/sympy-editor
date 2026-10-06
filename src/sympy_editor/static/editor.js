@@ -1658,7 +1658,10 @@ var SympyEditor = (function () {
       this.toolbar = h("div", { class: "se-toolbar", role: "toolbar" });
       // The tools sit in their own strip: on a narrow screen it scrolls
       // sideways instead of wrapping onto several rows.
-      this.tools = h("div", { class: "se-tools" });
+      // Two strips: the head (the session and its timeline, the zoom, the
+      // drawer's button), which on a phone stays above the formula, and the
+      // main one (the edits, the clipboard, the menus), which goes under it.
+      this.toolsHead = this.tools = h("div", { class: "se-tools se-tools-head" });
       this.toolbar.appendChild(this.tools);
       // The tools are laid out in blocks, and the blocks in columns (two on
       // a narrow screen, three from 44rem): the first column of a row hugs
@@ -1720,6 +1723,10 @@ var SympyEditor = (function () {
         // the File section (open, save, the history written out), which a
         // plain page with neither needs as much as any.
       }
+      // From here on the main strip (see toolsHead): block() appends to
+      // this.tools, and so do the add-ons' blocks later.
+      this.toolsMain = this.tools = h("div", { class: "se-tools se-tools-main" });
+      this.toolbar.appendChild(this.tools);
       if (!o.readOnly) {
         // 4. moving the selection: the arrows are under the formula (keyRow)
         // 5. what to do with the selection

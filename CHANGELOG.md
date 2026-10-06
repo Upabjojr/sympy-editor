@@ -12,9 +12,10 @@
 
 * **On a phone the formula comes first.** The tools - seven rows of them at
   a phone's width - stood between the top of the screen and the formula;
-  now the formula, the arrows, the line naming the selection and the
-  source line come first and the tools follow, where the thumbs are. A
-  wide screen is laid out as before. And the guide opens with a **Quick
+  now only the session row (undo, redo, History, ?, Done, the zoom, ≡)
+  stays at the top, then the formula, the arrows, the line naming the
+  selection and the source line, then the editing tools, where the thumbs
+  are, and the add-ons' panels last. A wide screen is laid out as before. And the guide opens with a **Quick
   start**: the five things to know, before the full account.
 
 * **Differentiate, integrate, solve and substitute from the Transform
