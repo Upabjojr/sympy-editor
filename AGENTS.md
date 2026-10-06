@@ -776,6 +776,17 @@ Two conventions between printer, document and front end:
   looks like what it does.  Dark mode redefines the same tokens; the
   transitions are dropped under `prefers-reduced-motion`.  Keep the
   paddings as they are - the toolbar-row and arrow tests measure them.
+- **Tool icons and tooltips.**  Edit, Unwrap, Delete, Extract, Copy and
+  Paste are icons (`toolSvg(cmd)`, `TOOL_ICONS`: a pencil, brackets opening,
+  a bin, a crop, two sheets, a clipboard; one stroke weight, `.se-icon`
+  sized), each with an `aria-label` of its name and a `title` that starts
+  with it ("Delete: remove the selection entirely (Del)").  Every button has
+  a title - `test_the_edit_tools_are_icons_and_every_button_has_a_tip`
+  refuses one without.  With a mouse the browser shows it; on a touch screen
+  `_wireTips` (on the root and on `this.chrome`) shows it in `.se-tip` when
+  a finger rests on a button for `longPress` ms - greyed ones too, found
+  through `elementsFromPoint` - and swallows the click that ends that hold;
+  a new touch hides it, and it fades 1.6 s after the finger lifts.
 - **Icons.**  The four navigation arrows are `arrowSvg(dir)`: one drawing
   rotated, sized to the text line box (`.se-icon`), so they match each
   other and the buttons beside them on every platform.  As text glyphs they

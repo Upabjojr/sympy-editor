@@ -2,6 +2,13 @@
 
 ## 0.1.3 — unreleased
 
+* **Icons for the edit tools, and tooltips on a touch screen.** Edit,
+  Unwrap, Delete, Extract, Copy and Paste are icons now - a pencil,
+  brackets opening, a bin, a crop, two sheets, a clipboard - so the edit
+  tools and the clipboard share one row on a phone. Every button has a
+  tooltip, and on a touch screen pressing and holding a button shows it
+  (greyed buttons too) without pressing it.
+
 * **Python, coloured, and out of the way when not wanted.** The source line
   under the formula is coloured as Python - classes, functions, numbers,
   strings, comments, operators - and the bracket by the text cursor is

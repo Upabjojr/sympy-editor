@@ -208,6 +208,19 @@
   padding-right: 0.3rem;
 }
 .se-icon { display: block; width: 1.2em; height: 1.2em; }
+/* the edit and clipboard tools as icons (toolSvg): a square-ish target */
+.se-toolbar button.se-tool-icon { padding-left: 0.45rem; padding-right: 0.45rem; min-width: 2.1em; display: inline-flex; align-items: center; justify-content: center; }
+/* a held finger's tooltip (_showTip): what the title says, above the button */
+.se-tip {
+  position: absolute; z-index: 10000; max-width: min(22rem, calc(100vw - 16px));
+  padding: 0.35rem 0.55rem; border-radius: 0.35rem;
+  background: rgba(31, 35, 40, 0.94); color: #fff;
+  font: 13px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25); pointer-events: none;
+}
+.se-tip[hidden] { display: none; }
+/* no text selection or system callout under a held finger */
+.se-toolbar button, .se-menubar button, .se-keyrow button { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 .se-zoom { display: inline-flex; align-items: center; gap: 0.25rem; white-space: nowrap; }   /* one block: wraps as a unit */
 .se-toolbar button, .se-menubar button, .se-keyrow button, .se-addon > summary .se-addon-help {
   font: inherit;

@@ -1298,7 +1298,7 @@ def test_glyph_buttons_have_a_name(browser, serve_expr):
              for cmd in ("undo", "redo", "help", "drawer", "zoomout", "zoomin")}
     assert names == {"undo": "Undo", "redo": "Redo", "help": "Help", "drawer": "Menu",
                      "zoomout": "Zoom out", "zoomin": "Zoom in"}
-    assert page.locator('.se-toolbar [data-cmd="isolate"]').inner_text() == "Extract"
+    assert page.locator('.se-toolbar [data-cmd="isolate"]').get_attribute("aria-label") == "Extract"
     assert page.locator(".se-lazy").first.inner_text().strip() == "keep unevaluated"
 
 
@@ -1441,6 +1441,55 @@ def test_the_overlays_are_dialogs_for_the_keyboard(browser, serve_expr):
     assert active and page.locator(f"#{active}").get_attribute("aria-selected") == "true"
     assert page.locator(f"#{active}").inner_text().strip() == "Expand"       # the first row was active on opening
     assert page.errors == []
+
+
+def test_the_edit_tools_are_icons_and_every_button_has_a_tip(browser, serve_expr):
+    """Edit, Unwrap, Delete, Extract, Copy and Paste are icons - the row is
+    short of room on a phone - each named for a screen reader and told by
+    its tooltip; every button has a tooltip; and on a touch screen a finger
+    held on a button shows it, without pressing the button."""
+    srv, doc = serve_expr(x + y, options={"longPress": 300})
+    page = browser.new_page(viewport={"width": 400, "height": 800}, has_touch=True)
+    page.goto(srv.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    for cmd, name in (("edit", "Edit"), ("unwrap", "Unwrap"), ("delete", "Delete"), ("isolate", "Extract"),
+                      ("copy", "Copy"), ("paste", "Paste")):
+        b = page.locator(f'.se-toolbar [data-cmd="{cmd}"]')
+        assert b.locator("svg.se-icon").count() == 1 and b.inner_text().strip() == "", cmd
+        assert b.get_attribute("aria-label") == name and b.get_attribute("title").startswith(name + ":"), cmd
+    untitled = page.evaluate("""() => [...document.querySelectorAll('.sympy-editor button, .se-chrome button')]
+        .filter(b => b.offsetParent !== null && !(b.getAttribute('title') || '').trim())
+        .map(b => b.outerHTML.slice(0, 80))""")
+    assert untitled == []
+    # a finger held on Delete (y selected): the tip, and y stays
+    _click(page, "/1")
+    hold = """([sel, ms]) => new Promise(done => {
+        const b = document.querySelector(sel), r = b.getBoundingClientRect();
+        const at = {clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, pointerId: 7, pointerType: 'touch',
+                    isPrimary: true, bubbles: true, cancelable: true};
+        b.dispatchEvent(new PointerEvent('pointerdown', at));
+        setTimeout(() => {
+            const tip = document.querySelector('.se-tip');
+            const shown = tip && !tip.hidden ? tip.textContent : null;
+            b.dispatchEvent(new PointerEvent('pointerup', at));
+            b.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, clientX: at.clientX, clientY: at.clientY}));
+            done(shown);
+        }, ms);
+    })"""
+    shown = page.evaluate(hold, ['.se-toolbar [data-cmd="delete"]', 500])
+    assert shown and shown.startswith("Delete:")
+    page.wait_for_timeout(300)
+    assert doc.expr == x + y                                       # the press that showed the tip pressed nothing
+    # a quick tap is a press
+    assert page.evaluate(hold, ['.se-toolbar [data-cmd="delete"]', 50]) is None
+    assert _wait(lambda: doc.expr == x)
+    # a greyed button tells too
+    _click(page, "/")
+    page.keyboard.press("Escape")
+    assert page.locator('.se-toolbar [data-cmd="unwrap"]').is_disabled()
+    shown = page.evaluate(hold, ['.se-toolbar [data-cmd="unwrap"]', 500])
+    assert shown and shown.startswith("Unwrap:")
+    page.close()
 
 
 def test_array_tools_ask_for_their_axes(browser, serve_expr):

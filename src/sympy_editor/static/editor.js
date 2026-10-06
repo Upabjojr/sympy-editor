@@ -143,6 +143,7 @@ var SympyEditor = (function () {
     "<li><kbd>\u2191</kbd> enclosing, <kbd>\u2193</kbd> inside, <kbd>\u2190</kbd>/<kbd>\u2192</kbd> siblings, <kbd>Esc</kbd> deselects (the same four arrows are in the row under the formula).</li>",
     "<li>With a mouse, drag across terms to select a range (a finger rests first: see <i>On a phone or tablet</i>); <kbd>Shift</kbd>+<kbd>\u2190</kbd>/<kbd>\u2192</kbd> grows and shrinks it. Dragging to the edge of the view scrolls the formula along and keeps taking in what appears, so a range can reach what lies beyond the screen.</li>",
     "<li>The line under the tools (under the arrows, on a phone, where the tools come after the formula) names the selection: its type and SymPy form.</li>",
+    "<li>Every button says what it does: rest the mouse on it, or, on a touch screen, press and hold it (the tip shows, nothing is pressed). The edit tools are icons: \u270e Edit, ( ) Unwrap, the bin Delete, the crop Extract, the two sheets Copy, the clipboard Paste.</li>",
     "</ul></section>",
     "<section><h3>Editing</h3><ul>",
     "<li>Just type over a selection to replace it; <kbd>Enter</kbd> or a double-click edits its existing text in place.</li>",
@@ -677,6 +678,29 @@ var SympyEditor = (function () {
       '<g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
       '<rect x="1.7" y="4.5" width="12.6" height="7" rx="1.4"/>' +
       '<path d="M5 7.5h.01M8 7.5h.01M11 7.5h.01M5.4 9.6h5.2"/></g></svg>';
+  }
+
+  /** The edit and clipboard tools' icons, drawn as the arrows are (one
+   *  stroke weight, the text line's size) so that they read as one set and
+   *  look the same on every platform. */
+  var TOOL_ICONS = {
+    // a pencil
+    edit: '<path d="M10.6 2.6l2.8 2.8-7.6 7.6H3v-2.8z"/><path d="M9.2 4l2.8 2.8"/>',
+    // a pair of brackets opening away from what they held
+    unwrap: '<path d="M4.6 2.5C2.7 4.6 2.7 11.4 4.6 13.5M11.4 2.5c1.9 2.1 1.9 8.9 0 11"/><rect x="6.6" y="6.6" width="2.8" height="2.8" rx="0.4"/>',
+    // a waste bin
+    "delete": '<path d="M2.8 4.4h10.4M6.3 4.4V2.8h3.4v1.6M4.2 4.4l.7 8.8h6.2l.7-8.8M6.8 6.8v4.2M9.2 6.8v4.2"/>',
+    // a frame kept, what is around it cropped away
+    isolate: '<path d="M4.6 1.8v9.6h9.6M1.8 4.6h9.6v9.6"/>',
+    // two sheets
+    copy: '<rect x="5.4" y="5.4" width="8" height="8.4" rx="1.2"/><path d="M10.6 5.4V3.4a1.2 1.2 0 0 0-1.2-1.2H3.6a1.2 1.2 0 0 0-1.2 1.2v6a1.2 1.2 0 0 0 1.2 1.2h1.8"/>',
+    // a clipboard
+    paste: '<rect x="3" y="3" width="10" height="11" rx="1.2"/><path d="M6 3V2h4v1"/><rect x="6" y="1.8" width="4" height="2.4" rx="0.6"/><path d="M5.6 8h4.8M5.6 10.6h3.2"/>'
+  };
+  function toolSvg(name) {
+    return '<svg class="se-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
+      '<g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">' +
+      TOOL_ICONS[name] + '</g></svg>';
   }
 
   /** The full-screen icon: four corner brackets pointing out (or, once the
@@ -1978,19 +2002,31 @@ var SympyEditor = (function () {
         // 4. moving the selection: the arrows are under the formula (keyRow)
         // 5. what to do with the selection
         block("edit");
-        btn("edit", "Edit", "Edit the selection in place (Enter, double-click, or just start typing)");
-        btn("unwrap", "Unwrap", "Remove the selected node but keep its argument: cos(θ) → θ (Backspace)");
-        btn("delete", "Delete", "Remove the selection entirely (Del)");
-        btn("isolate", "Extract", "Keep only the selection: it becomes the whole expression (Ctrl+Shift+I)");
+        // icons, not words: the row is short of room on a phone; the
+        // tooltip (hover, or press and hold on a touch screen) names each
+        var toolBtn = function (cmd, name, title) {
+          var b = btn(cmd, "", name + ": " + title, name);
+          b.innerHTML = toolSvg(cmd);
+          b.classList.add("se-tool-icon");
+          return b;
+        };
+        toolBtn("edit", "Edit", "edit the selection in place (Enter, double-click, or just start typing)");
+        toolBtn("unwrap", "Unwrap", "remove the selected node but keep its argument: cos(θ) → θ (Backspace)");
+        toolBtn("delete", "Delete", "remove the selection entirely (Del)");
+        toolBtn("isolate", "Extract", "keep only the selection: it becomes the whole expression (Ctrl+Shift+I)");
         // 6. the clipboard (the keyboard's button is under the formula: see
         //    keyRow)
         block("clip");
       } else {
         block("clip");
       }
-      btn("copy", "Copy", "Copy the SymPy source of the selection, or of the whole expression (Ctrl+C / Ctrl+X / Ctrl+V work on selections and carets)");
+      var copyBtn = btn("copy", "", "Copy: the SymPy source of the selection, or of the whole expression (Ctrl+C / Ctrl+X / Ctrl+V work on selections and carets)", "Copy");
+      copyBtn.innerHTML = toolSvg("copy");
+      copyBtn.classList.add("se-tool-icon");
       if (!o.readOnly) {
-        btn("paste", "Paste", "Paste the clipboard over the selection, or at the caret (Ctrl+V)");
+        var pasteBtn = btn("paste", "", "Paste: the clipboard over the selection, or at the caret (Ctrl+V)", "Paste");
+        pasteBtn.innerHTML = toolSvg("paste");
+        pasteBtn.classList.add("se-tool-icon");
         // The palette: fractions, roots, integrals, sums, limits... as
         // buttons drawn the way they will look (see MATH_PALETTE and
         // insertTemplate), beside Paste at the right of that row - a thing
@@ -2910,8 +2946,90 @@ var SympyEditor = (function () {
       }
     }
 
+    /** Tooltips where there is no hover: a finger held on a button (even a
+     *  greyed one - why it is grey is what one wants to know) shows its
+     *  title in a tip above it, and lifting the finger does not press it.
+     *  With a mouse the browser's own tooltip shows the same title. */
+    _wireTips(area) {
+      var self = this, hold = null;
+      var buttonAt = function (x, y) {
+        var els = document.elementsFromPoint ? document.elementsFromPoint(x, y) : [];
+        for (var i = 0; i < els.length; i++) {
+          var b = els[i].closest && els[i].closest("button[title], .se-pick[title], label[title]");
+          if (b && (self.root.contains(b) || (self.chrome && self.chrome.contains(b)))) return b;
+        }
+        return null;
+      };
+      var cancel = function () { if (hold) { clearTimeout(hold.timer); hold = null; } };
+      area.addEventListener("pointerdown", function (ev) {
+        if (ev.pointerType !== "touch") return;
+        self._hideTip();                    // a new touch: the last tip goes
+        var b = buttonAt(ev.clientX, ev.clientY);
+        if (!b || b.closest(".se-view")) return;
+        cancel();
+        hold = { x: ev.clientX, y: ev.clientY, el: b, timer: setTimeout(function () {
+          if (!hold) return;
+          hold.shown = true;
+          self._showTip(b);
+          self._haptic("select");
+        }, self.opts.longPress) };
+      }, true);
+      area.addEventListener("pointermove", function (ev) {
+        if (hold && !hold.shown && Math.hypot(ev.clientX - hold.x, ev.clientY - hold.y) > 10) cancel();
+      }, true);
+      var release = function () {
+        if (!hold) return;
+        var shown = hold.shown;
+        cancel();
+        if (shown) {
+          // the press that showed the tip is not a press of the button
+          self._swallowClick = Date.now();
+          clearTimeout(self._tipTimer);
+          self._tipTimer = setTimeout(function () { self._hideTip(); }, 1600);
+        }
+      };
+      area.addEventListener("pointerup", release, true);
+      area.addEventListener("pointercancel", function () { cancel(); }, true);
+      area.addEventListener("click", function (ev) {
+        if (self._swallowClick && Date.now() - self._swallowClick < 700) {
+          self._swallowClick = 0;
+          ev.preventDefault();
+          ev.stopPropagation();
+        }
+      }, true);
+      // a held finger on a button is a tip, not the system's menu
+      area.addEventListener("contextmenu", function (ev) {
+        if (ev.target.closest && ev.target.closest("button, .se-pick, label")) ev.preventDefault();
+      });
+    }
+
+    _showTip(el) {
+      var text = el.getAttribute("title") || el.getAttribute("aria-label") || "";
+      if (!text) return;
+      clearTimeout(this._tipTimer);
+      if (!this.tip) {
+        this.tip = h("div", { class: "se-tip", role: "tooltip" });
+        document.body.appendChild(this.tip);
+      }
+      this.tip.textContent = text;
+      this.tip.hidden = false;
+      var r = el.getBoundingClientRect(), t = this.tip;
+      var w = Math.min(t.offsetWidth, window.innerWidth - 16);
+      var left = Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2));
+      var top = r.top - t.offsetHeight - 8;
+      if (top < 8) top = r.bottom + 8;                         // no room above: under it
+      t.style.left = (left + window.scrollX) + "px";
+      t.style.top = (top + window.scrollY) + "px";
+    }
+
+    _hideTip() {
+      if (this.tip) this.tip.hidden = true;
+    }
+
     _wire() {
       var self = this;
+      this._wireTips(this.root);
+      if (this.chrome) this._wireTips(this.chrome);
       var onCommandClick = function (ev) {
         var b = ev.target.closest && ev.target.closest("button[data-cmd]");
         if (b && (self.root.contains(b) || (self.chrome && self.chrome.contains(b)))) {
@@ -8110,6 +8228,8 @@ var SympyEditor = (function () {
       if (this._relayout) window.removeEventListener("resize", this._relayout);
       if (this.root.parentNode) this.root.parentNode.removeChild(this.root);
       if (this.chrome && this.chrome.parentNode) this.chrome.parentNode.removeChild(this.chrome);
+      if (this.tip && this.tip.parentNode) this.tip.parentNode.removeChild(this.tip);
+      clearTimeout(this._tipTimer);
     }
   }
 
