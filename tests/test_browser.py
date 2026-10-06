@@ -6269,7 +6269,7 @@ def test_the_palette_is_a_menu(browser, serve_expr):
     assert abs(btn.bounding_box()["y"] + btn.bounding_box()["height"] / 2 - paste["y"] - paste["height"] / 2) < 2
     assert btn.bounding_box()["x"] > paste["x"]
     # Copy and Paste at the left of their block, the palette at the right end of the row
-    strip = page.locator(".se-tools").bounding_box()
+    strip = page.locator(".se-tools-main").bounding_box()
     clip = page.locator('.se-block[data-block="clip"]').bounding_box()
     copy = page.locator('.se-toolbar [data-cmd="copy"]').bounding_box()
     assert abs(copy["x"] - clip["x"]) <= 1
