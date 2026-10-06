@@ -1697,36 +1697,51 @@ var SympyEditor = (function () {
       if (!o.readOnly) {
         btn("undo", "↺", "Undo (Ctrl+Z)", "Undo");
         btn("redo", "↻", "Redo (Ctrl+Shift+Z, Ctrl+Y)", "Redo");
-        sep();
-        btn("history", "History", "View the history of this session: every step, what changed and what produced it - play it as a slideshow, or save it as a web page or a Python script");
-        btn("help", "?", "How to use the editor: every gesture, key and tool", "Help");
-        if (o.finishButton) btn("finish", "Done", "Finish editing and hand the expression back to Python");
       }
-      // 2. the formula's size
+      // 2. the formula's size, a group of its own between two rules
       block("zoom");
+      if (!o.readOnly) sep();
       var zoomBlock = h("span", { class: "se-zoom" });
       current.appendChild(zoomBlock);
       var zoomBtn = function (cmd, label, title, name) { var b = btn(cmd, label, title, name); zoomBlock.appendChild(b); return b; };
       zoomBtn("zoomout", "\u2212", "Zoom out (Ctrl+minus, Ctrl+wheel, pinch)", "Zoom out");
       zoomBtn("zoomreset", "100%", "Reset the zoom (Ctrl+0)");
       zoomBtn("zoomin", "+", "Zoom in (Ctrl+plus, Ctrl+wheel, pinch)", "Zoom in");
-      // 3. the sessions drawer, alone at the right end of its row: it slides
-      //    in from the right, so the tap and what it opens are on one side
+      if (!o.readOnly) sep();
+      // 3. the guide, at the right end of the row; and the drawer's button
+      //    after it - unless the page has a title line with a place for it
+      //    (render_page's .se-page-menu), where it stands on its own, at the
+      //    right of the title: it is the page's menu, not one more tool
+      //    History (and Done) just left of it, a rule between
+      block("help");
       if (!o.readOnly) {
-        this.drawerBlock = block("sessions");
+        btn("history", "History", "View the history of this session: every step, what changed and what produced it - play it as a slideshow, or save it as a web page or a Python script");
+        if (o.finishButton) btn("finish", "Done", "Finish editing and hand the expression back to Python");
+        sep();
+        btn("help", "?", "How to use the editor: every gesture, key and tool", "Help");
+      }
+      if (!o.readOnly) {
         btn("drawer", "\u2261", o.sessions ? "Sessions, history, files, settings and add-ons" : "Files, settings and add-ons", "Menu");
-        // On a narrow screen the blocks pack into lines: this ends the first
-        // one, so nothing can slip to the right of the drawer's button.
-        this.drawerBreak = h("span", { class: "se-linebreak" });
-        this.tools.appendChild(this.drawerBreak);
         // Always there, sessions or not, add-ons or not: the drawer holds
         // the File section (open, save, the history written out), which a
         // plain page with neither needs as much as any.
+        var slot = this.host && this.host.id && document.querySelector('.se-page-menu[data-editor="' + this.host.id + '"]');
+        if (slot) {
+          // .se-chrome carries the editor's colours, .se-menubar the toolbar
+          // buttons' look; clicks come to the editor through onCommandClick.
+          this.chrome = h("span", { class: "se-chrome" }, [h("span", { class: "se-menubar" }, [this.buttons.drawer])]);
+          slot.textContent = "";
+          slot.appendChild(this.chrome);
+        }
       }
       // From here on the main strip (see toolsHead): block() appends to
-      // this.tools, and so do the add-ons' blocks later.
+      // this.tools.  The add-ons' own tools (the LaTeX button, the pen's)
+      // have a strip of their own, the toolbar's last, right above the
+      // formula (on a phone too, where the main strip goes under it).
       this.toolsMain = this.tools = h("div", { class: "se-tools se-tools-main" });
       this.toolbar.appendChild(this.tools);
+      this.toolsAddons = h("div", { class: "se-tools se-tools-addons" });
+      this.toolbar.appendChild(this.toolsAddons);
       if (!o.readOnly) {
         // 4. moving the selection: the arrows are under the formula (keyRow)
         // 5. what to do with the selection
@@ -2252,8 +2267,7 @@ var SympyEditor = (function () {
           this.buttons[cmd] = b;
           entry.tools.push({ cmd: tool.cmd, button: b, fn: tool.run });
         }
-        // before the add-ons menu, so that the menu stays last
-        this.tools.insertBefore(block, this.addonsBlock || null);
+        this.toolsAddons.appendChild(block);
         entry.block = block;
       }
       this._addons.push(entry);
@@ -2646,9 +2660,9 @@ var SympyEditor = (function () {
 
     _wire() {
       var self = this;
-      this.root.addEventListener("click", function (ev) {
+      var onCommandClick = function (ev) {
         var b = ev.target.closest && ev.target.closest("button[data-cmd]");
-        if (b && self.root.contains(b)) {
+        if (b && (self.root.contains(b) || (self.chrome && self.chrome.contains(b)))) {
           ev.preventDefault();
           var cmd = b.getAttribute("data-cmd");
           self.command(cmd);
@@ -2669,7 +2683,9 @@ var SympyEditor = (function () {
           if (cmd !== "edit" && cmd !== "keyboard" && active !== self.source && active !== self.input
               && active !== self.emptyField && !inAddon && !over && !self._typingHere()) self.view.focus({ preventScroll: true });
         }
-      });
+      };
+      this.root.addEventListener("click", onCommandClick);
+      if (this.chrome) this.chrome.addEventListener("click", onCommandClick);
       this.view.addEventListener("mousemove", function (ev) {
         var leaf = self._leafAt(ev);
         var edge = leaf && !self.opts.readOnly ? self._edgeCaretAt(leaf, ev.clientX) : null;
@@ -6751,12 +6767,12 @@ var SympyEditor = (function () {
      *  (what an overlay gives the focus back to). */
     _opener() {
       var at = document.activeElement;
-      return at && at !== document.body && this.root.contains(at) ? at : null;
+      return at && at !== document.body && (this.root.contains(at) || (this.chrome && this.chrome.contains(at))) ? at : null;
     }
 
     /** The focus back to `opener` after an overlay, or to the formula. */
     _refocus(opener) {
-      if (opener && this.root.contains(opener) && !opener.disabled && !opener.hidden && opener.offsetParent !== null) {
+      if (opener && (this.root.contains(opener) || (this.chrome && this.chrome.contains(opener))) && !opener.disabled && !opener.hidden && opener.offsetParent !== null) {
         try { opener.focus({ preventScroll: true }); return; } catch (e) { /* fall through */ }
       }
       this.view.focus({ preventScroll: true });
@@ -7761,6 +7777,7 @@ var SympyEditor = (function () {
       if (this._contentObserver) { this._contentObserver.disconnect(); this._contentObserver = null; }
       if (this._relayout) window.removeEventListener("resize", this._relayout);
       if (this.root.parentNode) this.root.parentNode.removeChild(this.root);
+      if (this.chrome && this.chrome.parentNode) this.chrome.parentNode.removeChild(this.chrome);
     }
   }
 

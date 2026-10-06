@@ -41,11 +41,13 @@ resting state; a caret is what you get when you point *between* things.
 
 ## 3. Pointing with a finger
 
-On a screen narrower than 44rem only the session row (undo, redo, History,
-?, Done, the zoom and ≡) stays above the formula; under the formula come the
-four arrows, the line naming the selection, the source line, then the
-editing tools - where the thumbs are, and not between the top of the screen
-and the work - and the add-ons' panels last.
+On a screen narrower than 44rem only the page's title with the menu (≡) at
+its right, the session row (undo, redo, the zoom, and History and ? at
+its right end) and the add-ons' own tools (the LaTeX button, the pen) stay above
+the formula; under the formula come the four arrows, the line naming the
+selection, the source line, then the editing tools - where the thumbs are,
+and not between the top of the screen and the work - and the add-ons'
+panels last.
 
 Touch has no hover, no double-click and no keyboard, so three gestures differ.
 Everything else is as above.

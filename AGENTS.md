@@ -863,20 +863,36 @@ Two conventions between printer, document and front end:
   root right after the toolbar (`display: block; width: 100%; min-width: 0;
   min-height: 1.3em`): the status text must never change the container's
   width nor move the tools, either of which moves the formula under the
-  pointer between two clicks.  **The toolbar is two strips**, `.se-tools`
-  both: `.se-tools-head` (the session block - undo, redo, History, ?, Done -,
-  the zoom and the drawer's button) and `.se-tools-main` (the edits, the
-  clipboard, the menus, and the add-ons' own blocks: `this.tools` points at
-  it from the split on, so `block()` and `_mountAddon` land there).  Wide,
-  the two are rows of the same three-column grid.  **On a phone the formula
-  comes first, under the head strip**: under 44rem the root is a column flex
-  box and `.se-toolbar` is `display: contents`, so its strips are items of
-  the column - the head strip `order: -2`, `.se-stage` and `.se-keyrow`
-  `-1`, the main strip `1`, `.se-addons` `2` - and the screen reads session
-  row, formula, arrows, status line, source line, Symbols, the editing
-  tools, then the add-on panels (open, the panels are the tallest thing on
-  the page; the tools must never come after them, and the session row must
-  never leave the top - the owner's call, on the device).
+  pointer between two clicks.  **The toolbar is three strips**, `.se-tools`
+  all: `.se-tools-head` (the session block - undo, redo -, the zoom between
+  two `.se-sep` rules, and the `help` block at the right end: History, Done,
+  a rule, ?), `.se-tools-main` (the
+  edits, the clipboard, the menus; `this.tools` points at it from the split
+  on, so `block()` lands there) and `.se-tools-addons` (the add-ons' own
+  tool blocks - the LaTeX button, the pen's - right above the formula,
+  hidden when empty).  **The menu button (≡) is the page's**: a page from
+  `render_page` has `<span class="se-page-menu" data-editor="<id>">` beside
+  its `<h1>` in `header.page-head` (beside, not in: the heading reads the
+  title alone), and the editor moves the drawer's button there
+  (`this.chrome`, a `.se-chrome` span carrying the colour tokens with a
+  `.se-menubar` inside, which shares the toolbar buttons' rules - not
+  `.se-toolbar`, which pages and tests address as the editor's own; its
+  clicks go through the
+  same `onCommandClick`, `_opener`/`_refocus` know it, `destroy` removes
+  it).  Without such a place (a notebook, a fragment) ≡ stays after ? in
+  the `help` block.  Wide, the strips are rows of the same three-column
+  grid (the add-ons' strip is a flex row).  **On a phone the formula comes
+  first, under the head strip and the add-ons' tools**: under 44rem the root
+  is a column flex box and `.se-toolbar` is `display: contents`, so its
+  strips are items of the column - head `order: -3`, add-ons' tools `-2`,
+  `.se-stage` and `.se-keyrow` `-1`, the main strip `1`, `.se-addons` `2` -
+  and the screen reads title with ≡, session row (↺ ↻ | − 100% + | …
+  History | ?), the add-ons' tools, formula, arrows, status line, source line,
+  Symbols, the editing tools, then the add-on panels.  All of it is the
+  owner's call, on the device: the session row and ≡ never leave the top,
+  the add-ons' tools stand right above the formula, and the editing tools
+  never come after the panels (`test_the_menu_button_sits_on_the_title_line`,
+  `test_the_add_ons_tools_are_right_above_the_formula`).
   `test_status_line_names_the_selection_on_its_own_line` checks the order
   at both widths; full screen is not affected, it hides the toolbar.  The tools sit in `.se-tools` in three logical rows -
   session/timeline + zoom, edits + clipboard, and

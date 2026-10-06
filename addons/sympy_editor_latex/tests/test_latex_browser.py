@@ -306,7 +306,7 @@ def test_the_add_on_switched_off_takes_its_field_and_its_strip_away():
     with playwright.sync_playwright() as p:
         srv, browser, page = _page(p, doc, tool=False)      # off to start with
         try:
-            page.locator('.se-toolbar [data-cmd="drawer"]').click()
+            page.locator('[data-cmd="drawer"]').click()
             switch = page.locator('.se-drawer .se-addon-row input[id*="latex"]')
             assert _wait(lambda: switch.count() == 1)
             switch.check()                                   # on: the tool appears
@@ -315,7 +315,7 @@ def test_the_add_on_switched_off_takes_its_field_and_its_strip_away():
             assert _wait(lambda: page.locator(".se-backdrop").is_hidden())
             page.locator(TOOL).click()
             assert _wait(lambda: page.locator(".se-view .ltx-field").count() == 1)
-            page.locator('.se-toolbar [data-cmd="drawer"]').click()
+            page.locator('[data-cmd="drawer"]').click()
             assert _wait(lambda: switch.is_visible())
             switch.uncheck()
             assert _wait(lambda: page.locator(TOOL).count() == 0, 15)

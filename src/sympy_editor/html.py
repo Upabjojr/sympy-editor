@@ -232,23 +232,26 @@ _PAGE = """<!DOCTYPE html>
      long formula, a magnified tree - scrolls in a box of its own. */
   html, body { overflow-x: hidden; overscroll-behavior-x: none; }
   @supports (overflow: clip) { html, body { overflow-x: clip; } }
-  h1 { font-size: 1.2rem; font-weight: 600; margin: 0 0 1rem;
+  .page-head { display: flex; align-items: center; gap: 0.5rem; margin: 0 0 1rem; }
+  h1 { font-size: 1.2rem; font-weight: 600; margin: 0;
        display: flex; align-items: center; gap: 0.5rem; }
   /* the application's own icon, on the title's line and as tall as it:
      a page in a WebView has no title bar of its own to carry either */
   h1 .page-logo { flex: 0 0 auto; display: block; }
   h1 .page-logo svg { display: block; width: 1.7em; height: 1.7em; }
+  .page-head .se-page-menu { margin-left: auto; }
   /* phones: a margin that keeps the controls clear of rounded corners and notches
    * (the safe-area insets where the browser reports them; the Android app pads natively) */
   @media (max-width: 640px) {
     body { margin: 0.75rem;
            padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0); }
-    h1 { font-size: 1rem; margin: 0.2rem 0 0.5rem; gap: 0.4rem; }
+    .page-head { margin: 0.2rem 0 0.5rem; }
+    h1 { font-size: 1rem; gap: 0.4rem; }
   }
 </style>
 </head>
 <body>
-<h1>%(heading)s</h1>
+<header class="page-head"><h1>%(heading)s</h1>%(menu)s</header>
 %(fragment)s<script>
 /* A page that is the editor alone - the apps, the site's editor, a page saved
  * to a file - zooms only what zooms: the formula, the plot, the tree.  The
@@ -271,11 +274,16 @@ def render_page(config: Dict[str, Any], title: str = "SymPy Editor", head: str =
     ``logo`` is SVG markup shown beside the title (the applications put their
     own icon there, having no title bar to carry it)."""
     name = _html.escape(str(title))
+    element_id = element_id or "sympy-editor-" + uuid.uuid4().hex[:12]
     # aria-hidden: the heading beside it already says the name, and the mark's
     # own <title>/<desc> - the note that lets us use SymPy's logo - would
     # otherwise be read out as part of the heading.
     heading = f'<span class="page-logo" aria-hidden="true">{logo}</span>{name}' if logo else name
-    return _PAGE % {"title": name, "heading": heading,
+    # The editor puts its menu button (≡) here, on the title's line at the
+    # right - beside the heading, not in it: it is the page's menu, not one
+    # more tool among the edits, and no part of what the heading says.
+    menu = f'<span class="se-page-menu" data-editor="{_id_attr(element_id)}"></span>'
+    return _PAGE % {"title": name, "heading": heading, "menu": menu,
                     "fragment": render_fragment(config, element_id), "head": head}
 
 
@@ -424,7 +432,7 @@ def to_history_html(
         return fragment
     # No <h1> of its own: the report inside the viewer already opens with the
     # title and the step count.
-    page = _PAGE.replace("<h1>%(heading)s</h1>\n", "")
+    page = _PAGE.replace('<header class="page-head"><h1>%(heading)s</h1>%(menu)s</header>\n', "")
     return page % {"title": _html.escape(str(config["title"])), "fragment": fragment, "head": head}
 
 

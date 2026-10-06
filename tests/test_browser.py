@@ -1236,7 +1236,7 @@ def test_glyph_buttons_have_a_name(browser, serve_expr):
     screen reader read "anticlockwise open circle arrow" for Undo."""
     srv, doc = serve_expr(x + y)
     page = _open(browser, srv.url)
-    names = {cmd: page.locator(f'.se-toolbar [data-cmd="{cmd}"]').get_attribute("aria-label")
+    names = {cmd: page.locator(f'[data-cmd="{cmd}"]').get_attribute("aria-label")
              for cmd in ("undo", "redo", "help", "drawer", "zoomout", "zoomin")}
     assert names == {"undo": "Undo", "redo": "Redo", "help": "Help", "drawer": "Menu",
                      "zoomout": "Zoom out", "zoomin": "Zoom in"}
@@ -1362,7 +1362,7 @@ def test_the_overlays_are_dialogs_for_the_keyboard(browser, serve_expr):
     assert page.locator(".se-help-view").count() == 0
     assert page.evaluate("document.activeElement.getAttribute('data-cmd')") == "help"
     # the drawer the same
-    page.locator('.se-toolbar [data-cmd="drawer"]').focus()
+    page.locator('[data-cmd="drawer"]').focus()
     page.keyboard.press("Enter")
     assert _wait(lambda: page.locator(".se-drawer").is_visible())
     assert page.locator(".se-drawer").get_attribute("aria-modal") == "true"
@@ -1766,7 +1766,7 @@ def test_allow_invalid_toggle(browser, serve_expr):
     src = page.locator(".se-source")
 
     def switch(on):
-        page.locator('.se-toolbar [data-cmd="drawer"]').click()
+        page.locator('[data-cmd="drawer"]').click()
         assert _wait(lambda: page.locator(".se-drawer").is_visible())
         page.locator(".se-drawer-settings").evaluate("d => { d.open = true; }")
         _next_state(page, lambda: box.check() if on else box.uncheck())
@@ -2782,7 +2782,7 @@ def test_pyodide_worker_interrupt_and_sessions(browser, tmp_path):
         assert page.evaluate(f"{ed}.state.src") == str(big)
         # the drawer (☰) lists the sessions - the first one so far - and the history of the current one
         assert page.locator(".se-drawer").is_hidden()
-        page.locator('.se-toolbar [data-cmd="drawer"]').click()
+        page.locator('[data-cmd="drawer"]').click()
         assert _wait(lambda: page.locator(".se-drawer").is_visible())
         assert page.locator(".se-session").count() == 2                # one session + the "new" row
         assert _wait(lambda: page.locator(".se-step").count() >= 1, timeout=10)
@@ -2806,7 +2806,7 @@ def test_pyodide_worker_interrupt_and_sessions(browser, tmp_path):
         page.keyboard.press("Escape")                                  # closes the drawer
         assert page.locator(".se-drawer").is_hidden()
         # an empty session: the formula area is empty and the cursor is in the source line
-        page.locator('.se-toolbar [data-cmd="drawer"]').click()
+        page.locator('[data-cmd="drawer"]').click()
         page.locator(".se-session-new").click()
         page.locator('.se-choice[data-start="empty"]').click()
         assert _wait(lambda: page.locator(".se-session").count() == 4, timeout=30)
@@ -2816,7 +2816,7 @@ def test_pyodide_worker_interrupt_and_sessions(browser, tmp_path):
         _next_state(page, lambda: page.keyboard.press("Enter"))
         assert _wait(lambda: page.evaluate("JSON.parse(localStorage.getItem('sympy-editor:sessions')).list.some(s => s.name === 'x + 1')"), timeout=10)
         # the history of this session has two steps (the placeholder, then x + 1); the first one can be jumped to
-        page.locator('.se-toolbar [data-cmd="drawer"]').click()
+        page.locator('[data-cmd="drawer"]').click()
         page.locator('.se-session-current .se-subtab[data-tab="history"]').click()
         assert _wait(lambda: page.locator(".se-step").count() == 2 and "se-step-current" in page.locator(".se-step").nth(1).get_attribute("class"), timeout=10)
         assert "(2)" in page.locator('.se-session-current .se-subtab[data-tab="history"]').inner_text()
@@ -2832,7 +2832,7 @@ def test_pyodide_worker_interrupt_and_sessions(browser, tmp_path):
         # switching back to the first session: tapping its row (not only its Open button) opens it, and the drawer closes
         page.locator('.se-session[role="button"]', has_text=str(big)).first.locator(".se-session-row code").click()
         assert _wait(lambda: page.evaluate(f"{ed}.state.src") == str(big) and page.locator(".se-drawer").is_hidden(), timeout=60)
-        page.locator('.se-toolbar [data-cmd="drawer"]').click()
+        page.locator('[data-cmd="drawer"]').click()
         assert _wait(lambda: page.locator(".se-drawer").is_visible())
         assert page.locator(".se-session-current .se-session-row code").inner_text() == str(big)
         page.locator(".se-drawer-close").click()
@@ -3127,14 +3127,15 @@ def test_the_tools_are_laid_out_in_columns(browser, serve_expr):
     one is centred.  One long strip of buttons, or rows each ending wherever
     their content happens to stop, read as a mess."""
     # Nothing else installed in this Python may join the strip: an add-on's
-    # own tools would add blocks.  The drawer's button is there without any
-    # (it holds File), a block of its own at the right end of the first row.
+    # own tools would add blocks.  The guide's ? is a block of its own at the
+    # right end of the first row; the drawer's button is on the page's title
+    # line (test_the_menu_button_sits_on_the_title_line).
     srv, doc = serve_expr(x + y, available=[])
     page = browser.new_page(viewport={"width": 1100, "height": 800})
     page.goto(srv.url)
     page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
     blocks = page.evaluate("""() => {
-        const strip = document.querySelector('.se-tools').getBoundingClientRect();
+        const strip = document.querySelector('.se-tools-main').getBoundingClientRect();
         const out = [];
         for (const el of document.querySelectorAll('.se-tools > .se-block')) {
             const r = el.getBoundingClientRect();
@@ -3146,17 +3147,17 @@ def test_the_tools_are_laid_out_in_columns(browser, serve_expr):
         return out;
     }""")
     by = {b["name"]: b for b in blocks}
-    assert {"session", "zoom", "sessions", "edit", "clip", "apply"} <= set(by), blocks
+    assert {"session", "zoom", "help", "edit", "clip", "apply"} <= set(by), blocks
     assert "nav" not in by, blocks                                 # the arrows are under the formula
     rows = sorted({b["top"] for b in blocks})
     assert len(rows) == 3, blocks                                  # a row of three, one of two, then the wide one
     # a block never breaks apart: what belongs together stays on one line
-    assert by["session"]["top"] == by["zoom"]["top"] == by["sessions"]["top"] == rows[0]
+    assert by["session"]["top"] == by["zoom"]["top"] == by["help"]["top"] == rows[0]
     assert by["edit"]["top"] == by["clip"]["top"] == rows[1]
     assert by["apply"]["top"] == rows[2] and by["apply"]["wide"]
     # left column flush left, right column flush right, middle centred
     assert by["session"]["left"] <= 1 and by["edit"]["left"] <= 1, blocks
-    assert by["sessions"]["right"] <= 1 and by["clip"]["right"] <= 1, blocks
+    assert by["help"]["right"] <= 1 and by["clip"]["right"] <= 1, blocks
     assert abs(by["zoom"]["left"] - by["zoom"]["right"]) <= 2, blocks
     assert by["apply"]["left"] <= 1 and by["apply"]["right"] <= 1, blocks
     page.close()
@@ -3194,6 +3195,68 @@ def test_the_tools_stay_in_blocks_on_a_narrow_screen(browser, serve_expr):
     assert any(len(line) > 1 for line in lines), lines
     assert page.evaluate("document.documentElement.scrollWidth") <= 384   # nothing overflows
     page.close()
+
+
+def test_the_menu_button_sits_on_the_title_line(browser, serve_expr):
+    """The drawer's button is the page's menu, not one more tool: on a page
+    with a title (render_page) it stands on the title's line at the right.
+    The first row of tools holds the session, the zoom beside History and,
+    at its right end, the guide's ? - on a phone too, on one line - and an
+    add-on's own tools (the LaTeX button) sit right above the formula."""
+    srv, doc = serve_expr(x + y, options={"finishButton": False})     # the apps' row: no Done
+    for width in (1100, 384):
+        page = browser.new_page(viewport={"width": width, "height": 800}, has_touch=width < 700)
+        page.goto(srv.url)
+        page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+        geo = page.evaluate("""() => {
+            const r = sel => { const e = document.querySelector(sel); const b = e.getBoundingClientRect(); return {l: b.left, r: b.right, t: b.top, b: b.bottom, cy: (b.top + b.bottom) / 2}; };
+            return {h1: r('h1'), menu: r('[data-cmd="drawer"]'), editor: r('.sympy-editor'), history: r('[data-cmd="history"]'),
+                    zoom: r('[data-cmd="zoomin"]'), help: r('[data-cmd="help"]'), head: r('.se-tools-head'), view: r('.se-stage'),
+                    inTitle: !!document.querySelector('.page-head [data-cmd="drawer"]')};
+        }""")
+        assert geo["inTitle"], width
+        assert abs(geo["menu"]["cy"] - geo["h1"]["cy"]) <= 4 and geo["menu"]["b"] <= geo["editor"]["t"], (width, geo)
+        assert abs(geo["menu"]["r"] - geo["editor"]["r"]) <= 2, (width, geo)               # at the right
+        assert abs(geo["zoom"]["cy"] - geo["history"]["cy"]) <= 2, (width, geo)          # the zoom on History's row
+        assert abs(geo["help"]["cy"] - geo["history"]["cy"]) <= 2, (width, geo)          # and ? too
+        assert abs(geo["help"]["r"] - geo["head"]["r"]) <= 2 and geo["help"]["l"] > geo["zoom"]["r"], (width, geo)
+        assert geo["head"]["b"] <= geo["view"]["t"], (width, geo)
+        # the menu works from there, and the focus comes back to it
+        page.locator('[data-cmd="drawer"]').click()
+        assert _wait(lambda: page.locator(".se-drawer").is_visible())
+        page.keyboard.press("Escape")
+        assert _wait(lambda: page.locator(".se-drawer").is_hidden())
+        assert page.evaluate("document.activeElement.getAttribute('data-cmd')") == "drawer"
+        page.close()
+
+
+def test_the_add_ons_tools_are_right_above_the_formula(browser):
+    """The LaTeX button (an add-on's own tool) has the toolbar's last strip,
+    right above the formula - on a phone too, where the editing tools go
+    under the formula."""
+    pytest.importorskip("lark")
+    from pathlib import Path
+    from sympy_editor import register_addons_folder
+    register_addons_folder(str(Path(__file__).resolve().parent.parent / "addons"))
+    srv = EditorServer(Document(x + y, addons=["sympy_editor_latex"]), port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        for width in (1100, 384):
+            page = browser.new_page(viewport={"width": width, "height": 800})
+            page.goto(srv.url)
+            page.wait_for_selector('.se-tools-addons [data-block="addon:latex"]', timeout=30000)
+            geo = page.evaluate("""() => {
+                const r = sel => document.querySelector(sel).getBoundingClientRect();
+                return {tools: r('.se-tools-addons'), view: r('.se-stage'), head: r('.se-tools-head'), main: r('.se-tools-main')};
+            }""")
+            assert geo["tools"]["bottom"] <= geo["view"]["top"] and geo["view"]["top"] - geo["tools"]["bottom"] < 40, (width, geo)
+            assert geo["tools"]["top"] >= geo["head"]["bottom"], (width, geo)
+            if width < 700:
+                assert geo["main"]["top"] > geo["view"]["bottom"], geo                   # the editing tools under the formula
+            page.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
 
 
 def test_navigation_arrows_are_one_uniform_set(browser, serve_expr):
@@ -3670,42 +3733,26 @@ def test_a_radical_that_disappears_is_marked(browser, tmp_path):
 
 
 def test_the_sessions_button_sits_on_the_side_the_drawer_opens(browser, tmp_path):
-    """The drawer slides in from the right, so its ☰ belongs at the right
-    end of its row - not at the far left, across the toolbar from it."""
+    """The drawer slides in from the right, so its ≡ belongs at the right -
+    on a page with a title, at the right end of the title's line, over the
+    editor's right edge, at every width; and the drawer comes from there."""
     path = tmp_path / "sessions.html"
     path.write_text(to_html(x + y, options={"sessions": True}), encoding="utf-8")
     page = browser.new_page(viewport={"width": 1100, "height": 800})
     page.goto(path.as_uri())
     page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
     assert _wait(lambda: page.locator(".se-loading").is_hidden(), timeout=180)   # Python in the page, add-ons on
-    row = page.evaluate("""() => {
-        const drawer = document.querySelector('.se-tools [data-cmd="drawer"]').getBoundingClientRect();
-        const strip = document.querySelector('.se-tools').getBoundingClientRect();
-        const mine = [], mid = (drawer.top + drawer.bottom) / 2;
-        for (const el of document.querySelectorAll('.se-tools > .se-block')) {
-            const r = el.getBoundingClientRect();
-            if (r.height && r.width && Math.abs((r.top + r.bottom) / 2 - mid) < 9) mine.push(r.right);
-        }
-        return {drawer: drawer.right, edge: strip.right, blocks: mine.length,
-                rightmost: Math.max(...mine), block: document.querySelector('.se-tools [data-cmd="drawer"]').closest('.se-block').getAttribute('data-block')};
-    }""")
-    assert row["block"] == "sessions"                           # a block of its own...
-    assert row["blocks"] >= 3                                   # ...on the row with the timeline and the zoom
-    assert abs(row["drawer"] - row["edge"]) <= 1, row           # and it ends that row, at the strip's right edge
-    assert row["drawer"] == row["rightmost"], row
-    # and on a phone, where the blocks pack into lines instead of columns,
-    # it moves up to end the first line rather than starting the second
-    page.set_viewport_size({"width": 384, "height": 780})
-    page.wait_for_timeout(100)
-    narrow = page.evaluate("""() => {
-        const strip = document.querySelector('.se-tools').getBoundingClientRect();
-        const blocks = [...document.querySelectorAll('.se-tools > .se-block')].filter(el => el.getBoundingClientRect().height);
-        const tops = blocks.map(el => Math.round(el.getBoundingClientRect().top));
-        const first = Math.min(...tops);
-        const drawer = document.querySelector('.se-tools [data-cmd="drawer"]').closest('.se-block').getBoundingClientRect();
-        return {onFirstLine: Math.round(drawer.top) === first, fromRight: Math.round(strip.right - drawer.right)};
-    }""")
-    assert narrow["onFirstLine"] and narrow["fromRight"] <= 1, narrow
+    for width in (1100, 384):
+        page.set_viewport_size({"width": width, "height": 800})
+        page.wait_for_timeout(100)
+        where = page.evaluate("""() => {
+            const b = document.querySelector('[data-cmd="drawer"]').getBoundingClientRect();
+            const e = document.querySelector('.sympy-editor').getBoundingClientRect();
+            const h = document.querySelector('h1').getBoundingClientRect();
+            return {inTitle: !!document.querySelector('.page-head [data-cmd="drawer"]'), right: Math.round(e.right - b.right),
+                    mid: Math.abs((b.top + b.bottom) / 2 - (h.top + h.bottom) / 2)};
+        }""")
+        assert where["inTitle"] and abs(where["right"]) <= 2 and where["mid"] <= 4, (width, where)
     # the drawer really does come from the right
     assert page.evaluate("getComputedStyle(document.querySelector('.se-drawer')).right") == "0px"
     page.close()
@@ -5232,7 +5279,7 @@ def test_addons_can_be_switched_on_and_off_while_editing(browser):
         assert page.locator(".se-addon-demo").count() == 0
         assert page.locator('.se-toolbar [data-cmd="addon:demo:boxit"]').count() == 0
         assert page.locator('.se-toolbar [data-cmd="addons"]').count() == 0      # no menu on the strip any more
-        drawer_btn = page.locator('.se-toolbar [data-cmd="drawer"]')
+        drawer_btn = page.locator('[data-cmd="drawer"]')
         assert drawer_btn.is_visible()
 
         def open_drawer():
@@ -5284,7 +5331,7 @@ def test_the_drawer_button_is_there_with_no_sessions_and_no_addons(browser, tmp_
     threading.Thread(target=srv2.serve_forever, daemon=True).start()
     try:
         page = _open(browser, srv2.url)
-        page.locator('.se-toolbar [data-cmd="drawer"]').click()
+        page.locator('[data-cmd="drawer"]').click()
         page.wait_for_selector(".se-drawer .se-file-action", state="visible", timeout=5000)
         assert page.locator(".se-drawer .se-file-action").count() == 5
         assert page.locator('.se-toolbar [data-cmd="addons"]').count() == 0
@@ -5327,7 +5374,7 @@ def test_remembered_addons_come_back_after_a_reload(browser, tmp_path):
         page = _open(browser, srv.url)
         page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)      # nothing kept: on
         assert list(doc.addons) == ["demo"]
-        page.locator('.se-toolbar [data-cmd="drawer"]').click()
+        page.locator('[data-cmd="drawer"]').click()
         page.locator(".se-drawer-addons input").uncheck()
         page.wait_for_function("!document.querySelector('.se-addon-demo')", timeout=10000)
         assert _wait_for(lambda: (tmp_path / "addons.json").is_file()
@@ -5338,7 +5385,7 @@ def test_remembered_addons_come_back_after_a_reload(browser, tmp_path):
         page.wait_for_function("document.querySelector('.sympy-editor').__sympyEditor.state.addons.length === 0", timeout=15000)
         assert list(doc.addons) == []                           # switched off again from the storage
         assert page.locator(".se-addon-demo").count() == 0
-        page.locator('.se-toolbar [data-cmd="drawer"]').click()
+        page.locator('[data-cmd="drawer"]').click()
         page.locator(".se-drawer-addons input").check()
         page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)
         assert _wait_for(lambda: json.loads((tmp_path / "addons.json").read_text(encoding="utf-8")) == {"off": []})
@@ -5759,7 +5806,7 @@ def test_a_formula_is_saved_to_a_file_and_opened_from_one(browser, serve_expr, t
     plain line of SymPy source, which opens as a formula of one step."""
     srv, doc = serve_expr(x**2 + sin(y))
     page = _open(browser, srv.url)
-    page.locator('.se-toolbar [data-cmd="drawer"]').click()
+    page.locator('[data-cmd="drawer"]').click()
     files = page.locator(".se-drawer .se-file-action")
     assert files.all_inner_texts() == ["Open formula\u2026", "Save formula\u2026",
                                        "History as Python\u2026", "History as web page\u2026",
@@ -5880,7 +5927,7 @@ def test_back_closes_what_is_open_and_then_lets_the_app_go(browser, serve_expr):
     page.locator('.se-toolbar [data-cmd="help"]').click()
     assert page.locator(".se-help-view").count() == 1
     assert back() is True and page.locator(".se-help-view").count() == 0
-    page.locator('.se-toolbar [data-cmd="drawer"]').click()
+    page.locator('[data-cmd="drawer"]').click()
     assert _wait(lambda: page.locator(".se-drawer").is_visible())
     assert back() is True and _wait(lambda: not page.locator(".se-drawer").is_visible())
     _select(page, "/")
@@ -5956,7 +6003,7 @@ def test_the_history_prints_through_the_app(browser, serve_expr):
     srv, doc = serve_expr(x + y)
     doc.handle({"action": "replace", "path": "/", "src": "x + 2*y"})
     page = _open_hosted(browser, srv.url)
-    page.locator('.se-toolbar [data-cmd="drawer"]').click()
+    page.locator('[data-cmd="drawer"]').click()
     page.locator(".se-drawer .se-file-action", has_text="Print history").click()
     assert _wait(lambda: _host_calls(page, "printHtml"))
     call = _host_calls(page, "printHtml")[0]

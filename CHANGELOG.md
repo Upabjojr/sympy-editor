@@ -12,10 +12,13 @@
 
 * **On a phone the formula comes first.** The tools - seven rows of them at
   a phone's width - stood between the top of the screen and the formula;
-  now only the session row (undo, redo, History, ?, Done, the zoom, ≡)
-  stays at the top, then the formula, the arrows, the line naming the
-  selection and the source line, then the editing tools, where the thumbs
-  are, and the add-ons' panels last. A wide screen is laid out as before. And the guide opens with a **Quick
+  now the menu (≡) stands on the title's line at the right, one row holds
+  undo and redo, the zoom between two rules and, at its right end, History
+  and ?, and the add-ons' own tools (LaTeX, the pen) sit right above the formula; then come the
+  formula, the arrows, the line naming the selection and the source line,
+  the editing tools, where the thumbs are, and the add-ons' panels last. A
+  wide screen keeps its grid, with ≡ on the title's line there too and ?
+  at the right end of the first row. And the guide opens with a **Quick
   start**: the five things to know, before the full account.
 
 * **Differentiate, integrate, solve and substitute from the Transform
