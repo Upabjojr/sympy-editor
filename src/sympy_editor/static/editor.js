@@ -131,15 +131,15 @@ var SympyEditor = (function () {
     '<div class="se-help-cols">',
     "<section><h3>Selecting</h3><ul>",
     "<li>Click the middle of anything to select it; with a mouse, click the same spot again for the enclosing expression (a second tap with a finger edits instead: see <i>On a phone or tablet</i>).</li>",
-    "<li><kbd>\u2191</kbd> enclosing, <kbd>\u2193</kbd> inside, <kbd>\u2190</kbd>/<kbd>\u2192</kbd> siblings, <kbd>Esc</kbd> deselects (the same arrows sit in the toolbar and under the selection).</li>",
+    "<li><kbd>\u2191</kbd> enclosing, <kbd>\u2193</kbd> inside, <kbd>\u2190</kbd>/<kbd>\u2192</kbd> siblings, <kbd>Esc</kbd> deselects (the same four arrows are in the row under the formula).</li>",
     "<li>With a mouse, drag across terms to select a range (a finger rests first: see <i>On a phone or tablet</i>); <kbd>Shift</kbd>+<kbd>\u2190</kbd>/<kbd>\u2192</kbd> grows and shrinks it. Dragging to the edge of the view scrolls the formula along and keeps taking in what appears, so a range can reach what lies beyond the screen.</li>",
     "<li>The line under the tools names the selection: its type and SymPy form.</li>",
     "</ul></section>",
     "<section><h3>Editing</h3><ul>",
     "<li>Just type over a selection to replace it; <kbd>Enter</kbd> or a double-click edits its existing text in place.</li>",
     "<li><b>Delete</b> removes the selection. Deleting the whole expression empties the view: type the new one right there. Deleting one side of a power leaves the other alone, the power unwrapped: the exponent of <i>x</i>\u00b2 gone leaves <i>x</i>, a root sign gone leaves what was under it, and e<sup><i>x</i></sup> without its exponent is e.</li>",
-    "<li><b>Unwrap</b> (<kbd>Backspace</kbd>) removes the node but keeps an argument: cos(\u03b8) \u2192 \u03b8; it asks which one when there is a choice.</li>",
-    "<li><b>Isolate</b> keeps only the selection; <b>Copy</b>/<b>Paste</b> and <kbd>Ctrl</kbd>+<kbd>C</kbd>/<kbd>X</kbd>/<kbd>V</kbd> work on selections and carets.</li>",
+    "<li><b>Unwrap</b> (<kbd>Backspace</kbd>) removes the node but keeps an argument: cos(\u03b8) \u2192 \u03b8; it asks which one when there is a choice. On a symbol or a number, which has nothing inside, <kbd>Backspace</kbd> deletes.</li>",
+    "<li><b>Extract</b> keeps only the selection, which becomes the whole formula; <b>Copy</b>/<b>Paste</b> and <kbd>Ctrl</kbd>+<kbd>C</kbd>/<kbd>X</kbd>/<kbd>V</kbd> work on selections and carets.</li>",
     "<li><kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> redoes.</li>",
     "<li>The source line under the formula is the whole expression as SymPy text: edit it there too (Enter applies, Esc reverts).</li>",
     "<li>The line and the formula are the same thing seen twice, and follow each other both ways: select text and that sub-expression is selected above; select above and its text is marked here \u2014 put the cursor in one and a caret appears in the other, at the same place.</li>",
@@ -153,7 +153,7 @@ var SympyEditor = (function () {
     "<li>Templates: \\int, \\sum, \\prod, \\lim, \\diff, \\frac, \\binom, \\matrix typed in a field put the whole construction in, with faint empty boxes where its parts go. The first box is selected: type to fill it, <kbd>Tab</kbd> moves to the next box (<kbd>Shift</kbd>+<kbd>Tab</kbd> back). The boxes are the symbols _1, _2\u2026 in the source line.</li>",
     "<li>The palette: the <b>\u221a \u222b \u03a3 \u25be</b> button beside <b>Paste</b> opens the constructions as buttons drawn the way they look \u2014 fraction, power, square root, absolute value, exponential, logarithm, factorial, binomial, integral, definite integral, derivative, limit, sum, product, 2 \u00d7 2 matrix. With a caret it goes in at the caret, its boxes empty; with a selection (or a range) the selection becomes its main part \u2014 x selected and \u222b pressed gives \u222b x d\u25a1, nothing computed, so \u221a4 stays \u221a4; with nothing selected it takes the whole formula. Then the first empty box is selected: type, <kbd>Tab</kbd>, type\u2026 (<kbd>Tab</kbd> in a field applies it and goes on to the next box). Arrows walk the palette, <kbd>Esc</kbd> closes it.</li>",
     "<li>An edit that cannot be read as an expression is refused: the message shows under the formula, and the formula flickers red for half a second.</li>",
-    "<li>So is an edit SymPy refuses to build — a product of matrices whose shapes do not match, sin(x, y). Tick <b>allow invalid</b> to keep it instead: it is shown as its constructor in red with its arguments in brackets (Invalid(MatMul, A, B) in the source line), and it becomes the ordinary expression again as soon as an edit inside it makes it valid.</li>",
+    "<li>So is an edit SymPy refuses to build — a product of matrices whose shapes do not match, sin(x, y). Tick <b>allow invalid</b> (under ≡, <i>Settings</i>) to keep it instead: it is shown as its constructor in red with its arguments in brackets (Invalid(MatMul, A, B) in the source line), and it becomes the ordinary expression again as soon as an edit inside it makes it valid.</li>",
     "</ul></section>",
     "<section><h3>Operators</h3><ul>",
     "<li>Click an operator itself (<b>+</b>, <b>\u2212</b>, <b>\u22c5</b>, <b>=</b>\u2026) to select it; a small palette appears.</li>",
@@ -167,7 +167,7 @@ var SympyEditor = (function () {
     "<li>In a <b>matrix</b> (the matrix, or anything in one of its entries) the row under the formula adds, beside the arrows, <b>+ row</b>, <b>+ col</b>, <b>\u2212 row</b>, <b>\u2212 col</b>: a new row or column of empty slots after the selected one (after the last, for the matrix itself), or the selected one taken away. The grip at the matrix\u2019s bottom-right corner <b>reshapes</b> it: the same entries laid out another way (SymPy\u2019s reshape, in reading order), so it snaps to the shapes that hold them all \u2014 12 entries go 1\u00d712, 2\u00d76, 3\u00d74, 4\u00d73, 6\u00d72, 12\u00d71 and nowhere else. Nothing is added or lost; the outline shows the shape it will take. To grow or shrink the matrix, use + row / + col / \u2212 row / \u2212 col.</li>",
     "<li>The second group is the <b>library</b>: <b>Methods \u25be</b> lists everything the selected object's class can do \u2014 .det(), .T, .diff()\u2026 \u2014 one pick calls it. A Lambda is itself a function: <b>( ) apply</b> evaluates it at the arguments you give.</li>",
     "<li>The <b>function box</b> beside it holds all of SymPy: pick a function and fill the parameters it asks for; \u201cdiff(x)\u201d, \u201c.T\u201d, \u201cdet()\u201d typed in full apply as written. A container takes the selection as its contents: <i>Matrix</i> over x + y gives the 1\u00d71 matrix holding it.</li>",
-    "<li><b>unevaluated</b> builds the symbolic form (Determinant, Integral, sin(0)\u2026) instead of computing it; <i>Evaluate (doit)</i> computes it later.</li>",
+    "<li><b>keep unevaluated</b> builds the symbolic form (Determinant, Integral, sin(0)\u2026) instead of computing it; <i>Evaluate (doit)</i> computes it later.</li>",
     "<li>The <b>Symbols</b> panel under the formula declares new names and changes what a name stands for (symbol, function, matrix, assumptions).</li>",
     "</ul></section>",
     "<section><h3>History and sessions</h3><ul>",
@@ -1634,8 +1634,11 @@ var SympyEditor = (function () {
         self.tools.appendChild(current);
         return current;
       };
-      var btn = function (cmd, label, title) {
+      var btn = function (cmd, label, title, name) {
         var b = h("button", { type: "button", "data-cmd": cmd, title: title }, [label]);
+        // A button that shows a glyph alone (↺, ?, ≡) is named by it to
+        // a screen reader ("anticlockwise open circle arrow"): give it a word.
+        if (name) b.setAttribute("aria-label", name);
         current.appendChild(b);
         self.buttons[cmd] = b;
         return b;
@@ -1652,26 +1655,26 @@ var SympyEditor = (function () {
       // 1. the session and its timeline
       block("session");
       if (!o.readOnly) {
-        btn("undo", "↺", "Undo (Ctrl+Z)");
-        btn("redo", "↻", "Redo (Ctrl+Shift+Z, Ctrl+Y)");
+        btn("undo", "↺", "Undo (Ctrl+Z)", "Undo");
+        btn("redo", "↻", "Redo (Ctrl+Shift+Z, Ctrl+Y)", "Redo");
         sep();
         btn("history", "History", "View the history of this session: every step, what changed and what produced it - play it as a slideshow, or save it as a web page or a Python script");
-        btn("help", "?", "How to use the editor: every gesture, key and tool");
+        btn("help", "?", "How to use the editor: every gesture, key and tool", "Help");
         if (o.finishButton) btn("finish", "Done", "Finish editing and hand the expression back to Python");
       }
       // 2. the formula's size
       block("zoom");
       var zoomBlock = h("span", { class: "se-zoom" });
       current.appendChild(zoomBlock);
-      var zoomBtn = function (cmd, label, title) { var b = btn(cmd, label, title); zoomBlock.appendChild(b); return b; };
-      zoomBtn("zoomout", "\u2212", "Zoom out (Ctrl+minus, Ctrl+wheel, pinch)");
+      var zoomBtn = function (cmd, label, title, name) { var b = btn(cmd, label, title, name); zoomBlock.appendChild(b); return b; };
+      zoomBtn("zoomout", "\u2212", "Zoom out (Ctrl+minus, Ctrl+wheel, pinch)", "Zoom out");
       zoomBtn("zoomreset", "100%", "Reset the zoom (Ctrl+0)");
-      zoomBtn("zoomin", "+", "Zoom in (Ctrl+plus, Ctrl+wheel, pinch)");
+      zoomBtn("zoomin", "+", "Zoom in (Ctrl+plus, Ctrl+wheel, pinch)", "Zoom in");
       // 3. the sessions drawer, alone at the right end of its row: it slides
       //    in from the right, so the tap and what it opens are on one side
       if (!o.readOnly) {
         this.drawerBlock = block("sessions");
-        btn("drawer", "\u2261", o.sessions ? "Sessions, history, files and add-ons" : "Files and add-ons");
+        btn("drawer", "\u2261", o.sessions ? "Sessions, history, files, settings and add-ons" : "Files, settings and add-ons", "Menu");
         // On a narrow screen the blocks pack into lines: this ends the first
         // one, so nothing can slip to the right of the drawer's button.
         this.drawerBreak = h("span", { class: "se-linebreak" });
@@ -1687,7 +1690,7 @@ var SympyEditor = (function () {
         btn("edit", "Edit", "Edit the selection in place (Enter, double-click, or just start typing)");
         btn("unwrap", "Unwrap", "Remove the selected node but keep its argument: cos(θ) → θ (Backspace)");
         btn("delete", "Delete", "Remove the selection entirely (Del)");
-        btn("isolate", "Isolate", "Keep only the selection: it becomes the whole expression (Ctrl+Shift+I)");
+        btn("isolate", "Extract", "Keep only the selection: it becomes the whole expression (Ctrl+Shift+I)");
         // 6. the clipboard (the keyboard's button is under the formula: see
         //    keyRow)
         block("clip");
@@ -1777,7 +1780,7 @@ var SympyEditor = (function () {
         this.lazyBox = h("input", { type: "checkbox", class: "se-lazy-box" });
         this.lazyBox.checked = !!this.opts.unevaluated;
         var lazyLabel = h("label", { class: "se-lazy", title: "Keep the result unevaluated: the Determinant, Integral, Derivative, sin(0)... is built, not computed (Evaluate applies it later); a transformation without such a form is applied as usual" },
-          [this.lazyBox, "unevaluated"]);
+          [this.lazyBox, "keep unevaluated"]);
         this.lazyBox.addEventListener("change", function () {
           self._setStatus(self.lazyBox.checked ? "Unevaluated: transformations and functions build their symbolic form (Determinant, Integral...) - Evaluate computes it later"
                                                : "Transformations and functions compute their result");
@@ -1786,16 +1789,17 @@ var SympyEditor = (function () {
         // Invalid expressions: an edit SymPy refuses to build (A*B of
         // matrices whose shapes do not match, sin(x, y)) is kept as a node
         // of its own, drawn in red, instead of being refused.  A switch of
-        // the document (Python holds it, snapshots report it).
+        // the document (Python holds it, snapshots report it) - set once in
+        // a while by someone who knows what it means, so it lives in the
+        // drawer's Settings fold, not on the strip beside the everyday tools.
         this.invalidBox = h("input", { type: "checkbox", class: "se-allow-invalid-box" });
-        var invalidLabel = h("label", { class: "se-lazy", title: "Keep what SymPy refuses to build (a product of matrices whose shapes do not match, a function given the wrong number of arguments) as an invalid node, shown in red, instead of refusing the edit" },
-          [this.invalidBox, "allow invalid"]);
+        this.invalidLabel = h("label", { class: "se-lazy se-setting", title: "Keep what SymPy refuses to build (a product of matrices whose shapes do not match, a function given the wrong number of arguments) as an invalid node, shown in red, instead of refusing the edit" },
+          [this.invalidBox, "allow invalid expressions"]);
         this.invalidBox.addEventListener("change", function () {
           self.send({ action: "settings", allow_invalid: self.invalidBox.checked });
           self._setStatus(self.invalidBox.checked ? "Invalid expressions allowed: what SymPy refuses to build is kept, in red, until it is fixed"
                                                   : "Invalid expressions refused: an edit SymPy refuses to build is not applied");
         });
-        current.appendChild(invalidLabel);
         this.fnForm = h("div", { class: "se-fn-form", hidden: "" });
         this._fnNames = [];
         this._fnSigs = {};
@@ -1977,6 +1981,12 @@ var SympyEditor = (function () {
                 this.printReport);
         this.filesPane = h("details", { class: "se-drawer-files", open: "" }, [
           h("summary", { class: "se-drawer-subhead" }, ["File"]), this.filesBody]);
+        // The settings of the document that are not about one edit: the
+        // "allow invalid" switch (the unevaluated toggle stays on the strip,
+        // it is set per operation).
+        this.settingsPane = this.invalidLabel ? h("details", { class: "se-drawer-settings" }, [
+          h("summary", { class: "se-drawer-subhead" }, ["Settings"]),
+          h("div", { class: "se-drawer-settings-body" }, [this.invalidLabel])]) : null;
 
         // The add-ons' switches ride at the top of the drawer (see the note
         // where addonsMenu is made): open in place, not a menu that drops.
@@ -2004,6 +2014,7 @@ var SympyEditor = (function () {
           h("div", { class: "se-drawer-head" }, [this.drawerHeading, close])
         ].concat(this.addonsPane ? [this.addonsPane] : [])
          .concat(this.filesPane ? [this.filesPane] : [])
+         .concat(this.settingsPane ? [this.settingsPane] : [])
          .concat(this.sessionsBody ? [this.sessionsBody] : []));
         this.backdrop = h("div", { class: "se-backdrop", hidden: "" });
         this.backdrop.addEventListener("click", function () { self.closeDrawer(); });
@@ -3909,7 +3920,11 @@ var SympyEditor = (function () {
       } else if ((k === "Backspace" || k === "Delete") && this.selected === "/" && !ro) {
         this.editSource("");                     // the whole expression: start over in the source line
       } else if (k === "Backspace") {
-        if (!ro && this.selected) this.unwrapSelection();
+        // A symbol or a number has nothing inside to keep: Backspace on it
+        // deletes, as it does on a range - the answer used to be an error.
+        var leaf = this.selected && this.state && this.state.nodes && this.state.nodes[this.selected];
+        if (!ro && leaf && !leaf.nargs && !leaf.parts) this.send({ action: "delete", path: this.selected });
+        else if (!ro && this.selected) this.unwrapSelection();
       } else if (k === "Delete") {
         if (!ro && this.selected && this.selected !== "/") this.send({ action: "delete", path: this.selected });
       } else if (k === "ArrowUp") {
@@ -4196,7 +4211,14 @@ var SympyEditor = (function () {
       this.overlay.querySelector(".se-loading-text").textContent = text || "Loading…";
       this.overlay.hidden = false;
       this._followLoading(true);
-      if (this.root.contains(document.activeElement) && document.activeElement !== document.body) document.activeElement.blur();
+      // The focus leaves while the overlay is up (keys are ignored meanwhile)
+      // and comes back where it was when it goes: a slow Simplify used to
+      // leave the keyboard pointing at nothing, and every key after it lost.
+      var active = document.activeElement;
+      if (this.root.contains(active) && active !== document.body) {
+        if (!this._loadingFocus) this._loadingFocus = active;
+        active.blur();
+      }
       this._setStatus(text || "");
     }
 
@@ -4206,6 +4228,12 @@ var SympyEditor = (function () {
       this.loading = false;
       this.overlay.hidden = true;
       this._applySelection();
+      var back = this._loadingFocus;
+      this._loadingFocus = null;
+      var idle = !document.activeElement || document.activeElement === document.body;
+      if (back && idle && this.root.contains(back) && !back.disabled) {
+        try { back.focus({ preventScroll: true }); } catch (e) { back.focus(); }
+      }
     }
 
     /** The overlay's box - spinner, text, Interrupt - in the middle of the

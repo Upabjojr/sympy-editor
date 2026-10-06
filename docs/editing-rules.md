@@ -26,12 +26,12 @@ page asks for, and the history they make).
   every node above it with `node.func(*args)`, which means SymPy's automatic
   evaluation applies: replacing `y` by `-x` in `x + y` gives `0`. This is the
   point of editing a *SymPy expression* rather than a string.
-* **Nothing is evaluated that was not asked for.** With the **unevaluated**
+* **Nothing is evaluated that was not asked for.** With the **keep unevaluated**
   switch on, operations that would compute a result build it unevaluated
   instead (`2 + 3` stays `2 + 3`).
 * **An edit that cannot be read is refused**: the message appears under the
   formula and the expression is untouched. An edit that *reads* but that
-  SymPy refuses to build is refused too — unless **allow invalid** is on, and
+  SymPy refuses to build is refused too — unless **allow invalid** (under ≡, *Settings*) is on, and
   then it is kept (§8).
 * **Only an expression is committed.** Text that reads as something else
   (`[x, 1]`, `None`), or an operation or a call that answers with one, is
@@ -69,6 +69,7 @@ cases that are not simply "one argument fewer":
 | the base of a power | the exponent alone, which is what is left of it |
 | the exponent of `eˣ` | `e`, the base it was drawn with |
 | the argument of a one-argument function | refused: `sin` is not an expression |
+| a symbol or a number, with Backspace | the same as Delete: there is nothing inside it to keep |
 | a range | the node without those arguments |
 | the whole expression | the view empties, and the new expression is typed in its place |
 
@@ -80,7 +81,7 @@ argument you name: `cos(x)` → `x`, `∫f dx` → `f`, `x²` → `x` (the base 
 default). A sum, a product of several terms or a fraction has no natural one,
 so unwrap asks which to keep.
 
-**Isolate** goes the other way: the selection becomes the whole expression and
+**Extract** goes the other way: the selection becomes the whole expression and
 everything around it is dropped.
 
 ## 4. Typing at a cursor

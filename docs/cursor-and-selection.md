@@ -257,7 +257,7 @@ Two pieces of interface follow the pointer rather than the host:
   **− row** and **− col**.
 
 No bar pops up under a selection or a caret: every command has one fixed
-place - the arrows in that row, Edit, Unwrap, Delete, Isolate, Copy and Paste
+place - the arrows in that row, Edit, Unwrap, Delete, Extract, Copy and Paste
 on the tool strip. Only the operator palette (under a selected operator) and
 the chooser that asks which argument to keep appear at the selection.
 

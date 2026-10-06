@@ -1,6 +1,7 @@
 /* sympy-editor styles.  Everything is scoped under .sympy-editor.
- * Colours follow JupyterLab's theme variables when present and fall back to
- * light/dark defaults driven by prefers-color-scheme. */
+ * Colours follow JupyterLab's theme (its variables and its light/dark
+ * setting) when present and fall back to light/dark defaults driven by
+ * prefers-color-scheme. */
 
 .sympy-editor {
   --se-accent: 59, 130, 246;
@@ -41,8 +42,13 @@
   font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   text-align: left;
 }
+/* Dark tokens, in two places that must stay the same: the system theme, for
+ * a page of its own, and JupyterLab's own theme (data-jp-theme-light on the
+ * body), which wins when the two disagree - the text already followed the
+ * --jp-* variables, so a dark Lab on a light desktop had light text on a
+ * white canvas and white buttons. */
 @media (prefers-color-scheme: dark) {
-  .sympy-editor {
+  .sympy-editor:not([data-jp-theme-light="true"] *) {
     --se-bg: var(--jp-layout-color1, #1e1e1e);
     --se-fg: var(--jp-ui-font-color1, #e6e6e6);
     --se-border: var(--jp-border-color2, #444444);
@@ -63,6 +69,27 @@
     --se-surface: #232529;
     --se-rule: rgba(255, 255, 255, 0.1);
   }
+}
+[data-jp-theme-light="false"] .sympy-editor {
+    --se-bg: var(--jp-layout-color1, #1e1e1e);
+    --se-fg: var(--jp-ui-font-color1, #e6e6e6);
+    --se-border: var(--jp-border-color2, #444444);
+    --se-muted: var(--jp-ui-font-color2, #a0a0a0);
+    --se-error: #ff8a80;
+    --se-removed: #ff7b72;
+    --se-added: #3fb950;
+    --se-removed-rgb: 255, 123, 114;
+    --se-added-rgb: 63, 185, 80;
+    --se-btn: linear-gradient(180deg, #3a3d42 0%, #2e3136 100%);
+    --se-btn-hover: linear-gradient(180deg, #45484e 0%, #35383d 100%);
+    --se-btn-down: linear-gradient(180deg, #26282c 0%, #303338 100%);
+    --se-btn-edge: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    --se-btn-shadow: 0 1px 1.5px rgba(0, 0, 0, 0.35);
+    --se-btn-shadow-hover: 0 2px 5px rgba(0, 0, 0, 0.45);
+    --se-btn-shadow-down: inset 0 1.5px 3px rgba(0, 0, 0, 0.45);
+    --se-field: linear-gradient(180deg, #232529 0%, #292c30 100%);
+    --se-surface: #232529;
+    --se-rule: rgba(255, 255, 255, 0.1);
 }
 .sympy-editor * { box-sizing: border-box; }
 
@@ -301,8 +328,10 @@
 }
 /* The drawer's file section: the document as a whole - kept in a file, taken
  * back from one, or written out as a script or a page. */
-.se-drawer-files { border-bottom: 1px solid var(--se-rule); padding-bottom: 0.5rem; margin-bottom: 0.2rem; }
-.se-drawer-files > summary { cursor: pointer; user-select: none; }
+.se-drawer-files, .se-drawer-settings { border-bottom: 1px solid var(--se-rule); padding-bottom: 0.5rem; margin-bottom: 0.2rem; }
+.se-drawer-files > summary, .se-drawer-settings > summary { cursor: pointer; user-select: none; }
+.se-drawer-settings-body { padding: 0.3rem 0.2rem 0; }
+.se-drawer-settings-body .se-setting { white-space: normal; }
 .se-files { display: flex; flex-direction: column; gap: 0.3rem; padding: 0.4rem 0.2rem 0.1rem; }
 .se-file-action {
   font: inherit;

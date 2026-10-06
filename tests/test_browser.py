@@ -1194,6 +1194,56 @@ def test_backspace_unwraps_and_delete_removes(browser, serve_expr):
     assert page.errors == []
 
 
+def test_backspace_on_a_leaf_deletes(browser, serve_expr):
+    """A symbol or a number has nothing inside to keep, so Backspace on it
+    deletes, as Delete does - the answer used to be the error "2 has nothing
+    inside to keep" while the Unwrap button beside it was greyed out."""
+    srv, doc = serve_expr(x**2 + y)
+    page = _open(browser, srv.url)
+    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "2"))
+    assert page.locator(".se-status").inner_text() == "Integer: 2"
+    assert page.locator('.se-toolbar [data-cmd="unwrap"]').is_disabled()
+    _next_state(page, lambda: page.keyboard.press("Backspace"))
+    assert doc.expr == x + y                                   # the exponent gone: the base is left
+    assert page.locator(".se-error").is_hidden()
+    _click(page, next(k for k, v in doc.snapshot()["nodes"].items() if v["src"] == "y"))
+    _next_state(page, lambda: page.keyboard.press("Backspace"))
+    assert doc.expr == x
+    assert page.errors == []
+
+
+def test_the_focus_comes_back_after_the_loading_overlay(browser, serve_expr):
+    """The overlay takes the focus away while it is up (keys are ignored
+    meanwhile) and gives it back when it goes: after a slow Simplify the
+    keyboard used to point at nothing, and every key after it was lost."""
+    srv, doc = serve_expr(x + y)
+    page = _open(browser, srv.url)
+    _click(page, "/0")
+    assert page.evaluate("document.activeElement.classList.contains('se-view')")
+    page.evaluate(f"{_ED}._showLoading('Working\u2026')")
+    assert page.locator(".se-loading").is_visible()
+    assert not page.evaluate("document.activeElement.classList.contains('se-view')")
+    page.evaluate(f"{_ED}._hideLoading()")
+    assert page.locator(".se-loading").is_hidden()
+    assert page.evaluate("document.activeElement.classList.contains('se-view')")
+    page.keyboard.press("ArrowUp")                              # and the keys reach the formula again
+    assert page.locator(".se-status").inner_text() == "Add: x + y"
+    assert page.errors == []
+
+
+def test_glyph_buttons_have_a_name(browser, serve_expr):
+    """↺, ↻, ?, ≡ and the zoom's −/+ show a glyph alone: a
+    screen reader read "anticlockwise open circle arrow" for Undo."""
+    srv, doc = serve_expr(x + y)
+    page = _open(browser, srv.url)
+    names = {cmd: page.locator(f'.se-toolbar [data-cmd="{cmd}"]').get_attribute("aria-label")
+             for cmd in ("undo", "redo", "help", "drawer", "zoomout", "zoomin")}
+    assert names == {"undo": "Undo", "redo": "Redo", "help": "Help", "drawer": "Menu",
+                     "zoomout": "Zoom out", "zoomin": "Zoom in"}
+    assert page.locator('.se-toolbar [data-cmd="isolate"]').inner_text() == "Extract"
+    assert page.locator(".se-lazy").first.inner_text().strip() == "keep unevaluated"
+
+
 def test_array_tools_ask_for_their_axes(browser, serve_expr):
     """The array type menu offers the tools; the ones that take axes ask."""
     from sympy import Array
@@ -1567,9 +1617,20 @@ def test_allow_invalid_toggle(browser, serve_expr):
     doc.declare("B", "MatrixSymbol", 2, 2)
     doc.declare("C", "MatrixSymbol", 3, 3)
     page = _open(browser, srv.url)
-    box = page.locator(".se-allow-invalid-box")
+    # the switch is a setting of the document, in the drawer's Settings fold,
+    # not on the strip beside the everyday tools
+    assert page.locator(".se-toolbar .se-allow-invalid-box").count() == 0
+    box = page.locator(".se-drawer-settings .se-allow-invalid-box")
     assert not box.is_checked()
     src = page.locator(".se-source")
+
+    def switch(on):
+        page.locator('.se-toolbar [data-cmd="drawer"]').click()
+        assert _wait(lambda: page.locator(".se-drawer").is_visible())
+        page.locator(".se-drawer-settings").evaluate("d => { d.open = true; }")
+        _next_state(page, lambda: box.check() if on else box.uncheck())
+        page.keyboard.press("Escape")
+        assert _wait(lambda: page.locator(".se-drawer").is_hidden())
 
     def commit(text):
         src.click()
@@ -1580,7 +1641,7 @@ def test_allow_invalid_toggle(browser, serve_expr):
     commit("A*B")
     assert doc.expr == A*D
     assert "not aligned" in page.locator(".se-error").inner_text()
-    _next_state(page, lambda: box.check())
+    switch(True)
     assert doc.allow_invalid
     commit("A*B")
     assert doc.expr == invalid("MatMul")(A, B)
@@ -1589,7 +1650,7 @@ def test_allow_invalid_toggle(browser, serve_expr):
     assert "MatMul" in page.locator('.se-view [data-path="/"]').inner_text()
     commit("Invalid(MatMul, A, C)")
     assert doc.expr == A*C
-    _next_state(page, lambda: box.uncheck())
+    switch(False)
     assert not doc.allow_invalid
     assert page.errors == []
 
@@ -2756,6 +2817,10 @@ def test_help_button_shows_the_guide(browser, serve_expr):
                      "the same thing seen twice", "container", "print or pdf", ".sympy file", "back",
                      "credits and licences", "katex", "sympy", "notice.txt", "the palette"):
         assert expected in text, expected
+    # ... and nothing it lost: the floating bar under the selection is gone,
+    # and so are the toolbar's arrows (they are in the row under the formula)
+    for stale in ("under the selection", "arrows sit in the toolbar", "isolate"):
+        assert stale not in text, stale
     page.keyboard.press("Escape")                     # Esc closes it
     assert page.locator(".se-help-view").count() == 0
     page.locator('.se-toolbar [data-cmd="help"]').click()

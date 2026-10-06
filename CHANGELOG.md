@@ -2,6 +2,20 @@
 
 ## 0.1.3 — unreleased
 
+* **Small things in the way of a first hour.** Backspace on a symbol or a
+  number deletes it (the answer used to be "2 has nothing inside to keep",
+  with the Unwrap button beside it greyed out). The focus comes back to the
+  formula after the "Working…" overlay goes, so the keys after a slow
+  Simplify are not lost. The **allow invalid** switch moved from the tool
+  strip to *Settings* in the ≡ drawer: it is a setting of the document, not
+  a tool for every edit. **Isolate** is now **Extract** - "isolate" reads as
+  "solve for" to anyone who does algebra - and the toggle reads **keep
+  unevaluated**. The glyph-only buttons (↺ ↻ ? ≡ − +) have names for a
+  screen reader. In JupyterLab the editor follows Lab's own light or dark
+  theme, where it used to follow the desktop's: a dark Lab on a light
+  desktop had light text on white buttons. The guide no longer mentions
+  the bar under the selection, gone since 0.1.2.
+
 * **The palette: fractions, roots, integrals, sums and limits as buttons.**
   The **√ ∫ Σ ▾** button beside Paste opens what a
   mathematical formula editor offers as buttons, each drawn the way it will

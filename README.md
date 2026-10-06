@@ -176,7 +176,7 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | Remove the selection entirely (on the whole expression: the formula is emptied and a field takes its place - type the new expression there, it is previewed as you type, Enter applies it; Esc brings the old one back) | **Delete** | Del |
 | Remove the node but keep its argument (`cos(θ)` → `θ`, `∫f dx` → `f`) | **Unwrap** | Backspace — a node with several arguments (`x²`: the base or the exponent, a sum, a fraction) asks which one to leave, with the one ↑ came from ready to confirm |
 | Put the node inside a function (`x` → `cos(x)`, `f(x)`, `∫x dx`) | `Document.wrap(path, "cos")` / `{"action": "wrap"}` | — (the function box **calls** a function; wrap builds without computing) |
-| Keep only the selection (it becomes the whole expression) | **Isolate** | Ctrl+Shift+I |
+| Keep only the selection (it becomes the whole expression) | **Extract** | Ctrl+Shift+I |
 | Moving in a matrix or an array | ← → ↑ ↓ | directional, as it is drawn: along the row, between the rows, for the selection and the caret alike (an array of any rank too - a rank-3 one is a row of matrices, and → crosses into the next block). At the edge the usual meaning takes over: ↑ in the top row selects the matrix itself |
 | Rows and columns of a matrix | in a matrix (the matrix, or anything in an entry) the row under the formula has, beside the arrows, **+ row** / **+ col** (a new row / column of empty slots after the selected one; after the last for the matrix itself) and **− row** / **− col** (the selected one removed); the **grip** at the matrix's bottom-right corner *reshapes* it when dragged - the same entries laid out another way, so it snaps to the shapes that hold them all (12 entries: 1×12, 2×6, 3×4, 4×3, 6×2, 12×1), nothing added or lost | `Document.insert_row/insert_col/delete_row/delete_col(path)`, `reshape_matrix(path, rows, cols)`, `resize_matrix(...)` (grows and truncates), `{"action": "matrix", "op", "rows", "cols"}` |
 | Transform the selection | pick an operation in the **Transform ▾** menu (general) or the type menu ("Matrix ▾", "Array ▾"...) - the first group of the last toolbar row, both lists chosen by `options={"actions": ...}`: it applies at once, or asks for what it needs first (the array tools want their axes) | |
@@ -194,7 +194,7 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 Nothing pops up under a selection: the four arrows sit in a row just under
 the formula, at its left (in a matrix the row and column buttons join them,
 and on a touch screen the keyboard button is at its right end), and Edit,
-Unwrap, Delete, Isolate, Copy and Paste are in the toolbar - every command
+Unwrap, Delete, Extract, Copy and Paste are in the toolbar - every command
 has one fixed place, and the keys do the same.
 
 Editing happens *inside* the formula: the selected node is swapped for a small
@@ -399,7 +399,7 @@ tall it is (a fraction, a matrix with its brackets).
 
 ### Evaluated or unevaluated
 
-The **unevaluated** toggle next to the function box decides what a
+The **keep unevaluated** toggle next to the function box decides what a
 transformation or a SymPy function produces: off, the result is computed
 (the determinant of a numeric matrix is a number); on, its symbolic form is
 built - `Determinant(M)`, `Inverse(A)`, `Transpose`, `Trace`, `Derivative(f,
@@ -553,7 +553,7 @@ gesture, key and tool in one box (Esc closes it).
 
 The toolbar is organised in three rows of related blocks: the session and
 its timeline (sessions, undo/redo, History, ?, Done) with the zoom; the
-selection (navigation arrows, then Edit/Unwrap/Delete/Isolate and the
+selection (navigation arrows, then Edit/Unwrap/Delete/Extract and the
 clipboard); and what to apply (the Transform, type and Methods menus, the
 function box, the unevaluated toggle).  The blocks sit in columns - three
 from 44rem, and on a narrow screen they spread across each line instead -
