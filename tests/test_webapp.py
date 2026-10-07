@@ -404,7 +404,7 @@ def test_the_site_opens_with_every_add_on_switched_on(tmp_path):
     on = re.search(r'"addons":\s*(\[[^\]]*\])', index)
     assert on, "the page says nothing about which add-ons are on"
     names = json.loads(on.group(1))
-    assert sorted(names) == ["console", "latex", "matching", "plot", "tree"], names
+    assert sorted(names) == ["console", "latex", "matching", "plot", "tree", "units"], names
     # and every one of them is listed as available too, so they can be switched off
     available = re.findall(r'"name":\s*"([a-z]+)",\s*"label"', index)
     for name in names:
@@ -442,7 +442,7 @@ def test_the_showcase_site_opens_with_the_add_ons_on(tmp_path):
         if name == "editor.html":
             on = re.search(r'"addons":\s*(\[[^\]]*\])', page)
             assert on, (name, "the page does not say which add-ons are on")
-            assert sorted(json.loads(on.group(1))) == ["console", "latex", "matching", "plot", "tree"], (name, on.group(1))
+            assert sorted(json.loads(on.group(1))) == ["console", "latex", "matching", "plot", "tree", "units"], (name, on.group(1))
         # the two that need something from PyPI say so, or the browser cannot
         # install them and they would come up switched on but broken
         micropip = re.search(r'"micropip":\s*(\[[^\]]*\])', page)

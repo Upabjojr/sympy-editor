@@ -15,11 +15,12 @@ addons/
   sympy_editor_matching/    rewrite rules matched many-to-one              (sympy-matching)
   sympy_editor_latex/       LaTeX in: a first reading, every ambiguity a choice, constants as switches (lark)
   sympy_editor_console/     a Python console and script runner, with `editor` for the formula (no dependency)
+  sympy_editor_units/       physical units: typed names, dimensions checked term by term, conversions (no dependency)
   sympy_editor_handwriting/ writing on the formula by hand, read by math-ocr's stroke model (onnxruntime; not in Pyodide)
   demo.py                   a page with the first five, to try them in a browser
 ```
 
-All six are **drafts**: they work end to end (each has tests, and the
+All seven are **drafts**: they work end to end (each has tests, and the
 editor's browser test drives a panel), but their interfaces are the first
 version of an idea, not a promise.  They live in this repository for
 convenience only: an add-on is an **external project** - any package, in
@@ -379,6 +380,19 @@ Nothing but the standard library: no IPython.  A run that changed the formula
 answers as a query with `changed: true`, and the panel then asks for a fresh
 snapshot - an add-on method answers either a query or a change, and a run is
 both (its output and a new formula).
+
+**`sympy_editor_units`** - *new nodes from SymPy itself + a panel*.  The
+units and constants of `sympy.physics.units` become names in the formula
+through `namespace()` - the units' own names (what `srepr` writes, so a
+session reads back) and their long aliases always, the one-letter
+abbreviations (`m`, `s`, `N`) only with the document's *short unit names*
+switch, since they are variables far more often.  The panel shows the
+selection's dimension and checks every sum, relation, exponent and function
+argument under it - the terms that disagree are listed and outlined in the
+formula - and converts (`convert_to`, SI base units, `quantity_simplify`),
+each a step of the history.  A unit is a SymPy *atom* whose arguments are the
+Symbols of its name: the document does not count those as the formula's names
+(`_names_in`), or the next `meter` typed was a plain symbol.
 
 ## Open questions
 

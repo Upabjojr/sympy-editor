@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sympy-editor-units"
+version = "0.0.1"
+description = "A sympy-editor add-on: physical units, dimension checks and conversions (sympy.physics.units)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "AGPL-3.0-or-later" }   # as sympy-editor: see its LICENSE
+dependencies = ["sympy-editor"]            # and SymPy, whose sympy.physics.units it uses
+
+# The editor finds installed add-ons here: Document(expr, addons=["units"]).
+[project.entry-points."sympy_editor.addons"]
+units = "sympy_editor_units:ADDON"
+
+[tool.setuptools.packages.find]
+include = ["sympy_editor_units*"]
+
+[tool.setuptools.package-data]
+sympy_editor_units = ["static/*"]
