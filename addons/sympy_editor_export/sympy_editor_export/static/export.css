@@ -1,0 +1,65 @@
+/* The export add-on: tabs of formats, their options, one code box per file. */
+.se-addon-export .ex-panel { display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; font-size: 12px; }
+.se-addon-export .ex-tabs, .se-addon-export .ex-opts, .se-addon-export .ex-file-head {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; min-width: 0;
+}
+.se-addon-export .ex-fill { flex: 1 1 auto; }
+.se-addon-export .ex-tab, .se-addon-export .ex-btn {
+  font: inherit;
+  line-height: 1.2;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--se-border);
+  border-radius: 0.3rem;
+  background: var(--se-btn);
+  box-shadow: var(--se-btn-edge), var(--se-btn-shadow);
+  color: inherit;
+  cursor: pointer;
+}
+.se-addon-export .ex-tab:active, .se-addon-export .ex-btn:active { background: var(--se-btn-down); box-shadow: var(--se-btn-shadow-down); }
+.se-addon-export .ex-tab:focus-visible, .se-addon-export .ex-btn:focus-visible,
+.se-addon-export .ex-code:focus-visible { outline: 2px solid rgba(var(--se-accent), 0.55); outline-offset: 1px; }
+.se-addon-export .ex-tab.ex-on { border-color: rgba(var(--se-accent), 0.7); background: rgba(var(--se-accent), 0.12); font-weight: 600; }
+@media (hover: hover) {
+  .se-addon-export .ex-tab:hover, .se-addon-export .ex-btn:hover { border-color: rgba(var(--se-accent), 0.6); }
+}
+.se-addon-export .ex-target { color: var(--se-muted); overflow-wrap: anywhere; }
+.se-addon-export .ex-opt { display: inline-flex; align-items: center; gap: 0.25rem; white-space: nowrap; }
+.se-addon-export .ex-field {
+  font: inherit;
+  padding: 0.15rem 0.3rem;
+  border: 1px solid var(--se-border);
+  border-radius: 0.25rem;
+  background: var(--se-field);
+  color: inherit;
+}
+.se-addon-export .ex-text { font-family: var(--se-mono); width: 8em; }
+.se-addon-export .ex-error { color: var(--se-error); }
+.se-addon-export .ex-notes { color: var(--se-muted); font-style: italic; }
+.se-addon-export [hidden] { display: none !important; }
+.se-addon-export .ex-files { display: flex; flex-direction: column; gap: 0.45rem; min-width: 0; }
+.se-addon-export.ex-busy .ex-files, .se-addon-export .ex-busy .ex-files { opacity: 0.55; transition: opacity 0.2s 0.25s; }
+.se-addon-export .ex-name { font-family: var(--se-mono); color: var(--se-muted); }
+.se-addon-export .ex-code {
+  margin: 0;
+  max-height: min(18em, 40vh);
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 0.35rem 0.45rem;
+  border: 1px solid var(--se-rule);
+  border-radius: 0.3rem;
+  background: var(--se-surface);
+  font-family: var(--se-mono);
+  font-size: 12.5px;
+  white-space: pre;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+@media (any-pointer: coarse) {
+  .se-addon-export .ex-tab, .se-addon-export .ex-btn { min-height: 36px; padding: 0.35rem 0.75rem; font-size: 14px; }
+  .se-addon-export .ex-field { min-height: 32px; font-size: 14px; }
+  .se-addon-export .ex-check { width: 22px; height: 22px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .se-addon-export .ex-busy .ex-files { transition: none; }
+}

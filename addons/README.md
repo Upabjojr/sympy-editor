@@ -16,10 +16,11 @@ addons/
   sympy_editor_latex/       LaTeX in: a first reading, every ambiguity a choice, constants as switches (lark)
   sympy_editor_console/     a Python console and script runner, with `editor` for the formula (no dependency)
   sympy_editor_handwriting/ writing on the formula by hand, read by math-ocr's stroke model (onnxruntime; not in Pyodide)
+  sympy_editor_export/      the selection as LaTeX, MathML, Python, C, Fortran, JS, Octave, Julia, Rust or a function (no dependency)
   demo.py                   a page with the first five, to try them in a browser
 ```
 
-All six are **drafts**: they work end to end (each has tests, and the
+All seven are **drafts**: they work end to end (each has tests, and the
 editor's browser test drives a panel), but their interfaces are the first
 version of an idea, not a promise.  They live in this repository for
 convenience only: an add-on is an **external project** - any package, in
@@ -379,6 +380,15 @@ Nothing but the standard library: no IPython.  A run that changed the formula
 answers as a query with `changed: true`, and the panel then asks for a fresh
 snapshot - an add-on method answers either a query or a change, and a run is
 both (its output and a new formula).
+
+**`sympy_editor_export`** - *a custom widget, no node of its own*.  One
+query, `export`: the selection (a node, a range, or the whole formula)
+written by SymPy's printers - LaTeX, MathML, Python (math, NumPy, mpmath or
+SymPy source), C, Fortran, JavaScript, Octave/MATLAB, Julia, Rust - or as a
+whole function by `codegen`, with the free symbols as arguments.  Printers
+run with `strict=False`, so what a language lacks is in their own *Not
+supported* comment; a refusal comes back as words.  Each file has Copy (the
+host's clipboard, as the editor's Copy) and Save (`api.saveFile`).
 
 ## Open questions
 
