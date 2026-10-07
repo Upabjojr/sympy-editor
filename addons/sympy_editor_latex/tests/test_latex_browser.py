@@ -307,15 +307,17 @@ def test_the_add_on_switched_off_takes_its_field_and_its_strip_away():
         srv, browser, page = _page(p, doc, tool=False)      # off to start with
         try:
             page.locator('[data-cmd="drawer"]').click()
-            switch = page.locator('.se-drawer .se-addon-row input[id*="latex"]')
+            page.locator('.se-drawer-entry[data-sheet="addons"]').click()     # the Add-ons window
+            switch = page.locator('.se-sheet-view .se-addon-row input[id*="latex"]')
             assert _wait(lambda: switch.count() == 1)
             switch.check()                                   # on: the tool appears
             assert _wait(lambda: page.locator(TOOL).count() == 1, 15)
-            page.locator(".se-drawer-close").click()          # the drawer is over the formula
-            assert _wait(lambda: page.locator(".se-backdrop").is_hidden())
+            page.keyboard.press("Escape")                     # the window is over the formula
+            assert _wait(lambda: page.locator(".se-sheet-view").count() == 0)
             page.locator(TOOL).click()
             assert _wait(lambda: page.locator(".se-view .ltx-field").count() == 1)
             page.locator('[data-cmd="drawer"]').click()
+            page.locator('.se-drawer-entry[data-sheet="addons"]').click()
             assert _wait(lambda: switch.is_visible())
             switch.uncheck()
             assert _wait(lambda: page.locator(TOOL).count() == 0, 15)

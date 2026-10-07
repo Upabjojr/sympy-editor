@@ -305,6 +305,28 @@ def scan_addons(directory: Union[str, Path]) -> Dict[str, Dict[str, Any]]:
     return out
 
 
+def addon_manifest(addon: "Addon") -> Dict[str, Any]:
+    """The manifest (``addon.json``) beside the package an add-on comes from,
+    when there is one - its description and version, for the Add-ons window
+    - else ``{}``.  An add-on object may say them itself: a ``description``
+    or ``version`` attribute wins."""
+    module = type(addon).__module__.split(".")[0]
+    found: Dict[str, Any] = {}
+    mod = sys.modules.get(module)
+    path = getattr(mod, "__file__", None)
+    if path:
+        try:
+            found = read_manifest(Path(path).resolve().parent.parent) or {}
+        except (OSError, ValueError):
+            found = {}
+    out = dict(found)
+    for key in ("description", "version"):
+        value = getattr(addon, key, None)
+        if isinstance(value, str) and value:
+            out[key] = value
+    return out
+
+
 def register_addons_folder(directory: Union[str, Path]) -> Dict[str, Dict[str, Any]]:
     """Make the add-on folders under ``directory`` count as installed (see
     :func:`installed`), and return them."""

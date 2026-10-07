@@ -2,6 +2,16 @@
 
 ## 0.1.3 — unreleased
 
+* **Add-ons and File have windows of their own.** The ≡ menu holds two
+  entries, **Add-ons** and **File**, each opening a window over the editor:
+  one card per add-on with what it does, its version, what it needs, its
+  switch and its guide; and the file actions, now with **Share formula…**,
+  which sends the .sympy file to another app (on Android through the share
+  sheet). On Android a .sympy file also opens with the app from the
+  Downloads list, Google Files and a mail's attachment - which hand it over
+  with no name and a generic type, so only a file manager that kept the
+  name could open it before.
+
 * **The selection's name reads at a glance.** The line under the tools
   shows the selection's type in bold, in the interface's font, and its
   SymPy form as code, coloured as the Python line is.

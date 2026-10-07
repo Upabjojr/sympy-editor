@@ -149,6 +149,19 @@ def _settled(read, tries=40):
     return last
 
 
+def _open_sheet(page, kind):
+    """Open the menu's window for `kind` ("addons" or "files"): the drawer,
+    then its entry - unless that window is open already."""
+    if page.locator(f'.se-sheet-view[data-sheet="{kind}"]').count():
+        return page.locator(f'.se-sheet-view[data-sheet="{kind}"]')
+    if not page.locator(".se-drawer").is_visible():
+        page.locator('[data-cmd="drawer"]').click()
+    page.locator(f'.se-drawer-entry[data-sheet="{kind}"]').click()
+    sheet = page.locator(f'.se-sheet-view[data-sheet="{kind}"]')
+    sheet.wait_for(state="visible", timeout=10000)
+    return sheet
+
+
 def _open(browser, url):
     page = browser.new_page()
     errors = []
@@ -4892,9 +4905,11 @@ def test_the_full_screen_button_keeps_its_corner(browser, serve_expr):
     page.close()
 
 
-def test_the_add_ons_switches_sit_at_the_top_of_the_drawer(browser, serve_expr):
-    """They used to be a menu of their own on the strip; they belong with
-    everything else that is not about the formula, behind the one button."""
+def test_the_add_ons_have_a_window_of_their_own(browser, serve_expr):
+    """The drawer holds an Add-ons entry at its top; it opens a window of
+    its own over the editor - one card per add-on, its switch, what it does
+    - and closes on Esc, giving the focus back.  (The switches used to be
+    a fold inside the drawer: too many add-ons for that.)"""
     addon, Boxed = _demo_addon()
     doc = Document(x + y, available=[addon])
     srv = EditorServer(doc, port=0, options={"sessions": True})
@@ -4903,18 +4918,24 @@ def test_the_add_ons_switches_sit_at_the_top_of_the_drawer(browser, serve_expr):
         page = _open(browser, srv.url)
         assert page.locator('.se-toolbar [data-cmd="addons"]').count() == 0
         page.locator('[data-cmd="drawer"]').click()
-        page.wait_for_selector(".se-drawer-addons", state="visible", timeout=10000)
+        entry = page.locator('.se-drawer-entry[data-sheet="addons"]')
+        entry.wait_for(state="visible", timeout=10000)
         panes = page.evaluate("(() => [...document.querySelector('.se-drawer').children].map(c => c.className))()")
-        assert "se-drawer-addons" in panes[1], panes      # right under the head, above the sessions
-        # it is a fold, shut until it is wanted
-        assert page.evaluate("(() => document.querySelector('.se-drawer-addons').open)()") is False
-        assert not page.locator(".se-drawer-addons input").is_visible()
-        page.locator(".se-drawer-addons .se-drawer-subhead").click()
-        box = page.locator(".se-drawer-addons input")
+        assert "se-drawer-nav" in panes[1], panes         # right under the head, above the sessions
+        assert entry.get_attribute("data-count") == "0 of 1 on"
+        assert page.locator(".se-drawer .se-addon-row").count() == 0          # no switch in the drawer itself
+        entry.click()
+        sheet = page.locator('.se-sheet-view[data-sheet="addons"]')
+        assert sheet.is_visible() and sheet.get_attribute("aria-modal") == "true"
+        assert page.locator(".se-drawer").is_hidden()
+        box = sheet.locator(".se-addon-row input")
         assert box.count() == 1 and box.is_visible() and not box.is_checked()
-        box.check()                                       # and it still switches the add-on on
+        assert "Demo panel" in sheet.inner_text()
+        box.check()                                       # and it switches the add-on on
         page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)
         assert list(doc.addons) == ["demo"]
+        page.keyboard.press("Escape")
+        assert _wait(lambda: page.locator(".se-sheet-view").count() == 0)
         assert page.errors == []
     finally:
         srv.shutdown()
@@ -5402,19 +5423,18 @@ def test_addons_can_be_switched_on_and_off_while_editing(browser):
         assert drawer_btn.is_visible()
 
         def open_drawer():
-            if not page.locator(".se-drawer").is_visible():
-                drawer_btn.click()
-            page.wait_for_selector(".se-drawer-addons input", state="visible", timeout=5000)
+            _open_sheet(page, "addons")
 
         def close_drawer():
-            page.locator(".se-drawer-close").click()
-            assert _wait(lambda: page.locator(".se-drawer").is_hidden())
-        open_drawer()
-        assert page.locator(".se-drawer-head").inner_text().startswith("Add-ons")
+            page.keyboard.press("Escape")
+            assert _wait(lambda: page.locator(".se-sheet-view").count() == 0)
+        page.locator('[data-cmd="drawer"]').click()
+        assert page.locator(".se-drawer-head").inner_text().startswith("Menu")
         assert page.locator(".se-sessions").count() == 0                         # no sessions in it
-        box = page.locator(".se-drawer-addons input")
+        open_drawer()
+        box = page.locator(".se-sheet-view .se-addon-row input")
         assert box.count() == 1 and not box.is_checked()
-        assert "Demo panel" in page.locator(".se-drawer-addons").inner_text()
+        assert "Demo panel" in page.locator(".se-sheet-view").inner_text()
         box.check()                                       # on: the panel and the tools appear
         page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)
         assert page.locator('.se-toolbar [data-cmd="addon:demo:boxit"]').count() == 1
@@ -5425,13 +5445,13 @@ def test_addons_can_be_switched_on_and_off_while_editing(browser):
         page.wait_for_function("document.querySelector('.se-source').textContent.startsWith('Box(')")
         # off: everything of it goes, the expression stays
         open_drawer()
-        page.locator(".se-drawer-addons input").uncheck()
+        page.locator(".se-sheet-view .se-addon-row input").uncheck()
         page.wait_for_function("!document.querySelector('.se-addon-demo')", timeout=10000)
         assert page.locator('.se-toolbar [data-cmd="addon:demo:boxit"]').count() == 0
         assert doc.addons == {} and isinstance(doc.expr, Boxed)
         assert page.locator(".se-source").inner_text().startswith("Box(")
         # and on again
-        page.locator(".se-drawer-addons input").check()
+        page.locator(".se-sheet-view .se-addon-row input").check()
         page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)
         assert page.errors == []
     finally:
@@ -5451,10 +5471,10 @@ def test_the_drawer_button_is_there_with_no_sessions_and_no_addons(browser, tmp_
     try:
         page = _open(browser, srv2.url)
         page.locator('[data-cmd="drawer"]').click()
-        page.wait_for_selector(".se-drawer .se-file-action", state="visible", timeout=5000)
-        assert page.locator(".se-drawer .se-file-action").count() == 5
+        assert page.locator('.se-drawer-entry[data-sheet="addons"]').is_hidden()   # nothing to switch
+        sheet = _open_sheet(page, "files")
+        assert sheet.locator(".se-file-action").count() == 6
         assert page.locator('.se-toolbar [data-cmd="addons"]').count() == 0
-        assert page.locator(".se-drawer-addons").is_hidden()          # nothing to switch
         assert page.errors == []
     finally:
         srv2.shutdown()
@@ -5493,8 +5513,7 @@ def test_remembered_addons_come_back_after_a_reload(browser, tmp_path):
         page = _open(browser, srv.url)
         page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)      # nothing kept: on
         assert list(doc.addons) == ["demo"]
-        page.locator('[data-cmd="drawer"]').click()
-        page.locator(".se-drawer-addons input").uncheck()
+        _open_sheet(page, "addons").locator(".se-addon-row input").uncheck()
         page.wait_for_function("!document.querySelector('.se-addon-demo')", timeout=10000)
         assert _wait_for(lambda: (tmp_path / "addons.json").is_file()
                          and json.loads((tmp_path / "addons.json").read_text(encoding="utf-8")) == {"off": ["demo"]})
@@ -5504,8 +5523,7 @@ def test_remembered_addons_come_back_after_a_reload(browser, tmp_path):
         page.wait_for_function("document.querySelector('.sympy-editor').__sympyEditor.state.addons.length === 0", timeout=15000)
         assert list(doc.addons) == []                           # switched off again from the storage
         assert page.locator(".se-addon-demo").count() == 0
-        page.locator('[data-cmd="drawer"]').click()
-        page.locator(".se-drawer-addons input").check()
+        _open_sheet(page, "addons").locator(".se-addon-row input").check()
         page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)
         assert _wait_for(lambda: json.loads((tmp_path / "addons.json").read_text(encoding="utf-8")) == {"off": []})
         assert page.errors == []
@@ -5925,9 +5943,8 @@ def test_a_formula_is_saved_to_a_file_and_opened_from_one(browser, serve_expr, t
     plain line of SymPy source, which opens as a formula of one step."""
     srv, doc = serve_expr(x**2 + sin(y))
     page = _open(browser, srv.url)
-    page.locator('[data-cmd="drawer"]').click()
-    files = page.locator(".se-drawer .se-file-action")
-    assert files.all_inner_texts() == ["Open formula\u2026", "Save formula\u2026",
+    files = _open_sheet(page, "files").locator(".se-file-action")
+    assert files.all_inner_texts() == ["Open formula\u2026", "Save formula\u2026", "Share formula\u2026",
                                        "History as Python\u2026", "History as web page\u2026",
                                        "Print history\u2026"]
     # Save: a file of its own type, named after the formula
@@ -5943,8 +5960,8 @@ def test_a_formula_is_saved_to_a_file_and_opened_from_one(browser, serve_expr, t
     # Open: a formula from a file takes the editor over
     other = tmp_path / "other.sympy"
     other.write_text("y**3 + 2", encoding="utf-8")
-    with page.expect_file_chooser() as chooser:      # the drawer is still open behind the download
-        page.locator(".se-drawer .se-file-action").first.click()
+    with page.expect_file_chooser() as chooser:      # (the window closed when Save was chosen)
+        _open_sheet(page, "files").locator(".se-file-action").first.click()
     chooser.value.set_files(str(other))
     page.wait_for_function("document.querySelector('.se-source').textContent.indexOf('y**3') >= 0", timeout=15000)
     assert doc.expr == y**3 + 2
@@ -6122,8 +6139,7 @@ def test_the_history_prints_through_the_app(browser, serve_expr):
     srv, doc = serve_expr(x + y)
     doc.handle({"action": "replace", "path": "/", "src": "x + 2*y"})
     page = _open_hosted(browser, srv.url)
-    page.locator('[data-cmd="drawer"]').click()
-    page.locator(".se-drawer .se-file-action", has_text="Print history").click()
+    _open_sheet(page, "files").locator(".se-file-action", has_text="Print history").click()
     assert _wait(lambda: _host_calls(page, "printHtml"))
     call = _host_calls(page, "printHtml")[0]
     assert call[1].startswith("sympy-editor-history-") and call[2] > 1000 and call[3]

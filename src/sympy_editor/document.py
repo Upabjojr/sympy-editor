@@ -43,7 +43,7 @@ from sympy.parsing.sympy_parser import (
 
 from collections import OrderedDict
 
-from .addons import Addon, installed, load_addon
+from .addons import Addon, addon_manifest, installed, load_addon
 from .ops import KINDS, KIND_LABELS, Op, get_ops, node_kind, node_kinds, with_kind
 from .printer import (
     PLACEHOLDER_RE,
@@ -1261,8 +1261,14 @@ class Document:
                 self._loaded[addon.name] = addon
             if any(entry["name"] == addon.name for entry in out):
                 continue
-            out.append({"name": addon.name, "label": addon.label or addon.name, "on": addon.name in self.addons,
-                        "requires": list(addon.requires)})
+            info = addon_manifest(addon)
+            entry = {"name": addon.name, "label": addon.label or addon.name, "on": addon.name in self.addons,
+                     "requires": list(addon.requires)}
+            if info.get("description"):
+                entry["description"] = str(info["description"])
+            if info.get("version"):
+                entry["version"] = str(info["version"])
+            out.append(entry)
         return out
 
     # -- state --------------------------------------------------------------

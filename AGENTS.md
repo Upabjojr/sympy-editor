@@ -878,6 +878,23 @@ Two conventions between printer, document and front end:
   Pyodide out of the bundle (~1 MB instead of ~24 MB).  A debug build turns
   on WebView debugging: `adb forward tcp:9222 localabstract:webview_devtools_remote_<pid>`
   and Playwright's `connect_over_cdp` then drive the app on the device.
+- **The menu's windows.**  The ≡ drawer holds entries (`.se-drawer-nav`,
+  `.se-drawer-entry[data-sheet]`): **Add-ons** (hidden when there is none
+  to switch; `data-count` "2 of 7 on") and **File**, each opening a window
+  of its own over the editor - `showSheet(kind)` / `closeSheet()`, dressed
+  as the guide (`.se-history-view.se-sheet-view[data-sheet]`), a dialog
+  like the others (`trapTab`, `_opener`/`_refocus`, Esc, Back).  The window
+  borrows the same elements as before - `this.addonsMenu` (rows built by
+  `_fillAddonsMenu`: switch, name, version, description from the add-on's
+  `addon.json` through `addon_manifest`, what it needs, and its "?" when it
+  is on) and `this.filesBody` (the file actions; a chosen one closes the
+  window) - and gives them back when it closes.  The add-ons and the files
+  grew too many for folds in a side panel (the owner's call).  File has
+  **Share formula…** (`shareFormula`): the app's `shareFile` (Android: the
+  share sheet, a copy in Downloads too), the Web Share API, else a download.
+  Android opens a `.sympy` file handed over without a name
+  (`content://media/...`, typed `application/octet-stream`) through a VIEW
+  filter for that type: Android knows no `.sympy`.
 - **Overlays are dialogs.**  Help, the history view and the drawer carry
   `aria-modal`, take the focus when they open (their close button), keep
   Tab inside (`trapTab`, from their own keydown handlers) and give the

@@ -1037,7 +1037,8 @@ def test_switching_the_add_on_off_takes_its_strip_and_its_ink_away():
             assert page.locator(".hw-panel").count() == 1 and page.locator(".hw-ink").count() == 1
             assert page.locator('[data-cmd="addon:handwriting:pen"]').count() == 1
             page.locator('[data-cmd="drawer"]').click()
-            switch = page.locator('.se-drawer .se-addon-row input[id*="handwriting"]')
+            page.locator('.se-drawer-entry[data-sheet="addons"]').click()     # the Add-ons window
+            switch = page.locator('.se-sheet-view .se-addon-row input[id*="handwriting"]')
             assert _wait(lambda: switch.count() == 1)
             switch.uncheck()
             assert _wait(lambda: page.locator(".hw-panel").count() == 0, 15)

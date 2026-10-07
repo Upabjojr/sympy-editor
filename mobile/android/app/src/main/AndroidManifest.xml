@@ -63,6 +63,19 @@
                 <data android:pathPattern=".*\\..*\\.sympy" />
                 <data android:pathPattern=".*\\..*\\..*\\.sympy" />
             </intent-filter>
+            <!-- ...and by no name at all: the Downloads list, Google Files and a
+                 mail's attachment hand over content://media/.../1000062462,
+                 typed application/octet-stream (Android knows no .sympy), so
+                 neither filter above can see it.  The app is offered for such
+                 files too; one that is not a formula is refused in words. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="application/json" />
+            </intent-filter>
             <!-- Shared to the app: a saved formula, or a formula as text. -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />

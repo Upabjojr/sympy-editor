@@ -173,7 +173,7 @@ var SympyEditor = (function () {
     "</ul></section>",
     "<section><h3>Applying functions</h3><ul>",
     "<li>The four menus at the foot of the tools are one kind of box: it lists everything it offers when it takes the focus, narrows the list as you type, and \u2191/\u2193 + <kbd>Enter</kbd> (or a click) pick. The first group holds the <b>actions</b>: <b>Transform \u25be</b> for the general operations - Simplify, Expand, Factor\u2026 and <i>Differentiate\u2026</i>, <i>Integrate\u2026</i>, <i>Solve for\u2026</i>, <i>Substitute\u2026</i>, which ask for their variable first -, and a second menu with the operations for the selection's type (Matrix, Integral, Equation\u2026). Picking one applies it at once, to the selection or, with nothing selected, to the whole expression.</li>",
-    "<li><b>Add-ons</b>, at the top of what <b>\u2261</b> opens, switches on or off the add-ons installed beside the editor \u2014 a panel under the formula, tools, node types from other packages \u2014 without restarting anything; what an add-on kept waits for it to come back. In the apps every add-on is on until switched off, and a switch holds for every session and is remembered between launches. (A read-only editor has no \u2261, and there the switches keep a button of their own on the strip.)</li>",
+    "<li><b>Add-ons</b>, at the top of what <b>\u2261</b> opens, is a window of its own: one card per add-on, with what it does, its switch and, when it is on, its <b>?</b>. It switches on or off the add-ons installed beside the editor \u2014 a panel under the formula, tools, node types from other packages \u2014 without restarting anything; what an add-on kept waits for it to come back. In the apps every add-on is on until switched off, and a switch holds for every session and is remembered between launches. (A read-only editor has no \u2261, and there the switches keep a button of their own on the strip.)</li>",
     "<li>In a <b>matrix</b> or an <b>array</b> the four arrows move as it is drawn: <kbd>\u2190</kbd>/<kbd>\u2192</kbd> along the row, <kbd>\u2191</kbd>/<kbd>\u2193</kbd> between the rows \u2014 for the selection and for the caret alike. At the edge the usual meaning takes over: <kbd>\u2191</kbd> in the top row selects the matrix itself (again, its own parent), <kbd>\u2190</kbd>/<kbd>\u2192</kbd> step out of it. An array of any rank works the same way, because the rule follows the drawing: a rank-3 array is a row of matrices, so <kbd>\u2192</kbd> at the right edge of one block enters the next on the same line.</li>",
     "<li>In a <b>matrix</b> (the matrix, or anything in one of its entries) the row under the formula adds, beside the arrows, <b>+ row</b>, <b>+ col</b>, <b>\u2212 row</b>, <b>\u2212 col</b>: a new row or column of empty slots after the selected one (after the last, for the matrix itself), or the selected one taken away. The grip at the matrix\u2019s bottom-right corner <b>reshapes</b> it: the same entries laid out another way (SymPy\u2019s reshape, in reading order), so it snaps to the shapes that hold them all \u2014 12 entries go 1\u00d712, 2\u00d76, 3\u00d74, 4\u00d73, 6\u00d72, 12\u00d71 and nowhere else. Nothing is added or lost; the outline shows the shape it will take. To grow or shrink the matrix, use + row / + col / \u2212 row / \u2212 col.</li>",
     "<li>The second group is the <b>library</b>: <b>Methods \u25be</b> lists everything the selected object's class can do \u2014 .det(), .T, .diff()\u2026 \u2014 one pick calls it. A Lambda is itself a function: <b>( ) apply</b> evaluates it at the arguments you give.</li>",
@@ -186,7 +186,7 @@ var SympyEditor = (function () {
     "<li>The strip above plays the history as a slideshow \u2014 a step and the change that produced it on one screen \u2014 and its <b>\u25c0 \u25b6</b> walk the steps one at a time when it is not playing; the two dials halve and double the speed, which is written between them (<kbd>,</kbd> and <kbd>.</kbd> while it plays), and <b>\u2212 / +</b> set the size of the formulas (Ctrl+wheel and two fingers too).</li>",
     "<li><b>Save \u25be</b> writes it out: a self-contained web page that works offline and plays on its own, or a Python script that rebuilds every step with SymPy \u2014 or sends it to the printer (<i>print or PDF</i>; <i>Print history\u2026</i> under <b>\u2261</b> too).</li>",
     "<li>A formula saved to a <b>.sympy</b> file opens with the app from a file manager or a mail, in a session of its own; in a notebook, files are saved next to the notebook.</li>",
-    "<li><b>\u2261</b> holds <b>File</b> in every editor: <i>Open formula\u2026</i>, <i>Save formula\u2026</i> (a <b>.sympy</b> file with the whole history), and the history as Python, as a web page or on paper.</li>",
+    "<li><b>\u2261</b> holds <b>File</b> in every editor, a window of its own: <i>Open formula\u2026</i>, <i>Save formula\u2026</i> (a <b>.sympy</b> file with the whole history), <i>Share formula\u2026</i> (that file sent to another app or person - in the Android app through the share sheet), and the history as Python, as a web page or on paper. In the app a .sympy file opens with SymPy Editor from a file manager, the Downloads list or a mail.</li>",
     "<li><b>\u2261</b> also lists the sessions, where the page keeps several. A session is labelled with its formula until you give it a name of your own (the pencil beside it, or a double-click), which nothing overwrites.</li>",
     "</ul></section>",
     "<section><h3>On a phone or tablet</h3><ul>",
@@ -454,6 +454,10 @@ var SympyEditor = (function () {
     var items = [];
     for (var i = 0; i < all.length; i++) {
       var el = all[i];
+      // what a closed <details> holds is not there to reach, whatever its
+      // boxes say (the Settings fold's check box was counted the last one)
+      var fold = el.closest && el.closest("details:not([open])");
+      if (fold && !(el.tagName === "SUMMARY" && el.parentNode === fold)) continue;
       if (el.offsetParent !== null || el.getClientRects().length) items.push(el);
     }
     if (!items.length) { ev.preventDefault(); return; }
@@ -2324,14 +2328,27 @@ var SympyEditor = (function () {
         fileBtn("Open formula\u2026", "Open a formula kept in a file, with the history behind it", this.openFormula);
         fileBtn("Save formula\u2026", "Keep this formula in a file: the expression and its whole history",
                 this.saveFormula);
+        fileBtn("Share formula\u2026", "Send this formula, with its whole history, to another app or person: a .sympy file they open with SymPy Editor",
+                this.shareFormula);
         fileBtn("History as Python\u2026", "Write the history out as a Python script that rebuilds every step with SymPy",
                 this.exportPython);
         fileBtn("History as web page\u2026", "Write the history out as a self-contained web page that works offline",
                 this.exportReport);
         fileBtn("Print history\u2026", "Print the history, every step with what changed - or keep it as a PDF",
                 this.printReport);
-        this.filesPane = h("details", { class: "se-drawer-files", open: "" }, [
-          h("summary", { class: "se-drawer-subhead" }, ["File"]), this.filesBody]);
+        // The drawer's entries: each opens a window of its own over the
+        // editor (showSheet) - the add-ons and the files grew too many for
+        // folds in a side panel.
+        var navBtn = function (sheet, label, title) {
+          var b = h("button", { type: "button", class: "se-drawer-entry", "data-sheet": sheet, title: title }, [
+            h("span", { class: "se-drawer-entry-label" }, [label]), h("span", { class: "se-drawer-entry-go", "aria-hidden": "true" }, ["\u203a"])]);
+          b.addEventListener("click", function () { self.showSheet(sheet); });
+          return b;
+        };
+        this.addonsEntry = navBtn("addons", "Add-ons", "Switch the add-ons on or off, and read what each does");
+        this.addonsEntry.hidden = true;                  // until a snapshot lists some (_fillAddonsMenu)
+        this.filesEntry = navBtn("files", "File", "Open, save or share a formula; write the history out or print it");
+        this.filesPane = h("nav", { class: "se-drawer-nav", "aria-label": "Menu" }, [this.addonsEntry, this.filesEntry]);
         // The settings of the document that are not about one edit: the
         // "allow invalid" switch (the unevaluated toggle stays on the strip,
         // it is set per operation).
@@ -2339,32 +2356,17 @@ var SympyEditor = (function () {
           h("summary", { class: "se-drawer-subhead" }, ["Settings"]),
           h("div", { class: "se-drawer-settings-body" }, [this.invalidLabel])]) : null;
 
-        // The add-ons' switches ride at the top of the drawer (see the note
-        // where addonsMenu is made): open in place, not a menu that drops.
-        this.addonsPane = null;
-        if (this.addonsMenu && !this.addonsBtn && !o.sessions) {
-          // No sessions: the switches are all the drawer holds, in the open.
+        // The add-ons' switches live in their own window (showSheet), not
+        // in the drawer: the drawer only holds the entry that opens it.
+        if (this.addonsMenu && !this.addonsBtn) {
           this.addonsMenu.hidden = false;
           this.addonsMenu.classList.add("se-addons-inline");
-          this.addonsPane = h("div", { class: "se-drawer-addons se-drawer-addons-only", hidden: "" }, [this.addonsMenu]);
-        } else if (this.addonsMenu && !this.addonsBtn) {
-          this.addonsMenu.hidden = false;
-          this.addonsMenu.classList.add("se-addons-inline");
-          // A fold, shut to start with: the switches are set once in a while,
-          // and the sessions below them are what the drawer is opened for.
-          this.addonsPane = h("details", { class: "se-drawer-addons", hidden: "" }, [
-            h("summary", { class: "se-drawer-subhead" }, ["Add-ons"]),
-            this.addonsMenu
-          ]);
         }
-        // Without sessions the heading names what comes first: the add-ons'
-        // switches when there are some (_fillAddonsMenu), else File.
-        var heading = o.sessions ? "Sessions" : "File";
+        var heading = o.sessions ? "Sessions" : "Menu";
         this.drawerHeading = h("strong", {}, [heading]);
         this.drawer = h("aside", { class: "se-drawer", hidden: "", role: "dialog", "aria-modal": "true", "aria-label": heading }, [
           h("div", { class: "se-drawer-head" }, [this.drawerHeading, close])
-        ].concat(this.addonsPane ? [this.addonsPane] : [])
-         .concat(this.filesPane ? [this.filesPane] : [])
+        ].concat(this.filesPane ? [this.filesPane] : [])
          .concat(this.settingsPane ? [this.settingsPane] : [])
          .concat(this.sessionsBody ? [this.sessionsBody] : []));
         this.backdrop = h("div", { class: "se-backdrop", hidden: "" });
@@ -2659,12 +2661,11 @@ var SympyEditor = (function () {
     }
 
     _fillAddonsMenu(available) {
-      var host = this.addonsBlock || this.addonsPane;
-      if (host) host.hidden = !available.length;
-      if (this.drawer && !this.opts.sessions) {
-        var heading = available.length ? "Add-ons" : "File";
-        this.drawerHeading.textContent = heading;
-        this.drawer.setAttribute("aria-label", heading);
+      if (this.addonsBlock) this.addonsBlock.hidden = !available.length;
+      if (this.addonsEntry) {
+        this.addonsEntry.hidden = !available.length;
+        var on = available.filter(function (a) { return a.on; }).length;
+        this.addonsEntry.setAttribute("data-count", on + " of " + available.length + " on");
       }
       if (!this.addonsMenu) return;
       var self = this;
@@ -2679,10 +2680,21 @@ var SympyEditor = (function () {
             msg[box.checked ? "enable" : "disable"] = [a.name];
             self.send(msg, { background: true });           // an add-on loading: see send
           });
-          var text = [a.label || a.name];
-          if (a.requires && a.requires.length) text.push(h("small", {}, [" needs " + a.requires.join(", ")]));
+          var text = [h("span", { class: "se-addon-name" }, [a.label || a.name])];
+          if (a.version) text.push(h("small", { class: "se-addon-version" }, [" " + a.version]));
+          if (a.description) text.push(h("span", { class: "se-addon-desc" }, [a.description]));
+          if (a.requires && a.requires.length) text.push(h("small", { class: "se-addon-needs" }, ["needs " + a.requires.join(", ")]));
           if (a.error) text.push(h("small", { class: "se-addon-error" }, [" " + a.error]));
-          self.addonsMenu.appendChild(h("label", { class: "se-addon-row", title: a.error || "" }, [box].concat(text)));
+          var row = h("label", { class: "se-addon-row", title: a.error || a.description || "" }, [box, h("span", { class: "se-addon-text" }, text)]);
+          // its guide, when it has one and is on (the help comes with its front end)
+          var def = addonDefs[a.name], mounted = self._mountedAddon ? self._mountedAddon(a.name) : null;
+          var help = a.on && ((def && def.help) || (mounted && mounted.inst && mounted.inst.help));
+          if (help) {
+            var q = h("button", { type: "button", class: "se-addon-help", title: "What " + (a.label || a.name) + " does", "aria-label": "Help: " + (a.label || a.name) }, ["?"]);
+            q.addEventListener("click", function (ev) { ev.preventDefault(); ev.stopPropagation(); self.showHelp(help, a.label || a.name); });
+            row.appendChild(q);
+          }
+          self.addonsMenu.appendChild(row);
         })(available[i]);
       }
     }
@@ -6941,6 +6953,7 @@ var SympyEditor = (function () {
     back() {
       if (this.closed) return false;
       if (this.helpView) { this.closeHelp(); return true; }
+      if (this.sheetView) { this.closeSheet(); return true; }
       if (this.historyView) { this.closeHistory(); return true; }
       if (this.drawer && !this.drawer.hidden) { this.closeDrawer(); return true; }
       for (var i = this._addons.length - 1; i >= 0; i--) {
@@ -7391,6 +7404,31 @@ var SympyEditor = (function () {
       }
     }
 
+    /** Send this formula, with its history, to another app: the app's share
+     *  sheet (Android's, through shareFile, which also keeps a copy in
+     *  Downloads), the Web Share API, or - nothing to share with - a download. */
+    async shareFormula() {
+      if (this.busy || this.closed || !this.backend) return;
+      this._setStatus("Sharing the formula\u2026");
+      try {
+        var name = this._formulaName() + FORMULA_EXT;
+        var snap = await this.backend.send({ action: "savefile", name: this._formulaName() }, function () {});
+        if (!snap || !snap.file) throw new Error("There is nothing to share");
+        var mime = snap.file.mime, text = snap.file.text, app = window.SympyEditorApp;
+        if (app && app.shareFile) { Host.tell("shareFile", name, mime, text); this._setStatus("Formula ready: choose where to send it"); return; }
+        var file = null;
+        try { file = new File([text], name, { type: mime }); } catch (e) { /* no File constructor */ }
+        if (file && navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+          try { await navigator.share({ files: [file], title: name }); this._setStatus("Formula shared"); return; }
+          catch (e) { if (e && e.name === "AbortError") { this._setStatus(""); return; } }
+        }
+        var how = await saveFile(name, mime, text, this.backend);
+        this._setStatus(how ? "Nothing here to share with: formula " + how : "");
+      } catch (e) {
+        this._showError("The formula could not be shared: " + ((e && e.message) || e));
+      }
+    }
+
     /** Open a formula from a file: one written by Save (with its history), a
      *  file holding an `expr`, or a line of SymPy source.  Where there are
      *  sessions it opens in one of its own, so nothing already open is lost. */
@@ -7561,6 +7599,64 @@ var SympyEditor = (function () {
       this.helpView = view;
       this.root.appendChild(view);
       close.focus();
+    }
+
+    /** A window of its own over the editor for one part of the menu:
+     *  "addons" (the switches, each add-on's description and guide) or
+     *  "files" (open, save, share, the history written out).  Dressed as
+     *  the guide is; a dialog for the keyboard (focus in, Tab kept inside,
+     *  focus back to what opened it); Esc, the \u00d7 and Back close it. */
+    showSheet(kind) {
+      var self = this;
+      var body = kind === "addons" ? this.addonsMenu : kind === "files" ? this.filesBody : null;
+      if (!body) return;
+      var opener = this._opener();
+      this.closeSheet();
+      this.closeDrawer();
+      this.closeHelp();
+      this.closeHistory();
+      var title = kind === "addons" ? "Add-ons" : "File";
+      var close = h("button", { type: "button", class: "se-history-close", title: "Close (Esc)", "aria-label": "Close" }, ["\u00d7"]);
+      var head = h("div", { class: "se-history-head" }, [h("span", { class: "se-history-title" }, [title]), close]);
+      var intro = kind === "addons"
+        ? "Each add-on brings a panel under the formula, tools on the strip, or both. A switch holds for every session."
+        : "A formula is kept in a .sympy file with its whole history; the history can also be written out on its own.";
+      var inner = h("div", { class: "se-sheet-body" }, [h("p", { class: "se-sheet-intro" }, [intro]), body]);
+      var view = h("div", { class: "se-history-view se-sheet-view", "data-sheet": kind, role: "dialog", "aria-modal": "true", "aria-label": title }, [head, inner]);
+      body.hidden = false;
+      close.addEventListener("click", function () { self.closeSheet(); });
+      this._sheetOpener = opener;
+      this._sheetKey = function (ev) {
+        if (self.helpView) return;                  // an add-on's guide over it: Esc is the guide's
+        if (ev.key === "Escape") { ev.preventDefault(); self.closeSheet(); }
+        else trapTab(view, ev);
+      };
+      view.addEventListener("keydown", this._sheetKey);
+      document.addEventListener("keydown", this._sheetKey);
+      // a file action is done once it is chosen: the window goes with it
+      if (kind === "files") {
+        this._sheetClick = function (ev) { if (ev.target.closest && ev.target.closest(".se-file-action")) self.closeSheet(); };
+        body.addEventListener("click", this._sheetClick);
+      }
+      this.sheetView = view;
+      this._sheetBody = body;
+      this.root.appendChild(view);
+      var first = body.querySelector("input, button");
+      (first || close).focus({ preventScroll: true });
+    }
+
+    closeSheet() {
+      if (!this.sheetView) return;
+      if (this._sheetKey) { document.removeEventListener("keydown", this._sheetKey); this._sheetKey = null; }
+      if (this._sheetClick && this._sheetBody) { this._sheetBody.removeEventListener("click", this._sheetClick); this._sheetClick = null; }
+      var body = this._sheetBody;
+      if (body && body.parentNode) body.parentNode.removeChild(body);      // kept for the next time
+      if (this.sheetView.parentNode) this.sheetView.parentNode.removeChild(this.sheetView);
+      this.sheetView = null;
+      this._sheetBody = null;
+      var back = this._sheetOpener;
+      this._sheetOpener = null;
+      this._refocus(back);
     }
 
     closeHelp() {

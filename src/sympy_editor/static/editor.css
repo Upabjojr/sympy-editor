@@ -366,8 +366,8 @@
 }
 /* The drawer's file section: the document as a whole - kept in a file, taken
  * back from one, or written out as a script or a page. */
-.se-drawer-files, .se-drawer-settings { border-bottom: 1px solid var(--se-rule); padding-bottom: 0.5rem; margin-bottom: 0.2rem; }
-.se-drawer-files > summary, .se-drawer-settings > summary { cursor: pointer; user-select: none; }
+.se-drawer-settings { border-bottom: 1px solid var(--se-rule); padding-bottom: 0.5rem; margin-bottom: 0.2rem; }
+.se-drawer-settings > summary { cursor: pointer; user-select: none; }
 .se-drawer-settings-body { padding: 0.3rem 0.2rem 0; }
 .se-drawer-settings-body .se-setting { white-space: normal; }
 .se-files { display: flex; flex-direction: column; gap: 0.3rem; padding: 0.4rem 0.2rem 0.1rem; }
@@ -384,8 +384,6 @@
 }
 .se-file-action:hover { background: rgba(var(--se-accent), 0.1); }
 @media (any-pointer: coarse) { .se-file-action { font-size: 15px; padding: 0.55rem 0.7rem; } }
-.se-drawer-addons[hidden] { display: none; }
-.se-drawer-addons { margin: 0 0 0.75rem; padding-bottom: 0.7rem; border-bottom: 1px solid var(--se-border); }
 /* The fold's handle: a row that reads as a heading and clicks like a button,
  * with the disclosure triangle the browser gives a <summary>. */
 .se-drawer-subhead {
@@ -400,7 +398,6 @@
 }
 .se-drawer-subhead:hover { background: rgba(var(--se-accent), 0.1); }
 .se-drawer-subhead:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(var(--se-accent), 0.45); }
-.se-drawer-addons[open] .se-drawer-subhead { margin-bottom: 0.3rem; }
 .se-pick-menu { min-width: 18rem; max-width: 30rem; max-height: 16rem; overflow-y: auto; padding: 2px; }
 .se-pick-item { display: flex; gap: 0.6rem; padding: 0.25rem 0.5rem; cursor: pointer; border-radius: 0.3rem; align-items: baseline; }
 .se-pick-item.se-active { background: rgba(var(--se-accent), 0.14); }
@@ -1031,6 +1028,42 @@
 .se-history-head .se-play-level { padding: 0.3rem 0.4rem; line-height: 1; min-width: 3.6em; font-variant-numeric: tabular-nums; }
 .se-history-head [hidden] { display: none; }
 .se-help-body { overflow: auto; padding: 0.9rem 1.3rem 2rem; }
+/* A window of its own for a part of the menu (showSheet): the add-ons, the
+ * files.  Dressed as the guide; its content a single readable column. */
+.se-sheet-body { overflow: auto; padding: 0.9rem 1.3rem 2rem; }
+.se-sheet-body > * { max-width: 40rem; margin-left: auto; margin-right: auto; }
+.se-sheet-intro { color: var(--se-muted); font-size: 13px; margin: 0 auto 0.8rem; }
+.se-sheet-view .se-addons-menu { position: static; max-width: 40rem; box-shadow: none; border: 0; padding: 0; gap: 0.45rem; background: none; font-size: 14px; }
+.se-sheet-view .se-addon-row {
+  align-items: flex-start; gap: 0.7rem; padding: 0.65rem 0.75rem;
+  border: 1px solid var(--se-rule); border-radius: 0.5rem; background: var(--se-surface);
+}
+.se-sheet-view .se-addon-row input { margin-top: 0.2rem; width: 1.15rem; height: 1.15rem; flex: 0 0 auto; }
+.se-addon-text { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.15rem 0.45rem; flex: 1 1 auto; min-width: 0; }
+.se-addon-name { font-weight: 600; }
+.se-addon-desc { flex: 1 1 100%; color: var(--se-muted); font-size: 13px; line-height: 1.4; }
+.se-addon-needs, .se-addon-version { color: var(--se-muted); font-size: 12px; }
+.se-sheet-view .se-addon-help {
+  flex: 0 0 auto; font: inherit; font-size: 13px; min-width: 2rem; min-height: 2rem; padding: 0 0.5rem;
+  border: 1px solid var(--se-border); border-radius: 0.3rem; background: var(--se-btn); color: inherit; cursor: pointer;
+  box-shadow: var(--se-btn-edge), var(--se-btn-shadow);
+}
+.se-sheet-view .se-files { max-width: 40rem; padding: 0; gap: 0.45rem; }
+.se-sheet-view .se-file-action { font-size: 14px; padding: 0.6rem 0.8rem; border: 1px solid var(--se-rule); background: var(--se-surface); }
+/* The drawer's entries: a row each, opening a window (the chevron says so) */
+.se-drawer-nav { display: flex; flex-direction: column; gap: 0.3rem; border-bottom: 1px solid var(--se-rule); padding-bottom: 0.5rem; margin-bottom: 0.2rem; }
+.se-drawer-entry {
+  display: flex; align-items: center; gap: 0.5rem; width: 100%;
+  padding: 0.5rem 0.6rem; font: inherit; font-size: 13px; color: inherit; text-align: left;
+  background: none; border: 1px solid transparent; border-radius: 0.35rem; cursor: pointer;
+}
+.se-drawer-entry[hidden] { display: none; }
+.se-drawer-entry-label { flex: 1 1 auto; font-weight: 600; }
+.se-drawer-entry[data-count]::after { content: attr(data-count); color: var(--se-muted); font-size: 12px; order: 1; }
+.se-drawer-entry-go { order: 2; color: var(--se-muted); font-size: 1.2em; }
+.se-drawer-entry:focus-visible { outline: none; border-color: rgba(var(--se-accent), 0.6); }
+@media (hover: hover) { .se-drawer-entry:hover { background: rgba(var(--se-accent), 0.1); } }
+@media (any-pointer: coarse) { .se-drawer-entry { font-size: 15px; padding: 0.7rem 0.7rem; } }
 .se-help-cols { max-width: 64rem; margin: 0 auto; column-width: 26rem; column-gap: 2.2rem; }
 .se-help-body section { break-inside: avoid; margin: 0 0 1.1rem; }
 .se-help-body h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--se-muted); margin: 0 0 0.35rem; }
