@@ -2,6 +2,10 @@
 
 ## 0.1.3 — unreleased
 
+* **The selection's name reads at a glance.** The line under the tools
+  shows the selection's type in bold, in the interface's font, and its
+  SymPy form as code, coloured as the Python line is.
+
 * **Erasing and clearing the ink can be undone.** The handwriting add-on's
   Undo and Redo followed the strokes written and nothing else: an erasure
   or a Clear ink could not be taken back. They walk the ink's whole history

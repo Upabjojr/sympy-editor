@@ -497,6 +497,19 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* the selection named: its type in the interface's font, bold, then its
+ * SymPy form as code (_setStatusOf) */
+.se-status .se-status-type {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-weight: 700;
+  font-size: 12.5px;
+  color: var(--se-fg);
+}
+.se-status .se-status-src { font-family: var(--se-mono); font-size: 12px; }
+/* a font of another height must not make the line taller: the formula
+ * under it would move between two clicks */
+.se-status { height: 1.4em; line-height: 1.4em; }
+.se-status .se-status-type, .se-status .se-status-src { line-height: inherit; }
 
 .se-view {
   padding: 0.6rem 0.5rem;

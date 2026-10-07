@@ -3203,10 +3203,20 @@ def test_status_line_names_the_selection_on_its_own_line(browser, serve_expr):
         page = browser.new_page(viewport={"width": width, "height": 800})
         page.goto(srv.url)
         page.wait_for_selector(".se-view .katex [data-path]")
+        top = lambda: page.evaluate("document.querySelector('.se-stage').getBoundingClientRect().top")
+        before = top()
         _select(page, path)
         status = page.locator(".se-status")
         assert status.is_visible()
         assert status.inner_text() == "Symbol: y"
+        assert abs(top() - before) < 0.5, width          # naming the selection moves nothing
+        # the type in bold, in the interface's font; the form as code, coloured
+        styles = status.evaluate("""s => {
+            const t = s.querySelector('.se-status-type'), c = s.querySelector('.se-status-src');
+            return {tw: getComputedStyle(t).fontWeight, tf: getComputedStyle(t).fontFamily,
+                    cf: getComputedStyle(c).fontFamily, coloured: !!c.querySelector('.se-py-sym')};
+        }""")
+        assert int(styles["tw"]) >= 600 and styles["tf"] != styles["cf"] and styles["coloured"], styles
         box = status.bounding_box()
         assert box["width"] > 120 and box["height"] >= 12, (width, box)
         # its own line, beside no tool, so their text can never squeeze it:

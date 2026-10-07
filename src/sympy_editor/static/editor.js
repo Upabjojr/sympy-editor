@@ -4193,7 +4193,7 @@ var SympyEditor = (function () {
         }
         var u = this._unionRect(rects);
         this._drawBoxes("select", u ? [u] : []);
-        if (!quiet) this._setStatus(this.state.nodes[this.range.parent].type + " range: " + this._rangeSource(rangePaths));
+        if (!quiet) this._setStatusOf(this.state.nodes[this.range.parent].type + " range", this._rangeSource(rangePaths));
         this._markSource(rangePaths);
         this._clearBarRoom();
         return;
@@ -4204,7 +4204,7 @@ var SympyEditor = (function () {
         var srects = [];
         for (var j = 0; j < els.length; j++) { els[j].classList.add("se-selected"); srects.push(this._visualRect(els[j])); }
         this._drawBoxes("select", els.length && !els[0].classList.contains("se-editing") ? srects : []);
-        if (!quiet) this._setStatus(node.type + ": " + node.src);
+        if (!quiet) this._setStatusOf(node.type, node.src);
         this._markSource([this.selected]);
         this._clearBarRoom();
       } else {
@@ -8030,6 +8030,19 @@ var SympyEditor = (function () {
     _setStatus(text) {
       this.status.textContent = text || "";
       this.status.title = text || "";
+    }
+
+    /** The status line naming the selection: its type in bold, then its
+     *  SymPy form as code, coloured as the Python line is - two things,
+     *  which one font made read as one.  The text is still "Type: src". */
+    _setStatusOf(type, src) {
+      var code = h("code", { class: "se-status-src" });
+      pyRender(code, src || "");
+      this.status.textContent = "";
+      this.status.appendChild(h("b", { class: "se-status-type" }, [type]));
+      this.status.appendChild(document.createTextNode(": "));
+      this.status.appendChild(code);
+      this.status.title = type + ": " + (src || "");
     }
 
     _showError(msg) {

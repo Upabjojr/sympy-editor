@@ -226,6 +226,11 @@ Two conventions between printer, document and front end:
   the document selection, which would move focus into the editable line);
   Enter sends `set`, Esc reverts.  `beginEdit("/")`
   edits there - the rendering is never swapped for a text field.
+- **The selection named.**  The status line names a node or a range with
+  `_setStatusOf(type, src)`: `b.se-status-type` (the interface's font,
+  bold) and `code.se-status-src` coloured by `pyRender`; its text stays
+  "Type: src", which the tests read.  Other status messages are plain text
+  (`_setStatus`).
 - **Python colouring.**  `pyTokens` (a hand-written tokenizer: keywords,
   constants, builtins, classes by shape - capitalised with a lower-case
   letter -, functions as called names, attributes, symbols, numbers,
