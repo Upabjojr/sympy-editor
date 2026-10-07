@@ -16,10 +16,11 @@ addons/
   sympy_editor_latex/       LaTeX in: a first reading, every ambiguity a choice, constants as switches (lark)
   sympy_editor_console/     a Python console and script runner, with `editor` for the formula (no dependency)
   sympy_editor_handwriting/ writing on the formula by hand, read by math-ocr's stroke model (onnxruntime; not in Pyodide)
+  sympy_editor_transforms/  Laplace, Fourier, Mellin, Hankel and z-transforms of the selection (no dependency)
   demo.py                   a page with the first five, to try them in a browser
 ```
 
-All six are **drafts**: they work end to end (each has tests, and the
+All seven are **drafts**: they work end to end (each has tests, and the
 editor's browser test drives a panel), but their interfaces are the first
 version of an idea, not a promise.  They live in this repository for
 convenience only: an add-on is an **external project** - any package, in
@@ -379,6 +380,17 @@ Nothing but the standard library: no IPython.  A run that changed the formula
 answers as a query with `changed: true`, and the panel then asks for a fresh
 snapshot - an add-on method answers either a query or a change, and a run is
 both (its output and a new formula).
+
+**`sympy_editor_transforms`** - *ops + a panel that computes*.  Laplace,
+Fourier, sine, cosine, Mellin and Hankel transforms and their inverses are
+SymPy's, asked for their conditions; the one-sided z-transform (a table of
+geometric, trigonometric and polynomial-times-geometric terms, `summation`
+otherwise) and its inverse for rational functions (partial fractions) are
+the add-on's own.  The panel's *Compute* is a query that shows the result
+and where it holds in words ("converges for Re(s) > -2"); *Apply* replaces
+the selection, unevaluated (`LaplaceTransform(f, t, s)`) when the editor's
+toggle is on.  Six ops put the same in the Transform menu, asking for the
+variables through the op `params`.
 
 ## Open questions
 
