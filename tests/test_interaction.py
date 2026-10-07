@@ -313,10 +313,10 @@ def test_a_refused_expression_in_the_empty_view_keeps_its_text(browser, serve_ex
     page.keyboard.press("Backspace")                       # everything removed
     field = page.locator(".se-view input.se-inline-empty")
     field.wait_for()
-    page.keyboard.type("((")
+    page.keyboard.type("x +")                              # (an open bracket is closed for you now: not refused)
     page.keyboard.press("Enter")
     assert _wait(lambda: page.locator(".se-error").is_visible(), timeout=10)
-    assert field.count() == 1 and field.input_value() == "(("
+    assert field.count() == 1 and field.input_value() == "x +"
     assert page.evaluate("(() => document.activeElement.classList.contains('se-inline-empty'))()")
     assert doc.expr == x + y
     page.keyboard.press("Escape")                          # still alive: Esc brings the expression back
