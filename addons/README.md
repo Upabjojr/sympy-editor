@@ -15,11 +15,12 @@ addons/
   sympy_editor_matching/    rewrite rules matched many-to-one              (sympy-matching)
   sympy_editor_latex/       LaTeX in: a first reading, every ambiguity a choice, constants as switches (lark)
   sympy_editor_console/     a Python console and script runner, with `editor` for the formula (no dependency)
+  sympy_editor_numeric/     the selection as a number: any precision, exact forms, why there is none, tables (no dependency)
   sympy_editor_handwriting/ writing on the formula by hand, read by math-ocr's stroke model (onnxruntime; not in Pyodide)
   demo.py                   a page with the first five, to try them in a browser
 ```
 
-All six are **drafts**: they work end to end (each has tests, and the
+All seven are **drafts**: they work end to end (each has tests, and the
 editor's browser test drives a panel), but their interfaces are the first
 version of an idea, not a promise.  They live in this repository for
 convenience only: an add-on is an **external project** - any package, in
@@ -379,6 +380,19 @@ Nothing but the standard library: no IPython.  A run that changed the formula
 answers as a query with `changed: true`, and the panel then asks for a fresh
 snapshot - an add-on method answers either a query or a change, and a run is
 both (its output and a new formula).
+
+**`sympy_editor_numeric`** - *a custom widget that only asks*.  The Values
+panel evaluates the selection: a field per free symbol (read as typed text
+is, so `pi/3` or `2 + I`; no value is guessed), the precision in `evalf`
+digits, an exact form beside the number when SymPy has a short one (and
+`nsimplify`'s guess when asked, marked as one), `a + b i` for a complex
+value.  A value that is no number says why - the innermost piece that goes
+wrong is found by evaluating the node from the inside out: a division by
+zero, an argument outside a function's domain, an indeterminate form.  A
+table mode varies one symbol over a range or a list (at most 500 rows,
+stopped after a few seconds) and copies as CSV or TSV through the host
+app's clipboard when there is one.  Two queries, `evaluate` and `table`;
+mpmath through SymPy, nothing else.
 
 ## Open questions
 
