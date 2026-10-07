@@ -2,6 +2,11 @@
 
 ## 0.1.3 — unreleased
 
+* **Erasing and clearing the ink can be undone.** The handwriting add-on's
+  Undo and Redo followed the strokes written and nothing else: an erasure
+  or a Clear ink could not be taken back. They walk the ink's whole history
+  now - a stroke written, one sweep of the eraser, Clear ink, each one step.
+
 * **Icons for the edit tools, and tooltips on a touch screen.** Edit,
   Unwrap, Delete, Extract, Copy and Paste are icons now - a pencil,
   brackets opening, a bin, a crop, two sheets, a clipboard - so the edit

@@ -175,6 +175,11 @@ or, from Python, `serve(expr, addons=["handwriting", "latex"])`.
   drawn, so it stays by what it was written by.
 * With the last stroke gone - erased, taken back or cleared - so are the
   readings, and Apply.
+* Undo ink and Redo ink walk the ink's own history, a step at a time: a
+  stroke written, one sweep of the eraser (however many strokes it takes)
+  and Clear ink are each a step (`past` / `future`, states of `strokes`).
+  Something new done drops what was taken back.  Putting the pen away and
+  applying a reading start the history afresh.
 
 ## What Python refuses
 

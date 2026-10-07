@@ -137,7 +137,7 @@ SympyEditor.registerAddon("handwriting", (function () {
       + "<li>Writing on a formula that fills the screen leaves the readings out of sight: a moment after the pen rests a button rises at the foot of the screen, and a press goes down to them. Writing again sends it away.</li>"
       + "<li>Written over a selected <b>operator</b> (the = of an equation, a +), the ink is read as the operator that takes its place \u2014 =, &lt;, &gt;, \u2264, \u2265, \u2260, +, \u2212, \u00b7, / \u2026 \u2014 with nothing to read it together with.</li>"
       + "<li>Where it goes is what the editor says: over the selected sub-expression (or the selected range) - which is hidden, its place kept, while you write over it, and comes back only if the writing is discarded (the pen put away) -, at the cursor, and - with neither - against the piece of the formula it is written by. That piece is outlined, and it is read <i>together with</i> the ink: a bar under it with ink under the bar is a fraction over it, a small letter at its top-right corner its exponent, a letter beside it a product. <b>Read with</b> offers the other pieces it might be, and <i>alone</i>: the reading by itself, after the formula.</li>"
-      + "<li>" + toolIcon("erase", 16) + " <b>Erase</b> takes away the strokes the pointer passes over (a pen turned round erases too); " + toolIcon("undo", 16) + " and " + toolIcon("redo", 16) + " take back the last stroke and write it again; " + toolIcon("clear", 16) + " <b>Clear ink</b> takes all of it, and so does putting the pen away: switching it off clears the ink that was not applied; with the last stroke gone, however it went, what was read of the ink goes with it. The editor's own Undo is for the formula, and takes back what a reading did.</li>"
+      + "<li>" + toolIcon("erase", 16) + " <b>Erase</b> takes away the strokes the pointer passes over (a pen turned round erases too); " + toolIcon("undo", 16) + " and " + toolIcon("redo", 16) + " take back what was last done to the ink and do it again - a stroke written, a sweep of the eraser (however many strokes it took), Clear ink - one step at a time; " + toolIcon("clear", 16) + " <b>Clear ink</b> takes all of it (Undo brings it back), and so does putting the pen away (for good): switching it off clears the ink that was not applied; with the last stroke gone, however it went, what was read of the ink goes with it. The editor's own Undo is for the formula, and takes back what a reading did.</li>"
       + "<li>With a pen, the hand may rest on the screen: a touch while the pen is down, or a moment after it lifts, writes nothing, and the pen takes over from a hand that came down before it. A contact the system takes back (a gesture of its own) leaves nothing on the formula.</li>"
       + "<li>Two fingers on the formula zoom it while writing, as they do at any other time, and the ink is zoomed with it - it stays by what it was written by; so do the \u2212/100%/+ buttons and <kbd>Ctrl</kbd>+wheel.</li>"
       + "<li>What the reading did is shown under the editor - the formula as it was and as it now is, what went marked red and what came marked green - to <b>Keep</b> (which takes you back up to the formula) or to <b>Undo the change</b>; the editor's own Undo takes it back too.</li>"
@@ -159,11 +159,11 @@ SympyEditor.registerAddon("handwriting", (function () {
       { cmd: "erase", label: "Erase",
         title: "Take away the strokes the pointer passes over (press again to write)",
         run: function () { this.setErasing(!this.erasing()); } },
-      { cmd: "undo", label: "Undo stroke", title: "Take back the last stroke written",
+      { cmd: "undo", label: "Undo ink", title: "Undo ink: take back the last thing done to the ink - a stroke written, a sweep of the eraser, Clear ink",
         run: function () { this.undoStroke(); } },
-      { cmd: "redo", label: "Redo stroke", title: "Write the stroke taken back again",
+      { cmd: "redo", label: "Redo ink", title: "Redo ink: do again what Undo ink took back",
         run: function () { this.redoStroke(); } },
-      { cmd: "clear", label: "Clear ink", title: "Take all the ink away",
+      { cmd: "clear", label: "Clear ink", title: "Clear ink: take all the ink away (Undo ink brings it back)",
         run: function () { this.clearInk(); } }
     ],
 
@@ -299,7 +299,11 @@ SympyEditor.registerAddon("handwriting", (function () {
       var ctx = canvas.getContext("2d");
 
       var pen = false, erasing = false;
-      var strokes = [], taken = [], current = null, currentId = null, t0 = 0, dpr = 1;
+      // The ink's own history: `past` and `future` are earlier and later
+      // states of `strokes` (arrays of the same stroke objects - a stroke is
+      // never changed once written).  A stroke written, one sweep of the
+      // eraser and Clear ink are each one step; Undo and Redo walk them.
+      var strokes = [], past = [], future = [], erasedThisPress = false, current = null, currentId = null, t0 = 0, dpr = 1;
       var timer = null, seq = 0, katex = null;
       var touches = {}, blocked = false, pinch = null, down = null;
       var currentType = "";   // what writes the stroke in progress: "pen", "touch", "mouse"
@@ -375,7 +379,7 @@ SympyEditor.registerAddon("handwriting", (function () {
           });
         };
         strokes.forEach(put);
-        taken.forEach(put);
+        past.concat(future).forEach(function (state) { state.forEach(put); });
         if (held) held.strokes.forEach(put);
         if (current) put(current);
       }
@@ -1179,7 +1183,7 @@ SympyEditor.registerAddon("handwriting", (function () {
             if (api.select) api.select(null);
           }
           strokes = [];
-          taken = [];
+          resetHistory();
           current = null;
           closeRoom();
           updateTools();
@@ -1351,15 +1355,25 @@ SympyEditor.registerAddon("handwriting", (function () {
       // Undo and Redo of the ink itself: the editor's own Undo is for the
       // formula, and takes back what a reading did (which is an edit of it).
       function undoStroke() {
-        if (!strokes.length) return;
-        taken.push(strokes.pop());
+        if (!past.length) return;
+        future.push(strokes);
+        strokes = past.pop();
         afterInk();
       }
       function redoStroke() {
-        if (!taken.length) return;
-        strokes.push(taken.pop());
+        if (!future.length) return;
+        past.push(strokes);
+        strokes = future.pop();
         afterInk();
       }
+      /** A step of the ink's history begins: the state before it is kept,
+       *  and what had been taken back cannot come again. */
+      function step_() {
+        past.push(strokes.slice());
+        if (past.length > 200) past.shift();
+        future = [];
+      }
+      function resetHistory() { past = []; future = []; }
       function afterInk() {
         clearTimeout(timer);
         sizeRoom();
@@ -1373,8 +1387,8 @@ SympyEditor.registerAddon("handwriting", (function () {
         return root ? root.querySelector('[data-cmd="addon:handwriting:' + cmd + '"]') : null;
       }
       function dressTools() {
-        [["pen", "Write by hand"], ["erase", "Erase"], ["undo", "Undo stroke"],
-         ["redo", "Redo stroke"], ["clear", "Clear ink"]].forEach(function (t) {
+        [["pen", "Write by hand"], ["erase", "Erase"], ["undo", "Undo ink"],
+         ["redo", "Redo ink"], ["clear", "Clear ink"]].forEach(function (t) {
           var b = toolButton(t[0]);
           if (!b || b.getAttribute("data-hw") === "1") return;
           b.setAttribute("data-hw", "1");
@@ -1400,8 +1414,8 @@ SympyEditor.registerAddon("handwriting", (function () {
         var u = toolButton("undo"), r = toolButton("redo");
         // Everything but the Pen is for writing: with the Pen off there is
         // nothing for them to do, whatever ink is still on the formula.
-        toolOff(u, !pen || !strokes.length);
-        toolOff(r, !pen || !taken.length);
+        toolOff(u, !pen || !past.length);
+        toolOff(r, !pen || !future.length);
         toolOff(c, !pen || !strokes.length);
         toolOff(e, !pen);
         toolOff(p, !canRead);
@@ -1426,7 +1440,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         // The pen put away takes its ink with it: strokes left on the formula
         // with nothing to write or erase them with were only in the way, and
         // what was read of them and not applied goes too.
-        if (was && !pen) clearInk();
+        if (was && !pen) { clearInk(); resetHistory(); updateTools(); }
         if (editor && editor.root) editor.root.classList.toggle("se-inking", pen);
         canvas.style.pointerEvents = pen ? "auto" : "none";
         if (pen) { openRoom(); centerRoom(); } else closeRoom();
@@ -1444,8 +1458,8 @@ SympyEditor.registerAddon("handwriting", (function () {
       }
       function clearInk() {
         if (!strokes.length && !current && !held) return;
+        if (strokes.length) step_();          // undone like any other step
         strokes = [];
-        taken = [];
         current = null;
         closeRoom();
         if (pen) openRoom();
@@ -1464,7 +1478,13 @@ SympyEditor.registerAddon("handwriting", (function () {
         for (var i = strokes.length - 1; i >= 0; i--) {
           var s = strokes[i];
           for (var k = 0; k < s.length; k++) {
-            if (Math.abs(s[k][0] - p[0]) <= r && Math.abs(s[k][1] - p[1]) <= r) { strokes.splice(i, 1); gone = true; break; }
+            if (Math.abs(s[k][0] - p[0]) <= r && Math.abs(s[k][1] - p[1]) <= r) {
+              // one sweep of the eraser is one step, however many strokes it takes
+              if (!erasedThisPress) { step_(); erasedThisPress = true; }
+              strokes = strokes.slice(0, i).concat(strokes.slice(i + 1));
+              gone = true;
+              break;
+            }
           }
         }
         if (!gone) return;
@@ -1514,6 +1534,7 @@ SympyEditor.registerAddon("handwriting", (function () {
         currentId = ev.pointerId;
         currentType = ev.pointerType;
         if (ev.pointerType === "pen") penId = ev.pointerId;
+        erasedThisPress = false;
         if (erasing || (ev.pointerType === "pen" && (ev.buttons & 32))) { current = null; eraseAt(point(ev)); return; }
         down = { x: ev.clientX, y: ev.clientY, t: ev.timeStamp, type: ev.pointerType };
         if (!strokes.length) {
@@ -1599,8 +1620,8 @@ SympyEditor.registerAddon("handwriting", (function () {
         }
         if (current) {
           var done = current;
-          strokes.push(current);
-          taken = [];              // written on: there is no stroke to put back any more
+          step_();                 // written on: what was taken back cannot come again
+          strokes = strokes.concat([current]);
           current = null;
           updateTools();
           redraw();

@@ -806,6 +806,57 @@ def test_a_stroke_is_taken_back_and_written_again():
             _close(srv, browser)
 
 
+def test_erasing_and_clearing_are_steps_undo_takes_back():
+    """Undo and Redo walk the ink's own history: a stroke written, one sweep
+    of the eraser (however many strokes it takes) and Clear ink are each a
+    step.  They used to follow the strokes written alone, so an erasure or
+    a Clear could not be taken back."""
+    doc = Document(x, addons=[HandwritingAddon(MuteRecognizer()), LATEX])
+    with playwright.sync_playwright() as p:
+        srv, browser, page = _page(p, doc)
+        try:
+            panel = page.locator(".hw-panel")
+            undo = page.locator('[data-cmd="addon:handwriting:undo"]')
+            redo = page.locator('[data-cmd="addon:handwriting:redo"]')
+            erase = page.locator('[data-cmd="addon:handwriting:erase"]')
+            clear = page.locator('[data-cmd="addon:handwriting:clear"]')
+            strokes = lambda: panel.get_attribute("data-strokes")
+            view = page.locator(".se-view").bounding_box()
+            X, Y = view["x"], view["y"]
+            for k in range(3):
+                _drag(page, X + 150 + 70 * k, Y + 40, X + 190 + 70 * k, Y + 70)
+            assert _wait(lambda: strokes() == "3")
+            # one sweep over two strokes: one step
+            erase.click()
+            _drag(page, X + 150, Y + 55, X + 260, Y + 55, steps=24)
+            assert _wait(lambda: strokes() == "1")
+            erase.click()                                     # back to writing
+            undo.click()
+            assert _wait(lambda: strokes() == "3")            # both come back at once
+            redo.click()
+            assert _wait(lambda: strokes() == "1")            # and go again
+            # Clear ink is a step too
+            clear.click()
+            assert _wait(lambda: strokes() == "0")
+            assert not undo.is_disabled() and redo.is_disabled()
+            undo.click()
+            assert _wait(lambda: strokes() == "1")
+            undo.click()
+            assert _wait(lambda: strokes() == "3")            # before the erasure
+            undo.click()
+            assert _wait(lambda: strokes() == "2")            # and the strokes, one by one
+            redo.click(); redo.click(); redo.click()
+            assert _wait(lambda: strokes() == "0") and redo.is_disabled()
+            # something new done: what was taken back cannot come again
+            undo.click()
+            assert _wait(lambda: strokes() == "1")
+            _drag(page, X + 400, Y + 40, X + 430, Y + 70)
+            assert _wait(lambda: strokes() == "2") and redo.is_disabled()
+            assert page.errors == []
+        finally:
+            _close(srv, browser)
+
+
 def test_a_reading_s_latex_can_be_corrected_by_hand():
     """The model read a glyph wrong: the reading's own LaTeX is opened,
     corrected, and what is typed goes into the formula like any reading -
