@@ -15,11 +15,12 @@ addons/
   sympy_editor_matching/    rewrite rules matched many-to-one              (sympy-matching)
   sympy_editor_latex/       LaTeX in: a first reading, every ambiguity a choice, constants as switches (lark)
   sympy_editor_console/     a Python console and script runner, with `editor` for the formula (no dependency)
+  sympy_editor_series/      series expansions of the selection: Taylor, Laurent, Puiseux, asymptotic, leading term (no dependency)
   sympy_editor_handwriting/ writing on the formula by hand, read by math-ocr's stroke model (onnxruntime; not in Pyodide)
   demo.py                   a page with the first five, to try them in a browser
 ```
 
-All six are **drafts**: they work end to end (each has tests, and the
+All seven are **drafts**: they work end to end (each has tests, and the
 editor's browser test drives a panel), but their interfaces are the first
 version of an idea, not a promise.  They live in this repository for
 convenience only: an add-on is an **external project** - any package, in
@@ -379,6 +380,15 @@ Nothing but the standard library: no IPython.  A run that changed the formula
 answers as a query with `changed: true`, and the panel then asks for a fresh
 snapshot - an add-on method answers either a query or a change, and a run is
 both (its output and a new formula).
+
+**`sympy_editor_series`** - *a panel that computes and inserts*.  One query,
+`expand`: the selection's `series` in a variable about any point (`oo` and
+`-oo` included), at an order from 1 to 20, from either side, named after its
+powers (Taylor, Laurent, Puiseux, with logarithms, asymptotic), or its
+leading term; with the coefficients, and the truncation error at a sample
+point.  `insert` replaces the selection with the expansion, with or without
+its O term, as one step.  Every computation is time-boxed in a thread that
+is stopped when it overruns, and SymPy's failures are said in words.
 
 ## Open questions
 

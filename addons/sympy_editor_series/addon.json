@@ -1,0 +1,8 @@
+{
+  "name": "series",
+  "label": "Series",
+  "module": "sympy_editor_series",
+  "version": "0.0.1",
+  "description": "Series expansions of the selection: Taylor, Laurent, Puiseux, asymptotic, the leading term - with the O term, the coefficients and the truncation error.",
+  "requires": []
+}
