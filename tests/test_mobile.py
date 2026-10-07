@@ -1498,7 +1498,7 @@ def test_the_apps_bundle_the_addons_one_folder_each(tmp_path):
     spec.loader.exec_module(build)
     dest = build.copy_python_sources(tmp_path / "python")
     folders = sorted(p.name for p in (dest / "addons").iterdir())
-    assert folders == ["sympy_editor_console", "sympy_editor_latex", "sympy_editor_matching", "sympy_editor_plot",
+    assert folders == ["sympy_editor_check", "sympy_editor_console", "sympy_editor_latex", "sympy_editor_matching", "sympy_editor_plot",
                        "sympy_editor_tree"]   # the template is not shipped
     for folder in folders:
         assert (dest / "addons" / folder / "addon.json").is_file()
@@ -1523,8 +1523,8 @@ print(res["items"][0]["text"].strip(), res["changed"], json.loads(app.handle("d"
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=300)
     assert out.returncode == 0, out.stderr
     lines = out.stdout.strip().splitlines()
-    assert json.loads(lines[0]) == ["console", "latex", "matching", "plot", "tree"]
-    assert lines[1] == '["console", "latex", "matching", "plot", "tree"] []'                    # listed, all off
+    assert json.loads(lines[0]) == ["check", "console", "latex", "matching", "plot", "tree"]
+    assert lines[1] == '["check", "console", "latex", "matching", "plot", "tree"] []'                    # listed, all off
     assert lines[2] == '["tree"] Add True'
     assert lines[3] == "cpython True 2*x + 2*y"                                                  # the console, in the app's Python
 

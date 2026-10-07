@@ -16,6 +16,7 @@ addons/
   sympy_editor_latex/       LaTeX in: a first reading, every ambiguity a choice, constants as switches (lark)
   sympy_editor_console/     a Python console and script runner, with `editor` for the formula (no dependency)
   sympy_editor_handwriting/ writing on the formula by hand, read by math-ocr's stroke model (onnxruntime; not in Pyodide)
+  sympy_editor_check/       "Check my work": is each step of the history equivalent to the one before (no dependency)
   demo.py                   a page with the first five, to try them in a browser
 ```
 

@@ -1,0 +1,8 @@
+{
+  "name": "check",
+  "label": "Check my work",
+  "module": "sympy_editor_check",
+  "version": "0.0.1",
+  "description": "Whether each step of the history is equivalent to the one before it, and the first step where the maths went wrong.",
+  "requires": []
+}
