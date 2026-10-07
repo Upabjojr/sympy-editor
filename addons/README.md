@@ -15,11 +15,12 @@ addons/
   sympy_editor_matching/    rewrite rules matched many-to-one              (sympy-matching)
   sympy_editor_latex/       LaTeX in: a first reading, every ambiguity a choice, constants as switches (lark)
   sympy_editor_console/     a Python console and script runner, with `editor` for the formula (no dependency)
+  sympy_editor_forms/       the selection rewritten by every simplification function, one card per form (no dependency)
   sympy_editor_handwriting/ writing on the formula by hand, read by math-ocr's stroke model (onnxruntime; not in Pyodide)
   demo.py                   a page with the first five, to try them in a browser
 ```
 
-All six are **drafts**: they work end to end (each has tests, and the
+All seven are **drafts**: they work end to end (each has tests, and the
 editor's browser test drives a panel), but their interfaces are the first
 version of an idea, not a promise.  They live in this repository for
 convenience only: an add-on is an **external project** - any package, in
@@ -379,6 +380,17 @@ Nothing but the standard library: no IPython.  A run that changed the formula
 answers as a query with `changed: true`, and the panel then asks for a fresh
 snapshot - an add-on method answers either a query or a change, and a run is
 both (its output and a new formula).
+
+**`sympy_editor_forms`** - *a simplification explorer*.  The selection (a
+range, the whole formula) rewritten by each of SymPy's rewriting functions -
+`simplify`, `expand`, `factor`, `apart`/`collect` per variable, `trigsimp`,
+`fu`, `logcombine`/`expand_log` with an optional `force`, `rewrite(exp)`... -
+one card per *different* form (equal forms grouped, the functions that gave
+each listed), with its `count_ops` and its length, sorted by either.  The
+panel asks for one function at a time (`run`, a query), each under a time box
+(a trace function raising at the first Python call past the deadline: it works
+in Pyodide, which has no threads), with a pause between them so the user's own
+edits go first; a card's `apply` is an undoable step, "Forms: factor".
 
 ## Open questions
 
