@@ -16,10 +16,11 @@ addons/
   sympy_editor_latex/       LaTeX in: a first reading, every ambiguity a choice, constants as switches (lark)
   sympy_editor_console/     a Python console and script runner, with `editor` for the formula (no dependency)
   sympy_editor_handwriting/ writing on the formula by hand, read by math-ocr's stroke model (onnxruntime; not in Pyodide)
+  sympy_editor_steps/       step-by-step solutions: integrals, derivatives, equations of degree one or two (no dependency)
   demo.py                   a page with the first five, to try them in a browser
 ```
 
-All six are **drafts**: they work end to end (each has tests, and the
+All seven are **drafts**: they work end to end (each has tests, and the
 editor's browser test drives a panel), but their interfaces are the first
 version of an idea, not a promise.  They live in this repository for
 convenience only: an add-on is an **external project** - any package, in
@@ -379,6 +380,15 @@ Nothing but the standard library: no IPython.  A run that changed the formula
 answers as a query with `changed: true`, and the panel then asks for a fresh
 snapshot - an add-on method answers either a query or a change, and a run is
 both (its output and a new formula).
+
+**`sympy_editor_steps`** - *a custom widget that explains*.  One query,
+`steps`, works out the selection - an integral through `manualintegrate`'s
+rule tree, flattened one rule at a time; a derivative with sum, product,
+quotient, power and chain rules applied to one `d/dx` hole per step; an
+equation of degree one or two - and the panel lists the steps with KaTeX.
+`apply` puts a step's result in place of the selection, a step of the
+history labelled with the rule; it works the steps out again rather than
+reading them back.  What it cannot explain it says in words.
 
 ## Open questions
 

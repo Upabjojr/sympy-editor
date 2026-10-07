@@ -80,7 +80,7 @@ src/sympy_editor/
 tests/          pytest suite (printer round-trips, document ops, HTML, server).
 examples/       demo.py generates demo.html / runs the server.
 addons/         Add-on drafts, each a package of its own (tree, plot, matching, latex,
-                console, handwriting).
+                console, handwriting, steps).
 ```
 
 Data flow: Python `Document.snapshot()` → JSON (`latex`, `latex_plain`,
