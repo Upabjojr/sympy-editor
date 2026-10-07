@@ -15,11 +15,12 @@ addons/
   sympy_editor_matching/    rewrite rules matched many-to-one              (sympy-matching)
   sympy_editor_latex/       LaTeX in: a first reading, every ambiguity a choice, constants as switches (lark)
   sympy_editor_console/     a Python console and script runner, with `editor` for the formula (no dependency)
+  sympy_editor_assumptions/ what SymPy knows about the selection; the symbols' assumptions as switches (no dependency)
   sympy_editor_handwriting/ writing on the formula by hand, read by math-ocr's stroke model (onnxruntime; not in Pyodide)
   demo.py                   a page with the first five, to try them in a browser
 ```
 
-All six are **drafts**: they work end to end (each has tests, and the
+All seven are **drafts**: they work end to end (each has tests, and the
 editor's browser test drives a panel), but their interfaces are the first
 version of an idea, not a promise.  They live in this repository for
 convenience only: an add-on is an **external project** - any package, in
@@ -379,6 +380,16 @@ Nothing but the standard library: no IPython.  A run that changed the formula
 answers as a query with `changed: true`, and the panel then asks for a fresh
 snapshot - an add-on method answers either a query or a change, and a run is
 both (its output and a new formula).
+
+**`sympy_editor_assumptions`** - *a custom widget that edits through the
+document*.  A query, `facts`, gives the main predicates of the selection
+(the old assumptions first, `ask(Q.*)` where they cannot tell, on small
+expressions) with every unknown explained in words and the assumption on a
+symbol that would decide it; `contribute` puts the free symbols with what
+was assumed of each in every snapshot; `assume` switches one assumption of
+one symbol through `Document.retype` - every occurrence, one step of the
+history - and keeps a hint for that step when SymPy rewrote the formula by
+itself or `simplify` can now do more, which `simplify` applies.
 
 ## Open questions
 

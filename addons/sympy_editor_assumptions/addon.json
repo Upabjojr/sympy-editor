@@ -1,0 +1,8 @@
+{
+  "name": "assumptions",
+  "label": "Assumptions",
+  "module": "sympy_editor_assumptions",
+  "version": "0.0.1",
+  "description": "What SymPy knows about the selection - real, positive, integer... - and the symbols' own assumptions as switches.",
+  "requires": []
+}
