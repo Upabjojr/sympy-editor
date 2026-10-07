@@ -15,11 +15,12 @@ addons/
   sympy_editor_matching/    rewrite rules matched many-to-one              (sympy-matching)
   sympy_editor_latex/       LaTeX in: a first reading, every ambiguity a choice, constants as switches (lark)
   sympy_editor_console/     a Python console and script runner, with `editor` for the formula (no dependency)
+  sympy_editor_solver/      solve the selected equation, inequality or system; check, insert (no dependency)
   sympy_editor_handwriting/ writing on the formula by hand, read by math-ocr's stroke model (onnxruntime; not in Pyodide)
   demo.py                   a page with the first five, to try them in a browser
 ```
 
-All six are **drafts**: they work end to end (each has tests, and the
+All seven are **drafts**: they work end to end (each has tests, and the
 editor's browser test drives a panel), but their interfaces are the first
 version of an idea, not a promise.  They live in this repository for
 convenience only: an add-on is an **external project** - any package, in
@@ -379,6 +380,16 @@ Nothing but the standard library: no IPython.  A run that changed the formula
 answers as a query with `changed: true`, and the panel then asks for a fresh
 snapshot - an add-on method answers either a query or a change, and a run is
 both (its output and a new formula).
+
+**`sympy_editor_solver`** - *a panel that computes and edits*.  It reads the
+selection (a range of an `And`'s equations included) as an equation, an
+inequality, an expression `= 0` or a system, offers its free symbols as
+unknowns and a domain, and solves with `solveset`, `linsolve`,
+`nonlinsolve` or `solve` as fits, inside a time limit kept by the profiler
+hook (no thread: it works in Pyodide too).  Each solution can be substituted
+back and checked, or inserted in place of what was solved - a step of the
+history.  The last solution is kept per document and named by a token, so
+nothing SymPy has to be read back from the page.
 
 ## Open questions
 
