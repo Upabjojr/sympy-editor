@@ -248,8 +248,16 @@ final class FilesBridge: NSObject, WKScriptMessageHandler {
         #else
         DispatchQueue.main.async { [weak self] in
             guard let self = self, let view = self.webView else { return }
-            // Saving and sharing are one panel on iOS: "Save to Files" is one
-            // of the things the share sheet offers, beside sending it on.
+            // Save: the Files app's own "save to" panel, where the user picks
+            // a folder.  Share: the share sheet, to send it on.  The page's
+            // File window offers the two side by side.
+            if !share {
+                let picker = UIDocumentPickerViewController(forExporting: [file], asCopy: true)
+                if !self.present(picker, from: view) {
+                    self.report("The file could not be saved: no place to keep it was offered")
+                }
+                return
+            }
             let sheet = UIActivityViewController(activityItems: [file], applicationActivities: nil)
             if let pop = sheet.popoverPresentationController {       // an iPad wants somewhere to point at
                 pop.sourceView = view

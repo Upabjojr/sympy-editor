@@ -889,9 +889,16 @@ Two conventions between printer, document and front end:
   `addon.json` through `addon_manifest`, what it needs, and its "?" when it
   is on) and `this.filesBody` (the file actions; a chosen one closes the
   window) - and gives them back when it closes.  The add-ons and the files
-  grew too many for folds in a side panel (the owner's call).  File has
-  **Share formula…** (`shareFormula`): the app's `shareFile` (Android: the
-  share sheet, a copy in Downloads too), the Web Share API, else a download.
+  grew too many for folds in a side panel (the owner's call).  In File,
+  everything written out goes two ways, a row each (`.se-file-row`): the
+  formula, the history as Python, the history as a web page, with **Save…**
+  (`_deliver(..., "save")` → the host's `saveFile`: Android's save dialog,
+  iOS's Files export picker, the Mac's save panel; else the kernel's folder
+  or a download) and **Share…** (`"share"` → `shareFileText`: the host's
+  `shareFile` - the share sheet, nothing kept on the device -, the Web Share
+  API, else saved).  Share buttons show only where sharing is
+  (`canShareFiles`, checked when the window opens); the history view's
+  Save menu offers the shares too.
   Android opens a `.sympy` file handed over without a name
   (`content://media/...`, typed `application/octet-stream`) through a VIEW
   filter for that type: Android knows no `.sympy`.

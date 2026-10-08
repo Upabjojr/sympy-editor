@@ -3,15 +3,12 @@ package org.sympy.editor
 import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.ClipboardManager
-import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
-import android.os.Environment
-import android.provider.MediaStore
 import android.net.Uri
 import android.print.PrintAttributes
 import android.print.PrintManager
@@ -589,23 +586,16 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun shareHtml(name: String, html: String) = shareFile(name, "text/html", html)
 
-        /** Save `text` as `name` (of MIME type `mime`: the HTML report, the
-         *  Python script) in Downloads (Android 10+) and offer to share it. */
+        /** Send `text` as the file `name` (of MIME type `mime`: a formula, the
+         *  HTML report, the Python script) to another app, through the share
+         *  sheet.  Only sent: keeping it on the device is saveFile's - the
+         *  File window offers the two side by side, and a share used to drop
+         *  a copy in Downloads as well. */
         @JavascriptInterface
         fun shareFile(name: String, mime: String, text: String) {
             val safe = name.replace(Regex("[^A-Za-z0-9._-]"), "_")
             val dir = File(cacheDir, "reports").apply { mkdirs() }
             val file = File(dir, safe).apply { writeText(text) }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val values = ContentValues().apply {
-                    put(MediaStore.Downloads.DISPLAY_NAME, safe)
-                    put(MediaStore.Downloads.MIME_TYPE, mime)
-                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-                }
-                contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)?.let { uri ->
-                    contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) }
-                }
-            }
             val uri = FileProvider.getUriForFile(this@MainActivity, "$packageName.fileprovider", file)
             val send = Intent(Intent.ACTION_SEND).apply {
                 type = mime

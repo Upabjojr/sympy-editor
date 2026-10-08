@@ -1496,9 +1496,10 @@ def test_the_edit_tools_are_icons_and_every_button_has_a_tip(browser, serve_expr
     # a quick tap is a press
     assert page.evaluate(hold, ['.se-toolbar [data-cmd="delete"]', 50]) is None
     assert _wait(lambda: doc.expr == x)
-    # a greyed button tells too
-    _click(page, "/")
-    page.keyboard.press("Escape")
+    # a greyed button tells too (nothing selected: Unwrap is grey); asked of
+    # the editor once its answer is drawn - a click raced the redraw
+    page.wait_for_function(f"{_ED}.state && {_ED}.state.src === 'x' && !{_ED}.busy")
+    page.evaluate(f"{_ED}.select(null)")
     assert page.locator('.se-toolbar [data-cmd="unwrap"]').is_disabled()
     shown = page.evaluate(hold, ['.se-toolbar [data-cmd="unwrap"]', 500])
     assert shown and shown.startswith("Unwrap:")
@@ -5473,7 +5474,7 @@ def test_the_drawer_button_is_there_with_no_sessions_and_no_addons(browser, tmp_
         page.locator('[data-cmd="drawer"]').click()
         assert page.locator('.se-drawer-entry[data-sheet="addons"]').is_hidden()   # nothing to switch
         sheet = _open_sheet(page, "files")
-        assert sheet.locator(".se-file-action").count() == 6
+        assert sheet.locator(".se-file-action:visible").count() == 5    # Open, three Saves, Print: nothing to share with here
         assert page.locator('.se-toolbar [data-cmd="addons"]').count() == 0
         assert page.errors == []
     finally:
@@ -5943,13 +5944,13 @@ def test_a_formula_is_saved_to_a_file_and_opened_from_one(browser, serve_expr, t
     plain line of SymPy source, which opens as a formula of one step."""
     srv, doc = serve_expr(x**2 + sin(y))
     page = _open(browser, srv.url)
-    files = _open_sheet(page, "files").locator(".se-file-action")
-    assert files.all_inner_texts() == ["Open formula\u2026", "Save formula\u2026", "Share formula\u2026",
-                                       "History as Python\u2026", "History as web page\u2026",
-                                       "Print history\u2026"]
+    sheet = _open_sheet(page, "files")
+    assert sheet.locator(".se-file-what").all_inner_texts() == ["Formula (.sympy)", "History as Python", "History as web page"]
+    files = sheet.locator(".se-file-action:visible")
+    assert files.all_inner_texts() == ["Open formula\u2026", "Save\u2026", "Save\u2026", "Save\u2026", "Print history\u2026"]
     # Save: a file of its own type, named after the formula
     with page.expect_download() as dl:
-        files.nth(1).click()
+        sheet.locator(".se-file-row").first.locator(".se-file-action", has_text="Save").click()
     saved = tmp_path / dl.value.suggested_filename
     dl.value.save_as(saved)
     assert saved.name.endswith(".sympy")
@@ -6031,6 +6032,40 @@ def _open_hosted(browser, url, script=_HOST_STUB, wait=True):
 def _host_calls(page, name=None):
     calls = page.evaluate("window.SympyEditorApp.calls")
     return [c for c in calls if name is None or c[0] == name]
+
+
+def test_in_the_app_every_file_is_saved_or_shared(browser, serve_expr):
+    """In the apps each thing written out goes two ways: Save, the app's
+    save dialog (a place on the device), and Share, its share sheet (another
+    app or person) - the formula, the history as Python, the history as a
+    web page; and the history view's Save menu offers the shares too."""
+    stub = _HOST_STUB.replace("keepWrite(key, text) {", """saveFile(name, mime, text) { this.calls.push(['saveFile', name, mime, text.length]); },
+  shareFile(name, mime, text) { this.calls.push(['shareFile', name, mime, text.length]); },
+  keepWrite(key, text) {""")
+    srv, doc = serve_expr(x + y)
+    doc.handle({"action": "replace", "path": "/", "src": "x + 2*y"})
+    page = _open_hosted(browser, srv.url, script=stub)
+    for row, ext, mime in ((0, ".sympy", None), (1, ".py", "text/x-python"), (2, ".html", "text/html")):
+        for how in ("Save", "Share"):
+            sheet = _open_sheet(page, "files")
+            assert sheet.locator(".se-file-share").first.is_visible()        # there is a share sheet here
+            before = len(_host_calls(page))
+            sheet.locator(".se-file-row").nth(row).locator(".se-file-action", has_text=how).click()
+            assert _wait(lambda: len(_host_calls(page)) > before, timeout=15)
+            call = _host_calls(page)[-1]
+            assert call[0] == ("saveFile" if how == "Save" else "shareFile"), (row, how, call)
+            assert call[1].endswith(ext) and call[3] > 0, call
+            if mime:
+                assert call[2] == mime
+    # the history view: shares beside the saves
+    page.locator('.se-toolbar [data-cmd="history"]').click()
+    menu = page.locator(".se-history-view .se-head-save")
+    menu.wait_for(state="visible")
+    assert menu.locator("option").all_inner_texts() == ["Save \u25be", "as a web page", "as a Python script",
+                                                       "share as a web page", "share as a Python script", "print or PDF"]
+    menu.select_option("share-py")
+    assert _wait(lambda: _host_calls(page)[-1][0] == "shareFile" and _host_calls(page)[-1][1].endswith(".py"))
+    assert page.errors == []
 
 
 def test_the_clipboard_is_the_systems_through_the_app(browser, serve_expr):

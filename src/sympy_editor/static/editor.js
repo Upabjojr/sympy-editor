@@ -186,7 +186,7 @@ var SympyEditor = (function () {
     "<li>The strip above plays the history as a slideshow \u2014 a step and the change that produced it on one screen \u2014 and its <b>\u25c0 \u25b6</b> walk the steps one at a time when it is not playing; the two dials halve and double the speed, which is written between them (<kbd>,</kbd> and <kbd>.</kbd> while it plays), and <b>\u2212 / +</b> set the size of the formulas (Ctrl+wheel and two fingers too).</li>",
     "<li><b>Save \u25be</b> writes it out: a self-contained web page that works offline and plays on its own, or a Python script that rebuilds every step with SymPy \u2014 or sends it to the printer (<i>print or PDF</i>; <i>Print history\u2026</i> under <b>\u2261</b> too).</li>",
     "<li>A formula saved to a <b>.sympy</b> file opens with the app from a file manager or a mail, in a session of its own; in a notebook, files are saved next to the notebook.</li>",
-    "<li><b>\u2261</b> holds <b>File</b> in every editor, a window of its own: <i>Open formula\u2026</i>, <i>Save formula\u2026</i> (a <b>.sympy</b> file with the whole history), <i>Share formula\u2026</i> (that file sent to another app or person - in the Android app through the share sheet), and the history as Python, as a web page or on paper. In the app a .sympy file opens with SymPy Editor from a file manager, the Downloads list or a mail.</li>",
+    "<li><b>\u2261</b> holds <b>File</b> in every editor, a window of its own: <i>Open formula\u2026</i>; the formula (a <b>.sympy</b> file with the whole history), the history as Python and the history as a web page, each with <b>Save\u2026</b> (a file on this device: the app asks where) and <b>Share\u2026</b> (sent to another app or person through the share sheet - in the apps, and in a browser that can share files); and the history on paper. In the app a .sympy file opens with SymPy Editor from a file manager, the Downloads list or a mail.</li>",
     "<li><b>\u2261</b> also lists the sessions, where the page keeps several. A session is labelled with its formula until you give it a name of your own (the pencil beside it, or a double-click), which nothing overwrites.</li>",
     "</ul></section>",
     "<section><h3>On a phone or tablet</h3><ul>",
@@ -1522,6 +1522,42 @@ var SympyEditor = (function () {
     return "downloaded: " + name;
   }
 
+  /** Whether a file can be shared from here: the app's share sheet, or
+   *  the browser's (Web Share with files - phones, some desktops). */
+  function canShareFiles() {
+    var app = window.SympyEditorApp;
+    if (app && app.shareFile) return true;
+    try {
+      return !!(navigator.share && navigator.canShare && typeof File === "function" &&
+                navigator.canShare({ files: [new File(["x"], "x.txt", { type: "text/plain" })] }));
+    } catch (e) { return false; }
+  }
+
+  /** Send `text` as the file `name` to another app: the host's share sheet
+   *  (Android's, iOS's), the Web Share API, else - nothing to share with -
+   *  kept as saveFile keeps it.  What happened, in words ("" when the user
+   *  closed the sheet). */
+  async function shareFileText(name, mime, text, backend) {
+    var app = window.SympyEditorApp;
+    if (app && app.shareFile) { Host.tell("shareFile", name, mime, text); return "ready: choose where to send it"; }
+    var file = null;
+    try { file = new File([text], name, { type: mime }); } catch (e) { /* no File constructor */ }
+    if (file && navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: name }); return "shared"; }
+      catch (e) { if (e && e.name === "AbortError") return ""; }
+    }
+    var how = await saveFile(name, mime, text, backend);
+    return how ? "nothing here to share with: " + how : "";
+  }
+
+  /** Keep `text` as the file `name` on the device: the host's save dialog
+   *  (Android's, iOS's Files), the kernel's folder, else saveFile's way. */
+  async function keepFileText(name, mime, text, backend) {
+    var app = window.SympyEditorApp;
+    if (app && app.saveFile) { Host.tell("saveFile", name, mime, text); return "ready: choose where to keep it"; }
+    return saveFile(name, mime, text, backend);
+  }
+
   //: What a saved formula is called and what opens as one (Document.save_text).
   var FORMULA_EXT = ".sympy";
   var FORMULA_ACCEPT = ".sympy,.json,.txt,.py,application/json,text/plain";
@@ -2319,21 +2355,30 @@ var SympyEditor = (function () {
         // the history out.  They live in the drawer because that is where
         // everything about the document as a whole lives.
         this.filesBody = h("div", { class: "se-files" });
-        var fileBtn = function (label, title, run) {
+        var fileBtn = function (label, title, run, where) {
           var b = h("button", { type: "button", class: "se-file-action", title: title }, [label]);
           b.addEventListener("click", function () { run.call(self); });
-          self.filesBody.appendChild(b);
+          (where || self.filesBody).appendChild(b);
           return b;
         };
+        // What is written out goes two ways: kept on the device (a save
+        // dialog) or sent to another app (the share sheet).  Share is there
+        // where sharing is (the apps; a browser that shares files).
+        var fileRow = function (label, what, save, share) {
+          var row = h("div", { class: "se-file-row" }, [h("span", { class: "se-file-what" }, [label])]);
+          fileBtn("Save\u2026", "Save " + what + " as a file on this device", save, row);
+          var s = fileBtn("Share\u2026", "Send " + what + " to another app or person", share, row);
+          s.classList.add("se-file-share");
+          self.filesBody.appendChild(row);
+          return row;
+        };
         fileBtn("Open formula\u2026", "Open a formula kept in a file, with the history behind it", this.openFormula);
-        fileBtn("Save formula\u2026", "Keep this formula in a file: the expression and its whole history",
-                this.saveFormula);
-        fileBtn("Share formula\u2026", "Send this formula, with its whole history, to another app or person: a .sympy file they open with SymPy Editor",
-                this.shareFormula);
-        fileBtn("History as Python\u2026", "Write the history out as a Python script that rebuilds every step with SymPy",
-                this.exportPython);
-        fileBtn("History as web page\u2026", "Write the history out as a self-contained web page that works offline",
-                this.exportReport);
+        fileRow("Formula (.sympy)", "this formula with its whole history - a .sympy file, which opens with SymPy Editor",
+                function () { return self.saveFormula("save"); }, function () { return self.saveFormula("share"); });
+        fileRow("History as Python", "the history as a Python script that rebuilds every step with SymPy",
+                function () { return self.exportPython("save"); }, function () { return self.exportPython("share"); });
+        fileRow("History as web page", "the history as a self-contained web page that works offline",
+                function () { return self.exportReport(null, "save"); }, function () { return self.exportReport(null, "share"); });
         fileBtn("Print history\u2026", "Print the history, every step with what changed - or keep it as a PDF",
                 this.printReport);
         // The drawer's entries: each opens a window of its own over the
@@ -7343,12 +7388,12 @@ var SympyEditor = (function () {
     }
 
     /** Download the report (built unless given) - or hand it to the app / the share sheet. */
-    async exportReport(html) {
+    async exportReport(html, how) {
       if (this.busy || this.closed || !this.backend) return;
       this._setStatus("Building the report\u2026");
       try {
         if (!html) html = await this.buildReport();
-        await this._exportFile(this._exportName("html"), "text/html", html, "Report");
+        await this._exportFile(this._exportName("html"), "text/html", html, "Report", how);
       } catch (e) {
         this._showError("The report could not be built: " + ((e && e.message) || e));
       }
@@ -7368,12 +7413,12 @@ var SympyEditor = (function () {
     }
 
     /** Download the history as a Python script - or hand it to the app / the share sheet. */
-    async exportPython() {
+    async exportPython(how) {
       if (this.busy || this.closed || !this.backend) return;
       this._setStatus("Building the script\u2026");
       try {
         var text = await this.buildPython();
-        await this._exportFile(this._exportName("py"), "text/x-python", text, "Script");
+        await this._exportFile(this._exportName("py"), "text/x-python", text, "Script", how);
       } catch (e) {
         this._showError("The script could not be built: " + ((e && e.message) || e));
       }
@@ -7390,44 +7435,31 @@ var SympyEditor = (function () {
     /** Write this formula out: the expression and the whole session behind it
      *  (the history, its labels, the declared names, what the add-ons kept),
      *  handed to the app's share sheet, the browser's or a download. */
-    async saveFormula() {
+    async saveFormula(how) {
       if (this.busy || this.closed || !this.backend) return;
-      this._setStatus("Saving the formula\u2026");
+      var share = how === "share";
+      this._setStatus(share ? "Sharing the formula\u2026" : "Saving the formula\u2026");
       try {
         var name = this._formulaName();
         var snap = await this.backend.send({ action: "savefile", name: name }, function () {});
-        if (!snap || !snap.file) throw new Error("There is nothing to save");
-        var how = await saveFile(name + FORMULA_EXT, snap.file.mime, snap.file.text, this.backend);
-        this._setStatus(how ? "Formula " + how : "");
+        if (!snap || !snap.file) throw new Error("There is nothing to " + (share ? "share" : "save"));
+        var done = await this._deliver(name + FORMULA_EXT, snap.file.mime, snap.file.text, how);
+        this._setStatus(done ? "Formula " + done : "");
       } catch (e) {
-        this._showError("The formula could not be saved: " + ((e && e.message) || e));
+        this._showError("The formula could not be " + (share ? "shared" : "saved") + ": " + ((e && e.message) || e));
       }
     }
 
-    /** Send this formula, with its history, to another app: the app's share
-     *  sheet (Android's, through shareFile, which also keeps a copy in
-     *  Downloads), the Web Share API, or - nothing to share with - a download. */
-    async shareFormula() {
-      if (this.busy || this.closed || !this.backend) return;
-      this._setStatus("Sharing the formula\u2026");
-      try {
-        var name = this._formulaName() + FORMULA_EXT;
-        var snap = await this.backend.send({ action: "savefile", name: this._formulaName() }, function () {});
-        if (!snap || !snap.file) throw new Error("There is nothing to share");
-        var mime = snap.file.mime, text = snap.file.text, app = window.SympyEditorApp;
-        if (app && app.shareFile) { Host.tell("shareFile", name, mime, text); this._setStatus("Formula ready: choose where to send it"); return; }
-        var file = null;
-        try { file = new File([text], name, { type: mime }); } catch (e) { /* no File constructor */ }
-        if (file && navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-          try { await navigator.share({ files: [file], title: name }); this._setStatus("Formula shared"); return; }
-          catch (e) { if (e && e.name === "AbortError") { this._setStatus(""); return; } }
-        }
-        var how = await saveFile(name, mime, text, this.backend);
-        this._setStatus(how ? "Nothing here to share with: formula " + how : "");
-      } catch (e) {
-        this._showError("The formula could not be shared: " + ((e && e.message) || e));
-      }
+    /** A file written out, kept (`how` "save", the default: the app's save
+     *  dialog, else saveFile's way) or sent to another app ("share"). */
+    _deliver(name, mime, text, how) {
+      return how === "share" ? shareFileText(name, mime, text, this.backend)
+        : (window.SympyEditorApp && window.SympyEditorApp.saveFile ? keepFileText(name, mime, text, this.backend)
+           : saveFile(name, mime, text, this.backend));
     }
+
+    /** Send this formula, with its history, to another app. */
+    shareFormula() { return this.saveFormula("share"); }
 
     /** Open a formula from a file: one written by Save (with its history), a
      *  file holding an `expr`, or a line of SymPy source.  Where there are
@@ -7467,9 +7499,9 @@ var SympyEditor = (function () {
     }
 
     /** Hand `text` to the app's share sheet, the Web Share API or a download, in that order. */
-    async _exportFile(name, mime, text, what) {
-      var how = await saveFile(name, mime, text, this.backend);   // the host app, the kernel, the share sheet, or a download
-      this._setStatus(how ? what + " " + how : "");
+    async _exportFile(name, mime, text, what, how) {
+      var done = await this._deliver(name, mime, text, how);   // kept (a save dialog, the kernel, a download) or shared
+      this._setStatus(done ? what + " " + done : "");
     }
 
     /* ---- the history view ---- */
@@ -7498,9 +7530,13 @@ var SympyEditor = (function () {
       var save = h("select", { class: "se-head-save", title: "Save this history" }, [
         h("option", { value: "", disabled: "", selected: "" }, ["Save \u25be"]),
         h("option", { value: "html", title: "A self-contained web page: works offline, KaTeX rendering and fonts included" }, ["as a web page"]),
-        h("option", { value: "py", title: "A Python script rebuilding every step with SymPy" }, ["as a Python script"]),
+        h("option", { value: "py", title: "A Python script rebuilding every step with SymPy" }, ["as a Python script"])
+      ].concat(canShareFiles() ? [
+        h("option", { value: "share-html", title: "Send the web page to another app or person" }, ["share as a web page"]),
+        h("option", { value: "share-py", title: "Send the Python script to another app or person" }, ["share as a Python script"])
+      ] : []).concat([
         h("option", { value: "print", title: "Print the history, or keep it as a PDF" }, ["print or PDF"])
-      ]);
+      ]));
       var close = h("button", { type: "button", class: "se-history-close", title: "Close (Esc)", "aria-label": "Close" }, ["\u00d7"]);
       var addonTools = this._addonsHistoryTools({ getDoc: function () { return frame.contentDocument; }, root: null, where: "view" });
       var head = h("div", { class: "se-history-head" },
@@ -7516,6 +7552,8 @@ var SympyEditor = (function () {
         save.selectedIndex = 0;
         if (how === "html") self.exportReport(html);
         else if (how === "py") self.exportPython();
+        else if (how === "share-html") self.exportReport(html, "share");
+        else if (how === "share-py") self.exportPython("share");
         else if (how === "print") self.printReport(html);
       });
       close.addEventListener("click", function () { self.closeHistory(); });
@@ -7621,6 +7659,11 @@ var SympyEditor = (function () {
       var intro = kind === "addons"
         ? "Each add-on brings a panel under the formula, tools on the strip, or both. A switch holds for every session."
         : "A formula is kept in a .sympy file with its whole history; the history can also be written out on its own.";
+      if (kind === "files") {
+        var sharing = canShareFiles();
+        var shares = body.querySelectorAll(".se-file-share");
+        for (var sh = 0; sh < shares.length; sh++) shares[sh].hidden = !sharing;
+      }
       var inner = h("div", { class: "se-sheet-body" }, [h("p", { class: "se-sheet-intro" }, [intro]), body]);
       var view = h("div", { class: "se-history-view se-sheet-view", "data-sheet": kind, role: "dialog", "aria-modal": "true", "aria-label": title }, [head, inner]);
       body.hidden = false;

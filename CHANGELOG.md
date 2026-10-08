@@ -5,9 +5,12 @@
 * **Add-ons and File have windows of their own.** The ≡ menu holds two
   entries, **Add-ons** and **File**, each opening a window over the editor:
   one card per add-on with what it does, its version, what it needs, its
-  switch and its guide; and the file actions, now with **Share formula…**,
-  which sends the .sympy file to another app (on Android through the share
-  sheet). On Android a .sympy file also opens with the app from the
+  switch and its guide; and the file actions, where everything written out -
+  the formula, the history as Python, the history as a web page - has
+  **Save…** (a file on the device: Android's save dialog, the Files app's
+  on iOS) and **Share…** (the share sheet, to another app or person; in a
+  browser too, where it can share files). Sharing on Android no longer
+  leaves a copy in Downloads: that is what Save is for. On Android a .sympy file also opens with the app from the
   Downloads list, Google Files and a mail's attachment - which hand it over
   with no name and a generic type, so only a file manager that kept the
   name could open it before.
