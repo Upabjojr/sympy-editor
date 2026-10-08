@@ -590,6 +590,10 @@ the whole expression; and a Python console - input and output as in IPython,
 or a whole script run at once - in the same Python as the editor (the app's
 own on a phone, the server's, Pyodide in a standalone page), where `editor`
 reads and changes the formula: `editor.selection = expand(editor.selection)`.
+Another, the assumptions panel, shows what SymPy knows about the selection
+(real, positive, integer... - true, false or unknown, and why) and turns
+the symbols' assumptions into switches: making `x` positive retypes it
+everywhere, as one undoable step, and says what that let SymPy simplify.
 
 An add-on is a package of its own, made by anyone, found by the editor
 once it is installed (`pip install -e addons/sympy_editor_tree` for a

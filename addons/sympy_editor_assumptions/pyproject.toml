@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sympy-editor-assumptions"
+version = "0.0.1"
+description = "sympy-editor add-on: what SymPy knows about the selection, and the symbols' assumptions as switches"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "AGPL-3.0-or-later" }   # as sympy-editor: see its LICENSE
+dependencies = ["sympy-editor"]
+
+[project.entry-points."sympy_editor.addons"]
+assumptions = "sympy_editor_assumptions:ADDON"
+
+[tool.setuptools.packages.find]
+include = ["sympy_editor_assumptions*"]
+
+[tool.setuptools.package-data]
+sympy_editor_assumptions = ["static/*"]
