@@ -1,0 +1,8 @@
+{
+  "name": "numeric",
+  "label": "Values",
+  "module": "sympy_editor_numeric",
+  "version": "0.0.1",
+  "description": "The selection evaluated numerically: a value per symbol, any precision, a table over a range.",
+  "requires": []
+}

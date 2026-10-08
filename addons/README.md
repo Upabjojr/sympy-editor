@@ -17,6 +17,7 @@ addons/
   sympy_editor_console/     a Python console and script runner, with `editor` for the formula (no dependency)
   sympy_editor_assumptions/ what SymPy knows about the selection; the symbols' assumptions as switches (no dependency)
   sympy_editor_forms/       the selection rewritten by every simplification function, one card per form (no dependency)
+  sympy_editor_numeric/     the selection as a number: any precision, exact forms, why there is none, tables (no dependency)
   sympy_editor_handwriting/ writing on the formula by hand, read by math-ocr's stroke model (onnxruntime; not in Pyodide)
   sympy_editor_export/      the selection as LaTeX, MathML, Python, C, Fortran, JS, Octave, Julia, Rust or a function (no dependency)
   sympy_editor_check/       "Check my work": is each step of the history equivalent to the one before (no dependency)
@@ -413,6 +414,19 @@ panel asks for one function at a time (`run`, a query), each under a time box
 (a trace function raising at the first Python call past the deadline: it works
 in Pyodide, which has no threads), with a pause between them so the user's own
 edits go first; a card's `apply` is an undoable step, "Forms: factor".
+
+**`sympy_editor_numeric`** - *a custom widget that only asks*.  The Values
+panel evaluates the selection: a field per free symbol (read as typed text
+is, so `pi/3` or `2 + I`; no value is guessed), the precision in `evalf`
+digits, an exact form beside the number when SymPy has a short one (and
+`nsimplify`'s guess when asked, marked as one), `a + b i` for a complex
+value.  A value that is no number says why - the innermost piece that goes
+wrong is found by evaluating the node from the inside out: a division by
+zero, an argument outside a function's domain, an indeterminate form.  A
+table mode varies one symbol over a range or a list (at most 500 rows,
+stopped after a few seconds) and copies as CSV or TSV through the host
+app's clipboard when there is one.  Two queries, `evaluate` and `table`;
+mpmath through SymPy, nothing else.
 
 ## Open questions
 
