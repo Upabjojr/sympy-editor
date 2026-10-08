@@ -2901,11 +2901,11 @@ def test_pyodide_worker_interrupt_and_sessions(browser, tmp_path):
         _next_state(page, lambda: _pick(page, ".se-ops", "expand"))
         assert _wait(lambda: page.locator(".se-loading").is_hidden(), timeout=180)
         assert page.evaluate(f"{ed}.state.src") == str(big)
-        # the drawer (☰) lists the sessions - the first one so far - and the history of the current one
+        # the menu (☰) starts sessions; its Sessions window lists them - the first one so far - with the history of the current one
         assert page.locator(".se-drawer").is_hidden()
-        page.locator('[data-cmd="drawer"]').click()
-        assert _wait(lambda: page.locator(".se-drawer").is_visible())
-        assert page.locator(".se-session").count() == 2                # one session + the "new" row
+        sheet = _open_sheet(page, "sessions")
+        store_len = lambda: page.evaluate(f"{ed}._sessionStore.list.length")
+        assert sheet.locator(".se-session[data-id]").count() == 1
         assert _wait(lambda: page.locator(".se-step").count() >= 1, timeout=10)
         # the history is a sub-tab nested inside the current session's card, collapsed by default
         assert page.locator(".se-drawer-pane[data-pane=history]").is_hidden()
@@ -2914,7 +2914,9 @@ def test_pyodide_worker_interrupt_and_sessions(browser, tmp_path):
         assert page.locator(".se-session-current .se-drawer-pane[data-pane=history]").is_visible()
         page.locator('.se-session-current .se-subtab[data-tab="history"]').click()          # toggles
         assert page.locator(".se-drawer-pane[data-pane=history]").is_hidden()
-        # "New session…" offers an empty formula (default), a copy, and the examples
+        page.keyboard.press("Escape")                                  # back to the menu
+        assert _wait(lambda: page.locator(".se-drawer").is_visible())
+        # "New session…", at the top of the menu, offers an empty formula (default), a copy, and the examples
         page.locator(".se-session-new").click()
         picker = page.locator(".se-session-picker")
         assert picker.is_visible() and "se-choice-default" in picker.locator('.se-choice[data-start="empty"]').get_attribute("class")
@@ -2922,22 +2924,22 @@ def test_pyodide_worker_interrupt_and_sessions(browser, tmp_path):
         assert picker.locator(".se-choice", has_text="Quadratic formula").count() == 1
         # an example starts a session with that expression
         _next_state(page, lambda: picker.locator(".se-choice", has_text="Quadratic formula").click())
-        assert _wait(lambda: page.locator(".se-session").count() == 3, timeout=30)
+        assert _wait(lambda: store_len() == 2, timeout=30)
         assert page.evaluate(f"{ed}.state.src") == "Eq(x, (-b + sqrt(-4*a*c + b**2))/(2*a))"
-        page.keyboard.press("Escape")                                  # closes the drawer
-        assert page.locator(".se-drawer").is_hidden()
+        page.keyboard.press("Escape")                                  # closes the menu
+        assert _wait(lambda: page.locator(".se-drawer").is_hidden())
         # an empty session: the formula area is empty and the cursor is in the source line
         page.locator('[data-cmd="drawer"]').click()
         page.locator(".se-session-new").click()
         page.locator('.se-choice[data-start="empty"]').click()
-        assert _wait(lambda: page.locator(".se-session").count() == 4, timeout=30)
+        assert _wait(lambda: store_len() == 3, timeout=30)
         assert _wait(lambda: page.locator(".se-drawer").is_hidden() and "se-empty" in page.locator(".se-view").get_attribute("class"), timeout=10)
         assert page.evaluate("document.activeElement.className") == "se-inline se-inline-empty" and page.locator(".se-source").inner_text() == ""
         page.keyboard.type("x + 1")
         _next_state(page, lambda: page.keyboard.press("Enter"))
         assert _wait(lambda: page.evaluate("JSON.parse(localStorage.getItem('sympy-editor:sessions')).list.some(s => s.name === 'x + 1')"), timeout=10)
         # the history of this session has two steps (the placeholder, then x + 1); the first one can be jumped to
-        page.locator('[data-cmd="drawer"]').click()
+        _open_sheet(page, "sessions")
         page.locator('.se-session-current .se-subtab[data-tab="history"]').click()
         assert _wait(lambda: page.locator(".se-step").count() == 2 and "se-step-current" in page.locator(".se-step").nth(1).get_attribute("class"), timeout=10)
         assert "(2)" in page.locator('.se-session-current .se-subtab[data-tab="history"]').inner_text()
@@ -2946,18 +2948,17 @@ def test_pyodide_worker_interrupt_and_sessions(browser, tmp_path):
         assert _wait(lambda: step2.locator(".se-step-formulas .katex").count() == 2, timeout=10)
         assert step2.locator(".se-step-before .se-diff-removed").count() >= 1 and step2.locator(".se-step-after .se-diff-added").count() >= 1
         assert "0" in step2.locator(".se-step-before").inner_text() and "x+1" in step2.locator(".se-step-after").inner_text().replace(" ", "")
-        assert page.locator(".se-drawer [data-path]").count() == 0     # history formulas carry no live paths
+        assert page.locator(".se-sheet-view [data-path]").count() == 0     # history formulas carry no live paths
         assert page.locator(".se-step").first.locator(".se-step-formulas .katex").count() == 1   # the first step: just the formula
         _next_state(page, lambda: page.locator(".se-step").first.click())
         assert page.evaluate(f"{ed}.state.src") == "0" and page.evaluate(f"{ed}.state.can_redo")
-        # switching back to the first session: tapping its row (not only its Open button) opens it, and the drawer closes
+        # switching back to the first session: tapping its row (not only its Open button) opens it, and the window closes
         page.locator('.se-session[role="button"]', has_text=str(big)).first.locator(".se-session-row code").click()
-        assert _wait(lambda: page.evaluate(f"{ed}.state.src") == str(big) and page.locator(".se-drawer").is_hidden(), timeout=60)
-        page.locator('[data-cmd="drawer"]').click()
-        assert _wait(lambda: page.locator(".se-drawer").is_visible())
+        assert _wait(lambda: page.evaluate(f"{ed}.state.src") == str(big) and page.locator(".se-sheet-view").count() == 0, timeout=60)
+        sheet = _open_sheet(page, "sessions")
         assert page.locator(".se-session-current .se-session-row code").inner_text() == str(big)
-        page.locator(".se-drawer-close").click()
-        assert page.locator(".se-drawer").is_hidden()
+        sheet.locator(".se-history-close").click()
+        assert _wait(lambda: page.locator(".se-sheet-view").count() == 0 and page.locator(".se-drawer").is_hidden())
         assert errors == []
     finally:
         httpd.shutdown()
@@ -4857,25 +4858,37 @@ def test_a_page_opened_as_a_file_says_why_python_cannot_start(browser, tmp_path)
     assert "http.server" in said and "file system" in said, said    # what is wrong, and what to do
     page.close()
 
-def test_new_session_leads_the_list(browser, serve_expr):
-    """Starting one is as much what the drawer is opened for as picking an old
-    one out of the list, so it sits above the sessions rather than under them."""
+def test_new_session_leads_the_menu_and_the_list_has_a_window(browser, serve_expr):
+    """Starting a session is what the menu is opened for as often as picking
+    an old one: "New session…" heads the menu, and under it an entry opens
+    the list of sessions in a window of its own (saying how many there are);
+    a session picked there opens, and the window goes."""
     srv, doc = serve_expr(x + y, options={"sessions": True}, store=False)   # the browser keeps them here
     page = browser.new_page()
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.goto(srv.url)
-    # two sessions in the store, so there is a list for the row to lead
+    # two sessions in the store, so there is a list
     page.evaluate("""() => localStorage.setItem('sympy-editor:sessions', JSON.stringify(
-        {current: 'a', list: [{id: 'a', name: 'x + y', updated: 2}, {id: 'b', name: 'sin(x)', updated: 1}]}))""")
+        {current: 'a', list: [{id: 'a', name: 'x + y', updated: 2}, {id: 'b', name: 'sin(x)', updated: 1,
+                               state: {history: ["sin(Symbol('x'))"], index: 0}}]}))""")
     page.reload()
     page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
     page.locator('[data-cmd="drawer"]').click()
-    page.wait_for_selector(".se-session-add", state="visible", timeout=10000)
-    rows = page.evaluate("(() => [...document.querySelectorAll('.se-sessions > .se-session')].map(r => r.className))()")
-    assert len(rows) >= 3, rows                       # the new-session row, the two sessions (and the page's own)
-    assert "se-session-add" in rows[0], rows          # leading them, not trailing
-    assert all("se-session-add" not in r for r in rows[1:]), rows
+    page.wait_for_selector(".se-drawer .se-session-new", state="visible", timeout=10000)
+    order = page.evaluate("(() => [...document.querySelector('.se-drawer').children].map(c => c.className))()")
+    assert "se-drawer-new" in order[1], order                          # right under the head
+    entries = page.evaluate("(() => [...document.querySelectorAll('.se-drawer-entry')].map(e => e.dataset.sheet))()")
+    assert entries[0] == "sessions", entries                           # the list's entry first, under it
+    assert page.locator(".se-drawer .se-session[data-id]").count() == 0      # no list in the menu itself
+    entry = page.locator('.se-drawer-entry[data-sheet="sessions"]')
+    assert _wait(lambda: (entry.get_attribute("data-count") or "").endswith(" sessions"))
+    sheet = _open_sheet(page, "sessions")
+    n = sheet.locator(".se-session[data-id]").count()
+    assert n >= 2 and entry.get_attribute("data-count") == f"{n} sessions"   # (the page's own may be one more)
+    sheet.locator('.se-session[role="button"]', has_text="sin(x)").locator(".se-session-row code").click()
+    assert _wait(lambda: page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.src") == "sin(x)")
+    assert _wait(lambda: page.locator(".se-sheet-view").count() == 0)      # picked: the window goes
     assert errors == []
     page.close()
 
@@ -4922,7 +4935,7 @@ def test_the_add_ons_have_a_window_of_their_own(browser, serve_expr):
         entry = page.locator('.se-drawer-entry[data-sheet="addons"]')
         entry.wait_for(state="visible", timeout=10000)
         panes = page.evaluate("(() => [...document.querySelector('.se-drawer').children].map(c => c.className))()")
-        assert "se-drawer-nav" in panes[1], panes         # right under the head, above the sessions
+        assert "se-drawer-new" in panes[1] and "se-drawer-nav" in panes[2], panes   # under "New session…"
         assert entry.get_attribute("data-count") == "0 of 1 on"
         assert page.locator(".se-drawer .se-addon-row").count() == 0          # no switch in the drawer itself
         entry.click()
@@ -4982,9 +4995,9 @@ def test_the_new_session_chooser_survives_a_refresh_of_the_list(browser, serve_e
     page.evaluate(ed + "._fillSessions()")                          # what a background refresh does
     picker = page.locator(".se-session-picker")
     assert picker.count() == 1 and picker.is_visible()
-    sessions = page.locator(".se-session:not(.se-session-add)").count()
+    sessions = page.evaluate(ed + "._sessionStore.list.length")
     _next_state(page, lambda: picker.locator(".se-choice", has_text="Quadratic formula").click())
-    assert _wait(lambda: page.locator(".se-session:not(.se-session-add)").count() == sessions + 1)
+    assert _wait(lambda: page.evaluate(ed + "._sessionStore.list.length") == sessions + 1)
     assert page.evaluate(ed + ".state.src") == "Eq(x, (-b + sqrt(-4*a*c + b**2))/(2*a))"
     assert page.locator(".se-session-picker").count() == 0            # chosen: the chooser is gone
     assert page.errors == []
@@ -5030,7 +5043,7 @@ def test_a_session_can_be_given_a_name(browser, tmp_path):
     page.goto(path.as_uri())
     page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
     assert _wait(lambda: page.locator(".se-loading").is_hidden(), timeout=180)   # Python in the page, add-ons on
-    page.locator('[data-cmd="drawer"]').click()
+    _open_sheet(page, "sessions")
     row = page.locator(".se-session:not(.se-session-add)").first   # "New session…" leads the list now
     assert _wait(lambda: row.locator(".se-session-row > code").inner_text() == "x + y")
 
@@ -5042,16 +5055,16 @@ def test_a_session_can_be_given_a_name(browser, tmp_path):
     assert _wait(lambda: row.locator(".se-session-row > code").inner_text() == "Simplifying the Hamiltonian")
 
     # the formula changes; the name the user gave stays
-    page.keyboard.press("Escape")                            # close the drawer (its backdrop covers the tools)
-    assert _wait(lambda: page.locator(".se-drawer").is_hidden())
+    page.locator(".se-sheet-view .se-history-close").click()     # close the window (it covers the tools)
+    assert _wait(lambda: page.locator(".se-sheet-view").count() == 0 and page.locator(".se-drawer").is_hidden())
     _next_state(page, lambda: page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.send({action: 'set', src: '2*x + y'})"))
     assert page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.state.src") == "2*x + y"
-    page.locator('[data-cmd="drawer"]').click()
+    _open_sheet(page, "sessions")
     assert _wait(lambda: page.locator(".se-session:not(.se-session-add)").first.locator(".se-session-row > code").inner_text() == "Simplifying the Hamiltonian")
     # it survives a reload, like the sessions themselves
     page.reload()
     page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
-    page.locator('[data-cmd="drawer"]').click()
+    _open_sheet(page, "sessions")
     assert _wait(lambda: page.locator(".se-session:not(.se-session-add)").first.locator(".se-session-row > code").inner_text() == "Simplifying the Hamiltonian")
 
     # emptying the name hands the session back to its formula
@@ -5161,7 +5174,7 @@ def test_naming_a_session_owns_the_row_until_it_is_done(browser, tmp_path):
     page.goto(path.as_uri())
     page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
     assert _wait(lambda: page.locator(".se-loading").is_hidden(), timeout=180)   # Python in the page, add-ons on
-    page.locator('[data-cmd="drawer"]').click()
+    _open_sheet(page, "sessions")
     row = page.locator(".se-session[data-id]").last               # not the current session
     assert _wait(lambda: row.locator("code").first.inner_text() == "an older one")
     assert row.locator("[data-delete]").is_enabled()              # deleting needs a second session
@@ -6045,8 +6058,8 @@ def test_the_sessions_are_kept_by_the_server_not_the_browser(browser, tmp_path):
         fresh.goto(srv.url)
         fresh.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
         assert fresh.evaluate("localStorage.getItem('sympy-editor:sessions')") is None
-        fresh.locator('[data-cmd="drawer"]').click()
-        fresh.wait_for_selector(".se-session-add", state="visible", timeout=10000)
+        _open_sheet(fresh, "sessions")
+        fresh.wait_for_selector(".se-sheet-view .se-session[data-id]", state="visible", timeout=10000)
         names = fresh.locator(".se-sessions > .se-session code").all_inner_texts()
         assert "kept by the server" in names and "and this one too" in names, names
         context.close()

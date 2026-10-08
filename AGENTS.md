@@ -472,9 +472,14 @@ Two conventions between printer, document and front end:
   behind a computation it was thrown away with it, and in a Pyodide page it
   was what restarted Python, the loading overlay coming up by itself)
   and switches with `backend.openDocument(state)` (Pyodide: a new document
-  id in the shared runtime).  All of it lives in a lateral drawer
-  (`.se-drawer`, `position: fixed`, the ≡ toolbar button, Esc / backdrop /
-  × close it), not in the widget's own layout; the history is a sub-tab
+  id in the shared runtime).  The ≡ menu (`.se-drawer`, `position:
+  fixed`; Esc / backdrop / × close it) starts it: **New session…**
+  (`newSessionRow`, its chooser opening under it) heads the menu, and the
+  **Sessions** entry (`data-count` "3 sessions") opens the list in a window
+  of its own (`showSheet("sessions")`, which brings the list up to date as
+  opening the menu does; a session picked there opens and the window goes,
+  `_openFromList`) - the owner's call: the list had taken over the menu.
+  Not in the widget's own layout; the history is a sub-tab
   (`.se-subtabs`, `showDrawerTab("history")` toggles `.se-drawer-pane`)
   nested in the current session's card, so the hierarchy session ⊃ history
   is visible.  `history_labels()` also carries `steps` (annotated LaTeX +

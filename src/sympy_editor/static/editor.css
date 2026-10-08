@@ -1127,6 +1127,16 @@
 .se-session button:disabled { opacity: 0.4; cursor: default; }
 .se-session button[data-armed] { border-color: var(--se-error); color: var(--se-error); }
 .se-session-add { border-top: 1px dashed var(--se-border); padding-top: 0.25rem; margin-top: 0.3rem; }
+/* "New session…" heading the menu: a full-width button of its own */
+.se-drawer-new.se-session-add { border-top: 0; margin: 0.2rem 0 0.4rem; padding: 0; }
+.se-drawer-new .se-session-new {
+  width: 100%; font: inherit; font-size: 14px; font-weight: 600; padding: 0.6rem 0.8rem; text-align: left;
+  border: 1px solid rgba(var(--se-accent), 0.45); border-radius: 0.4rem;
+  background: rgba(var(--se-accent), 0.08); color: inherit; cursor: pointer;
+}
+.se-drawer-new .se-session-new:disabled { opacity: 0.5; cursor: default; }
+@media (hover: hover) { .se-drawer-new .se-session-new:hover:not(:disabled) { background: rgba(var(--se-accent), 0.16); } }
+@media (any-pointer: coarse) { .se-drawer-new .se-session-new { font-size: 15px; padding: 0.75rem 0.8rem; } }
 
 /* The row just under the formula: the four arrows at the left, the rows and
  * columns of a matrix after them while the selection is in one, and the
