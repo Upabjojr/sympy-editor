@@ -2,6 +2,15 @@
 
 ## 0.1.3 — unreleased
 
+* **`sympy-editor`, the editor as a program.** `pip install sympy-editor`
+  now brings a command - `sympy-editor`, or `python -m sympy_editor` - that
+  starts the local server and opens the editor as the apps have it:
+  sessions kept on disk (the last one reopens at the next start), zoom and
+  add-on switches remembered, every installed add-on offered, no *Done*
+  button, and the app's mark beside the title and on the tab; it runs
+  until Ctrl+C.  A formula can be given to start from;
+  `--port`, `--host`, `--no-browser`, `--store`, `--addons-dir`.
+
 * **Feynman diagrams drawn as on paper.** The Feynman add-on's drawings
   were laid out in a row: the self-energy's photon lay on its electron
   line, a loop was invisible. Each vertex is now placed by the lines

@@ -160,6 +160,22 @@ from sympy_editor import serve
 new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 ```
 
+### The editor as a program
+
+```sh
+sympy-editor                          # or: python -m sympy_editor
+sympy-editor "sin(x)**2 + cos(x)**2"  # start from a formula
+sympy-editor --no-browser --port 8000
+```
+
+The editor the apps are, backed by this Python: sessions kept on disk with
+their history (the last one reopens at the next start), the zoom and the
+add-on switches remembered, every installed add-on in **≡ → Add-ons**
+(`--addons-dir DIR` offers the add-on folders under `DIR` too).  It listens
+on this computer only; `--host 0.0.0.0` exposes it - and this Python, since
+typed input is evaluated - to the network.  `sympy-editor --help` lists the
+rest.
+
 ### Editing
 
 | Action | Mouse | Keyboard |

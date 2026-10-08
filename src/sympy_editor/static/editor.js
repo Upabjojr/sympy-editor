@@ -47,7 +47,8 @@ var SympyEditor = (function () {
     unevaluated: false,  // the "unevaluated" toggle starts on: transformations build Determinant(M), Integral(f, x)... rather than computing
     rememberAddons: false, // add-ons are switched on and off for the whole editor, not per session, and the
                            // switches are kept between page loads (the apps do; see Keep); every add-on is on
-                           // until switched off
+                           // until switched off, but for an experimental one, off until switched on
+    reopenLastSession: false, // with sessions on the server: the page's expression is a stand-in, the last session reopens (the sympy-editor program)
     animate: true,       // animate a change: the old parts in red turn into the new ones in green
     animateDuration: 1600 // ms: a quarter to show what goes (red), the rest to move it and fade the new in (green)
   };
@@ -8587,8 +8588,11 @@ var SympyEditor = (function () {
     // The server holds one document, which a session replaces ("load").
     backend.openDocument = loadThrough(backend.send);
     // It was handed in by whoever called serve(expr): the sessions keep it,
-    // they do not open the last one over it (see _initSessions).
-    backend.givenDocument = true;
+    // they do not open the last one over it (see _initSessions) - unless the
+    // page says its expression is a stand-in (reopenLastSession: the
+    // `sympy-editor` program started with no formula, which reopens the
+    // last session as the apps do).
+    backend.givenDocument = !(cfg.options && cfg.options.reopenLastSession);
     return backend;
   }
 

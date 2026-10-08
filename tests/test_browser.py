@@ -6959,3 +6959,38 @@ def test_an_addon_is_given_the_range_as_the_editor_sends_it(browser, serve_expr)
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_the_program_reopens_the_last_session_on_the_next_start(browser, tmp_path):
+    """``sympy-editor`` started with no formula is the editor the apps are:
+    the work of the last run comes back at the next start, from the
+    sessions kept on disk - its page's own expression is only a stand-in."""
+    from sympy_editor.__main__ import build_parser, make_server
+
+    def run():
+        srv = make_server(build_parser().parse_args(["--no-browser", "--store", str(tmp_path)]))
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        return srv
+    srv = run()
+    try:
+        page = _open(browser, srv.url)
+        assert _wait(lambda: page.evaluate(f"{_ED}._sessionsReady === true"), timeout=10)
+        _next_state(page, lambda: page.evaluate(f"{_ED}.send({{action: 'set', src: 'x**3 - 2*x'}})"))
+        page.evaluate(f"{_ED}.flush()")
+        assert _wait_for(lambda: "x**3 - 2*x" in (tmp_path / "sessions.json").read_text(encoding="utf-8")
+                         if (tmp_path / "sessions.json").is_file() else False, timeout=10)
+        page.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+    srv = run()                                               # the next start
+    try:
+        page = _open(browser, srv.url)
+        assert _wait(lambda: page.evaluate(f"{_ED}.state.src") == "x**3 - 2*x", timeout=15)
+        assert page.evaluate(f"{_ED}._sessionStore.list.length") == 1   # reopened, not a second session
+        assert page.locator('.se-toolbar [data-cmd="finish"]').count() == 0
+        assert page.errors == []
+        page.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()

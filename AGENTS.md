@@ -1206,6 +1206,16 @@ the mobile bundles carry them as folders beside the app's Python (above).  Rebui
 are process-wide registries: activation adds, nothing removes; kinds are
 not.
 
+## The program
+
+`sympy-editor` (`[project.scripts]`, `src/sympy_editor/__main__.py`; also
+`python -m sympy_editor`) is the local server with the apps' options
+(`APP_OPTIONS`: sessions, rememberZoom, rememberAddons, no finishButton),
+a Document whose catalogue is every installed add-on, and - with no formula
+given - `reopenLastSession`, which tells the http backend its document is a
+stand-in (`givenDocument` false), so the last session reopens as in the
+apps.  `make_server(args)` is what the tests drive.
+
 ## Backends at a glance
 
 - Jupyter widget (`edit()`, `SympyEditorWidget`): the kernel's SymPy through

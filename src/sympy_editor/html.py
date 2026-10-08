@@ -99,6 +99,18 @@ def read_static(name: str) -> str:
     return (STATIC_DIR / name).read_text(encoding="utf-8")
 
 
+def _b64(text: str) -> str:
+    import base64
+    return base64.b64encode(text.encode("utf-8")).decode("ascii")
+
+
+def app_logo() -> str:
+    """SymPy Editor's mark (``static/icon.svg``, the apps' launcher icon) as
+    inline SVG, for the corner beside a page's title - what the
+    ``sympy-editor`` program shows, as the apps do."""
+    return read_static("icon.svg").split("?>", 1)[-1].strip()
+
+
 def python_sources() -> Dict[str, str]:
     """Sources of the core modules, for execution inside Pyodide."""
     pkg = Path(__file__).parent
@@ -275,6 +287,10 @@ def render_page(config: Dict[str, Any], title: str = "SymPy Editor", head: str =
     own icon there, having no title bar to carry it)."""
     name = _html.escape(str(title))
     element_id = element_id or "sympy-editor-" + uuid.uuid4().hex[:12]
+    if logo and 'rel="icon"' not in head:
+        # the mark beside the title is the tab's icon too (a page that brings
+        # icons of its own - the web app's - keeps them)
+        head = f'<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,{_b64(logo)}">\n' + head
     # aria-hidden: the heading beside it already says the name, and the mark's
     # own <title>/<desc> - the note that lets us use SymPy's logo - would
     # otherwise be read out as part of the heading.

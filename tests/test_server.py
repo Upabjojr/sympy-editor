@@ -1,4 +1,5 @@
 import json
+import os
 import threading
 from pathlib import Path
 from contextlib import contextmanager
@@ -461,3 +462,56 @@ def test_a_relative_state_home_is_ignored(monkeypatch):
     from sympy_editor.store import default_store
     monkeypatch.setenv("XDG_STATE_HOME", "relative/dir")
     assert default_store().is_absolute()
+
+
+def test_the_sympy_editor_program_serves_the_editor_as_the_apps_have_it(tmp_path):
+    """``sympy-editor`` (``python -m sympy_editor``): the local server with
+    the apps' options - sessions kept on disk, zoom and add-on switches
+    remembered, no Done button - every installed add-on in its catalogue,
+    and, started with no formula, the last session reopened rather than a
+    new one made for a stand-in."""
+    import urllib.request
+    from sympy_editor.__main__ import build_parser, make_server
+    args = build_parser().parse_args(["--no-browser", "--port", "0", "--store", str(tmp_path)])
+    srv = make_server(args)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        page = urllib.request.urlopen(srv.url, timeout=10).read().decode("utf-8")
+        for option in ('"sessions": true', '"rememberAddons": true', '"rememberZoom": true',
+                       '"finishButton": false', '"reopenLastSession": true'):
+            assert option in page, option
+        # the app's mark beside the title, and as the tab's icon
+        assert '<span class="page-logo" aria-hidden="true"><svg' in page
+        assert '<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,' in page
+        assert srv.store == tmp_path
+        from sympy_editor.addons import installed
+        assert sorted(a["name"] for a in srv.document.available_addons()) == sorted(installed())
+    finally:
+        srv.shutdown()
+        srv.server_close()
+    # a formula given: that formula, and it is the work (no reopening over it)
+    args = build_parser().parse_args(["--no-browser", "--no-store", "sin(x)**2 + cos(x)**2"])
+    srv = make_server(args)
+    try:
+        assert srv.document.snapshot()["src"] == "sin(x)**2 + cos(x)**2" and srv.store is None
+        assert srv._page_args[0]["reopenLastSession"] is False
+    finally:
+        srv.server_close()
+
+
+def test_python_m_sympy_editor_answers_version_and_help():
+    import subprocess
+    import sys
+    from sympy_editor import __version__
+    out = subprocess.run([sys.executable, "-m", "sympy_editor", "--version"], capture_output=True, text=True, timeout=60,
+                         env=dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[1] / "src")))
+    assert out.returncode == 0 and out.stdout.strip() == f"sympy-editor {__version__}"
+
+
+def test_the_package_s_mark_is_the_apps_icon():
+    """static/icon.svg ships the apps' launcher icon (mobile/icon/icon.svg,
+    which make_icons.py draws every size from) with the package, for the
+    program's page; the two must not drift apart."""
+    root = Path(__file__).resolve().parents[1]
+    assert (root / "src/sympy_editor/static/icon.svg").read_text(encoding="utf-8") == \
+        (root / "mobile/icon/icon.svg").read_text(encoding="utf-8")
