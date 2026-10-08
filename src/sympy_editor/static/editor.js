@@ -173,7 +173,7 @@ var SympyEditor = (function () {
     "</ul></section>",
     "<section><h3>Applying functions</h3><ul>",
     "<li>The four menus at the foot of the tools are one kind of box: it lists everything it offers when it takes the focus, narrows the list as you type, and \u2191/\u2193 + <kbd>Enter</kbd> (or a click) pick. The first group holds the <b>actions</b>: <b>Transform \u25be</b> for the general operations - Simplify, Expand, Factor\u2026 and <i>Differentiate\u2026</i>, <i>Integrate\u2026</i>, <i>Solve for\u2026</i>, <i>Substitute\u2026</i>, which ask for their variable first -, and a second menu with the operations for the selection's type (Matrix, Integral, Equation\u2026). Picking one applies it at once, to the selection or, with nothing selected, to the whole expression.</li>",
-    "<li><b>Add-ons</b>, at the top of what <b>\u2261</b> opens, is a window of its own: one card per add-on, with what it does, its switch and, when it is on, its <b>?</b>. It switches on or off the add-ons installed beside the editor \u2014 a panel under the formula, tools, node types from other packages \u2014 without restarting anything; what an add-on kept waits for it to come back. In the apps every add-on is on until switched off, and a switch holds for every session and is remembered between launches. (A read-only editor has no \u2261, and there the switches keep a button of their own on the strip.)</li>",
+    "<li><b>Add-ons</b>, at the top of what <b>\u2261</b> opens, is a window of its own: one card per add-on, with what it does, its switch and, when it is on, its <b>?</b>; the box at its top searches them. Back (or <kbd>Esc</kbd>) in the Add-ons or File window goes back to the menu, the \u00d7 closes both. It switches on or off the add-ons installed beside the editor \u2014 a panel under the formula, tools, node types from other packages \u2014 without restarting anything; what an add-on kept waits for it to come back. In the apps every add-on is on until switched off, and a switch holds for every session and is remembered between launches. (A read-only editor has no \u2261, and there the switches keep a button of their own on the strip.)</li>",
     "<li>In a <b>matrix</b> or an <b>array</b> the four arrows move as it is drawn: <kbd>\u2190</kbd>/<kbd>\u2192</kbd> along the row, <kbd>\u2191</kbd>/<kbd>\u2193</kbd> between the rows \u2014 for the selection and for the caret alike. At the edge the usual meaning takes over: <kbd>\u2191</kbd> in the top row selects the matrix itself (again, its own parent), <kbd>\u2190</kbd>/<kbd>\u2192</kbd> step out of it. An array of any rank works the same way, because the rule follows the drawing: a rank-3 array is a row of matrices, so <kbd>\u2192</kbd> at the right edge of one block enters the next on the same line.</li>",
     "<li>In a <b>matrix</b> (the matrix, or anything in one of its entries) the row under the formula adds, beside the arrows, <b>+ row</b>, <b>+ col</b>, <b>\u2212 row</b>, <b>\u2212 col</b>: a new row or column of empty slots after the selected one (after the last, for the matrix itself), or the selected one taken away. The grip at the matrix\u2019s bottom-right corner <b>reshapes</b> it: the same entries laid out another way (SymPy\u2019s reshape, in reading order), so it snaps to the shapes that hold them all \u2014 12 entries go 1\u00d712, 2\u00d76, 3\u00d74, 4\u00d73, 6\u00d72, 12\u00d71 and nowhere else. Nothing is added or lost; the outline shows the shape it will take. To grow or shrink the matrix, use + row / + col / \u2212 row / \u2212 col.</li>",
     "<li>The second group is the <b>library</b>: <b>Methods \u25be</b> lists everything the selected object's class can do \u2014 .det(), .T, .diff()\u2026 \u2014 one pick calls it. A Lambda is itself a function: <b>( ) apply</b> evaluates it at the arguments you give.</li>",
@@ -2742,6 +2742,7 @@ var SympyEditor = (function () {
           self.addonsMenu.appendChild(row);
         })(available[i]);
       }
+      if (this.sheetView) this._filterAddons();       // a snapshot refilled the list under the search
     }
 
     toggleAddonsMenu() {
@@ -6998,7 +6999,7 @@ var SympyEditor = (function () {
     back() {
       if (this.closed) return false;
       if (this.helpView) { this.closeHelp(); return true; }
-      if (this.sheetView) { this.closeSheet(); return true; }
+      if (this.sheetView) { this.sheetBack(); return true; }
       if (this.historyView) { this.closeHistory(); return true; }
       if (this.drawer && !this.drawer.hidden) { this.closeDrawer(); return true; }
       for (var i = this._addons.length - 1; i >= 0; i--) {
@@ -7621,7 +7622,8 @@ var SympyEditor = (function () {
       this._helpTitle = title || "";
       var close = h("button", { type: "button", class: "se-history-close", title: "Close (Esc)", "aria-label": "Close" }, ["\u00d7"]);
       var head = h("div", { class: "se-history-head" }, [
-        h("span", { class: "se-history-title" }, [heading]), close]);
+        h("span", { class: "se-history-title" }, [heading]),
+        h("span", { class: "se-head-group se-head-close" }, [close])]);
       var body = h("div", { class: "se-help-body" });
       // an add-on's guide in the columns of the editor's own, not across the whole width
       body.innerHTML = html ? (html.indexOf("se-help-cols") >= 0 ? html : '<div class="se-help-cols">' + html + "</div>") : HELP_HTML;
@@ -7648,14 +7650,16 @@ var SympyEditor = (function () {
       var self = this;
       var body = kind === "addons" ? this.addonsMenu : kind === "files" ? this.filesBody : null;
       if (!body) return;
-      var opener = this._opener();
+      var fromDrawer = !!(this.drawer && !this.drawer.hidden);
+      var opener = fromDrawer ? this.buttons.drawer : this._opener();
       this.closeSheet();
       this.closeDrawer();
       this.closeHelp();
       this.closeHistory();
       var title = kind === "addons" ? "Add-ons" : "File";
       var close = h("button", { type: "button", class: "se-history-close", title: "Close (Esc)", "aria-label": "Close" }, ["\u00d7"]);
-      var head = h("div", { class: "se-history-head" }, [h("span", { class: "se-history-title" }, [title]), close]);
+      var head = h("div", { class: "se-history-head" }, [h("span", { class: "se-history-title" }, [title]),
+        h("span", { class: "se-head-group se-head-close" }, [close])]);
       var intro = kind === "addons"
         ? "Each add-on brings a panel under the formula, tools on the strip, or both. A switch holds for every session."
         : "A formula is kept in a .sympy file with its whole history; the history can also be written out on its own.";
@@ -7664,14 +7668,31 @@ var SympyEditor = (function () {
         var shares = body.querySelectorAll(".se-file-share");
         for (var sh = 0; sh < shares.length; sh++) shares[sh].hidden = !sharing;
       }
-      var inner = h("div", { class: "se-sheet-body" }, [h("p", { class: "se-sheet-intro" }, [intro]), body]);
+      var parts = [h("p", { class: "se-sheet-intro" }, [intro])];
+      if (kind === "addons") {
+        // A search box over the list: by name, by what it does, by what it needs.
+        var search = h("input", { type: "search", class: "se-addon-search", placeholder: "Search the add-ons",
+                                  "aria-label": "Search the add-ons", title: "Search the add-ons by name or by what they do" });
+        noAutoCaps(search);
+        search.value = this._addonFilter || "";
+        search.addEventListener("input", function () { self._addonFilter = search.value; self._filterAddons(); });
+        search.addEventListener("keydown", function (ev) {
+          if (ev.key === "Escape" && search.value) { ev.preventDefault(); ev.stopPropagation(); search.value = ""; self._addonFilter = ""; self._filterAddons(); }
+        });
+        parts.push(h("div", { class: "se-addon-search-row" }, [search]));
+        this._addonSearch = search;
+      }
+      parts.push(body);
+      var inner = h("div", { class: "se-sheet-body" }, parts);
       var view = h("div", { class: "se-history-view se-sheet-view", "data-sheet": kind, role: "dialog", "aria-modal": "true", "aria-label": title }, [head, inner]);
       body.hidden = false;
       close.addEventListener("click", function () { self.closeSheet(); });
       this._sheetOpener = opener;
       this._sheetKey = function (ev) {
         if (self.helpView) return;                  // an add-on's guide over it: Esc is the guide's
-        if (ev.key === "Escape") { ev.preventDefault(); self.closeSheet(); }
+        // (stopped here: the menu it reopens listens for Esc on the document,
+        // and would take this same press as its own and close at once)
+        if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); self.sheetBack(); }
         else trapTab(view, ev);
       };
       view.addEventListener("keydown", this._sheetKey);
@@ -7683,12 +7704,47 @@ var SympyEditor = (function () {
       }
       this.sheetView = view;
       this._sheetBody = body;
+      // Opened from the menu: Back (and Esc) goes back to the menu, as a
+      // phone's Back goes back a level; the \u00d7 closes both.
+      this._sheetFromDrawer = fromDrawer;
       this.root.appendChild(view);
+      if (kind === "addons") this._filterAddons();
       var first = body.querySelector("input, button");
       (first || close).focus({ preventScroll: true });
     }
 
-    closeSheet() {
+    /** Back from a menu window: to the menu it was opened from, else out. */
+    sheetBack() {
+      var toMenu = this._sheetFromDrawer;
+      this.closeSheet(!toMenu);
+      if (toMenu) {
+        this.openDrawer();
+        this._drawerOpener = this.buttons.drawer || null;   // closing the menu then goes back to its button
+      }
+    }
+
+    /** Show the add-ons the search box names: by label, description, what
+     *  they need (case and accents aside); a word for none. */
+    _filterAddons() {
+      if (!this.addonsMenu) return;
+      var q = (this._addonFilter || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      var rows = this.addonsMenu.querySelectorAll(".se-addon-row"), shown = 0;
+      for (var i = 0; i < rows.length; i++) {
+        var text = rows[i].textContent.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        var hit = !q || q.split(/\s+/).every(function (w) { return text.indexOf(w) >= 0; });
+        rows[i].hidden = !hit;
+        if (hit) shown++;
+      }
+      var none = this.addonsMenu.querySelector(".se-addon-none");
+      if (!none) {
+        none = h("p", { class: "se-addon-none", hidden: "" });
+        this.addonsMenu.appendChild(none);
+      }
+      none.textContent = rows.length && !shown ? "No add-on matches \u201c" + this._addonFilter.trim() + "\u201d." : "";
+      none.hidden = !(rows.length && !shown);
+    }
+
+    closeSheet(refocus) {
       if (!this.sheetView) return;
       if (this._sheetKey) { document.removeEventListener("keydown", this._sheetKey); this._sheetKey = null; }
       if (this._sheetClick && this._sheetBody) { this._sheetBody.removeEventListener("click", this._sheetClick); this._sheetClick = null; }
@@ -7699,7 +7755,8 @@ var SympyEditor = (function () {
       this._sheetBody = null;
       var back = this._sheetOpener;
       this._sheetOpener = null;
-      this._refocus(back);
+      this._addonSearch = null;
+      if (refocus !== false) this._refocus(back);
     }
 
     closeHelp() {

@@ -2,7 +2,9 @@
 
 ## 0.1.3 — unreleased
 
-* **Add-ons and File have windows of their own.** The ≡ menu holds two
+* **Add-ons and File have windows of their own.** The Add-ons window has
+  a search box; Back (Android's, or Esc) in either window returns to the
+  menu, and their × - the guide's too - sits right at the edge. The ≡ menu holds two
   entries, **Add-ons** and **File**, each opening a window over the editor:
   one card per add-on with what it does, its version, what it needs, its
   switch and its guide; and the file actions, where everything written out -

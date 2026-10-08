@@ -888,7 +888,15 @@ Two conventions between printer, document and front end:
   of its own over the editor - `showSheet(kind)` / `closeSheet()`, dressed
   as the guide (`.se-history-view.se-sheet-view[data-sheet]`), a dialog
   like the others (`trapTab`, `_opener`/`_refocus`, Esc, Back).  The window
-  borrows the same elements as before - `this.addonsMenu` (rows built by
+  `.se-addon-search` filters the add-on cards (`_filterAddons`, every word
+  in the card's text, accents aside; kept across refills).  The windows'
+  ×, like the guide's, sits in the header's corner group
+  (`.se-head-group.se-head-close`): loose in the header it stood off the
+  right edge by the room the header keeps for that group.  Back and Esc in
+  a window opened from the menu go back to the menu (`sheetBack`; Esc is
+  stopped there, or the reopened menu would close on the same press); the
+  × closes both.
+  The window borrows the same elements as before - `this.addonsMenu` (rows built by
   `_fillAddonsMenu`: switch, name, version, description from the add-on's
   `addon.json` through `addon_manifest`, what it needs, and its "?" when it
   is on) and `this.filesBody` (the file actions; a chosen one closes the
