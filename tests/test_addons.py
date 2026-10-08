@@ -498,3 +498,24 @@ def test_an_addon_written_in_a_script_embeds_no_file_of_its_neighbours(tmp_path,
         assert "hunter2" not in page
     finally:
         sys.modules.pop("lone_addon", None)
+
+
+def test_an_experimental_add_on_is_said_so_in_the_catalogue():
+    """``"experimental": true`` in an add-on's manifest - or an
+    ``experimental = True`` attribute - reaches the Add-ons window through
+    ``available_addons``, which puts the badge on its card."""
+    from sympy import Symbol
+    from sympy_editor import Document
+    from sympy_editor.addons import Addon
+
+    class New(Addon):
+        name = "newone"
+        label = "A new one"
+        experimental = True
+
+    class Old(Addon):
+        name = "oldone"
+        label = "An old one"
+    doc = Document(Symbol("x"), available=[New(), Old()])
+    flags = {a["name"]: a.get("experimental", False) for a in doc.available_addons()}
+    assert flags == {"newone": True, "oldone": False}

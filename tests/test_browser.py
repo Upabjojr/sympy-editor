@@ -5526,6 +5526,7 @@ def test_the_add_ons_window_searches_and_back_returns_to_the_menu(browser):
     class Other(Addon):
         name = "otherthing"
         label = "Another thing"
+        experimental = True
     doc = Document(x + y, available=[a1, Other()])
     srv = EditorServer(doc, port=0)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -5536,6 +5537,9 @@ def test_the_add_ons_window_searches_and_back_returns_to_the_menu(browser):
         sheet = _open_sheet(page, "addons")
         rows = sheet.locator(".se-addon-row")
         assert rows.count() == 2
+        # one is experimental, and its card says so
+        assert sheet.locator(".se-addon-badge").count() == 1
+        assert "Another thing" in sheet.locator(".se-addon-row", has=page.locator(".se-addon-badge")).inner_text()
         search = sheet.locator(".se-addon-search")
         assert search.is_visible()
         search.fill("demo")

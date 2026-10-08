@@ -252,6 +252,9 @@ sympy_editor_tree/            the folder: a checkout of the add-on's repository
 
 The manifest's optional `"bundle": false` marks a folder the apps must not
 ship (the template is one: an example to copy).
+An optional `"experimental": true` marks an add-on not yet checked: the
+Add-ons window shows an *Experimental* badge on its card (it is on by
+default like any other).
 
 `sympy_editor.addons.scan_addons(directory)` reads every such folder under a
 directory, puts the folder on `sys.path` and returns the manifests by name;

@@ -894,6 +894,9 @@ Two conventions between printer, document and front end:
   of its own over the editor - `showSheet(kind)` / `closeSheet()`, dressed
   as the guide (`.se-history-view.se-sheet-view[data-sheet]`), a dialog
   like the others (`trapTab`, `_opener`/`_refocus`, Esc, Back).  The window
+  An add-on's `addon.json` (or its object) may say `"experimental": true`:
+  the card carries an *Experimental* badge (`.se-addon-badge`) - new, not
+  yet checked by the owner; it is still on by default like any other.
   `.se-addon-search` filters the add-on cards (`_filterAddons`, every word
   in the card's text, accents aside; kept across refills).  The windows'
   ×, like the guide's, sits in the header's corner group

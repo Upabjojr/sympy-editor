@@ -56,7 +56,8 @@ ENTRY_POINT_GROUP = "sympy_editor.addons"
 #: An add-on *folder* - what a checkout of an add-on's repository is, and
 #: what the apps bundle one as - carries this manifest beside the Python
 #: package: ``{"name", "label", "module", "version", "requires": [...],
-#: "description"}``.  :func:`scan_addons` reads a directory of such folders.
+#: "description"[, "bundle": false][, "experimental": true]}``.
+#: :func:`scan_addons` reads a directory of such folders.
 MANIFEST = "addon.json"
 #: Directories of add-on folders, ``os.pathsep``-separated, that count as
 #: installed (the apps point it at the folders they bundle).
@@ -324,6 +325,8 @@ def addon_manifest(addon: "Addon") -> Dict[str, Any]:
         value = getattr(addon, key, None)
         if isinstance(value, str) and value:
             out[key] = value
+    if getattr(addon, "experimental", None) is True:
+        out["experimental"] = True
     return out
 
 

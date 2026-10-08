@@ -1268,6 +1268,8 @@ class Document:
                 entry["description"] = str(info["description"])
             if info.get("version"):
                 entry["version"] = str(info["version"])
+            if info.get("experimental") is True:
+                entry["experimental"] = True
             out.append(entry)
         return out
 
