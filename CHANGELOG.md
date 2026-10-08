@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.3 — unreleased
+## 0.1.3 — October 2026
 
 * **`sympy-editor`, the editor as a program.** `pip install sympy-editor`
   now brings a command - `sympy-editor`, or `python -m sympy_editor` - that
