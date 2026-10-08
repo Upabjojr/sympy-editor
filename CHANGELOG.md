@@ -2,6 +2,14 @@
 
 ## 0.1.3 — unreleased
 
+* **Feynman diagrams drawn as on paper.** The Feynman add-on's drawings
+  were laid out in a row: the self-energy's photon lay on its electron
+  line, a loop was invisible. Each vertex is now placed by the lines
+  through it, lines between the same two points spread into arcs (the
+  photon arcs over the electron, a fermion loop opens into a bubble),
+  loops are drawn, vacuum bubbles float clear of the propagator, an
+  external photon hangs below, and the points read x₁, z₂.
+
 * **Twelve new add-ons, experimental.** Bundled with the apps and switched
   off until switched on in **≡ → Add-ons**: **Steps** (step-by-step
   integrals, derivatives, equations of degree one or two), **Check my work**

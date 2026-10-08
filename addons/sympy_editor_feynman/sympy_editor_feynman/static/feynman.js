@@ -17,7 +17,7 @@ SympyEditor.registerAddon("feynman", {
   mount: function (api) {
     var h = api.h;
     var SVG = "http://www.w3.org/2000/svg";
-    var W = 190, H = 120, PAD = 22;
+    var W = 230, H = 150, PAD = 26;
 
     var examples = api.options.examples || [];
     var exampleSel = h("select", { class: "fd-examples", title: "Start from one of the usual correlators" },
@@ -196,48 +196,124 @@ SympyEditor.registerAddon("feynman", {
      *  middle and relaxed a little: propagators pull, vertices push. */
     function layout(d, known) {
       var pos = {}, ext = d.nodes.filter(function (n) { return n.external; }), verts = d.nodes.filter(function (n) { return !n.external; });
-      var left = [], right = [], nPhoton = 0;
+      var left = [], right = [], bottom = [], nPhoton = 0;
+      var hasIn = ext.some(function (n) { return n.kind === "psibar"; }), hasOut = ext.some(function (n) { return n.kind === "psi"; });
       ext.forEach(function (n) {
         if (n.kind === "psibar") left.push(n);
         else if (n.kind === "psi") right.push(n);
+        else if (hasIn && hasOut) bottom.push(n);          // the electron passes left to right, the photon hangs below
         else (nPhoton++ % 2 ? right : left).push(n);
       });
       function column(list, x) {
         list.forEach(function (n, i) { pos[n.id] = { x: x, y: PAD + (H - 2 * PAD) * (list.length === 1 ? 0.5 : i / (list.length - 1)) }; });
       }
       column(left, PAD); column(right, W - PAD);
+      if (bottom.length) {
+        // the fermion ends a little above the middle, the photons on the floor
+        left.concat(right).forEach(function (n) { pos[n.id].y -= (left.length < 2 && right.length < 2) ? 22 : 0; });
+        bottom.forEach(function (n, i) { pos[n.id] = { x: W / 2 + (i - (bottom.length - 1) / 2) * 60, y: H - 14 }; });
+      }
       var k = verts.length;
-      verts.forEach(function (n, i) {
-        var t = k === 1 ? 0.5 : i / (k - 1);
-        pos[n.id] = { x: PAD + 24 + (W - 2 * PAD - 48) * t, y: H / 2 + (k > 2 ? (i % 2 ? 22 : -22) : 0) };
-      });
-      if (!ext.length && k) verts.forEach(function (n, i) {           // a bubble: a ring
-        var a = 2 * Math.PI * i / k - Math.PI / 2;
-        pos[n.id] = { x: W / 2 + 32 * Math.cos(a), y: H / 2 + 28 * Math.sin(a) };
-      });
       var fixed = {};
       d.nodes.forEach(function (n) { if (known && known[n.id]) { pos[n.id] = { x: known[n.id].x, y: known[n.id].y }; fixed[n.id] = true; } });
+      ext.forEach(function (n) { fixed[n.id] = true; });
+      if (!ext.length && k) verts.forEach(function (n, i) {           // a bubble: a ring
+        if (fixed[n.id]) return;
+        var a = 2 * Math.PI * i / k - Math.PI / 2;
+        pos[n.id] = { x: W / 2 + 40 * Math.cos(a), y: H / 2 + 34 * Math.sin(a) };
+      });
+      // Each vertex starts at the middle of the external points it is joined
+      // to (the two vertices of the self-energy start by their own ends, not
+      // in the order of their names), else in the middle, spread a little.
+      var nbrs = {};
+      d.edges.forEach(function (e) {
+        if (e.from === e.to) return;
+        (nbrs[e.from] = nbrs[e.from] || []).push(e.to);
+        (nbrs[e.to] = nbrs[e.to] || []).push(e.from);
+      });
+      // the pieces with no external point (vacuum bubbles beside a line):
+      // they get the upper part of the card, clear of the line
+      var reach = {}, stack = ext.map(function (n) { return n.id; });
+      stack.forEach(function (id) { reach[id] = true; });
+      while (stack.length) {
+        var at = stack.pop();
+        (nbrs[at] || []).forEach(function (m) { if (!reach[m]) { reach[m] = true; stack.push(m); } });
+      }
+      var floating = verts.filter(function (n) { return !reach[n.id]; });
+      var band = function (n) { return ext.length && !reach[n.id]; };
+      if (floating.length && ext.length) {
+        // the line goes down to the lower part of the card, the bubble has the upper
+        ext.forEach(function (n) { if (!(known && known[n.id])) pos[n.id].y = Math.min(H - PAD, pos[n.id].y + H * 0.24); });
+      }
+      floating.forEach(function (n, i) {
+        if (fixed[n.id] || !ext.length) return;
+        var a = 2 * Math.PI * i / floating.length;
+        pos[n.id] = { x: W / 2 + 34 * Math.cos(a), y: H * 0.36 + 10 * Math.sin(a) };
+      });
+      if (ext.length) verts.forEach(function (n, i) {
+        if (fixed[n.id] || !reach[n.id]) return;
+        var outs = (nbrs[n.id] || []).filter(function (m) { return pos[m] && fixed[m]; });
+        var cx = W / 2, cy = H / 2;
+        if (outs.length) {
+          cx = outs.reduce(function (s, m) { return s + pos[m].x; }, 0) / outs.length;
+          cy = outs.reduce(function (s, m) { return s + pos[m].y; }, 0) / outs.length;
+          cx = W / 2 + (cx - W / 2) * 0.55;                // in from the side
+        }
+        pos[n.id] = { x: cx, y: cy };
+      });
+      // points that start on the same spot are spread apart (always the same
+      // way): otherwise nothing tells them apart
+      var spots = {};
+      verts.forEach(function (n) {
+        if (fixed[n.id] || !pos[n.id]) return;
+        var key = Math.round(pos[n.id].x) + "," + Math.round(pos[n.id].y);
+        (spots[key] = spots[key] || []).push(n);
+      });
+      Object.keys(spots).forEach(function (key) {
+        var group = spots[key];
+        if (group.length < 2) return;
+        group.forEach(function (n, i) {
+          var a = 2 * Math.PI * i / group.length + 0.3;
+          pos[n.id] = { x: pos[n.id].x + 22 * Math.cos(a), y: pos[n.id].y + 22 * Math.sin(a) };
+        });
+      });
+      // Then springs: every line pulls its ends towards a rest length, every
+      // pair of points pushes apart, the steps shrinking as it settles.
       var free = verts.filter(function (n) { return !fixed[n.id]; });
-      for (var it = 0; it < 60 && free.length && k > 1; it++) {
-        var force = {};
+      var ids = d.nodes.map(function (n) { return n.id; }).filter(function (id) { return pos[id]; });
+      var rest = Math.max(40, Math.min(70, (W - 2 * PAD) / Math.max(2, k + 1)));
+      // one spring per pair of points joined, however many lines join them -
+      // and longer for several, so that the arcs between them have room
+      var springs = [], byPair = {};
+      d.edges.forEach(function (e) {
+        if (e.from === e.to) return;
+        var key = [e.from, e.to].sort().join("|");
+        if (byPair[key]) { byPair[key].n++; return; }
+        springs.push(byPair[key] = { a: e.from, b: e.to, n: 1 });
+      });
+      springs.forEach(function (sp) { sp.rest = rest * (1 + 0.5 * (sp.n - 1)); });
+      for (var it = 0; it < 300 && free.length; it++) {
+        var step = 6 * (1 - it / 300) + 0.3, force = {};
         free.forEach(function (n) { force[n.id] = { x: 0, y: 0 }; });
         free.forEach(function (a) {
-          verts.forEach(function (b) {
-            if (a === b) return;
-            var dx = pos[a.id].x - pos[b.id].x, dy = pos[a.id].y - pos[b.id].y, d2 = dx * dx + dy * dy + 1;
-            force[a.id].x += 900 * dx / d2; force[a.id].y += 900 * dy / d2;
+          ids.forEach(function (bid) {
+            if (bid === a.id) return;
+            var dx = pos[a.id].x - pos[bid].x, dy = pos[a.id].y - pos[bid].y, d2 = dx * dx + dy * dy + 0.01;
+            var push = rest * rest / d2;
+            force[a.id].x += push * dx / Math.sqrt(d2); force[a.id].y += push * dy / Math.sqrt(d2);
           });
         });
-        d.edges.forEach(function (e) {
-          var p = pos[e.from], q = pos[e.to];
+        springs.forEach(function (sp) {
+          var p = pos[sp.a], q = pos[sp.b];
           if (!p || !q) return;
-          var dx = q.x - p.x, dy = q.y - p.y, len = Math.sqrt(dx * dx + dy * dy) || 1, pull = (len - 50) * 0.02;
-          if (force[e.from]) { force[e.from].x += pull * dx / len; force[e.from].y += pull * dy / len; }
-          if (force[e.to]) { force[e.to].x -= pull * dx / len; force[e.to].y -= pull * dy / len; }
+          var dx = q.x - p.x, dy = q.y - p.y, len = Math.sqrt(dx * dx + dy * dy) || 0.01, pull = (len - sp.rest) / sp.rest;
+          if (force[sp.a]) { force[sp.a].x += pull * dx / len * 3; force[sp.a].y += pull * dy / len * 3; }
+          if (force[sp.b]) { force[sp.b].x -= pull * dx / len * 3; force[sp.b].y -= pull * dy / len * 3; }
         });
         free.forEach(function (n) {
-          pos[n.id].x = Math.min(W - PAD - 16, Math.max(PAD + 16, pos[n.id].x + force[n.id].x));
-          pos[n.id].y = Math.min(H - 12, Math.max(12, pos[n.id].y + force[n.id].y));
+          var f = force[n.id], m = Math.hypot(f.x, f.y) || 1, move = Math.min(step, m);
+          pos[n.id].x = Math.min(W - PAD - 10, Math.max(PAD + 10, pos[n.id].x + f.x / m * move));
+          pos[n.id].y = Math.min(band(n) ? H * 0.42 : H - 18, Math.max(band(n) ? H * 0.3 : 16, pos[n.id].y + f.y / m * move));
         });
       }
       return pos;
@@ -245,7 +321,15 @@ SympyEditor.registerAddon("feynman", {
 
     /** A wavy path along the curve p(t) (a quadratic through c). */
     function wavy(p, c, q) {
-      var pts = [], n = 40, amp = 3.2, waves = Math.max(3, Math.round(Math.hypot(q.x - p.x, q.y - p.y) / 9));
+      // as many waves as the curve is long (an arc is longer than its chord)
+      var arc = 0, prev = p;
+      for (var k = 1; k <= 16; k++) {
+        var u = k / 16, mu = 1 - u;
+        var pt = { x: mu * mu * p.x + 2 * mu * u * c.x + u * u * q.x, y: mu * mu * p.y + 2 * mu * u * c.y + u * u * q.y };
+        arc += Math.hypot(pt.x - prev.x, pt.y - prev.y);
+        prev = pt;
+      }
+      var pts = [], n = Math.max(40, Math.round(arc / 1.5)), amp = 3.4, waves = Math.max(3, Math.round(arc / 10));
       for (var i = 0; i <= n; i++) {
         var t = i / n, mt = 1 - t;
         var x = mt * mt * p.x + 2 * mt * t * c.x + t * t * q.x, y = mt * mt * p.y + 2 * mt * t * c.y + t * t * q.y;
@@ -256,14 +340,67 @@ SympyEditor.registerAddon("feynman", {
       return "M" + pts.join(" L");
     }
 
+    /** A line from a point back to itself (a tadpole): a loop above the
+     *  point (the next one below), as a cubic; loopWavy is its photon. */
+    function loopPath(p, nth) {
+      var r = 16 + 7 * Math.floor(nth / 2), up = nth % 2 ? 1 : -1;
+      return "M" + p.x + "," + p.y + " C" + (p.x - 1.3 * r) + "," + (p.y + up * 2 * r) + " " +
+        (p.x + 1.3 * r) + "," + (p.y + up * 2 * r) + " " + p.x + "," + p.y;
+    }
+    function loopWavy(p, nth) {
+      var r = 16 + 7 * Math.floor(nth / 2), up = nth % 2 ? 1 : -1, pts = [], n = 90, waves = 9, amp = 3;
+      var c1 = { x: p.x - 1.3 * r, y: p.y + up * 2 * r }, c2 = { x: p.x + 1.3 * r, y: p.y + up * 2 * r };
+      for (var i = 0; i <= n; i++) {
+        var t = i / n, mt = 1 - t;
+        var x = mt * mt * mt * p.x + 3 * mt * mt * t * c1.x + 3 * mt * t * t * c2.x + t * t * t * p.x;
+        var y = mt * mt * mt * p.y + 3 * mt * mt * t * c1.y + 3 * mt * t * t * c2.y + t * t * t * p.y;
+        var dx = 3 * mt * mt * (c1.x - p.x) + 6 * mt * t * (c2.x - c1.x) + 3 * t * t * (p.x - c2.x);
+        var dy = 3 * mt * mt * (c1.y - p.y) + 6 * mt * t * (c2.y - c1.y) + 3 * t * t * (p.y - c2.y);
+        var len = Math.hypot(dx, dy) || 1, off = amp * Math.sin(t * waves * 2 * Math.PI) * Math.min(1, 6 * t, 6 * (1 - t));
+        pts.push((x - off * dy / len).toFixed(1) + "," + (y + off * dx / len).toFixed(1));
+      }
+      return "M" + pts.join(" L");
+    }
+
+    /** The control point of line `e`'s curve.  Lines joining the same two
+     *  points are spread as a textbook draws them: with an odd number of
+     *  fermion lines one of them stays straight and the photons arc around it
+     *  (the electron's self-energy); an even number opens into a bubble (a
+     *  loop).  The arcs grow with the distance between the points, and are
+     *  measured one way for the pair, whichever way each line runs. */
     function control(card, e, pos) {
-      var p = pos[e.from], q = pos[e.to];
-      var key = [e.from, e.to].sort().join("|");
+      var a = e.from < e.to ? e.from : e.to, b = a === e.from ? e.to : e.from;
+      var key = a + "|" + b;
       var same = card.data.edges.filter(function (o) { return [o.from, o.to].sort().join("|") === key; });
-      var nth = same.indexOf(e) + 1, total = same.length;
-      var bend = total > 1 ? (nth - (total + 1) / 2) * 26 : (e.from === e.to ? 30 : 0);
-      var mx = (p.x + q.x) / 2, my = (p.y + q.y) / 2, dx = q.x - p.x, dy = q.y - p.y, len = Math.hypot(dx, dy) || 1;
-      return { x: mx - bend * dy / len, y: my + bend * dx / len };
+      var fermions = same.filter(function (o) { return o.kind !== "A"; });
+      var order = fermions.concat(same.filter(function (o) { return o.kind === "A"; }));
+      var nth = order.indexOf(e), total = order.length;
+      var pa = pos[a], pb = pos[b];
+      var dx = pb.x - pa.x, dy = pb.y - pa.y, len = Math.hypot(dx, dy) || 1;
+      var unit = Math.max(22, Math.min(0.38 * len, 46));
+      var slot;
+      if (total === 1) slot = 0;
+      else if (fermions.length % 2 === 1) slot = nth === 0 ? 0 : (nth % 2 ? -1 : 1) * Math.ceil(nth / 2);   // 0, -1, +1, -2...
+      else slot = (nth % 2 ? 1 : -1) * (Math.floor(nth / 2) + 0.5);                                         // -½, +½, -1½...
+      var bend = slot * unit * 2;
+      if (dx < 0) bend = -bend;          // the first arc opens upwards, as on paper, whichever way the pair lies
+      var mx = (pa.x + pb.x) / 2, my = (pa.y + pb.y) / 2;
+      // an arc stays on the card: its apex (half-way to the control point)
+      // is brought in when it would cross an edge
+      var nx = -dy / len, ny = dx / len, apexOff = bend / 2;
+      var room = function (v, n) { return n > 0 ? (v - 8) / n : n < 0 ? (v - 8) / -n : Infinity; };
+      var limit = Math.min(
+        bend * ny < 0 ? room(my, Math.abs(ny)) : room(H - my, Math.abs(ny)),
+        bend * nx < 0 ? room(mx, Math.abs(nx)) : room(W - mx, Math.abs(nx)));
+      if (Math.abs(apexOff) > limit) bend = (bend < 0 ? -1 : 1) * 2 * Math.max(0, limit);
+      return { x: mx + bend * nx, y: my + bend * ny };
+    }
+
+    /** x_1 as x₁: the points written as on paper. */
+    function subscript(id) {
+      var m = /^(.*?)_\{?(\w+)\}?$/.exec(id);
+      if (!m || !/^[0-9]+$/.test(m[2])) return id;
+      return m[1] + m[2].replace(/[0-9]/g, function (d) { return "\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089".charAt(+d); });
     }
 
     /* ---- drawing, with the interactions ---- */
@@ -271,12 +408,29 @@ SympyEditor.registerAddon("feynman", {
     function draw(card) {
       var d = card.data, pos = card.pos;
       var svg = el("svg", { class: "fd-svg", viewBox: "0 0 " + W + " " + H, width: W, height: H });
+      var loops = {};
       d.edges.forEach(function (e, i) {
         var p = pos[e.from], q = pos[e.to];
         if (!p || !q) return;
+        var g = el("g", { class: "fd-edge", "data-edge": String(i) });
+        var onLine = function (ev) {
+          ev.stopPropagation();
+          if (busy) return;
+          if (mode() === "delete") { editEdge(card, i, "delete"); return; }
+          if (mode() === "move") showMenu(card, i, ev.clientX, ev.clientY);
+        };
+        if (e.from === e.to) {
+          // a line from a point to itself: a loop above it (the next one below)
+          var nth = loops[e.from] = (loops[e.from] === undefined ? 0 : loops[e.from] + 1);
+          var loop = loopPath(p, nth);
+          g.appendChild(el("path", { class: e.kind === "A" ? "fd-photon" : "fd-fermion", d: e.kind === "A" ? loopWavy(p, nth) : loop }));
+          g.appendChild(el("path", { class: "fd-hit", d: loop }));
+          g.addEventListener("pointerdown", onLine);
+          svg.appendChild(g);
+          return;
+        }
         var c = control(card, e, pos);
         var curve = "M" + p.x + "," + p.y + " Q" + c.x + "," + c.y + " " + q.x + "," + q.y;
-        var g = el("g", { class: "fd-edge", "data-edge": String(i) });
         if (e.kind === "A") {
           g.appendChild(el("path", { class: "fd-photon", d: wavy(p, c, q) }));
         } else {
@@ -306,10 +460,13 @@ SympyEditor.registerAddon("feynman", {
         if (n.external) {
           g.appendChild(el("circle", { class: "fd-external", cx: p.x, cy: p.y, r: 3.4 }));
           var t = el("text", { class: "fd-label", x: p.x + (p.x < W / 2 ? -6 : 6), y: p.y - 6, "text-anchor": p.x < W / 2 ? "end" : "start" });
-          t.textContent = n.id.replace(/_\{?(\w+)\}?$/, "$1");
+          t.textContent = subscript(n.id);
           g.appendChild(t);
         } else {
-          g.appendChild(el("circle", { class: "fd-vertex", cx: p.x, cy: p.y, r: 2.8 }));
+          g.appendChild(el("circle", { class: "fd-vertex", cx: p.x, cy: p.y, r: 3.2 }));
+          var vl = el("text", { class: "fd-label fd-vlabel", x: p.x, y: p.y + 15, "text-anchor": "middle" });
+          vl.textContent = subscript(n.id);
+          g.appendChild(vl);
         }
         g.appendChild(el("circle", { class: "fd-hit-node", cx: p.x, cy: p.y, r: 9 }));   // the handle
         g.addEventListener("pointerdown", function (ev) { onNodeDown(ev, card, n, svg); });

@@ -90,7 +90,10 @@ def test_the_panel_expands_draws_and_selects():
         x1_, y1_ = center(card.locator('.fd-node[data-node="z_1"] .fd-vertex'))
         assert abs(x1_ - x0 - 20) < 3 and abs(y1_ - y0 + 15) < 3 and doc.expr == before
         # a line's menu: delete the photon line -> the term loses it and is marked
-        x0, y0 = center(card.locator(".fd-edge .fd-photon"))
+        # (a point on the line itself: drawn as an arc, its box's middle is off it)
+        x0, y0 = card.locator(".fd-edge:has(.fd-photon) .fd-hit").evaluate("""p => {
+            const at = p.getPointAtLength(p.getTotalLength() / 2), m = p.getScreenCTM();
+            return [at.x * m.a + at.y * m.c + m.e, at.x * m.b + at.y * m.d + m.f]; }""")
         page.mouse.click(x0, y0)
         menu = panel.locator(".fd-menu")
         assert menu.is_visible() and [b.strip() for b in menu.inner_text().split("\n") if b.strip()] == ["Delete line", "Make it a fermion line"]
@@ -142,6 +145,81 @@ def test_the_panel_expands_draws_and_selects():
         page.locator(".se-addon-feynman .se-addon-help").click()
         assert "Wick" in page.locator(".se-help-view").inner_text() and "Editing a drawing" in page.locator(".se-help-view").inner_text()
         page.keyboard.press("Escape")
+        assert errors == []
+        browser.close()
+    srv.shutdown()
+    srv.server_close()
+
+
+def _expanded(page, src, order, which):
+    """The cards of `src` expanded to `order` (`which` diagrams)."""
+    panel = page.locator(".se-addon-feynman")
+    ed = "document.querySelector('.sympy-editor').__sympyEditor"
+    seq = page.evaluate(f"{ed}._stateCount || 0")
+    panel.locator(".fd-examples").select_option(src)
+    # (SymPy may order the fields its own way: the new state, not the text, is waited for)
+    page.wait_for_function(f"({ed}._stateCount || 0) > {seq} && !{ed}.busy && {ed}.state.src.startsWith('PathIntegral')", timeout=15000)
+    panel.locator(".fd-order").fill(order)
+    panel.locator(".fd-which").select_option(which)
+    before = panel.locator(".fd-card").count()
+    panel.locator(".fd-expand").click()
+    page.wait_for_function(f"document.querySelectorAll('.fd-card').length > 0 && "
+                           f"[...document.querySelectorAll('.fd-card')].every(c => c.querySelector('svg'))", timeout=15000)
+    page.wait_for_timeout(300)
+    return panel.locator(".fd-card")
+
+
+def test_the_diagrams_are_drawn_as_on_paper():
+    """The layout of a textbook: the inner points follow the line through
+    them (the self-energy's z joined to x₁ stands on x₁'s side), the photon
+    of the self-energy arcs above a straight fermion line, a vacuum bubble
+    floats clear of the propagator, and nothing is drawn off its card."""
+    doc = Document("PathIntegral(psi(x_1)*psibar(x_2))", addons=[ADDON])
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    geometry = """card => {
+        const svg = card.querySelector('svg'), vb = svg.viewBox.baseVal, out = {nodes: {}, inside: true};
+        card.querySelectorAll('.fd-node').forEach(g => {
+            const c = g.querySelector('circle'); out.nodes[g.dataset.node] = [+c.getAttribute('cx'), +c.getAttribute('cy')]; });
+        card.querySelectorAll('path.fd-fermion, path.fd-photon').forEach(p => {
+            const b = p.getBBox();
+            if (b.x < -1 || b.y < -1 || b.x + b.width > vb.width + 1 || b.y + b.height > vb.height + 1) out.inside = false; });
+        const ph = card.querySelector('path.fd-photon');
+        out.photonTop = ph ? ph.getBBox().y : null;
+        return out; }"""
+    with playwright.sync_playwright() as p:
+        try:
+            browser = p.chromium.launch()
+        except Exception as exc:
+            pytest.skip(f"chromium not available: {exc}")
+        page = browser.new_page(viewport={"width": 1100, "height": 900})
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(srv.url)
+        page.wait_for_selector(".se-addon-feynman .fd-panel", timeout=30000)
+        # the electron's self-energy
+        cards = _expanded(page, "PathIntegral(psi(x_1)*psibar(x_2))", "2", "connected")
+        g = cards.nth(1).evaluate(geometry)
+        assert g["inside"], g
+        n = g["nodes"]
+        # each vertex on the side of the external point it is joined to: x_2 → z_2 → z_1 → x_1, left to right
+        assert n["x_2"][0] < n["z_2"][0] < n["z_1"][0] < n["x_1"][0], n
+        assert abs(n["z_1"][1] - n["z_2"][1]) < 3                         # a straight fermion line...
+        assert g["photonTop"] < min(n["z_1"][1], n["z_2"][1]) - 10        # ...and the photon arcs above it
+        # every connected diagram up to order 3 of the vertex, and Møller's, on their cards
+        for src, order in (("PathIntegral(psi(x_1)*psibar(x_2)*A(mu, x_3))", "3"),
+                           ("PathIntegral(psi(x_1)*psibar(x_2)*psi(x_3)*psibar(x_4))", "2"),
+                           ("PathIntegral(A(mu, x_1)*A(nu, x_2))", "2")):
+            cards = _expanded(page, src, order, "connected")
+            for i in range(cards.count()):
+                assert cards.nth(i).evaluate(geometry)["inside"], (src, i)
+        # a vacuum bubble beside the propagator: above it, and on the card
+        cards = _expanded(page, "PathIntegral(psi(x_1)*psibar(x_2))", "2", "all")
+        bubble = [cards.nth(i).evaluate(geometry) for i in range(cards.count())]
+        bubble = [b for b in bubble if b["photonTop"] is not None and "z_1" in b["nodes"]
+                  and abs(b["nodes"]["x_1"][1] - b["nodes"]["z_1"][1]) > 20]
+        assert bubble and all(b["inside"] for b in bubble), bubble
+        assert all(b["nodes"]["z_1"][1] < b["nodes"]["x_1"][1] for b in bubble)
         assert errors == []
         browser.close()
     srv.shutdown()

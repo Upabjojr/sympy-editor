@@ -30,8 +30,14 @@ printed by the Feynman rules in position space:
 ```
 
 The panel draws them - fermion lines with the arrow of the charge, wavy
-photon lines, a dot per vertex, the external points labelled - and a
-click on a drawing selects its term.  *Feynman rules* in a diagram's menu
+photon lines, a dot per vertex, the points labelled x₁, z₂ - laid out as
+on paper: ψ̄ coming in on the left and ψ going out on the right (an
+external photon below them), each vertex placed by the lines through it
+(springs pull along every line, the points push apart), several lines
+between two points spread into arcs (the self-energy's photon arcs over a
+straight fermion line, a loop opens into a bubble), a line from a point to
+itself drawn as a loop, a vacuum bubble floating clear of the propagator,
+and nothing off the card - and a click on a drawing selects its term.  *Feynman rules* in a diagram's menu
 gives its value as an expression (`S_F`, `D_F`, `gamma`, `Tr`, the
 vertices integrated over).  *connected* keeps the diagrams in one piece,
 *no vacuum bubbles* drops the pieces without an external point (they
