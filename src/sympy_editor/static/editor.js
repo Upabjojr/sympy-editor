@@ -187,7 +187,7 @@ var SympyEditor = (function () {
     "<li><b>Save \u25be</b> writes it out: a self-contained web page that works offline and plays on its own, or a Python script that rebuilds every step with SymPy \u2014 or sends it to the printer (<i>print or PDF</i>; <i>Print history\u2026</i> under <b>\u2261</b> too).</li>",
     "<li>A formula saved to a <b>.sympy</b> file opens with the app from a file manager or a mail, in a session of its own; in a notebook, files are saved next to the notebook.</li>",
     "<li><b>\u2261</b> holds <b>File</b> in every editor, a window of its own: <i>Open formula\u2026</i>; the formula (a <b>.sympy</b> file with the whole history), the history as Python and the history as a web page, each with <b>Save\u2026</b> (a file on this device: the app asks where) and <b>Share\u2026</b> (sent to another app or person through the share sheet - in the apps, and in a browser that can share files); and the history on paper. In the app a .sympy file opens with SymPy Editor from a file manager, the Downloads list or a mail.</li>",
-    "<li><b>\u2261</b> also lists the sessions, where the page keeps several. A session is labelled with its formula until you give it a name of your own (the pencil beside it, or a double-click), which nothing overwrites.</li>",
+    "<li>Where the page keeps several sessions, <b>New session\u2026</b> heads the <b>\u2261</b> menu, and under it <b>Sessions</b> opens their list in a window of its own (tap one to open it; its <i>History</i> tab shows its steps). A session is labelled with its formula until you give it a name of your own (the pencil beside it, or a double-click), which nothing overwrites.</li>",
     "</ul></section>",
     "<section><h3>On a phone or tablet</h3><ul>",
     "<li>Tap to select; tap the selected node again to edit it.</li>",
@@ -2393,7 +2393,19 @@ var SympyEditor = (function () {
         this.addonsEntry = navBtn("addons", "Add-ons", "Switch the add-ons on or off, and read what each does");
         this.addonsEntry.hidden = true;                  // until a snapshot lists some (_fillAddonsMenu)
         this.filesEntry = navBtn("files", "File", "Open, save or share a formula; write the history out or print it");
-        this.filesPane = h("nav", { class: "se-drawer-nav", "aria-label": "Menu" }, [this.addonsEntry, this.filesEntry]);
+        // Sessions: starting a new one at the top of the menu (its chooser
+        // opens under it), the list in a window of its own (the entry).
+        this.newSessionRow = null;
+        this.sessionsEntry = null;
+        if (o.sessions) {
+          var newBtn = h("button", { type: "button", class: "se-session-new", title: "Start a new session: an empty formula, a copy of this one, or an example" }, ["New session\u2026"]);
+          newBtn.disabled = true;                          // until the sessions are read (_fillSessions)
+          this.newSessionRow = h("div", { class: "se-drawer-new se-session-add" }, [newBtn]);
+          newBtn.addEventListener("click", function () { self._showSessionPicker(self.newSessionRow); });
+          this.sessionsEntry = navBtn("sessions", "Sessions", "Every formula kept as a session, with its history: open one, rename it, delete it");
+        }
+        this.filesPane = h("nav", { class: "se-drawer-nav", "aria-label": "Menu" },
+          (this.sessionsEntry ? [this.sessionsEntry] : []).concat([this.addonsEntry, this.filesEntry]));
         // The settings of the document that are not about one edit: the
         // "allow invalid" switch (the unevaluated toggle stays on the strip,
         // it is set per operation).
@@ -2407,13 +2419,13 @@ var SympyEditor = (function () {
           this.addonsMenu.hidden = false;
           this.addonsMenu.classList.add("se-addons-inline");
         }
-        var heading = o.sessions ? "Sessions" : "Menu";
+        var heading = "Menu";
         this.drawerHeading = h("strong", {}, [heading]);
         this.drawer = h("aside", { class: "se-drawer", hidden: "", role: "dialog", "aria-modal": "true", "aria-label": heading }, [
           h("div", { class: "se-drawer-head" }, [this.drawerHeading, close])
-        ].concat(this.filesPane ? [this.filesPane] : [])
-         .concat(this.settingsPane ? [this.settingsPane] : [])
-         .concat(this.sessionsBody ? [this.sessionsBody] : []));
+        ].concat(this.newSessionRow ? [this.newSessionRow] : [])
+         .concat(this.filesPane ? [this.filesPane] : [])
+         .concat(this.settingsPane ? [this.settingsPane] : []));
         this.backdrop = h("div", { class: "se-backdrop", hidden: "" });
         this.backdrop.addEventListener("click", function () { self.closeDrawer(); });
         this.sessions = o.sessions ? this.drawer : null;
@@ -7648,7 +7660,8 @@ var SympyEditor = (function () {
      *  focus back to what opened it); Esc, the \u00d7 and Back close it. */
     showSheet(kind) {
       var self = this;
-      var body = kind === "addons" ? this.addonsMenu : kind === "files" ? this.filesBody : null;
+      var body = kind === "addons" ? this.addonsMenu : kind === "files" ? this.filesBody
+        : kind === "sessions" ? this.sessionsBody : null;
       if (!body) return;
       var fromDrawer = !!(this.drawer && !this.drawer.hidden);
       var opener = fromDrawer ? this.buttons.drawer : this._opener();
@@ -7656,12 +7669,14 @@ var SympyEditor = (function () {
       this.closeDrawer();
       this.closeHelp();
       this.closeHistory();
-      var title = kind === "addons" ? "Add-ons" : "File";
+      var title = kind === "addons" ? "Add-ons" : kind === "sessions" ? "Sessions" : "File";
       var close = h("button", { type: "button", class: "se-history-close", title: "Close (Esc)", "aria-label": "Close" }, ["\u00d7"]);
       var head = h("div", { class: "se-history-head" }, [h("span", { class: "se-history-title" }, [title]),
         h("span", { class: "se-head-group se-head-close" }, [close])]);
       var intro = kind === "addons"
         ? "Each add-on brings a panel under the formula, tools on the strip, or both. A switch holds for every session."
+        : kind === "sessions"
+        ? "Every formula you work on is kept as a session, with its whole history. Tap one to open it; a new one starts from the menu."
         : "A formula is kept in a .sympy file with its whole history; the history can also be written out on its own.";
       if (kind === "files") {
         var sharing = canShareFiles();
@@ -7709,6 +7724,12 @@ var SympyEditor = (function () {
       this._sheetFromDrawer = fromDrawer;
       this.root.appendChild(view);
       if (kind === "addons") this._filterAddons();
+      if (kind === "sessions") {
+        // the list as it stands now - another editor on the same keeper may
+        // have written since - as opening the menu brings it up to date
+        this._fillSessions();
+        if (this._sessionsReady) this._saveSession();
+      }
       var first = body.querySelector("input, button");
       (first || close).focus({ preventScroll: true });
     }
@@ -7856,9 +7877,17 @@ var SympyEditor = (function () {
     }
 
     /** The chooser under "New session": empty (default), a copy, the examples. */
+    /** A session picked in the list: opened, and the window gone - what
+     *  was picked is the formula to work on now. */
+    async _openFromList(id) {
+      var opened = await this.openSession(id);
+      if (opened && this.sheetView && this.sheetView.getAttribute("data-sheet") === "sessions") this.closeSheet();
+      return opened;
+    }
+
     _showSessionPicker(anchor) {
       var self = this;
-      var old = this.sessionsBody.querySelector(".se-session-picker");
+      var old = anchor.parentNode && anchor.parentNode.querySelector(".se-session-picker");
       if (old) { old.parentNode.removeChild(old); return; }
       var picker = h("div", { class: "se-session-picker", role: "listbox" });
       var choice = function (label, detail, start, isDefault) {
@@ -7915,21 +7944,14 @@ var SympyEditor = (function () {
       var self = this;
       var store = this._sessionStore || this._loadSessions();
       var body = this.sessionsBody;
-      // The New session chooser, if open, stays open: a background refresh
-      // (the session saved after a change, a Python restarted after an
-      // interruption) took it away under the finger.
-      var picker = body.querySelector(".se-session-picker");
       body.textContent = "";
       var list = store.list.slice().sort(function (a, b) { return b.updated - a.updated; });
       if (this.buttons.drawer) this.buttons.drawer.title = "Sessions (" + list.length + ") and history";
-      // Starting a new one comes first: it is what the drawer is opened for
-      // as often as picking an old session out of the list under it.
-      var add = h("button", { type: "button", class: "se-session-new", title: "Start a new session: an empty formula, a copy of this one, or an example" }, ["New session\u2026"]);
-      add.disabled = !this._sessionsReady;
-      var addRow = h("div", { class: "se-session se-session-add" }, [add]);
-      add.addEventListener("click", function () { self._showSessionPicker(addRow); });
-      body.appendChild(addRow);
-      if (picker) body.appendChild(picker);
+      // "New session…" is at the top of the menu (newSessionRow), the list
+      // in its own window: the menu's entry says how many there are.
+      var newBtn = this.newSessionRow && this.newSessionRow.querySelector(".se-session-new");
+      if (newBtn) newBtn.disabled = !this._sessionsReady;
+      if (this.sessionsEntry) this.sessionsEntry.setAttribute("data-count", list.length === 1 ? "1 session" : list.length + " sessions");
       list.forEach(function (sess) {
         var current = sess.id === store.current;
         var when = new Date(sess.updated || 0);
@@ -7948,14 +7970,14 @@ var SympyEditor = (function () {
         head.appendChild(h("span", { class: "se-session-when" }, [when.toLocaleDateString() + " " + when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })]));
         var open = h("button", { type: "button", "data-open": sess.id, title: "Open this session" }, [current ? "Current" : "Open"]);
         open.disabled = current || !self._sessionsReady;
-        open.addEventListener("click", function () { self.openSession(sess.id); });
+        open.addEventListener("click", function () { self._openFromList(sess.id); });
         head.appendChild(open);
         if (!current) {   // the whole row is the target (a phone has no room for aiming at a small button)
           row.setAttribute("role", "button");
           row.setAttribute("tabindex", "0");
           row.title = "Open this session";
-          head.addEventListener("click", function (ev) { if (!ev.target.closest("button")) self.openSession(sess.id); });
-          row.addEventListener("keydown", function (ev) { if (ev.key === "Enter" && ev.target === row) self.openSession(sess.id); });
+          head.addEventListener("click", function (ev) { if (!ev.target.closest("button")) self._openFromList(sess.id); });
+          row.addEventListener("keydown", function (ev) { if (ev.key === "Enter" && ev.target === row) self._openFromList(sess.id); });
         }
         var del = h("button", { type: "button", "data-delete": sess.id, title: "Delete this session (click twice)" }, ["Delete"]);
         del.disabled = list.length < 2;

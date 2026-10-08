@@ -492,10 +492,10 @@ def test_two_editors_on_one_store_keep_each_other_s_sessions(browser, serving, t
     _set(page_b, "y**4")
     assert _until(page_b, lambda: _names(tmp_path) == ["x**5", "y**4"], timeout=8), _names(tmp_path)
     # each page lists the other's session as it stands now, once it looks (the drawer opened)
-    page_a.evaluate(ED + ".openDrawer()")
+    page_a.evaluate(ED + ".showSheet('sessions')")             # the list, in its window
     assert _until(page_a, lambda: sorted(s["name"] for s in page_a.evaluate(ED + "._sessionStore.list")) == ["x**5", "y**4"])
     assert _until(page_a, lambda: page_a.locator(".se-session:not(.se-session-add)").count() == 2)
-    page_a.evaluate(ED + ".closeDrawer()")
+    page_a.evaluate(ED + ".closeSheet()")
     # a session deleted in one page stays deleted when the other saves
     left = page_b.evaluate(ED + "._sessionStore.current")
     assert page_b.evaluate(ED + ".newSession('current')") is True
@@ -577,8 +577,9 @@ def test_a_list_that_is_not_one_starts_the_sessions_all_the_same(browser, servin
     srv = serving(Document(x + y), options={"sessions": True}, store=tmp_path)
     page = _open(browser, srv.url)
     _ready(page)
-    page.locator('[data-cmd="drawer"]').click()
+    page.evaluate(ED + ".showSheet('sessions')")
     assert _wait(lambda: page.locator(".se-session:not(.se-session-add)").count() >= 1)
+    page.evaluate(ED + ".closeSheet()")
     _set(page, "x*y")
     page.evaluate(ED + ".flush()")
     assert _until(page, lambda: "Mul" in _last_step(tmp_path), timeout=8)
@@ -631,7 +632,7 @@ def test_a_name_emptied_goes_back_to_the_session_s_own_formula(browser, serving,
     first = page.evaluate(ED + "._sessionStore.current")
     assert page.evaluate(ED + ".newSession('current')") is True
     _set(page, "sin(z)")
-    page.locator('[data-cmd="drawer"]').click()
+    page.evaluate(ED + ".showSheet('sessions')")
     row = page.locator(".se-session:not(.se-session-current):not(.se-session-add)").first
     for typed, name in (("mine", "mine"), ("", "x + y")):
         row.locator(".se-session-rename").first.click()
