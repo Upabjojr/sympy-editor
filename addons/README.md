@@ -25,6 +25,7 @@ addons/
   sympy_editor_check/       "Check my work": is each step of the history equivalent to the one before (no dependency)
   sympy_editor_transforms/  Laplace, Fourier, Mellin, Hankel and z-transforms of the selection (no dependency)
   sympy_editor_steps/       step-by-step solutions: integrals, derivatives, equations of degree one or two (no dependency)
+  sympy_editor_linalg/      a linear algebra workbench for the selected matrix: spectrum, Jordan form, LU/QR/Cholesky, row reduction step by step (no dependency)
   demo.py                   a page with the first five, to try them in a browser
 ```
 
@@ -470,6 +471,17 @@ equation of degree one or two - and the panel lists the steps with KaTeX.
 `apply` puts a step's result in place of the selection, a step of the
 history labelled with the rule; it works the steps out again rather than
 reading them back.  What it cannot explain it says in words.
+
+**`sympy_editor_linalg`** - *a custom widget that computes*.  For the
+explicit matrix around the selection: rank, determinant, trace,
+characteristic polynomial, eigenvalues with both multiplicities and their
+eigenvectors, diagonalizability and the Jordan form; LU, QR, Cholesky and a
+Gauss-Jordan elimination recorded one elementary row operation at a time
+(checked against `Matrix.rref()`) on demand.  Every result has *Insert*,
+which puts it in place of the matrix as a step of the history.  Every
+computation runs under a time budget on a thread of its own and is stopped
+past it, the panel saying so in words (Pyodide has no threads: the editor's
+Interrupt is the limit there).
 
 ## Open questions
 

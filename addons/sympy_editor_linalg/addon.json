@@ -1,0 +1,8 @@
+{
+  "name": "linalg",
+  "label": "Linear algebra",
+  "module": "sympy_editor_linalg",
+  "version": "0.0.1",
+  "description": "A workbench for an explicit matrix: rank, determinant, eigenvalues, Jordan form, LU/QR/Cholesky and row reduction step by step.",
+  "requires": []
+}
