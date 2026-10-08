@@ -4,5 +4,6 @@
   "module": "sympy_editor_steps",
   "version": "0.0.1",
   "description": "Step-by-step solutions for the selection: integrals, derivatives, equations of degree one or two.",
-  "requires": []
+  "requires": [],
+  "experimental": true
 }
