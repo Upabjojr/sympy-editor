@@ -19,6 +19,7 @@ addons/
   sympy_editor_forms/       the selection rewritten by every simplification function, one card per form (no dependency)
   sympy_editor_numeric/     the selection as a number: any precision, exact forms, why there is none, tables (no dependency)
   sympy_editor_series/      series expansions of the selection: Taylor, Laurent, Puiseux, asymptotic, leading term (no dependency)
+  sympy_editor_solver/      solve the selected equation, inequality or system; check, insert (no dependency)
   sympy_editor_handwriting/ writing on the formula by hand, read by math-ocr's stroke model (onnxruntime; not in Pyodide)
   sympy_editor_export/      the selection as LaTeX, MathML, Python, C, Fortran, JS, Octave, Julia, Rust or a function (no dependency)
   sympy_editor_check/       "Check my work": is each step of the history equivalent to the one before (no dependency)
@@ -449,6 +450,16 @@ and where it holds in words ("converges for Re(s) > -2"); *Apply* replaces
 the selection, unevaluated (`LaplaceTransform(f, t, s)`) when the editor's
 toggle is on.  Six ops put the same in the Transform menu, asking for the
 variables through the op `params`.
+
+**`sympy_editor_solver`** - *a panel that computes and edits*.  It reads the
+selection (a range of an `And`'s equations included) as an equation, an
+inequality, an expression `= 0` or a system, offers its free symbols as
+unknowns and a domain, and solves with `solveset`, `linsolve`,
+`nonlinsolve` or `solve` as fits, inside a time limit kept by the profiler
+hook (no thread: it works in Pyodide too).  Each solution can be substituted
+back and checked, or inserted in place of what was solved - a step of the
+history.  The last solution is kept per document and named by a token, so
+nothing SymPy has to be read back from the page.
 
 ## Open questions
 

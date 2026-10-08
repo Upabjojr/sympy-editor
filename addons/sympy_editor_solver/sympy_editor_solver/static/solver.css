@@ -1,0 +1,62 @@
+/* sympy-editor add-on "solver". */
+.se-addon-solver .sv-panel { font-size: 12px; display: flex; flex-direction: column; gap: 0.35rem; }
+.se-addon-solver .sv-problem { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem; }
+.se-addon-solver .sv-words, .se-addon-solver .sv-label { color: var(--se-muted); }
+.se-addon-solver .sv-none { color: var(--se-muted); font-style: italic; }
+.se-addon-solver .sv-formula { min-width: 0; max-width: 100%; overflow-x: auto; overflow-y: hidden; }
+.se-addon-solver .sv-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem; }
+.se-addon-solver .sv-unknowns { display: flex; flex-wrap: wrap; gap: 0.2rem 0.7rem; }
+.se-addon-solver .sv-unknown { display: inline-flex; align-items: center; gap: 0.25rem; cursor: pointer; }
+.se-addon-solver .sv-domain { font: inherit; font-size: 12px; padding: 2px 4px; color: inherit;
+  background: var(--se-field); border: 1px solid var(--se-border); border-radius: 0.3rem; }
+.se-addon-solver .sv-btn {
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--se-border);
+  border-radius: 0.3rem;
+  background: var(--se-btn);
+  box-shadow: var(--se-btn-edge), var(--se-btn-shadow);
+  color: inherit;
+  cursor: pointer;
+}
+.se-addon-solver .sv-btn[hidden] { display: none; }
+@media (hover: hover) {
+  .se-addon-solver .sv-btn:hover:not(:disabled) { background: var(--se-btn-hover); border-color: rgba(var(--se-accent), 0.6); }
+}
+.se-addon-solver .sv-btn:active:not(:disabled) { background: var(--se-btn-down); box-shadow: var(--se-btn-shadow-down); }
+.se-addon-solver .sv-btn:focus-visible { outline: 2px solid rgba(var(--se-accent), 0.55); outline-offset: 1px; }
+.se-addon-solver .sv-btn:disabled { background: none; box-shadow: none; opacity: 0.55; cursor: default; }
+.se-addon-solver .sv-solve { font-weight: 600; }
+.se-addon-solver .sv-status { color: var(--se-muted); min-height: 1.2em; }
+.se-addon-solver .sv-status:empty { min-height: 0; }
+.se-addon-solver .sv-status.sv-error { color: var(--se-error); }
+.se-addon-solver .sv-method { color: var(--se-muted); font-family: var(--se-mono); font-size: 11px; }
+.se-addon-solver .sv-set { overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
+.se-addon-solver .sv-note { color: var(--se-muted); font-style: italic; }
+.se-addon-solver .sv-list { margin: 0; padding-left: 1.6em; }
+.se-addon-solver .sv-list:empty { display: none; }
+.se-addon-solver .sv-item { padding: 3px 0; border-top: 1px solid var(--se-rule); }
+.se-addon-solver .sv-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.6rem; }
+.se-addon-solver .sv-line .sv-formula { flex: 1 1 auto; }
+.se-addon-solver .sv-actions { display: inline-flex; gap: 0.35rem; flex: 0 0 auto; }
+.se-addon-solver .sv-item-words { color: var(--se-muted); }
+.se-addon-solver .sv-check { margin: 0.2rem 0 0.1rem; padding: 0.25rem 0.5rem; background: var(--se-surface);
+  border: 1px solid var(--se-rule); border-radius: 0.3rem; }
+.se-addon-solver .sv-check[hidden] { display: none; }
+.se-addon-solver .sv-row { overflow-x: auto; overflow-y: hidden; padding: 1px 0; }
+.se-addon-solver .sv-arrow { color: var(--se-muted); }
+.se-addon-solver .sv-row.sv-holds .sv-after, .se-addon-solver .sv-verdict.sv-holds { color: var(--se-added); }
+.se-addon-solver .sv-row.sv-fails .sv-after, .se-addon-solver .sv-verdict.sv-fails, .se-addon-solver .sv-check.sv-fails { color: var(--se-error); }
+.se-addon-solver .sv-verdict { font-weight: 600; }
+.se-addon-solver .sv-verdict.sv-open, .se-addon-solver .sv-open { color: var(--se-muted); }
+
+/* A finger's targets. */
+@media (any-pointer: coarse) {
+  .se-addon-solver .sv-btn { font-size: 14px; padding: 0.45rem 0.75rem; min-height: 36px; }
+  .se-addon-solver .sv-domain { font-size: 16px; min-height: 36px; }    /* iOS zooms into anything smaller */
+  .se-addon-solver .sv-unknown { min-height: 36px; padding-right: 0.3rem; }
+  .se-addon-solver .sv-unknown input { width: 20px; height: 20px; }
+}
+@media (prefers-reduced-motion: reduce) { .se-addon-solver .sv-btn { transition: none; } }
