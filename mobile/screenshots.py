@@ -5,6 +5,7 @@
     python mobile/screenshots.py --set examples   # ... /{iphone,ipad}/examples/{raw,framed}: the app's own examples
     python mobile/screenshots.py --set addons     # ... /{iphone,ipad}/addons/{raw,framed}: the plot, the tree, LaTeX, the rules
     python mobile/screenshots.py --set console    # ... /{iphone,ipad}/console/{raw,framed}: the Python console
+    python mobile/screenshots.py --set handwriting  # ... /{iphone,ipad}/handwriting/{raw,framed}: writing by hand
 
 The page is the bundle the apps show (``build_www.build`` with the native
 backend) opened in Playwright's WebKit - the engine of the iOS WebView -
@@ -37,6 +38,7 @@ from sympy import (Derivative, Eq, Function, I, Integral, Limit, Matrix, Sum, co
 #: points, scale, and how much larger than on the phone a formula may be
 DEVICES = {
     "iphone": (414, 896, 3, 1.0),      # the 6.5" iPhone: 1242 x 2688 pixels
+    "iphone63": (393, 852, 3, 1.0),    # the 6.3" iPhone: 1179 x 2556
     "ipad": (1032, 1376, 2, 1.7),      # the 13" iPad:    2064 x 2752
 }
 ED = "document.querySelector('.sympy-editor').__sympyEditor"
@@ -58,6 +60,36 @@ def serve(folder: Path):
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv
+
+
+def opaque(path: Path) -> None:
+    """The screenshot at ``path`` without an alpha channel, which App Store
+    Connect refuses.  Playwright writes RGBA, and WebKit leaves the soft rim
+    of a range input's knob see-through: each such patch is laid on the
+    colour the page has around it (the brightest of the ring just outside -
+    the ground, not the knob's dark track), so it looks as on the device."""
+    from PIL import Image
+    im = Image.open(path).convert("RGBA")
+    alpha = im.getchannel("A")
+    w, h = im.size
+    see_through = [(k % w, k // w) for k, a in enumerate(alpha.tobytes()) if a < 255]
+    patches: list = []                       # [left, top, right, bottom], pixels within 16 px joined
+    for x, y in see_through:
+        for box in patches:
+            if box[0] - 16 <= x <= box[2] + 16 and box[1] - 16 <= y <= box[3] + 16:
+                box[:] = [min(box[0], x), min(box[1], y), max(box[2], x), max(box[3], y)]
+                break
+        else:
+            patches.append([x, y, x, y])
+    rgb = im.convert("RGB")
+    for l, t, r, b in patches:
+        l, t, r, b = max(l - 4, 0), max(t - 4, 0), min(r + 5, w - 1), min(b + 5, h - 1)
+        ring = [rgb.getpixel((x, y)) for x in range(l, r + 1) for y in (t, b)] + \
+               [rgb.getpixel((x, y)) for y in range(t, b + 1) for x in (l, r)]
+        under = Image.new("RGBA", (r - l + 1, b - t + 1), max(ring, key=sum) + (255,))
+        under.alpha_composite(im.crop((l, t, r + 1, b + 1)))
+        im.paste(under, (l, t))
+    im.convert("RGB").save(path)
 
 
 class Screen:
@@ -84,7 +116,21 @@ class Screen:
         self.page.wait_for_selector(".sympy-editor .katex", timeout=60000)
         assert self.ev("!!window.SympyEditorPy && !window.pyodide && !window.loadPyodide"), "the page is not on the native backend"
         self.page.wait_for_timeout(600)
+        # The apps carry the handwriting add-on with its model, on like the
+        # others, and its tools are in every screen of theirs: so here, where
+        # this Python can read strokes too (the add-on installed, a model found).
+        if self.handwriting_reads():
+            self.send({"action": "addons", "enable": ["latex", "handwriting"]})
+            self.page.wait_for_selector('[data-cmd="addon:handwriting:pen"]', timeout=30000)
         self.page.evaluate("document.activeElement && document.activeElement.blur()")
+
+    @staticmethod
+    def handwriting_reads() -> bool:
+        try:
+            from sympy_editor_handwriting import ADDON
+            return bool(ADDON.recognizer.status()["available"])
+        except Exception:  # noqa: BLE001 - not installed, or nothing to read with
+            return False
 
     def ev(self, js):
         return self.page.evaluate(js)
@@ -160,7 +206,9 @@ class Screen:
 
     def shot(self, name):
         self.page.wait_for_timeout(400)
-        self.page.screenshot(path=str(self.out / f"{name}.png"))
+        path = self.out / f"{name}.png"
+        self.page.screenshot(path=str(path))
+        opaque(path)
         print("  ", name)
 
     def close(self):
@@ -557,6 +605,131 @@ def take_console(work: Path, out: Path, device: str) -> None:
                 s.close()
 
 
+#: Writing by hand: (file name, caption, the formula, what the scene does).
+#: ``select`` is the piece written over (its source), ``caret`` puts the cursor
+#: at the end instead, and with neither the ink is written by the formula and
+#: read together with it; ``ink`` writes (see the functions below), ``apply``
+#: presses Apply, ``show`` is what the picture is of: the readings or the
+#: formula.  The ink is made up (screenshot_ink.py) and read by the model.
+def _under(w, r, size):                 # a bar under the piece and a 2 under the bar: a fraction
+    w.line(r["l"] - 0.15 * size, r["b"] + 0.25 * size, r["r"] + 0.15 * size, r["b"] + 0.25 * size)
+    w.text(["2"], (r["l"] + r["r"]) / 2 - 0.3 * size, r["b"] + 0.55 * size, size)
+
+
+def _raised(w, r, size):                # a small 2 at the top-right corner: a power
+    w.text(["2"], r["r"] + 0.12 * size, r["t"] - 0.45 * size, size * 0.62)
+
+
+def _written(*chars, power=None, drop=0.0):   # glyphs in a row, where the room opens; ``power`` raises a 2 after
+    def ink(w, r, size):                      # that many, ``drop`` lowers the line (a tall first glyph)
+        x, y = r["x"], (r["t"] + r["b"]) / 2 - size / 2 + drop * size
+        for i, ch in enumerate(chars):
+            x = w.text([ch], x, y, size)
+            if power == i + 1:
+                x = w.text(["2"], x - 0.3 * size, y - 0.5 * size, size * 0.6) + 0.1 * size
+    return ink
+
+
+u2, v2 = symbols("x y")
+HANDWRITING_SCENES = [
+    ("01-ink-fraction", "Write on the formula by hand", sin(u2),
+     dict(ink=_under, want="sin(x)/2", show="readings")),
+    ("02-ink-fraction-applied", "It is read, and becomes the formula", sin(u2),
+     dict(ink=_under, want="sin(x)/2", apply=True, show="formula")),
+    ("03-ink-power", "A small 2 at the corner is a power", cos(u2),
+     dict(ink=_raised, want="cos(x)**2", show="readings")),
+    ("04-ink-cursor", "Write on at the cursor", u2**2,
+     dict(ink=_written("+", "2", "x", "+", "3"), want="2*x + 3", caret=True, show="readings")),
+    ("05-ink-cursor-applied", "Handwriting in, mathematics out", u2**2,
+     dict(ink=_written("+", "2", "x", "+", "3"), want="2*x + 3", caret=True, apply=True, show="formula")),
+    ("06-ink-replace", "Write over a piece to replace it", 1 + cos(u2),
+     dict(ink=_written("x", "+", "1", power=1, drop=0.25), want="x**2 + 1", select="cos(x)", zoom=1.2, show="readings")),
+    ("07-ink-integral", "An integral, written and read", v2,
+     dict(ink=_written("int", "x", "d", "x", power=2, drop=0.45), want="Integral(x**2, x)", select="/", show="readings")),
+    ("08-ink-integral-applied", "Then let SymPy work it out", v2,
+     dict(ink=_written("int", "x", "d", "x", power=2, drop=0.45), want="Integral(x**2, x)", select="/",
+          apply=True, doit=True, show="formula")),
+]
+HANDWRITING_SHOTS = [(name, caption) for name, caption, _expr, _how in HANDWRITING_SCENES]
+
+
+def _handwriting(s: "Screen", ink, want, select=None, caret=False, apply=False, doit=False, zoom=1.5,
+                 show="readings") -> None:
+    from screenshot_ink import Writer
+
+    # the pen's own strip is the picture: the other panels are switched off
+    s.send({"action": "addons", "enable": ["latex", "handwriting"], "disable": ["console", "matching", "plot", "tree"]})
+    s.page.wait_for_selector(".se-stage .hw-ink", state="attached", timeout=30000)
+    s.fit(zoom)
+    if select:
+        s.select(select)
+    elif caret:
+        s.ev(f"(() => {{ const ed = {ED}; ed.select(null); const all = ed._caretPositions(), p = all[all.length - 1]; ed._showCaret(p.gap, p.x); }})()")
+    s.page.locator('[data-cmd="addon:handwriting:pen"]').click()
+    s.page.wait_for_timeout(900)
+    # where to write: by the piece (the formula, when nothing is selected), or in the room the pen opened
+    r = s.ev("""(() => {
+      const view = document.querySelector('.se-view');
+      const piece = view.querySelector('.hw-covered') || view.querySelector('[data-path="/"]');
+      const b = piece.getBoundingClientRect(), root = view.querySelector('[data-path="/"]').getBoundingClientRect();
+      const roomy = [...view.querySelectorAll('[data-path]')].find(e => e.style.marginLeft || e.style.marginRight);
+      let x = b.left;
+      if (roomy) { const q = roomy.getBoundingClientRect(), ml = parseFloat(roomy.style.marginLeft) || 0; x = ml ? q.left - ml : q.right; }
+      return {l: b.left, r: b.right, t: b.top, b: b.bottom, x: x + 6, h: root.height};
+    })()""")
+    w = Writer(seed=len(s.out.parts) + int(r["h"]))
+    ink(w, r, min(r["h"], 64) * 0.85)
+    for stroke in w.strokes:
+        s.page.mouse.move(*stroke[0])
+        s.page.mouse.down()
+        for point in stroke[1:]:
+            s.page.mouse.move(*point)
+        s.page.mouse.up()
+        s.page.wait_for_timeout(90)
+    s.page.wait_for_selector(".hw-cand", timeout=30000)
+    s.page.wait_for_timeout(900)
+    # "the best first; pick the one that is right": the reading wanted, picked as a finger would
+    for i in range(s.page.locator(".hw-cand").count()):
+        if s.page.locator(".hw-src").inner_text().strip() == want:
+            break
+        s.page.locator(".hw-cand").nth(i).click()
+        s.page.wait_for_timeout(500)
+    read = s.page.locator(".hw-src").inner_text().strip()
+    if read != want:
+        raise ValueError(f"read as {read!r}, not {want!r}")
+    if apply:
+        s.page.locator(".hw-apply").click()
+        s.page.wait_for_function(f"!{ED}.busy")
+        s.page.wait_for_timeout(1500)
+        if doit:
+            s.page.locator(".hw-keep").click()
+            s.page.locator('[data-cmd="addon:handwriting:pen"]').click()      # the pen away: the editor again
+            s.page.wait_for_timeout(500)
+            s.send({"action": "apply", "path": "/", "op": "doit"})
+            s.fit(1.5)
+    s.page.evaluate("document.activeElement && document.activeElement.blur()")
+    if show == "readings":
+        s.reveal(".hw-panel")
+    else:
+        s.ev("window.scrollTo(0, 0)")
+        s.reveal(".hw-panel" if not doit else ".se-source")
+
+
+def take_handwriting(work: Path, out: Path, device: str) -> None:
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as pw:
+        for name, _caption, expr, how in HANDWRITING_SCENES:
+            s = Screen(pw, expr, work, out, device)
+            try:
+                _handwriting(s, **how)
+                s.shot(name)
+            except Exception as exc:      # one scene that fails is one picture fewer, not none
+                print(f"   {name}: not taken ({type(exc).__name__}: {str(exc).splitlines()[0]})")
+            finally:
+                s.close()
+
+
 def frame(raw: Path, caption: str, out: Path, device: str) -> None:
     """The screen under its caption, on a green ground, in the store's size."""
     from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -609,16 +782,18 @@ def main(argv=None) -> int:
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--device", choices=sorted(DEVICES), action="append", help="one of them only (default: all)")
-    ap.add_argument("--set", choices=("story", "examples", "addons", "console"), default="story",
+    ap.add_argument("--set", choices=("story", "examples", "addons", "console", "handwriting"), default="story",
                     help="story: famous equations worked (default); examples: the app's own examples, under examples/; "
-                         "addons: the add-ons it ships, under addons/; console: the Python console, under console/")
+                         "addons: the add-ons it ships, under addons/; console: the Python console, under console/; "
+                         "handwriting: writing on the formula by hand, under handwriting/")
     args = ap.parse_args(argv)
     shots, taker = {"story": (SHOTS, take), "examples": (EXAMPLE_SHOTS, take_examples),
-                    "addons": (ADDON_SHOTS, take_addons), "console": (CONSOLE_SHOTS, take_console)}[args.set]
+                    "addons": (ADDON_SHOTS, take_addons), "console": (CONSOLE_SHOTS, take_console),
+                    "handwriting": (HANDWRITING_SHOTS, take_handwriting)}[args.set]
     out = HERE / "ios" / "build" / "screenshots"
     for device in args.device or sorted(DEVICES):
         base = out / device / ("" if args.set == "story" else args.set)
-        raw, framed, work = base / "raw", base / "framed", out / "work"
+        raw, framed, work = base / "raw", base / "framed", out / "work" / args.set   # a set's own: two can run at once
         for folder in (raw, framed, work):
             folder.mkdir(parents=True, exist_ok=True)
         w, h, scale, _ = DEVICES[device]
