@@ -520,3 +520,24 @@ def test_names_an_addon_puts_in_scope_are_not_the_documents_own():
     doc.handle({"action": "set", "src": "2*meter"})
     assert doc.expr == 2 * meter                       # still the unit
     assert [s["name"] for s in doc.snapshot()["symbols"]] == []
+
+
+def test_an_experimental_add_on_is_said_so_in_the_catalogue():
+    """``"experimental": true`` in an add-on's manifest - or an
+    ``experimental = True`` attribute - reaches the Add-ons window through
+    ``available_addons``, which puts the badge on its card."""
+    from sympy import Symbol
+    from sympy_editor import Document
+    from sympy_editor.addons import Addon
+
+    class New(Addon):
+        name = "newone"
+        label = "A new one"
+        experimental = True
+
+    class Old(Addon):
+        name = "oldone"
+        label = "An old one"
+    doc = Document(Symbol("x"), available=[New(), Old()])
+    flags = {a["name"]: a.get("experimental", False) for a in doc.available_addons()}
+    assert flags == {"newone": True, "oldone": False}

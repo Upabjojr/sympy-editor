@@ -4,5 +4,6 @@
   "module": "sympy_editor_transforms",
   "version": "0.0.1",
   "description": "Laplace, Fourier, sine, cosine, Mellin, Hankel and z-transforms of the selection, with their conditions in words.",
-  "requires": []
+  "requires": [],
+  "experimental": true
 }

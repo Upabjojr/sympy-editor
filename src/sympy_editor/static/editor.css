@@ -1034,6 +1034,20 @@
 .se-sheet-body > * { max-width: 40rem; margin-left: auto; margin-right: auto; }
 .se-sheet-intro { color: var(--se-muted); font-size: 13px; margin: 0 auto 0.8rem; }
 .se-addon-search-row { margin-bottom: 0.7rem; }
+/* The sessions' window is as wide as the screen and no wider: the cards
+ * stretch to it, a long name wraps instead of running off the side, and a
+ * formula wider than the window scrolls in its own row of the history. */
+.se-sheet-view .se-sheet-body { overflow-x: hidden; }
+.se-sheet-view .se-sessions { display: flex; flex-direction: column; gap: 0.45rem; color: var(--se-muted); }
+.se-sheet-view .se-session { align-items: stretch; min-width: 0; max-width: 100%; margin: 0; padding: 0.55rem 0.65rem; border: 1px solid var(--se-rule); border-radius: 0.5rem; background: var(--se-surface); }
+.se-sheet-view .se-session-current { border-color: rgba(var(--se-accent), 0.7); background: rgba(var(--se-accent), 0.05); }
+.se-sheet-view .se-session[hidden] { display: none; }
+.se-sheet-view .se-session-row { min-width: 0; row-gap: 0.35rem; }
+.se-sheet-view .se-session-row > code { flex: 1 1 100%; white-space: normal; overflow-wrap: anywhere; overflow: visible; text-overflow: clip; font-size: 13px; }
+.se-sheet-view .se-session-sub, .se-sheet-view .se-drawer-pane, .se-sheet-view .se-history, .se-sheet-view .se-step, .se-sheet-view .se-step-body { min-width: 0; max-width: 100%; }
+.se-sheet-view .se-step code { white-space: normal; overflow-wrap: anywhere; }
+.se-sheet-view .se-step-formulas { flex-wrap: nowrap; max-width: 100%; overflow-x: auto; }
+.se-sheet-view .se-session-none { color: var(--se-muted); font-size: 13px; margin: 0.3rem 0; }
 .se-addon-search {
   width: 100%; box-sizing: border-box; font: inherit; font-size: 14px; padding: 0.5rem 0.7rem;
   border: 1px solid var(--se-border); border-radius: 0.4rem; background: var(--se-field); color: inherit;
@@ -1052,6 +1066,11 @@
 .se-addon-name { font-weight: 600; }
 .se-addon-desc { flex: 1 1 100%; color: var(--se-muted); font-size: 13px; line-height: 1.4; }
 .se-addon-needs, .se-addon-version { color: var(--se-muted); font-size: 12px; }
+.se-addon-badge {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.02em; padding: 0.05rem 0.4rem; border-radius: 1rem;
+  color: #9a6700; background: rgba(212, 167, 44, 0.16); border: 1px solid rgba(212, 167, 44, 0.45);
+}
+@media (prefers-color-scheme: dark) { .se-addon-badge { color: #e3b341; } }
 .se-sheet-view .se-addon-help {
   flex: 0 0 auto; font: inherit; font-size: 13px; min-width: 2rem; min-height: 2rem; padding: 0 0.5rem;
   border: 1px solid var(--se-border); border-radius: 0.3rem; background: var(--se-btn); color: inherit; cursor: pointer;

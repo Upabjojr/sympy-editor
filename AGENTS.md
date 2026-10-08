@@ -479,6 +479,11 @@ Two conventions between printer, document and front end:
   of its own (`showSheet("sessions")`, which brings the list up to date as
   opening the menu does; a session picked there opens and the window goes,
   `_openFromList`) - the owner's call: the list had taken over the menu.
+  The window is the screen's width and never scrolls sideways (the cards
+  stretch to it, names wrap, a wide history formula scrolls in its own
+  row: `test_the_sessions_window_fits_the_screen_and_searches`), and
+  `.se-session-search` finds a session by its name or the formula it holds
+  (`_filterSessions`, re-applied when the list is refilled).
   Not in the widget's own layout; the history is a sub-tab
   (`.se-subtabs`, `showDrawerTab("history")` toggles `.se-drawer-pane`)
   nested in the current session's card, so the hierarchy session ⊃ history
@@ -893,6 +898,9 @@ Two conventions between printer, document and front end:
   of its own over the editor - `showSheet(kind)` / `closeSheet()`, dressed
   as the guide (`.se-history-view.se-sheet-view[data-sheet]`), a dialog
   like the others (`trapTab`, `_opener`/`_refocus`, Esc, Back).  The window
+  An add-on's `addon.json` (or its object) may say `"experimental": true`:
+  the card carries an *Experimental* badge (`.se-addon-badge`) - new, not
+  yet checked by the owner; it is still on by default like any other.
   `.se-addon-search` filters the add-on cards (`_filterAddons`, every word
   in the card's text, accents aside; kept across refills).  The windows'
   ×, like the guide's, sits in the header's corner group

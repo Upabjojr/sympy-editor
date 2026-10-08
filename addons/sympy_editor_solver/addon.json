@@ -4,5 +4,6 @@
   "module": "sympy_editor_solver",
   "version": "0.0.1",
   "description": "Solve the selected equation, inequality or system; check a solution by substituting it back; insert it.",
-  "requires": []
+  "requires": [],
+  "experimental": true
 }

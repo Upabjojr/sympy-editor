@@ -173,7 +173,7 @@ var SympyEditor = (function () {
     "</ul></section>",
     "<section><h3>Applying functions</h3><ul>",
     "<li>The four menus at the foot of the tools are one kind of box: it lists everything it offers when it takes the focus, narrows the list as you type, and \u2191/\u2193 + <kbd>Enter</kbd> (or a click) pick. The first group holds the <b>actions</b>: <b>Transform \u25be</b> for the general operations - Simplify, Expand, Factor\u2026 and <i>Differentiate\u2026</i>, <i>Integrate\u2026</i>, <i>Solve for\u2026</i>, <i>Substitute\u2026</i>, which ask for their variable first -, and a second menu with the operations for the selection's type (Matrix, Integral, Equation\u2026). Picking one applies it at once, to the selection or, with nothing selected, to the whole expression.</li>",
-    "<li><b>Add-ons</b>, at the top of what <b>\u2261</b> opens, is a window of its own: one card per add-on, with what it does, its switch and, when it is on, its <b>?</b>; the box at its top searches them. Back (or <kbd>Esc</kbd>) in the Add-ons or File window goes back to the menu, the \u00d7 closes both. It switches on or off the add-ons installed beside the editor \u2014 a panel under the formula, tools, node types from other packages \u2014 without restarting anything; what an add-on kept waits for it to come back. In the apps every add-on is on until switched off, and a switch holds for every session and is remembered between launches. (A read-only editor has no \u2261, and there the switches keep a button of their own on the strip.)</li>",
+    "<li><b>Add-ons</b>, at the top of what <b>\u2261</b> opens, is a window of its own: one card per add-on, with what it does, its switch and, when it is on, its <b>?</b> (one marked <i>Experimental</i> is new and not yet checked: it may give wrong answers or change); the box at its top searches them. Back (or <kbd>Esc</kbd>) in the Add-ons or File window goes back to the menu, the \u00d7 closes both. It switches on or off the add-ons installed beside the editor \u2014 a panel under the formula, tools, node types from other packages \u2014 without restarting anything; what an add-on kept waits for it to come back. In the apps every add-on is on until switched off, and a switch holds for every session and is remembered between launches. (A read-only editor has no \u2261, and there the switches keep a button of their own on the strip.)</li>",
     "<li>In a <b>matrix</b> or an <b>array</b> the four arrows move as it is drawn: <kbd>\u2190</kbd>/<kbd>\u2192</kbd> along the row, <kbd>\u2191</kbd>/<kbd>\u2193</kbd> between the rows \u2014 for the selection and for the caret alike. At the edge the usual meaning takes over: <kbd>\u2191</kbd> in the top row selects the matrix itself (again, its own parent), <kbd>\u2190</kbd>/<kbd>\u2192</kbd> step out of it. An array of any rank works the same way, because the rule follows the drawing: a rank-3 array is a row of matrices, so <kbd>\u2192</kbd> at the right edge of one block enters the next on the same line.</li>",
     "<li>In a <b>matrix</b> (the matrix, or anything in one of its entries) the row under the formula adds, beside the arrows, <b>+ row</b>, <b>+ col</b>, <b>\u2212 row</b>, <b>\u2212 col</b>: a new row or column of empty slots after the selected one (after the last, for the matrix itself), or the selected one taken away. The grip at the matrix\u2019s bottom-right corner <b>reshapes</b> it: the same entries laid out another way (SymPy\u2019s reshape, in reading order), so it snaps to the shapes that hold them all \u2014 12 entries go 1\u00d712, 2\u00d76, 3\u00d74, 4\u00d73, 6\u00d72, 12\u00d71 and nowhere else. Nothing is added or lost; the outline shows the shape it will take. To grow or shrink the matrix, use + row / + col / \u2212 row / \u2212 col.</li>",
     "<li>The second group is the <b>library</b>: <b>Methods \u25be</b> lists everything the selected object's class can do \u2014 .det(), .T, .diff()\u2026 \u2014 one pick calls it. A Lambda is itself a function: <b>( ) apply</b> evaluates it at the arguments you give.</li>",
@@ -187,7 +187,7 @@ var SympyEditor = (function () {
     "<li><b>Save \u25be</b> writes it out: a self-contained web page that works offline and plays on its own, or a Python script that rebuilds every step with SymPy \u2014 or sends it to the printer (<i>print or PDF</i>; <i>Print history\u2026</i> under <b>\u2261</b> too).</li>",
     "<li>A formula saved to a <b>.sympy</b> file opens with the app from a file manager or a mail, in a session of its own; in a notebook, files are saved next to the notebook.</li>",
     "<li><b>\u2261</b> holds <b>File</b> in every editor, a window of its own: <i>Open formula\u2026</i>; the formula (a <b>.sympy</b> file with the whole history), the history as Python and the history as a web page, each with <b>Save\u2026</b> (a file on this device: the app asks where) and <b>Share\u2026</b> (sent to another app or person through the share sheet - in the apps, and in a browser that can share files); and the history on paper. In the app a .sympy file opens with SymPy Editor from a file manager, the Downloads list or a mail.</li>",
-    "<li>Where the page keeps several sessions, <b>New session\u2026</b> heads the <b>\u2261</b> menu, and under it <b>Sessions</b> opens their list in a window of its own (tap one to open it; its <i>History</i> tab shows its steps). A session is labelled with its formula until you give it a name of your own (the pencil beside it, or a double-click), which nothing overwrites.</li>",
+    "<li>Where the page keeps several sessions, <b>New session\u2026</b> heads the <b>\u2261</b> menu, and under it <b>Sessions</b> opens their list in a window of its own (tap one to open it; its <i>History</i> tab shows its steps; the box at its top finds a session by name or by formula). A session is labelled with its formula until you give it a name of your own (the pencil beside it, or a double-click), which nothing overwrites.</li>",
     "</ul></section>",
     "<section><h3>On a phone or tablet</h3><ul>",
     "<li>Tap to select; tap the selected node again to edit it.</li>",
@@ -2739,6 +2739,8 @@ var SympyEditor = (function () {
           });
           var text = [h("span", { class: "se-addon-name" }, [a.label || a.name])];
           if (a.version) text.push(h("small", { class: "se-addon-version" }, [" " + a.version]));
+          // not yet checked by the project: said on the card, and why
+          if (a.experimental) text.push(h("span", { class: "se-addon-badge", title: "Experimental: new, and not yet checked - it may give wrong answers or change" }, ["Experimental"]));
           if (a.description) text.push(h("span", { class: "se-addon-desc" }, [a.description]));
           if (a.requires && a.requires.length) text.push(h("small", { class: "se-addon-needs" }, ["needs " + a.requires.join(", ")]));
           if (a.error) text.push(h("small", { class: "se-addon-error" }, [" " + a.error]));
@@ -7697,6 +7699,18 @@ var SympyEditor = (function () {
         parts.push(h("div", { class: "se-addon-search-row" }, [search]));
         this._addonSearch = search;
       }
+      if (kind === "sessions") {
+        // and over the sessions: by name, or by the formula a session holds
+        var find = h("input", { type: "search", class: "se-addon-search se-session-search", placeholder: "Search the sessions",
+                                "aria-label": "Search the sessions", title: "Search the sessions by name or by formula" });
+        noAutoCaps(find);
+        find.value = this._sessionFilter || "";
+        find.addEventListener("input", function () { self._sessionFilter = find.value; self._filterSessions(); });
+        find.addEventListener("keydown", function (ev) {
+          if (ev.key === "Escape" && find.value) { ev.preventDefault(); ev.stopPropagation(); find.value = ""; self._sessionFilter = ""; self._filterSessions(); }
+        });
+        parts.push(h("div", { class: "se-addon-search-row" }, [find]));
+      }
       parts.push(body);
       var inner = h("div", { class: "se-sheet-body" }, parts);
       var view = h("div", { class: "se-history-view se-sheet-view", "data-sheet": kind, role: "dialog", "aria-modal": "true", "aria-label": title }, [head, inner]);
@@ -7728,6 +7742,7 @@ var SympyEditor = (function () {
         // the list as it stands now - another editor on the same keeper may
         // have written since - as opening the menu brings it up to date
         this._fillSessions();
+        this._filterSessions();
         if (this._sessionsReady) this._saveSession();
       }
       var first = body.querySelector("input, button");
@@ -7742,6 +7757,35 @@ var SympyEditor = (function () {
         this.openDrawer();
         this._drawerOpener = this.buttons.drawer || null;   // closing the menu then goes back to its button
       }
+    }
+
+    /** Show the sessions the search box names: by name, by the formula a
+     *  session holds (what is written on its card, and the source of its
+     *  current step when it is kept); a word for none. */
+    _filterSessions() {
+      if (!this.sessionsBody) return;
+      var fold = function (t) { return String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""); };
+      var q = fold(this._sessionFilter).trim();
+      var store = this._sessionStore || { list: [] };
+      var byId = {};
+      store.list.forEach(function (sess) { byId[sess.id] = sess; });
+      var rows = this.sessionsBody.querySelectorAll(".se-session[data-id]"), shown = 0;
+      for (var i = 0; i < rows.length; i++) {
+        var sess = byId[rows[i].getAttribute("data-id")] || {};
+        var steps = sess.state && sess.state.history ? sess.state.history : [];
+        var formula = steps.length ? steps[Math.min(sess.state.index || 0, steps.length - 1)] : "";
+        var text = fold((rows[i].querySelector(".se-session-row > code") || rows[i]).textContent + " " + (sess.name || "") + " " + formula);
+        var hit = !q || q.split(/\s+/).every(function (w) { return text.indexOf(w) >= 0; });
+        rows[i].hidden = !hit;
+        if (hit) shown++;
+      }
+      var none = this.sessionsBody.querySelector(".se-session-none");
+      if (!none) {
+        none = h("p", { class: "se-session-none", hidden: "" });
+        this.sessionsBody.appendChild(none);
+      }
+      none.textContent = rows.length && !shown ? "No session matches \u201c" + String(this._sessionFilter).trim() + "\u201d." : "";
+      none.hidden = !(rows.length && !shown);
     }
 
     /** Show the add-ons the search box names: by label, description, what
@@ -7995,6 +8039,7 @@ var SympyEditor = (function () {
         }
         body.appendChild(row);
       });
+      if (this.sheetView && this.sheetView.getAttribute("data-sheet") === "sessions") this._filterSessions();
       // The history of the current session: one row per step, the current one marked.
       var hist = this.historyBody;
       hist.textContent = "";

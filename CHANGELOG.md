@@ -4,7 +4,9 @@
 
 * **Sessions, Add-ons and File have windows of their own.** "New
   session…" heads the ≡ menu, with an entry under it that opens the list of
-  sessions in a window (a session picked there opens, and the window goes).
+  sessions in a window (a session picked there opens, and the window goes;
+  a search box finds one by name or formula, and on a phone the window
+  wraps long names instead of scrolling sideways).
   The Add-ons window has
   a search box; Back (Android's, or Esc) in either window returns to the
   menu, and their × - the guide's too - sits right at the edge. The ≡ menu holds two

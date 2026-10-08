@@ -4,5 +4,6 @@
   "module": "sympy_editor_units",
   "version": "0.0.1",
   "description": "Physical units (sympy.physics.units): typed in the formula, dimensions checked term by term, conversions as steps.",
-  "requires": []
+  "requires": [],
+  "experimental": true
 }

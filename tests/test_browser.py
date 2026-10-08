@@ -4980,6 +4980,48 @@ def test_the_history_close_button_sits_in_the_corner(browser, serve_expr):
     page.close()
 
 
+def test_the_sessions_window_fits_the_screen_and_searches(browser, serve_expr):
+    """On a phone the Sessions window is as wide as the screen: a long name
+    wraps onto new lines, the history's formulas scroll in their own rows,
+    and nothing scrolls the window sideways.  A search box over the list
+    finds a session by its name or by the formula it holds."""
+    srv, doc = serve_expr(sin(x) / (x + 1) + sympy.Integral(sympy.exp(-x**2), (x, -sympy.oo, sympy.oo)),
+                          options={"sessions": True}, store=False)
+    page = browser.new_page(viewport={"width": 390, "height": 844}, has_touch=True)
+    page.goto(srv.url)
+    page.evaluate("""() => localStorage.setItem('sympy-editor:sessions', JSON.stringify({current: 'a', list: [
+        {id: 'a', name: 'x', updated: 3},
+        {id: 'b', name: 'Integral(sqrt(2)*exp(-x**2/2)/(2*sqrt(pi)), (x, -oo, oo)) + Sum(x**(-2), (x, 1, oo))', updated: 2},
+        {id: 'c', name: 'Simplifying the Hamiltonian of the quantum harmonic oscillator', title: true, updated: 1,
+         state: {history: ["cos(Symbol('omega'))"], index: 0}}]}))""")
+    page.reload()
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    sheet = _open_sheet(page, "sessions")
+    sheet.locator(".se-session-current .se-subtab").click()          # the history, with its wide formula
+    assert _wait(lambda: page.locator(".se-sheet-view .se-step").count() >= 1)
+    widths = page.evaluate("""() => { const b = document.querySelector('.se-sheet-body');
+        return [b.scrollWidth, b.clientWidth, document.documentElement.scrollWidth,
+                Math.max(...[...document.querySelectorAll('.se-sheet-view .se-session')].map(e => e.getBoundingClientRect().right))]; }""")
+    assert widths[0] <= widths[1] and widths[2] <= 390 and widths[3] <= 390, widths
+    long_name = sheet.locator('.se-session[data-id="b"] .se-session-row > code')
+    long_name.wait_for(state="visible")
+    assert long_name.bounding_box()["height"] > 30                   # wrapped onto several lines
+    # the search: by name, by formula, none
+    find = sheet.locator(".se-session-search")
+    find.fill("hamiltonian")
+    visible = lambda: [r.get_attribute("data-id") for r in sheet.locator(".se-session[data-id]").all() if r.is_visible()]
+    assert visible() == ["c"]
+    find.fill("omega")                                                # the formula it holds
+    assert visible() == ["c"]
+    find.fill("integral sum")
+    assert visible() == ["b"]
+    find.fill("nothing like it")
+    assert visible() == [] and "No session matches" in sheet.locator(".se-session-none").inner_text()
+    find.fill("")
+    assert len(visible()) == 4                                        # the three, and the page's own
+    page.close()
+
+
 def test_the_new_session_chooser_survives_a_refresh_of_the_list(browser, serve_expr):
     """The chooser lives in the sessions list, which a snapshot arriving in
     the background rebuilds (the session saved after a change, a Python
@@ -5484,6 +5526,7 @@ def test_the_add_ons_window_searches_and_back_returns_to_the_menu(browser):
     class Other(Addon):
         name = "otherthing"
         label = "Another thing"
+        experimental = True
     doc = Document(x + y, available=[a1, Other()])
     srv = EditorServer(doc, port=0)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -5494,6 +5537,9 @@ def test_the_add_ons_window_searches_and_back_returns_to_the_menu(browser):
         sheet = _open_sheet(page, "addons")
         rows = sheet.locator(".se-addon-row")
         assert rows.count() == 2
+        # one is experimental, and its card says so
+        assert sheet.locator(".se-addon-badge").count() == 1
+        assert "Another thing" in sheet.locator(".se-addon-row", has=page.locator(".se-addon-badge")).inner_text()
         search = sheet.locator(".se-addon-search")
         assert search.is_visible()
         search.fill("demo")
