@@ -173,7 +173,7 @@ var SympyEditor = (function () {
     "</ul></section>",
     "<section><h3>Applying functions</h3><ul>",
     "<li>The four menus at the foot of the tools are one kind of box: it lists everything it offers when it takes the focus, narrows the list as you type, and \u2191/\u2193 + <kbd>Enter</kbd> (or a click) pick. The first group holds the <b>actions</b>: <b>Transform \u25be</b> for the general operations - Simplify, Expand, Factor\u2026 and <i>Differentiate\u2026</i>, <i>Integrate\u2026</i>, <i>Solve for\u2026</i>, <i>Substitute\u2026</i>, which ask for their variable first -, and a second menu with the operations for the selection's type (Matrix, Integral, Equation\u2026). Picking one applies it at once, to the selection or, with nothing selected, to the whole expression.</li>",
-    "<li><b>Add-ons</b>, at the top of what <b>\u2261</b> opens, is a window of its own: one card per add-on, with what it does, its switch and, when it is on, its <b>?</b> (one marked <i>Experimental</i> is new and not yet checked: it may give wrong answers or change); the box at its top searches them. Back (or <kbd>Esc</kbd>) in the Add-ons or File window goes back to the menu, the \u00d7 closes both. It switches on or off the add-ons installed beside the editor \u2014 a panel under the formula, tools, node types from other packages \u2014 without restarting anything; what an add-on kept waits for it to come back. In the apps every add-on is on until switched off, and a switch holds for every session and is remembered between launches. (A read-only editor has no \u2261, and there the switches keep a button of their own on the strip.)</li>",
+    "<li><b>Add-ons</b>, at the top of what <b>\u2261</b> opens, is a window of its own: one card per add-on, with what it does, its switch and, when it is on, its <b>?</b> (one marked <i>Experimental</i> is new and not yet checked: it may give wrong answers or change, and in the apps it starts off until you switch it on); the box at its top searches them. Back (or <kbd>Esc</kbd>) in the Add-ons or File window goes back to the menu, the \u00d7 closes both. It switches on or off the add-ons installed beside the editor \u2014 a panel under the formula, tools, node types from other packages \u2014 without restarting anything; what an add-on kept waits for it to come back. In the apps every add-on is on until switched off, and a switch holds for every session and is remembered between launches. (A read-only editor has no \u2261, and there the switches keep a button of their own on the strip.)</li>",
     "<li>In a <b>matrix</b> or an <b>array</b> the four arrows move as it is drawn: <kbd>\u2190</kbd>/<kbd>\u2192</kbd> along the row, <kbd>\u2191</kbd>/<kbd>\u2193</kbd> between the rows \u2014 for the selection and for the caret alike. At the edge the usual meaning takes over: <kbd>\u2191</kbd> in the top row selects the matrix itself (again, its own parent), <kbd>\u2190</kbd>/<kbd>\u2192</kbd> step out of it. An array of any rank works the same way, because the rule follows the drawing: a rank-3 array is a row of matrices, so <kbd>\u2192</kbd> at the right edge of one block enters the next on the same line.</li>",
     "<li>In a <b>matrix</b> (the matrix, or anything in one of its entries) the row under the formula adds, beside the arrows, <b>+ row</b>, <b>+ col</b>, <b>\u2212 row</b>, <b>\u2212 col</b>: a new row or column of empty slots after the selected one (after the last, for the matrix itself), or the selected one taken away. The grip at the matrix\u2019s bottom-right corner <b>reshapes</b> it: the same entries laid out another way (SymPy\u2019s reshape, in reading order), so it snaps to the shapes that hold them all \u2014 12 entries go 1\u00d712, 2\u00d76, 3\u00d74, 4\u00d73, 6\u00d72, 12\u00d71 and nowhere else. Nothing is added or lost; the outline shows the shape it will take. To grow or shrink the matrix, use + row / + col / \u2212 row / \u2212 col.</li>",
     "<li>The second group is the <b>library</b>: <b>Methods \u25be</b> lists everything the selected object's class can do \u2014 .det(), .T, .diff()\u2026 \u2014 one pick calls it. A Lambda is itself a function: <b>( ) apply</b> evaluates it at the arguments you give.</li>",
@@ -2666,11 +2666,13 @@ var SympyEditor = (function () {
     /** With rememberAddons, the add-ons are switched for the editor as a
      *  whole: every document it opens - the last session at start, another
      *  session, a file - gets the same ones, whatever the page or the
-     *  session was made with.  What is kept is the list of those switched
-     *  *off* ({"off": [...]}), so every add-on is on until the user switches
-     *  it off, one added in a later version included.  (An older page kept
-     *  the list of those on, per session: that is read as nothing kept.)
-     *  Read once, when the editor is ready. */
+     *  session was made with.  What is kept is what the user switched:
+     *  {"off": [...], "on": [...]}.  An add-on the user never switched is on
+     *  - one added in a later version included - unless it is marked
+     *  experimental (addon.json), which stays off until switched on: a first
+     *  launch shows the checked ones only.  (An older page kept the list of
+     *  those on, per session: that is read as nothing kept.)  Read once,
+     *  when the editor is ready. */
     async _restoreAddons() {
       if (this._addonsRestored) return Promise.resolve();
       this._addonsRestored = true;
@@ -2680,7 +2682,8 @@ var SympyEditor = (function () {
         var kept = null;
         try { kept = JSON.parse(text || "null"); } catch (e) { kept = null; }
         self._addonsOff = kept && Array.isArray(kept.off) ? kept.off.map(String) : [];
-      }, function () { self._addonsOff = []; }).then(function () { return self._enforceAddons(); });
+        self._addonsOn = kept && Array.isArray(kept.on) ? kept.on.map(String) : [];
+      }, function () { self._addonsOff = []; self._addonsOn = []; }).then(function () { return self._enforceAddons(); });
     }
 
     /** Switch the document's add-ons to the editor's own: on, but for those
@@ -2688,13 +2691,13 @@ var SympyEditor = (function () {
      *  nor on a page whose add-ons are the page's choice. */
     _enforceAddons() {
       if (!this.state || !this._addonsOff || this.closed) return Promise.resolve();
-      var off = this._addonsOff;
       var on = this.state.addons || [];
-      var enable = this._addonsKnown().filter(function (n) { return off.indexOf(n) < 0 && on.indexOf(n) < 0; });
-      var disable = on.filter(function (n) { return off.indexOf(n) >= 0; });
+      var self = this;
+      var want = function (n) { return self._addonWanted(n); };
+      var enable = this._addonsKnown().filter(function (n) { return want(n) && on.indexOf(n) < 0; });
+      var disable = on.filter(function (n) { return !want(n); });
       if (!enable.length && !disable.length) return Promise.resolve();
       this._enforcingAddons = true;
-      var self = this;
       return Promise.resolve(this.send({ action: "addons", enable: enable, disable: disable }, { background: true })).then(function (snap) {
         self._enforcingAddons = false;
         return snap;
@@ -2709,12 +2712,25 @@ var SympyEditor = (function () {
       if (!snap || snap.error || snap.preview || !Array.isArray(snap.addons)) return;
       var on = snap.addons;
       var known = this._addonsKnown(snap);
-      // what is off now, and what was off before and is not listed here (an
-      // add-on this Python cannot load stays off where it can)
+      // what is off now and what is on, and what was kept before and is not
+      // listed here (an add-on this Python cannot load keeps its switch where
+      // it can)
       var off = known.filter(function (n) { return on.indexOf(n) < 0; });
+      var onNow = known.filter(function (n) { return on.indexOf(n) >= 0; });
       (this._addonsOff || []).forEach(function (n) { if (known.indexOf(n) < 0 && off.indexOf(n) < 0) off.push(n); });
+      (this._addonsOn || []).forEach(function (n) { if (known.indexOf(n) < 0 && onNow.indexOf(n) < 0) onNow.push(n); });
       this._addonsOff = off;
-      Keep.write("addons", JSON.stringify({ off: off }), this);
+      this._addonsOn = onNow;
+      Keep.write("addons", JSON.stringify({ off: off, on: onNow }), this);
+    }
+
+    /** Whether the editor wants add-on `name` on: as the user switched it,
+     *  else on - unless it is experimental, which waits to be switched on. */
+    _addonWanted(name) {
+      if ((this._addonsOn || []).indexOf(name) >= 0) return true;
+      if ((this._addonsOff || []).indexOf(name) >= 0) return false;
+      var info = ((this.state && this.state.addons_available) || []).filter(function (a) { return a.name === name; })[0];
+      return !(info && info.experimental);
     }
 
     _fillAddonsMenu(available) {
