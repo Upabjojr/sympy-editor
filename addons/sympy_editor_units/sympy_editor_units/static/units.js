@@ -32,7 +32,8 @@ SympyEditor.registerAddon("units", {
     var what = h("span", { class: "su-what" }, ["The formula"]);
     var dimName = h("span", { class: "su-dim-name" });
     var dimTex = h("span", { class: "su-dim-tex" });
-    var dimRow = h("div", { class: "su-row su-dim" }, [what, h("span", { class: "su-is" }, ["is"]), dimName, dimTex]);
+    var isWord = h("span", { class: "su-is" }, ["is"]);
+    var dimRow = h("div", { class: "su-row su-dim" }, [what, isWord, dimName, dimTex]);
     var siTex = h("span", { class: "su-si-tex" });
     var siRow = h("div", { class: "su-row su-si", hidden: "" }, [h("span", { class: "su-label" }, ["In SI base units"]), siTex]);
 
@@ -89,6 +90,7 @@ SympyEditor.registerAddon("units", {
       var d = res.dimension || {};
       var sel = target_();
       what.textContent = sel.children ? "The selected terms" : (sel.path === "/" ? "The formula" : "The selection");
+      isWord.hidden = false;
       dimName.textContent = d.known ? (d.name || "of dimension") : "of a dimension that cannot be told";
       dimTex.hidden = !d.known;
       refreshTex();
@@ -118,6 +120,7 @@ SympyEditor.registerAddon("units", {
     function showNoUnits() {
       last = null;
       what.textContent = "The formula";
+      isWord.hidden = true;               // "The formula has no units", not "is has"
       dimName.textContent = "has no units";
       dimTex.textContent = "";
       siRow.hidden = true;

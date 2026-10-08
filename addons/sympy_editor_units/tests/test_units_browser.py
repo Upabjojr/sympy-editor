@@ -128,3 +128,17 @@ def test_the_short_names_switch_and_the_guide(served, browser):
     assert "Short unit names" in page.locator(".se-help-view").inner_text()
     page.keyboard.press("Escape")
     assert errors == []
+
+
+def test_a_formula_without_units_says_so_in_one_sentence(served, browser):
+    # The row reads "<what> is <dimension>"; with no units it is "The formula
+    # has no units" - it used to keep its "is": "The formula is has no units".
+    doc, srv = served(x**2 - 5 * x + 6)
+    page, errors = _open(browser, srv.url)
+    page.wait_for_function("document.querySelector('.su-dim-name').textContent === 'has no units'")
+    assert " ".join(page.locator(".su-dim").inner_text().split()) == "The formula has no units"
+    page.locator(".se-source").fill("5*meter + x**2*meter")                 # units come, the "is" with them
+    page.keyboard.press("Enter")
+    page.wait_for_function("document.querySelector('.su-dim-name').textContent === 'length'")
+    assert " ".join(page.locator(".su-dim").inner_text().split()).startswith("The formula is length")
+    assert errors == []
