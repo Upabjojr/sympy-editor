@@ -1,0 +1,9 @@
+{
+  "name": "export",
+  "label": "Export",
+  "module": "sympy_editor_export",
+  "version": "0.0.1",
+  "description": "The selection, or the whole formula, written out as LaTeX, MathML, Python, C, Fortran, JavaScript, Octave/MATLAB, Julia, Rust or a whole function - to copy or save.",
+  "requires": [],
+  "experimental": true
+}

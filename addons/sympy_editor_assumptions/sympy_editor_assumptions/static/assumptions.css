@@ -1,0 +1,60 @@
+/* sympy-editor add-on "assumptions": everything under its box. */
+.se-addon-assumptions .as-panel { font-size: 12px; display: flex; flex-direction: column; gap: 0.4rem; }
+.se-addon-assumptions .as-subject { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem; min-width: 0; overflow-x: auto; }
+.se-addon-assumptions .as-label, .se-addon-assumptions .as-heading { color: var(--se-muted); }
+.se-addon-assumptions .as-heading { font-weight: 600; margin-top: 0.2rem; }
+.se-addon-assumptions .as-tex { font-size: 1.1em; }
+
+/* The table: one cell per predicate, as many columns as fit. */
+.se-addon-assumptions .as-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: 3px; }
+.se-addon-assumptions .as-fact {
+  display: flex; align-items: center; gap: 0.35rem; min-width: 0;
+  font: inherit; text-align: left; color: var(--se-fg); cursor: pointer;
+  padding: 2px 6px; border: 1px solid var(--se-rule); border-radius: 4px;
+  background: var(--se-surface, var(--se-bg));
+}
+.se-addon-assumptions .as-pred { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.se-addon-assumptions .as-val { font-family: var(--se-mono); font-size: 11px; }
+.se-addon-assumptions .as-true .as-val { color: var(--se-added); font-weight: 600; }
+.se-addon-assumptions .as-false .as-val { color: var(--se-removed); }
+.se-addon-assumptions .as-null .as-val { color: var(--se-muted); font-style: italic; }
+.se-addon-assumptions .as-src { font-size: 10px; color: var(--se-muted); border: 1px solid var(--se-rule); border-radius: 3px; padding: 0 2px; }
+.se-addon-assumptions .as-fact.as-open { border-color: rgb(var(--se-accent)); box-shadow: 0 0 0 1px rgb(var(--se-accent)) inset; }
+.se-addon-assumptions .as-why { margin: 0; color: var(--se-fg); line-height: 1.45; }
+.se-addon-assumptions .as-na { color: var(--se-muted); margin: 0; }
+
+/* The symbols, each with its switches. */
+.se-addon-assumptions .as-sym { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.5rem; }
+.se-addon-assumptions .as-name { font-family: var(--se-mono); font-weight: 600; min-width: 1.5em; }
+.se-addon-assumptions .as-chips { display: flex; flex-wrap: wrap; gap: 3px; }
+.se-addon-assumptions .as-chip {
+  font: inherit; font-size: 11px; color: var(--se-muted); cursor: pointer;
+  padding: 1px 6px; border-radius: 999px; border: 1px dashed var(--se-border); background: transparent;
+}
+.se-addon-assumptions .as-chip.as-implied-true { color: var(--se-fg); border-style: solid; border-color: rgba(var(--se-accent), 0.35); }
+.se-addon-assumptions .as-chip.as-implied-false { text-decoration: line-through; }
+.se-addon-assumptions .as-chip.as-given-true { color: #fff; background: rgb(var(--se-accent)); border: 1px solid rgb(var(--se-accent)); }
+.se-addon-assumptions .as-chip.as-given-false { color: var(--se-removed); border: 1px solid var(--se-removed); text-decoration: line-through; }
+
+.se-addon-assumptions .as-btn {
+  font: inherit; font-size: 12px; color: inherit; cursor: pointer;
+  padding: 1px 8px; border: 1px solid var(--se-border); border-radius: 4px;
+  background: var(--se-btn); box-shadow: var(--se-btn-edge), var(--se-btn-shadow);
+}
+.se-addon-assumptions .as-btn:active { background: var(--se-btn-down); box-shadow: var(--se-btn-shadow-down); }
+.se-addon-assumptions .as-hint { border-left: 3px solid var(--se-added); padding: 0.2rem 0.5rem; background: rgba(var(--se-added-rgb), 0.07); }
+.se-addon-assumptions .as-hint p { margin: 0.15rem 0; }
+.se-addon-assumptions .as-note { margin: 0; color: var(--se-muted); }
+.se-addon-assumptions .as-note:empty { display: none; }
+.se-addon-assumptions .as-note.as-error { color: var(--se-error); }
+
+@media (hover: hover) {
+  .se-addon-assumptions .as-fact:hover, .se-addon-assumptions .as-chip:hover { border-color: rgb(var(--se-accent)); }
+}
+@media (any-pointer: coarse) {
+  .se-addon-assumptions .as-fact { font-size: 14px; min-height: 36px; padding: 4px 8px; }
+  .se-addon-assumptions .as-val { font-size: 13px; }
+  .se-addon-assumptions .as-chip { font-size: 14px; min-height: 34px; padding: 4px 10px; }
+  .se-addon-assumptions .as-btn { font-size: 14px; min-height: 36px; padding: 0.4rem 0.8rem; }
+  .se-addon-assumptions .as-grid { grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); gap: 4px; }
+}

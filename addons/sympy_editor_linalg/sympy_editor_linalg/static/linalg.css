@@ -1,0 +1,49 @@
+/* sympy-editor add-on "linalg": everything scoped under its box. */
+.se-addon-linalg .la-panel { font-size: 12px; display: flex; flex-direction: column; gap: 0.35rem; }
+.se-addon-linalg .la-panel [hidden] { display: none; }
+.se-addon-linalg .la-head { color: var(--se-muted); }
+.se-addon-linalg .la-head.la-none { font-style: italic; }
+.se-addon-linalg .la-sub { font-weight: 600; margin-top: 0.3rem; }
+.se-addon-linalg .la-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.6rem; padding: 0.15rem 0; }
+.se-addon-linalg .la-label { min-width: 9em; color: var(--se-muted); }
+.se-addon-linalg .la-math { overflow-x: auto; max-width: 100%; }
+.se-addon-linalg .la-note { color: var(--se-muted); }
+.se-addon-linalg .la-problem, .se-addon-linalg .la-error { color: var(--se-error); }
+.se-addon-linalg .la-verdict { margin: 0.2rem 0; }
+.se-addon-linalg .la-verdict.la-no { color: var(--se-error); }
+.se-addon-linalg .la-eigen { border-collapse: collapse; }
+.se-addon-linalg .la-eigen th { text-align: left; font-weight: normal; color: var(--se-muted); padding: 0.1rem 0.6rem 0.1rem 0; border-bottom: 1px solid var(--se-rule); }
+.se-addon-linalg .la-eigen td { padding: 0.2rem 0.6rem 0.2rem 0; vertical-align: middle; border-bottom: 1px solid var(--se-rule); }
+.se-addon-linalg .la-eigen td > .la-math { margin-right: 0.4rem; }
+.se-addon-linalg .la-num { text-align: center; font-family: var(--se-mono); }
+.se-addon-linalg .la-num.la-short { color: var(--se-error); font-weight: 600; }
+.se-addon-linalg .la-vecs { display: flex; flex-wrap: wrap; gap: 0.3rem 0.8rem; }
+.se-addon-linalg .la-vec { display: inline-flex; align-items: center; gap: 0.3rem; }
+.se-addon-linalg .la-tools { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.3rem; }
+.se-addon-linalg .la-steps { margin: 0.2rem 0; padding-left: 1.6em; }
+.se-addon-linalg .la-step { padding: 0.2rem 0; border-bottom: 1px solid var(--se-rule); }
+.se-addon-linalg .la-op { display: flex; align-items: center; gap: 0.6rem; }
+.se-addon-linalg .la-optext { font-family: var(--se-mono); color: var(--se-muted); }
+
+/* Buttons as the editor's: raised, the same tokens. */
+.se-addon-linalg .la-panel button {
+  font: inherit;
+  font-size: 12px;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--se-border);
+  border-radius: 0.3rem;
+  background: var(--se-btn);
+  color: inherit;
+  box-shadow: var(--se-btn-shadow);
+  cursor: pointer;
+}
+.se-addon-linalg .la-panel button:disabled { opacity: 0.5; box-shadow: none; cursor: default; }
+.se-addon-linalg .la-panel button:active:not(:disabled) { background: var(--se-btn-down); }
+@media (hover: hover) { .se-addon-linalg .la-panel button:hover:not(:disabled) { background: var(--se-btn-hover); } }
+.se-addon-linalg .la-panel .la-insert { font-size: 11px; padding: 0.05rem 0.4rem; }
+.se-addon-linalg .la-again { margin-left: 0.4rem; }
+
+/* A finger needs a target, not a glyph. */
+@media (any-pointer: coarse) {
+  .se-addon-linalg .la-panel button, .se-addon-linalg .la-panel .la-insert { font-size: 14px; min-height: 44px; min-width: 44px; padding: 0.4rem 0.7rem; }
+}

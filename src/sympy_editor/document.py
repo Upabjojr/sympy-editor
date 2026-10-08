@@ -192,6 +192,24 @@ def _whole(value: Any, message: str) -> int:
 MAX_MATRIX_ENTRIES = 10000
 
 
+def _names_in(expr: Basic) -> set:
+    """The symbols, matrix symbols and indexed bases of ``expr`` - not the
+    ones an *atom* holds as its own data: a unit (``Quantity``) is an atom
+    whose arguments are the Symbols of its name and abbreviation, and taken
+    for the formula's names they made the next ``meter`` typed a plain
+    symbol (``expr.atoms`` walks into an atom's arguments; ``free_symbols``
+    and ``xreplace`` do not)."""
+    out = set()
+    stack = [expr]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (Symbol, MatrixSymbol, IndexedBase)):
+            out.add(node)
+        if isinstance(node, Basic) and not node.is_Atom:
+            stack.extend(node.args)
+    return out
+
+
 def _short(text: Any, n: int = 60) -> str:
     text = repr(str(text))
     return text if len(text) <= n else text[: n - 1] + "…"
@@ -2242,7 +2260,7 @@ class Document:
         """Symbols, matrix symbols, indexed bases and undefined functions
         occurring in the current expression, by name."""
         ns: Dict[str, Any] = {}
-        for s in self.expr.atoms(Symbol, MatrixSymbol, IndexedBase):
+        for s in _names_in(self.expr):
             if not isinstance(s, Dummy):
                 ns.setdefault(self._symbol_name(s), s)
         for f in self.expr.atoms(AppliedUndef):
@@ -2464,7 +2482,14 @@ class Document:
         "assumptions": ["positive"]}, ...]``."""
         out: List[Dict[str, Any]] = []
         used = self.used_symbols()
-        for name, obj in sorted(self.namespace().items()):
+        # The document's names: what the expression uses and what was
+        # declared.  What the add-ons put in scope (the units add-on's
+        # hundreds of unit names, a rule's constructor) is theirs, not names
+        # to retype here - and it went with every snapshot.
+        names = dict(used)
+        for name, obj in self.declared.items():
+            names.setdefault(name, obj)
+        for name, obj in sorted(names.items()):
             info: Dict[str, Any] = {"name": name, "used": name in used}
             if isinstance(obj, MatrixSymbol):
                 info.update(type="MatrixSymbol", shape=[str(obj.rows), str(obj.cols)])

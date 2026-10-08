@@ -16,7 +16,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "src"))
-for pkg in ("sympy_editor_tree", "sympy_editor_plot", "sympy_editor_matching", "sympy_editor_latex", "sympy_editor_console", "sympy_editor_feynman"):
+for pkg in ("sympy_editor_tree", "sympy_editor_plot", "sympy_editor_matching", "sympy_editor_latex", "sympy_editor_console"):
     sys.path.insert(0, str(HERE / pkg))         # run from a checkout without installing
 
 from sympy import cos, sin, symbols  # noqa: E402
@@ -26,12 +26,11 @@ from sympy_editor import Document, save_html, serve  # noqa: E402
 
 def addons():
     from sympy_editor_console import ADDON as console
-    from sympy_editor_feynman import ADDON as feynman
     from sympy_editor_latex import ADDON as latex
     from sympy_editor_matching import ADDON as matching
     from sympy_editor_plot import ADDON as plot
     from sympy_editor_tree import ADDON as tree
-    return [tree, plot, matching, latex, console, feynman]
+    return [tree, plot, matching, latex, console]
 
 
 def main(argv=None) -> int:
@@ -40,9 +39,9 @@ def main(argv=None) -> int:
     ap.add_argument("--out", type=Path, default=HERE / "demo.html")
     args = ap.parse_args(argv)
     x = symbols("x")
-    tree, plot, matching, latex, console, feynman = addons()
+    tree, plot, matching, latex, console = addons()
     # Two on to start with, the others a click away in the Add-ons menu.
-    doc = Document(sin(x) ** 2 / x + cos(x) ** 2, addons=[tree, plot], available=[matching, latex, console, feynman])
+    doc = Document(sin(x) ** 2 / x + cos(x) ** 2, addons=[tree, plot], available=[matching, latex, console])
     if args.serve:
         serve(doc, title="SymPy Editor - add-ons")
         return 0

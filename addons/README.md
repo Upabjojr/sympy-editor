@@ -15,9 +15,20 @@ addons/
   sympy_editor_matching/    rewrite rules matched many-to-one              (sympy-matching)
   sympy_editor_latex/       LaTeX in: a first reading, every ambiguity a choice, constants as switches (lark)
   sympy_editor_console/     a Python console and script runner, with `editor` for the formula (no dependency)
+  sympy_editor_assumptions/ what SymPy knows about the selection; the symbols' assumptions as switches (no dependency)
+  sympy_editor_forms/       the selection rewritten by every simplification function, one card per form (no dependency)
+  sympy_editor_numeric/     the selection as a number: any precision, exact forms, why there is none, tables (no dependency)
+  sympy_editor_series/      series expansions of the selection: Taylor, Laurent, Puiseux, asymptotic, leading term (no dependency)
+  sympy_editor_solver/      solve the selected equation, inequality or system; check, insert (no dependency)
+  sympy_editor_units/       physical units: typed names, dimensions checked term by term, conversions (no dependency)
   sympy_editor_handwriting/ writing on the formula by hand, read by math-ocr's stroke model (onnxruntime; not in Pyodide)
-  sympy_editor_feynman/     path integrals of QED as Feynman diagrams, drawn and editable  (no dependency; not bundled: install it while editing)
-  demo.py                   a page with the drafts, to try them in a browser
+  sympy_editor_export/      the selection as LaTeX, MathML, Python, C, Fortran, JS, Octave, Julia, Rust or a function (no dependency)
+  sympy_editor_check/       "Check my work": is each step of the history equivalent to the one before (no dependency)
+  sympy_editor_transforms/  Laplace, Fourier, Mellin, Hankel and z-transforms of the selection (no dependency)
+  sympy_editor_steps/       step-by-step solutions: integrals, derivatives, equations of degree one or two (no dependency)
+  sympy_editor_linalg/      a linear algebra workbench for the selected matrix: spectrum, Jordan form, LU/QR/Cholesky, row reduction step by step (no dependency)
+  sympy_editor_feynman/     path integrals of QED expanded into Feynman diagrams, each drawn (no dependency)
+  demo.py                   a page with the first five, to try them in a browser
   pack.py                   zips an add-on folder for "From a file…" in the Add-ons window
 ```
 
@@ -122,9 +133,10 @@ remove it.
   `{"action": "addons", "inspect": ..., "install": ..., "select": [...],
   "uninstall": [...], "enable": [...]}` answers with `addons_result`.
 
-`python addons/pack.py sympy_editor_feynman` writes `addons/dist/…zip`,
-the archive *From a file…* takes; the Feynman add-on is the one kept out
-of the apps to be installed this way (from the repository's URL too).
+`python addons/pack.py <folder>` writes `addons/dist/…zip`, the archive
+*From a file…* takes - any of the folders above, or one of your own; a
+repository is read as it stands, so an add-on published anywhere can be
+installed from its URL.
 
 ## Writing an add-on of your own
 
@@ -430,6 +442,112 @@ Nothing but the standard library: no IPython.  A run that changed the formula
 answers as a query with `changed: true`, and the panel then asks for a fresh
 snapshot - an add-on method answers either a query or a change, and a run is
 both (its output and a new formula).
+
+**`sympy_editor_assumptions`** - *a custom widget that edits through the
+document*.  A query, `facts`, gives the main predicates of the selection
+(the old assumptions first, `ask(Q.*)` where they cannot tell, on small
+expressions) with every unknown explained in words and the assumption on a
+symbol that would decide it; `contribute` puts the free symbols with what
+was assumed of each in every snapshot; `assume` switches one assumption of
+one symbol through `Document.retype` - every occurrence, one step of the
+history - and keeps a hint for that step when SymPy rewrote the formula by
+itself or `simplify` can now do more, which `simplify` applies.
+
+**`sympy_editor_export`** - *a custom widget, no node of its own*.  One
+query, `export`: the selection (a node, a range, or the whole formula)
+written by SymPy's printers - LaTeX, MathML, Python (math, NumPy, mpmath or
+SymPy source), C, Fortran, JavaScript, Octave/MATLAB, Julia, Rust - or as a
+whole function by `codegen`, with the free symbols as arguments.  Printers
+run with `strict=False`, so what a language lacks is in their own *Not
+supported* comment; a refusal comes back as words.  Each file has Copy (the
+host's clipboard, as the editor's Copy) and Save (`api.saveFile`).
+
+**`sympy_editor_forms`** - *a simplification explorer*.  The selection (a
+range, the whole formula) rewritten by each of SymPy's rewriting functions -
+`simplify`, `expand`, `factor`, `apart`/`collect` per variable, `trigsimp`,
+`fu`, `logcombine`/`expand_log` with an optional `force`, `rewrite(exp)`... -
+one card per *different* form (equal forms grouped, the functions that gave
+each listed), with its `count_ops` and its length, sorted by either.  The
+panel asks for one function at a time (`run`, a query), each under a time box
+(a trace function raising at the first Python call past the deadline: it works
+in Pyodide, which has no threads), with a pause between them so the user's own
+edits go first; a card's `apply` is an undoable step, "Forms: factor".
+
+**`sympy_editor_numeric`** - *a custom widget that only asks*.  The Values
+panel evaluates the selection: a field per free symbol (read as typed text
+is, so `pi/3` or `2 + I`; no value is guessed), the precision in `evalf`
+digits, an exact form beside the number when SymPy has a short one (and
+`nsimplify`'s guess when asked, marked as one), `a + b i` for a complex
+value.  A value that is no number says why - the innermost piece that goes
+wrong is found by evaluating the node from the inside out: a division by
+zero, an argument outside a function's domain, an indeterminate form.  A
+table mode varies one symbol over a range or a list (at most 500 rows,
+stopped after a few seconds) and copies as CSV or TSV through the host
+app's clipboard when there is one.  Two queries, `evaluate` and `table`;
+mpmath through SymPy, nothing else.
+
+**`sympy_editor_series`** - *a panel that computes and inserts*.  One query,
+`expand`: the selection's `series` in a variable about any point (`oo` and
+`-oo` included), at an order from 1 to 20, from either side, named after its
+powers (Taylor, Laurent, Puiseux, with logarithms, asymptotic), or its
+leading term; with the coefficients, and the truncation error at a sample
+point.  `insert` replaces the selection with the expansion, with or without
+its O term, as one step.  Every computation is time-boxed in a thread that
+is stopped when it overruns, and SymPy's failures are said in words.
+
+**`sympy_editor_transforms`** - *ops + a panel that computes*.  Laplace,
+Fourier, sine, cosine, Mellin and Hankel transforms and their inverses are
+SymPy's, asked for their conditions; the one-sided z-transform (a table of
+geometric, trigonometric and polynomial-times-geometric terms, `summation`
+otherwise) and its inverse for rational functions (partial fractions) are
+the add-on's own.  The panel's *Compute* is a query that shows the result
+and where it holds in words ("converges for Re(s) > -2"); *Apply* replaces
+the selection, unevaluated (`LaplaceTransform(f, t, s)`) when the editor's
+toggle is on.  Six ops put the same in the Transform menu, asking for the
+variables through the op `params`.
+
+**`sympy_editor_solver`** - *a panel that computes and edits*.  It reads the
+selection (a range of an `And`'s equations included) as an equation, an
+inequality, an expression `= 0` or a system, offers its free symbols as
+unknowns and a domain, and solves with `solveset`, `linsolve`,
+`nonlinsolve` or `solve` as fits, inside a time limit kept by the profiler
+hook (no thread: it works in Pyodide too).  Each solution can be substituted
+back and checked, or inserted in place of what was solved - a step of the
+history.  The last solution is kept per document and named by a token, so
+nothing SymPy has to be read back from the page.
+
+**`sympy_editor_steps`** - *a custom widget that explains*.  One query,
+`steps`, works out the selection - an integral through `manualintegrate`'s
+rule tree, flattened one rule at a time; a derivative with sum, product,
+quotient, power and chain rules applied to one `d/dx` hole per step; an
+equation of degree one or two - and the panel lists the steps with KaTeX.
+`apply` puts a step's result in place of the selection, a step of the
+history labelled with the rule; it works the steps out again rather than
+reading them back.  What it cannot explain it says in words.
+
+**`sympy_editor_linalg`** - *a custom widget that computes*.  For the
+explicit matrix around the selection: rank, determinant, trace,
+characteristic polynomial, eigenvalues with both multiplicities and their
+eigenvectors, diagonalizability and the Jordan form; LU, QR, Cholesky and a
+Gauss-Jordan elimination recorded one elementary row operation at a time
+(checked against `Matrix.rref()`) on demand.  Every result has *Insert*,
+which puts it in place of the matrix as a step of the history.  Every
+computation runs under a time budget on a thread of its own and is stopped
+past it, the panel saying so in words (Pyodide has no threads: the editor's
+Interrupt is the limit there).
+
+**`sympy_editor_units`** - *new nodes from SymPy itself + a panel*.  The
+units and constants of `sympy.physics.units` become names in the formula
+through `namespace()` - the units' own names (what `srepr` writes, so a
+session reads back) and their long aliases always, the one-letter
+abbreviations (`m`, `s`, `N`) only with the document's *short unit names*
+switch, since they are variables far more often.  The panel shows the
+selection's dimension and checks every sum, relation, exponent and function
+argument under it - the terms that disagree are listed and outlined in the
+formula - and converts (`convert_to`, SI base units, `quantity_simplify`),
+each a step of the history.  A unit is a SymPy *atom* whose arguments are the
+Symbols of its name: the document does not count those as the formula's names
+(`_names_in`), or the next `meter` typed was a plain symbol.
 
 ## Open questions
 

@@ -63,11 +63,17 @@ checkout — and restart the kernel:
 ```
 pip install -e addons/sympy_editor_plot -e addons/sympy_editor_latex
 pip install -e addons/sympy_editor_tree -e addons/sympy_editor_matching
-pip install -e addons/sympy_editor_console
+pip install -e addons/sympy_editor_console -e addons/sympy_editor_export
+pip install -e addons/sympy_editor_steps -e addons/sympy_editor_check
+pip install -e addons/sympy_editor_solver -e addons/sympy_editor_assumptions
+pip install -e addons/sympy_editor_numeric -e addons/sympy_editor_series
+pip install -e addons/sympy_editor_units -e addons/sympy_editor_linalg
+pip install -e addons/sympy_editor_transforms -e addons/sympy_editor_forms
+pip install -e addons/sympy_editor_feynman
 ```
 
-Every installed add-on is then listed at the top of the drawer the **≡**
-button opens, to switch on and off while editing, and their Python runs in
+Every installed add-on is then listed in the **Add-ons** window of the
+**≡** menu, to switch on and off while editing, and their Python runs in
 **this** kernel — the plot's samples are the kernel's SymPy at work:
 
 ```python
@@ -590,6 +596,10 @@ the whole expression; and a Python console - input and output as in IPython,
 or a whole script run at once - in the same Python as the editor (the app's
 own on a phone, the server's, Pyodide in a standalone page), where `editor`
 reads and changes the formula: `editor.selection = expand(editor.selection)`.
+Another, the assumptions panel, shows what SymPy knows about the selection
+(real, positive, integer... - true, false or unknown, and why) and turns
+the symbols' assumptions into switches: making `x` positive retypes it
+everywhere, as one undoable step, and says what that let SymPy simplify.
 
 An add-on is a package of its own, made by anyone, found by the editor
 once it is installed (`pip install -e addons/sympy_editor_tree` for a
@@ -609,10 +619,10 @@ add-on on or off while editing, and installs new ones: paste the URL of a
 GitHub repository (or of a `.zip`), or choose a `.zip` with *From a file…*,
 tick what it holds, *Install* - on the desktop, in the web app (kept in the
 browser's storage) and in the Android and iOS apps (kept in the app's data)
-alike; a × on the row removes it again.  `addons/sympy_editor_feynman` - path
-integrals of QED expanded into Feynman diagrams, drawn and editable - is the
-add-on kept out of the apps to be installed that way
-(`python addons/pack.py sympy_editor_feynman` zips it).  Not installed?  A module name (`addons=["sympy_editor_tree"]`)
+alike; a × on the row removes it again.  An add-on of your own goes the same
+way: `python addons/pack.py <folder>` zips a folder as *From a file…* takes
+it, and a repository is read as it stands - the manifest and the package
+beside it.  Not installed?  A module name (`addons=["sympy_editor_tree"]`)
 or the object itself (`addons=[ADDON]`) work too; `python addons/demo.py`
 builds a page with the drafts straight from the checkout.
 `addons/README.md` describes the architecture, and `addons/template/` is

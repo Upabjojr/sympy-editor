@@ -1,0 +1,47 @@
+/* sympy-editor add-on "transforms": everything under the box the editor gives it. */
+.se-addon-transforms .tf-panel { font-size: 12px; }
+.se-addon-transforms .tf-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.4rem 0.8rem; margin-bottom: 0.4rem; }
+.se-addon-transforms .tf-field { display: inline-flex; flex-direction: column; gap: 0.15rem; color: var(--se-muted); }
+.se-addon-transforms .tf-field[hidden] { display: none; }
+.se-addon-transforms .tf-field select,
+.se-addon-transforms .tf-field input {
+  font: inherit;
+  font-size: 12px;
+  color: var(--se-fg);
+  padding: 2px 4px;
+  border: 1px solid var(--se-border);
+  border-radius: 0.3rem;
+}
+.se-addon-transforms .tf-field select { background: var(--se-btn); }
+.se-addon-transforms .tf-field input { width: 6.5em; font-family: var(--se-mono); background: var(--se-field, var(--se-bg)); }
+.se-addon-transforms .tf-field input.tf-extra { width: 8em; }
+.se-addon-transforms .tf-buttons { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.4rem; }
+.se-addon-transforms .tf-buttons button {
+  font: inherit;
+  font-size: 12px;
+  padding: 0.15rem 0.7rem;
+  color: var(--se-fg);
+  border: 1px solid var(--se-border);
+  border-radius: 0.3rem;
+  background: var(--se-btn);
+  box-shadow: var(--se-btn-edge, none), var(--se-btn-shadow, none);
+  cursor: pointer;
+}
+.se-addon-transforms .tf-buttons button:active { background: var(--se-btn-down, var(--se-btn)); box-shadow: none; }
+.se-addon-transforms .tf-buttons button:focus-visible { outline: 2px solid rgb(var(--se-accent)); outline-offset: 1px; }
+@media (hover: hover) {
+  .se-addon-transforms .tf-buttons button:hover { border-color: rgb(var(--se-accent)); }
+}
+.se-addon-transforms .tf-note { color: var(--se-muted); min-height: 1.3em; }
+.se-addon-transforms .tf-note.tf-error { color: var(--se-error); }
+.se-addon-transforms .tf-result { overflow-x: auto; color: var(--se-fg); font-size: 14px; }
+.se-addon-transforms .tf-result:empty { display: none; }
+.se-addon-transforms .tf-conds { margin: 0.2rem 0; padding-left: 1.2rem; color: var(--se-fg); }
+.se-addon-transforms .tf-conds:empty { display: none; }
+.se-addon-transforms .tf-convention { color: var(--se-muted); font-style: italic; }
+@media (any-pointer: coarse) {
+  .se-addon-transforms .tf-field select,
+  .se-addon-transforms .tf-field input { font-size: 16px; min-height: 36px; padding: 0.3rem 0.5rem; }   /* iOS zooms into anything smaller */
+  .se-addon-transforms .tf-buttons button { font-size: 14px; min-height: 36px; padding: 0.45rem 0.9rem; }
+  .se-addon-transforms .tf-panel { font-size: 14px; }
+}

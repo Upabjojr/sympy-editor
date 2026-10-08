@@ -1,0 +1,69 @@
+/* sympy-editor add-on "numeric" (the Values panel). */
+.se-addon-numeric .num-panel { font-size: 12px; }
+.se-addon-numeric .num-bar, .se-addon-numeric .num-follow, .se-addon-numeric .num-tablebar,
+.se-addon-numeric .num-fields, .se-addon-numeric .num-tools {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.8rem; margin-bottom: 0.35rem;
+}
+.se-addon-numeric label { display: inline-flex; align-items: center; gap: 0.3rem; }
+.se-addon-numeric .num-tablebar[hidden], .se-addon-numeric .num-tablebox[hidden],
+.se-addon-numeric .num-result[hidden], .se-addon-numeric .num-fields:empty { display: none; }
+
+/* The two modes: a segmented pair, the one on show pressed. */
+.se-addon-numeric .num-modes { display: inline-flex; }
+.se-addon-numeric .num-btn {
+  font: inherit; font-size: 12px; padding: 0.15rem 0.55rem; color: inherit; cursor: pointer;
+  border: 1px solid var(--se-border); border-radius: 0.3rem;
+  background: var(--se-btn); box-shadow: var(--se-btn-edge), var(--se-btn-shadow);
+}
+.se-addon-numeric .num-modes .num-btn { border-radius: 0; }
+.se-addon-numeric .num-modes .num-btn:first-child { border-radius: 0.3rem 0 0 0.3rem; }
+.se-addon-numeric .num-modes .num-btn:last-child { border-radius: 0 0.3rem 0.3rem 0; margin-left: -1px; }
+.se-addon-numeric .num-btn[aria-pressed="true"] { background: var(--se-btn-down); box-shadow: var(--se-btn-shadow-down); font-weight: 600; }
+.se-addon-numeric .num-btn:disabled { opacity: 0.5; cursor: default; box-shadow: none; }
+.se-addon-numeric .num-btn:focus-visible { outline: 2px solid rgb(var(--se-accent)); outline-offset: 1px; }
+@media (hover: hover) { .se-addon-numeric .num-btn:not(:disabled):hover { background: var(--se-btn-hover); } }
+
+.se-addon-numeric select, .se-addon-numeric .num-in {
+  font: inherit; font-size: 12px; padding: 2px 4px; color: inherit;
+  border: 1px solid var(--se-border); border-radius: 0.25rem; background: var(--se-field);
+}
+.se-addon-numeric .num-in { width: 7em; font-family: var(--se-mono); }
+.se-addon-numeric .num-list { width: 14em; }
+.se-addon-numeric .num-fields label.num-unset { color: var(--se-error); }
+.se-addon-numeric .num-read { color: var(--se-muted); font-family: var(--se-mono); }
+
+/* What is evaluated, and its value. */
+.se-addon-numeric .num-target { color: var(--se-muted); margin-bottom: 0.3rem; word-break: break-word; }
+.se-addon-numeric .num-target code { font-family: var(--se-mono); color: var(--se-fg); }
+.se-addon-numeric .num-result {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 0.8rem;
+  padding: 0.35rem 0.5rem; border: 1px solid var(--se-rule); border-radius: 0.3rem; background: var(--se-surface);
+}
+.se-addon-numeric .num-value { font-family: var(--se-mono); font-size: 13px; word-break: break-all; }
+.se-addon-numeric .num-value.num-bad { color: var(--se-error); }
+.se-addon-numeric .num-exact { color: var(--se-muted); }
+.se-addon-numeric .num-exact .katex { color: var(--se-fg); }
+.se-addon-numeric .num-note { color: var(--se-muted); margin-top: 0.3rem; word-break: break-word; }
+.se-addon-numeric .num-note.num-error { color: var(--se-error); }
+.se-addon-numeric .num-note:empty { display: none; }
+
+/* The table: scrolls inside the panel, its header kept in sight. */
+.se-addon-numeric .num-scroll { max-height: 18rem; overflow: auto; border: 1px solid var(--se-rule); border-radius: 0.3rem; background: var(--se-surface); }
+.se-addon-numeric .num-table { border-collapse: collapse; width: 100%; font-family: var(--se-mono); font-size: 12px; }
+.se-addon-numeric .num-table th {
+  position: sticky; top: 0; text-align: left; font-family: inherit; font-weight: 600;
+  background: var(--se-bg); border-bottom: 1px solid var(--se-border); padding: 0.2rem 0.5rem;
+}
+.se-addon-numeric .num-table td { padding: 0.15rem 0.5rem; border-bottom: 1px solid var(--se-rule); vertical-align: top; word-break: break-all; }
+.se-addon-numeric .num-table td.num-bad { color: var(--se-error); }
+.se-addon-numeric .num-table td.num-why { font-family: inherit; color: var(--se-muted); word-break: break-word; }
+
+/* A finger's targets; 16px fields, or iOS zooms into them. */
+@media (any-pointer: coarse) {
+  .se-addon-numeric .num-btn { font-size: 14px; padding: 0.45rem 0.75rem; min-height: 36px; }
+  .se-addon-numeric select, .se-addon-numeric .num-in { font-size: 16px; min-height: 36px; }
+  .se-addon-numeric .num-follow input[type=checkbox], .se-addon-numeric .num-bar input[type=checkbox] { width: 20px; height: 20px; }
+  .se-addon-numeric .num-table { font-size: 13px; }
+  .se-addon-numeric .num-table td { padding: 0.35rem 0.5rem; }
+}
+@media (prefers-reduced-motion: reduce) { .se-addon-numeric .num-btn { transition: none; } }

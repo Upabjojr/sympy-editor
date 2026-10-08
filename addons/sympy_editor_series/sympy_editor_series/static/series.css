@@ -1,0 +1,75 @@
+/* sympy-editor add-on "series".  Everything under the box the editor gives it. */
+.se-addon-series .ser-panel { display: flex; flex-direction: column; gap: 0.35rem; font-size: 12px; color: var(--se-fg); }
+.se-addon-series .ser-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.75rem; }
+.se-addon-series .ser-row[hidden], .se-addon-series [hidden] { display: none; }
+.se-addon-series label { display: inline-flex; align-items: center; gap: 0.25rem; }
+.se-addon-series select,
+.se-addon-series .ser-field {
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 5px;
+  color: var(--se-fg);
+  background: var(--se-field, var(--se-bg));
+  border: 1px solid var(--se-border);
+  border-radius: 4px;
+}
+.se-addon-series .ser-field { font-family: var(--se-mono); width: 6.5em; }
+.se-addon-series .ser-order { width: 9em; }
+.se-addon-series .ser-order-out { font-family: var(--se-mono); min-width: 2ch; text-align: right; font-variant-numeric: tabular-nums; }
+.se-addon-series .ser-btn {
+  font: inherit;
+  font-size: 12px;
+  padding: 0.15rem 0.55rem;
+  color: inherit;
+  background: var(--se-btn);
+  border: 1px solid var(--se-border);
+  border-radius: 0.3rem;
+  box-shadow: var(--se-btn-edge), var(--se-btn-shadow);
+  cursor: pointer;
+}
+.se-addon-series .ser-btn:active { background: var(--se-btn-down); box-shadow: var(--se-btn-shadow-down); }
+.se-addon-series .ser-btn:disabled { opacity: 0.5; cursor: default; box-shadow: none; }
+.se-addon-series .ser-btn:focus-visible { outline: 2px solid rgb(var(--se-accent)); outline-offset: 1px; }
+@media (hover: hover) {
+  .se-addon-series .ser-btn:not(:disabled):hover { background: var(--se-btn-hover); border-color: rgba(var(--se-accent), 0.6); }
+}
+.se-addon-series .ser-step { min-width: 1.8em; }
+.se-addon-series .ser-heading { color: var(--se-muted); }
+.se-addon-series .ser-result {
+  font-size: 1.25em;
+  padding: 0.35rem 0.5rem;
+  min-height: 1.6em;
+  overflow-x: auto;
+  background: var(--se-surface, var(--se-bg));
+  border: 1px solid var(--se-rule, var(--se-border));
+  border-radius: 4px;
+}
+.se-addon-series .ser-other { font-size: 1.1em; overflow-x: auto; }
+.se-addon-series .ser-note, .se-addon-series .ser-check { color: var(--se-muted); }
+.se-addon-series .ser-error { color: var(--se-error); }
+.se-addon-series .ser-working { font-style: italic; }
+.se-addon-series .ser-terms { overflow-x: auto; }
+.se-addon-series .ser-table { border-collapse: collapse; margin-top: 0.2rem; }
+.se-addon-series .ser-table th, .se-addon-series .ser-table td {
+  border-bottom: 1px solid var(--se-rule, var(--se-border));
+  padding: 0.15rem 0.6rem;
+  text-align: left;
+}
+.se-addon-series .ser-table th { color: var(--se-muted); font-weight: normal; }
+.se-addon-series .ser-k { font-variant-numeric: tabular-nums; }
+
+/* A finger needs bigger targets than a pointer. */
+@media (any-pointer: coarse) {
+  .se-addon-series .ser-panel { font-size: 14px; }
+  .se-addon-series .ser-btn, .se-addon-series select, .se-addon-series .ser-field {
+    font-size: 14px;
+    min-height: 44px;
+    padding: 0.4rem 0.7rem;
+  }
+  .se-addon-series .ser-step { min-width: 44px; }
+  .se-addon-series .ser-order { min-height: 44px; width: 10em; }
+  .se-addon-series input[type=checkbox] { width: 22px; height: 22px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .se-addon-series * { transition: none !important; }
+}

@@ -61,15 +61,8 @@ to itself (`problems(diagram)`).
 
 ## Install
 
-This add-on is **not bundled** with the apps: it is the example of an
-add-on installed from the editor's **Add-ons** section -
-
-- from this repository: paste `https://github.com/Upabjojr/sympy-editor`
-  (or the folder's URL,
-  `https://github.com/Upabjojr/sympy-editor/tree/master/addons/sympy_editor_feynman`),
-  *Look up*, tick *Feynman diagrams*, *Install*;
-- from a file: `python addons/pack.py sympy_editor_feynman` writes the
-  .zip that *From a file…* takes.
+The apps bundle it, as they do every add-on folder of `addons/`; switch it
+on in **≡ → Add-ons**.
 
 On a desktop, `pip install -e addons/sympy_editor_feynman` works too, then
 `edit(expr, addons=["feynman"])`.

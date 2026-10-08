@@ -1,0 +1,48 @@
+/* sympy-editor add-on "forms". */
+.se-addon-forms .fm-bar, .se-addon-forms .fm-switches {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.8rem; font-size: 12px; margin-bottom: 0.35rem;
+}
+.se-addon-forms .fm-switches label, .se-addon-forms .fm-bar label { display: inline-flex; align-items: center; gap: 0.25rem; }
+.se-addon-forms .fm-bar button {
+  font: inherit; font-size: 12px; padding: 0.15rem 0.6rem; cursor: pointer; color: inherit;
+  border: 1px solid var(--se-border); border-radius: 0.3rem;
+  background: var(--se-btn); box-shadow: var(--se-btn-edge), var(--se-btn-shadow);
+}
+.se-addon-forms .fm-bar button:disabled { opacity: 0.5; cursor: default; box-shadow: none; }
+.se-addon-forms .fm-bar select { font: inherit; font-size: 12px; padding: 2px 4px; }
+.se-addon-forms .fm-current { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem; margin: 0.2rem 0; }
+.se-addon-forms .fm-label { color: var(--se-muted); font-size: 12px; }
+.se-addon-forms .fm-progress { color: var(--se-muted); font-size: 12px; min-height: 1.3em; }
+.se-addon-forms .fm-progress.fm-error { color: var(--se-error); }
+.se-addon-forms .fm-cards {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: 0.45rem; margin: 0.35rem 0;
+}
+.se-addon-forms .fm-card {
+  display: flex; flex-direction: column; align-items: stretch; gap: 0.25rem; min-width: 0;
+  text-align: left; font: inherit; color: var(--se-fg); padding: 0.45rem 0.55rem;
+  border: 1px solid var(--se-border); border-radius: 0.4rem;
+  background: var(--se-surface, var(--se-bg)); box-shadow: var(--se-btn-shadow);
+}
+.se-addon-forms button.fm-card { cursor: pointer; }
+@media (hover: hover) {
+  .se-addon-forms button.fm-card:hover { border-color: rgb(var(--se-accent)); }
+}
+.se-addon-forms button.fm-card:focus-visible { outline: 2px solid rgb(var(--se-accent)); outline-offset: 1px; }
+.se-addon-forms .fm-card .fm-tex { overflow-x: auto; overflow-y: hidden; padding: 0.1rem 0; }
+.se-addon-forms .fm-src { font-family: var(--se-mono); font-size: 12px; word-break: break-all; }
+.se-addon-forms .fm-meta { display: flex; gap: 0.6rem; font-size: 11px; color: var(--se-muted); font-variant-numeric: tabular-nums; }
+.se-addon-forms .fm-better { color: var(--se-added); }
+.se-addon-forms .fm-worse { color: var(--se-removed); }
+.se-addon-forms .fm-fns { font-family: var(--se-mono); font-size: 11px; color: rgb(var(--se-accent)); overflow-wrap: anywhere; }
+.se-addon-forms .fm-timeout-card { opacity: 0.7; border-style: dashed; box-shadow: none; }
+.se-addon-forms .fm-timeout-card .fm-fns { color: var(--se-muted); }
+.se-addon-forms .fm-rest { font-size: 11px; color: var(--se-muted); }
+.se-addon-forms .fm-same { margin: 0.2rem 0; overflow-wrap: anywhere; }
+.se-addon-forms .fm-failed summary { cursor: pointer; }
+@media (any-pointer: coarse) {
+  .se-addon-forms .fm-bar button { font-size: 14px; min-height: 44px; padding: 0.3rem 0.9rem; }
+  .se-addon-forms .fm-bar select { font-size: 14px; min-height: 36px; }
+  .se-addon-forms .fm-switches label { min-height: 36px; font-size: 13px; }
+  .se-addon-forms .fm-card { min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) { .se-addon-forms .fm-card { transition: none; } }

@@ -80,7 +80,8 @@ src/sympy_editor/
 tests/          pytest suite (printer round-trips, document ops, HTML, server).
 examples/       demo.py generates demo.html / runs the server.
 addons/         Add-on drafts, each a package of its own (tree, plot, matching, latex,
-                console, handwriting, feynman).
+                console, assumptions, forms, numeric, series, solver, units,
+                handwriting, export, check, transforms, steps, linalg, feynman).
 ```
 
 Data flow: Python `Document.snapshot()` → JSON (`latex`, `latex_plain`,
@@ -896,7 +897,11 @@ Two conventions between printer, document and front end:
   like the others (`trapTab`, `_opener`/`_refocus`, Esc, Back).  The window
   An add-on's `addon.json` (or its object) may say `"experimental": true`:
   the card carries an *Experimental* badge (`.se-addon-badge`) - new, not
-  yet checked by the owner; it is still on by default like any other.
+  yet checked by the owner.  With `rememberAddons` (the apps, the web app)
+  an experimental add-on starts **off** until the user switches it on - on
+  a first launch, and when one arrives in an update - while the others
+  start on (`_addonWanted`; the keeper holds what the user switched,
+  `{"off": [...], "on": [...]}`).
   `.se-addon-search` filters the add-on cards (`_filterAddons`, every word
   in the card's text, accents aside; kept across refills).  The windows'
   ×, like the guide's, sits in the header's corner group
@@ -1208,10 +1213,9 @@ points `set_user_dir` into `HOME`, Android's `MainActivity` answers
 `test_browser.py::test_addons_install_from_a_zip_file_and_remove` and
 `..._from_a_github_repository` (GitHub stood in by `page.route`),
 `test_mobile.py::test_the_app_keeps_the_addons_the_user_installs`.
-`addons/pack.py` zips a folder; `addons/sympy_editor_feynman` is
-`"bundle": false`, the one to install that way.  Adding an add-on from a
-repository later = cloning it into that directory; keep the folder format
-and the scan stable for that.
+`addons/pack.py` zips a folder as *From a file…* takes it.  Adding an
+add-on from a repository later = cloning it into that directory; keep the
+folder format and the scan stable for that.
 `Addon.contribute_step(doc, step, expr)` adds to each step of
 `history_labels()["steps"]` (on a copy: the render cache stays plain), and
 the front end hooks `historyStep` (an element for the drawer's rows,

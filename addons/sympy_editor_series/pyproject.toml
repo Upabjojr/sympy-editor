@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sympy-editor-series"
+version = "0.0.1"
+description = "sympy-editor add-on: series expansions of the selection (Taylor, Laurent, Puiseux, asymptotic, leading term)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "AGPL-3.0-or-later" }   # as sympy-editor: see its LICENSE
+dependencies = ["sympy-editor"]
+
+[project.entry-points."sympy_editor.addons"]
+series = "sympy_editor_series:ADDON"
+
+[tool.setuptools.packages.find]
+include = ["sympy_editor_series*"]
+
+[tool.setuptools.package-data]
+sympy_editor_series = ["static/*"]

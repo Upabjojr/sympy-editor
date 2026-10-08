@@ -124,10 +124,12 @@ def test_the_nodes_in_a_document():
     assert ADDON.client_options()["max_order"] == 4 and len(ADDON.client_options()["examples"]) >= 5
 
 
-def test_the_manifest_says_not_bundled():
+def test_the_manifest_ships_it_with_the_apps():
+    """Bundled like every add-on folder (it was left out only as the example
+    of an add-on installed from the editor), with nothing to install."""
     import json
     manifest = json.loads((Path(__file__).resolve().parents[1] / "addon.json").read_text())
-    assert manifest["name"] == "feynman" and manifest["bundle"] is False and manifest["requires"] == []
+    assert manifest["name"] == "feynman" and manifest.get("bundle", True) is True and manifest["requires"] == []
     assert diagram_json(diagrams(PathIntegral(1), 0)[0])["edges"] == []
     assert FERMION != PHOTON
 

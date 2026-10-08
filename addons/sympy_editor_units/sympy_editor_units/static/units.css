@@ -1,0 +1,81 @@
+/* The units add-on: a panel under the formula, and outlines in the formula
+ * around what does not add up.  Colours are the editor's tokens. */
+
+.se-addon-units .su-panel { display: flex; flex-direction: column; gap: 0.4rem; font-size: 12px; }
+.se-addon-units .su-panel [hidden] { display: none !important; }
+.se-addon-units .su-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem; }
+.se-addon-units .su-dim { font-size: 13px; }
+.se-addon-units .su-is, .se-addon-units .su-label { color: var(--se-muted); }
+.se-addon-units .su-dim-name { font-weight: 600; }
+.se-addon-units .su-dim-tex, .se-addon-units .su-si-tex { font-size: 1.15em; }
+
+.se-addon-units .su-verdict { font-weight: 600; }
+.se-addon-units .su-verdict.su-ok { color: var(--se-added); }
+.se-addon-units .su-verdict.su-bad { color: var(--se-error); }
+.se-addon-units .su-verdict.su-none { color: var(--se-muted); font-weight: normal; }
+.se-addon-units .su-problems { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.2rem; }
+.se-addon-units .su-problem {
+  font: inherit;
+  text-align: left;
+  width: 100%;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--se-rule);
+  border-left: 3px solid var(--se-error);
+  border-radius: 0.3rem;
+  background: var(--se-surface);
+  color: var(--se-fg);
+  cursor: pointer;
+}
+.se-addon-units .su-src { font-family: var(--se-mono); }
+.se-addon-units .su-msg { color: var(--se-muted); }
+
+.se-addon-units .su-btn {
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--se-border);
+  border-radius: 0.3rem;
+  background: var(--se-btn);
+  box-shadow: var(--se-btn-shadow);
+  color: var(--se-fg);
+  cursor: pointer;
+}
+.se-addon-units .su-btn:active { background: var(--se-btn-down); box-shadow: var(--se-btn-shadow-down); }
+.se-addon-units .su-btn:focus-visible, .se-addon-units .su-problem:focus-visible {
+  outline: 2px solid rgba(var(--se-accent), 0.55); outline-offset: 1px;
+}
+.se-addon-units .su-primary { border-color: rgba(var(--se-accent), 0.6); }
+@media (hover: hover) {
+  .se-addon-units .su-btn:hover { background: var(--se-btn-hover); box-shadow: var(--se-btn-shadow-hover); border-color: rgba(var(--se-accent), 0.6); }
+  .se-addon-units .su-problem:hover { background: rgba(var(--se-accent), 0.08); }
+}
+.se-addon-units .su-target {
+  font-family: var(--se-mono);
+  font-size: 12px;
+  width: 11rem;
+  max-width: 100%;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--se-border);
+  border-radius: 0.3rem;
+  background: var(--se-field);
+  color: var(--se-fg);
+}
+.se-addon-units .su-short { display: inline-flex; align-items: center; gap: 0.3rem; color: var(--se-muted); cursor: pointer; }
+.se-addon-units .su-note { min-height: 1.2em; color: var(--se-muted); }
+.se-addon-units .su-note.su-error { color: var(--se-error); }
+
+/* What does not add up, in the formula: a dashed outline in the error colour. */
+.se-view .su-bad-node {
+  outline: 1.5px dashed var(--se-error);
+  outline-offset: 2px;
+  border-radius: 0.15em;
+}
+
+/* A finger's targets. */
+@media (any-pointer: coarse) {
+  .se-addon-units .su-btn, .se-addon-units .su-problem { font-size: 14px; padding: 0.45rem 0.7rem; min-height: 36px; }
+  .se-addon-units .su-target { font-size: 16px; padding: 0.4rem 0.5rem; }   /* iOS zooms into anything smaller */
+  .se-addon-units .su-short { font-size: 14px; min-height: 36px; }
+  .se-addon-units .su-short-box { width: 20px; height: 20px; }
+}

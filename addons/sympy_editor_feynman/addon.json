@@ -5,6 +5,6 @@
   "version": "0.0.1",
   "description": "Path integrals of QED expanded into Feynman diagrams: Wick's contractions with their signs and symmetry factors, each diagram drawn and printed by the Feynman rules.",
   "requires": [],
-  "bundle": false,
+  "bundle": true,
   "experimental": true
 }

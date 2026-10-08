@@ -1,0 +1,32 @@
+/* sympy-editor add-on "check" - scoped under the panel the editor gives it. */
+.se-addon-check .chk-panel { font-size: 12px; }
+.se-addon-check .chk-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; }
+.se-addon-check .chk-summary { color: var(--se-fg); }
+.se-addon-check .chk-summary.chk-bad { color: var(--se-removed); font-weight: 600; }
+.se-addon-check .chk-summary.chk-good { color: var(--se-added); font-weight: 600; }
+.se-addon-check .chk-auto { display: inline-flex; align-items: center; gap: 0.25rem; color: var(--se-muted); margin-left: auto; }
+.se-addon-check .chk-list { list-style: none; margin: 0; padding: 0; max-height: 18rem; overflow-y: auto;
+  border: 1px solid var(--se-rule, var(--se-border)); border-radius: 0.35rem; background: var(--se-surface, var(--se-bg)); }
+.se-addon-check .chk-step { display: grid; grid-template-columns: 1.6em 2.2em minmax(0, 1fr); gap: 0 0.4rem; align-items: baseline;
+  padding: 0.3rem 0.45rem; border-top: 1px solid var(--se-rule, var(--se-border)); cursor: pointer; }
+.se-addon-check .chk-step:first-child { border-top: 0; }
+.se-addon-check .chk-step:focus-visible { outline: 2px solid rgb(var(--se-accent)); outline-offset: -2px; }
+.se-addon-check .chk-step.chk-current { background: rgba(var(--se-accent), 0.12); }
+.se-addon-check .chk-step.chk-first-error { box-shadow: inset 3px 0 0 var(--se-removed); }
+.se-addon-check .chk-mark { font-weight: 700; text-align: center; font-size: 14px; line-height: 1; }
+.se-addon-check .chk-n { color: var(--se-muted); font-variant-numeric: tabular-nums; }
+.se-addon-check .chk-src { font-family: var(--se-mono); overflow-wrap: anywhere; color: var(--se-fg); }
+.se-addon-check .chk-label { color: var(--se-muted); }
+.se-addon-check .chk-text { grid-column: 3; color: var(--se-muted); overflow-wrap: anywhere; }
+.se-addon-check .chk-equal .chk-mark { color: var(--se-added); }
+.se-addon-check .chk-different .chk-mark, .se-addon-check .chk-different .chk-text { color: var(--se-removed); }
+.se-addon-check .chk-unknown .chk-mark { color: var(--se-muted); }
+.se-addon-check .chk-transformation .chk-mark { color: rgb(var(--se-accent)); }
+.se-addon-check .chk-pending .chk-mark, .se-addon-check .chk-start .chk-mark, .se-addon-check .chk-incomplete .chk-mark { color: var(--se-muted); }
+@media (hover: hover) {
+  .se-addon-check .chk-step:hover { background: rgba(var(--se-accent), 0.07); }
+}
+@media (any-pointer: coarse) {
+  .se-addon-check .chk-step { padding: 0.55rem 0.5rem; }
+  .se-addon-check .chk-auto input { width: 1.1rem; height: 1.1rem; }
+}
