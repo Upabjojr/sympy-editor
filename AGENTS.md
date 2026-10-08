@@ -83,6 +83,7 @@ addons/         Add-on drafts, each a package of its own (tree, plot, matching, 
                 console, handwriting, assumptions).
                 console, handwriting, numeric).
                 console, handwriting, transforms).
+                console, handwriting, steps).
 ```
 
 Data flow: Python `Document.snapshot()` → JSON (`latex`, `latex_plain`,

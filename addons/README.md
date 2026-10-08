@@ -24,6 +24,7 @@ addons/
   sympy_editor_export/      the selection as LaTeX, MathML, Python, C, Fortran, JS, Octave, Julia, Rust or a function (no dependency)
   sympy_editor_check/       "Check my work": is each step of the history equivalent to the one before (no dependency)
   sympy_editor_transforms/  Laplace, Fourier, Mellin, Hankel and z-transforms of the selection (no dependency)
+  sympy_editor_steps/       step-by-step solutions: integrals, derivatives, equations of degree one or two (no dependency)
   demo.py                   a page with the first five, to try them in a browser
 ```
 
@@ -460,6 +461,15 @@ hook (no thread: it works in Pyodide too).  Each solution can be substituted
 back and checked, or inserted in place of what was solved - a step of the
 history.  The last solution is kept per document and named by a token, so
 nothing SymPy has to be read back from the page.
+
+**`sympy_editor_steps`** - *a custom widget that explains*.  One query,
+`steps`, works out the selection - an integral through `manualintegrate`'s
+rule tree, flattened one rule at a time; a derivative with sum, product,
+quotient, power and chain rules applied to one `d/dx` hole per step; an
+equation of degree one or two - and the panel lists the steps with KaTeX.
+`apply` puts a step's result in place of the selection, a step of the
+history labelled with the rule; it works the steps out again rather than
+reading them back.  What it cannot explain it says in words.
 
 ## Open questions
 

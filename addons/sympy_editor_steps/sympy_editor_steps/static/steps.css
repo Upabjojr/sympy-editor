@@ -1,0 +1,52 @@
+/* sympy-editor add-on "steps".  Scoped under the box the editor gives it. */
+.se-addon-steps .st-panel { font-size: 12px; }
+.se-addon-steps .st-panel.st-working { opacity: 0.6; }
+.se-addon-steps .st-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.3rem; }
+.se-addon-steps .st-bar select { font: inherit; font-size: 12px; padding: 2px 4px; }
+.se-addon-steps .st-varlabel[hidden] { display: none; }
+.se-addon-steps .st-start { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem; margin: 0.2rem 0 0.3rem; }
+.se-addon-steps .st-start:empty { display: none; }
+.se-addon-steps .st-head { color: var(--se-muted); font-weight: 600; }
+.se-addon-steps .st-steps { margin: 0; padding-left: 1.8em; }
+.se-addon-steps .st-step { padding: 0.3rem 0; border-top: 1px solid var(--se-rule); }
+.se-addon-steps .st-remark .st-text { color: var(--se-muted); }
+.se-addon-steps .st-detail { color: var(--se-muted); overflow-x: auto; overflow-y: hidden; }
+.se-addon-steps .st-line { display: flex; align-items: center; gap: 0.6rem; }
+.se-addon-steps .st-math { flex: 1 1 auto; min-width: 0; overflow-x: auto; overflow-y: hidden; padding: 0.15rem 0; font-size: 13px; }
+.se-addon-steps .st-math code { font-family: var(--se-mono); }
+.se-addon-steps .st-note { color: var(--se-muted); margin-top: 0.3rem; }
+.se-addon-steps .st-note:empty { display: none; }
+.se-addon-steps .st-note.st-error { color: var(--se-error); }
+.se-addon-steps .st-offers { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.3rem; }
+.se-addon-steps .st-offers:empty { display: none; }
+/* Raised, as the editor's own tools are (its button tokens). */
+.se-addon-steps .st-apply, .se-addon-steps .st-offer {
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--se-border);
+  border-radius: 0.3rem;
+  background: var(--se-btn);
+  box-shadow: var(--se-btn-edge), var(--se-btn-shadow);
+  color: inherit;
+  cursor: pointer;
+}
+.se-addon-steps .st-apply:active, .se-addon-steps .st-offer:active {
+  background: var(--se-btn-down);
+  box-shadow: var(--se-btn-shadow-down);
+  transform: translateY(0.5px);
+}
+.se-addon-steps .st-apply:focus-visible, .se-addon-steps .st-offer:focus-visible {
+  outline: 2px solid rgba(var(--se-accent), 0.55);
+  outline-offset: 1px;
+}
+@media (hover: hover) {
+  .se-addon-steps .st-apply:hover, .se-addon-steps .st-offer:hover { border-color: rgba(var(--se-accent), 0.7); }
+}
+/* A finger: targets, not glyphs. */
+@media (any-pointer: coarse) {
+  .se-addon-steps .st-apply, .se-addon-steps .st-offer { font-size: 14px; padding: 0.45rem 0.8rem; min-height: 36px; }
+  .se-addon-steps .st-bar select { font-size: 14px; padding: 0.35rem 0.4rem; min-height: 36px; }
+}
