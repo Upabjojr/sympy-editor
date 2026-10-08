@@ -5427,8 +5427,8 @@ def test_addons_can_be_switched_on_and_off_while_editing(browser):
             _open_sheet(page, "addons")
 
         def close_drawer():
-            page.keyboard.press("Escape")
-            assert _wait(lambda: page.locator(".se-sheet-view").count() == 0)
+            page.locator(".se-sheet-view .se-history-close").click()          # (Esc goes back to the menu)
+            assert _wait(lambda: page.locator(".se-sheet-view").count() == 0 and page.locator(".se-drawer").is_hidden())
         page.locator('[data-cmd="drawer"]').click()
         assert page.locator(".se-drawer-head").inner_text().startswith("Menu")
         assert page.locator(".se-sessions").count() == 0                         # no sessions in it
@@ -5455,6 +5455,60 @@ def test_addons_can_be_switched_on_and_off_while_editing(browser):
         page.locator(".se-sheet-view .se-addon-row input").check()
         page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)
         assert page.errors == []
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_the_add_ons_window_searches_and_back_returns_to_the_menu(browser):
+    """The Add-ons window has a search box over its cards (name, what it
+    does); its \u00d7 sits at the right edge, as every window's; and Back -
+    Android's, or Esc - from a window opened from the menu goes back to the
+    menu, while the \u00d7 closes both."""
+    a1, _ = _demo_addon()
+    from sympy_editor.addons import Addon
+
+    class Other(Addon):
+        name = "otherthing"
+        label = "Another thing"
+    doc = Document(x + y, available=[a1, Other()])
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        page = browser.new_page(viewport={"width": 390, "height": 800}, has_touch=True)
+        page.goto(srv.url)
+        page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+        sheet = _open_sheet(page, "addons")
+        rows = sheet.locator(".se-addon-row")
+        assert rows.count() == 2
+        search = sheet.locator(".se-addon-search")
+        assert search.is_visible()
+        search.fill("demo")
+        assert [r.is_visible() for r in rows.all()] == [True, False]
+        search.fill("nothing like it")
+        assert not any(r.is_visible() for r in rows.all())
+        assert "No add-on matches" in sheet.locator(".se-addon-none").inner_text()
+        search.fill("")
+        assert all(r.is_visible() for r in rows.all())
+        # the \u00d7 at the right edge (the windows' other controls aside)
+        right = page.evaluate("document.querySelector('.se-sheet-view .se-history-close').getBoundingClientRect().right")
+        assert 390 - right <= 16, right
+        # Back: to the menu
+        assert page.evaluate("SympyEditor.back()") is True
+        assert _wait(lambda: page.locator(".se-sheet-view").count() == 0 and page.locator(".se-drawer").is_visible())
+        # the File window the same, with Esc
+        _open_sheet(page, "files")
+        page.keyboard.press("Escape")
+        assert _wait(lambda: page.locator(".se-sheet-view").count() == 0 and page.locator(".se-drawer").is_visible())
+        # the \u00d7 closes both
+        _open_sheet(page, "files").locator(".se-history-close").click()
+        assert _wait(lambda: page.locator(".se-sheet-view").count() == 0)
+        assert page.locator(".se-drawer").is_hidden()
+        # the guide's \u00d7 is at the edge too
+        page.locator('[data-cmd="help"]').click()
+        right = page.evaluate("document.querySelector('.se-help-view .se-history-close').getBoundingClientRect().right")
+        assert 390 - right <= 16, right
+        page.close()
     finally:
         srv.shutdown()
         srv.server_close()

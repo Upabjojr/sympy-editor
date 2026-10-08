@@ -1033,6 +1033,15 @@
 .se-sheet-body { overflow: auto; padding: 0.9rem 1.3rem 2rem; }
 .se-sheet-body > * { max-width: 40rem; margin-left: auto; margin-right: auto; }
 .se-sheet-intro { color: var(--se-muted); font-size: 13px; margin: 0 auto 0.8rem; }
+.se-addon-search-row { margin-bottom: 0.7rem; }
+.se-addon-search {
+  width: 100%; box-sizing: border-box; font: inherit; font-size: 14px; padding: 0.5rem 0.7rem;
+  border: 1px solid var(--se-border); border-radius: 0.4rem; background: var(--se-field); color: inherit;
+}
+.se-addon-search:focus { outline: 2px solid rgba(var(--se-accent), 0.5); outline-offset: -1px; }
+@media (any-pointer: coarse) { .se-addon-search { font-size: 16px; } }   /* iOS zooms into anything smaller */
+.se-sheet-view .se-addon-row[hidden], .se-addon-none[hidden] { display: none; }
+.se-addon-none { color: var(--se-muted); font-size: 13px; margin: 0.3rem 0; }
 .se-sheet-view .se-addons-menu { position: static; max-width: 40rem; box-shadow: none; border: 0; padding: 0; gap: 0.45rem; background: none; font-size: 14px; }
 .se-sheet-view .se-addon-row {
   align-items: flex-start; gap: 0.7rem; padding: 0.65rem 0.75rem;

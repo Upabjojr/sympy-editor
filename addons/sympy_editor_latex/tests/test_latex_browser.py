@@ -312,8 +312,8 @@ def test_the_add_on_switched_off_takes_its_field_and_its_strip_away():
             assert _wait(lambda: switch.count() == 1)
             switch.check()                                   # on: the tool appears
             assert _wait(lambda: page.locator(TOOL).count() == 1, 15)
-            page.keyboard.press("Escape")                     # the window is over the formula
-            assert _wait(lambda: page.locator(".se-sheet-view").count() == 0)
+            page.locator(".se-sheet-view .se-history-close").click()     # the window is over the formula (Esc: back to the menu)
+            assert _wait(lambda: page.locator(".se-sheet-view").count() == 0 and page.locator(".se-drawer").is_hidden())
             page.locator(TOOL).click()
             assert _wait(lambda: page.locator(".se-view .ltx-field").count() == 1)
             page.locator('[data-cmd="drawer"]').click()
