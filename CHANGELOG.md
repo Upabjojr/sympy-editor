@@ -2,6 +2,21 @@
 
 ## 0.1.3 — unreleased
 
+* **Twelve new add-ons, experimental.** Bundled with the apps and switched
+  off until switched on in **≡ → Add-ons**: **Steps** (step-by-step
+  integrals, derivatives, equations of degree one or two), **Check my work**
+  (is each step of the history equivalent to the one before), **Export**
+  (LaTeX, MathML, Python, C, Fortran, JavaScript, Octave, Julia, Rust, a
+  whole function), **Solve** (equations, inequalities, systems, checked by
+  substitution), **Assumptions** (what SymPy knows of the selection; the
+  symbols' assumptions as switches), **Values** (any precision, exact forms,
+  tables), **Series** (Taylor, Laurent, Puiseux, asymptotic), **Units**
+  (physical units, dimensions checked term by term, conversions), **Linear
+  algebra** (spectrum, Jordan form, LU/QR/Cholesky, row reduction step by
+  step), **Transforms** (Laplace, Fourier, Mellin, Hankel, z), **Forms**
+  (every simplification of the selection side by side) and **Feynman
+  diagrams** (path integrals of QED expanded into diagrams).
+
 * **New add-ons are marked experimental, and start off.** An add-on whose
   `addon.json` says `"experimental": true` shows an *Experimental* badge in
   the Add-ons window, and in the apps it starts switched off - on a first
