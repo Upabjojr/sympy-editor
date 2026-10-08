@@ -64,15 +64,16 @@ checkout — and restart the kernel:
 pip install -e addons/sympy_editor_plot -e addons/sympy_editor_latex
 pip install -e addons/sympy_editor_tree -e addons/sympy_editor_matching
 pip install -e addons/sympy_editor_console -e addons/sympy_editor_export
-pip install -e addons/sympy_editor_console -e addons/sympy_editor_forms
-pip install -e addons/sympy_editor_console -e addons/sympy_editor_numeric
-pip install -e addons/sympy_editor_console -e addons/sympy_editor_series
-pip install -e addons/sympy_editor_console -e addons/sympy_editor_solver
-pip install -e addons/sympy_editor_console -e addons/sympy_editor_units
+pip install -e addons/sympy_editor_steps -e addons/sympy_editor_check
+pip install -e addons/sympy_editor_solver -e addons/sympy_editor_assumptions
+pip install -e addons/sympy_editor_numeric -e addons/sympy_editor_series
+pip install -e addons/sympy_editor_units -e addons/sympy_editor_linalg
+pip install -e addons/sympy_editor_transforms -e addons/sympy_editor_forms
+pip install -e addons/sympy_editor_feynman
 ```
 
-Every installed add-on is then listed at the top of the drawer the **≡**
-button opens, to switch on and off while editing, and their Python runs in
+Every installed add-on is then listed in the **Add-ons** window of the
+**≡** menu, to switch on and off while editing, and their Python runs in
 **this** kernel — the plot's samples are the kernel's SymPy at work:
 
 ```python
