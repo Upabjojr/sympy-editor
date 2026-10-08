@@ -6994,3 +6994,48 @@ def test_the_program_reopens_the_last_session_on_the_next_start(browser, tmp_pat
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_an_action_from_the_menus_brings_the_formula_back_into_sight(browser, serve_expr):
+    """On a phone the menus sit under the formula, a screen or more down:
+    a transform, a method or a function picked there scrolls the page back
+    to the formula, where the change happens - and nothing moves when the
+    formula is in sight already."""
+    srv, doc = serve_expr(Matrix([[1, x], [0, 1]]))
+    page = browser.new_page(viewport={"width": 384, "height": 360}, has_touch=True, is_mobile=True)
+    page.goto(srv.url)
+    page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
+    in_sight = """() => { const r = document.querySelector('.se-stage').getBoundingClientRect();
+                          return r.top >= -1 && r.bottom <= window.innerHeight + 1; }"""
+
+    def away():
+        """Scroll down to the menus, the formula out of sight."""
+        page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
+        page.wait_for_timeout(100)
+        assert not page.evaluate(in_sight)
+
+    # a transform
+    away()
+    _next_state(page, lambda: _pick(page, ".se-ops", "simplify"))
+    page.wait_for_function(in_sight, timeout=3000)
+    # a method of the matrix: inverse, no parameter asked
+    away()
+    _next_state(page, lambda: _pick(page, ".se-methods", "inv"))
+    page.wait_for_function(in_sight, timeout=3000)
+    assert doc.expr == Matrix([[1, -x], [0, 1]])
+    # a function typed in the box, with its arguments
+    away()
+    box = page.locator(".se-fn")
+    box.click()
+    box.fill("transpose()")
+    _next_state(page, lambda: box.press("Enter"))
+    page.wait_for_function(in_sight, timeout=3000)
+    assert doc.expr == Matrix([[1, 0], [-x, 1]])
+    # in sight already: the page stays where it is
+    page.evaluate("window.scrollTo(0, 0)")
+    page.wait_for_timeout(100)
+    before = page.evaluate("window.scrollY")
+    page.evaluate("document.querySelector('.sympy-editor').__sympyEditor._revealFormula()")
+    page.wait_for_timeout(400)
+    assert page.evaluate("window.scrollY") == before
+    page.close()

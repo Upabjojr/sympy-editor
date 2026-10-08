@@ -3495,7 +3495,24 @@ var SympyEditor = (function () {
       if (this.lazy()) msg.lazy = true;
       if (this.range) msg.children = this._rangeIndices();
       this.send(msg);
+      this._revealFormula();
       this.view.focus({ preventScroll: true });
+    }
+
+    /** Bring the formula back into sight after an action picked from the
+     *  menus or the function box: on a phone they sit under the formula, a
+     *  screen or more down, and the change - and its error, if any, on the
+     *  status line under it - happened out of sight.  Nothing moves when the
+     *  formula is already in sight, or in full screen. */
+    _revealFormula() {
+      var stage = this.stage;
+      if (!stage || !stage.scrollIntoView || this.root.classList.contains("se-full")) return;
+      var r = stage.getBoundingClientRect();
+      var vh = window.innerHeight || document.documentElement.clientHeight;
+      if (r.top >= 0 && r.bottom <= vh) return;
+      var smooth = !(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+      try { stage.scrollIntoView({ block: "nearest", behavior: smooth ? "smooth" : "auto" }); }
+      catch (e) { stage.scrollIntoView(true); }
     }
 
     /** Change what the two action menus offer (`options.actions`) at any time. */
@@ -4955,6 +4972,7 @@ var SympyEditor = (function () {
           if (self.lazy()) msg.lazy = true;
           if (children) msg.children = children;
           self.send(msg);
+          self._revealFormula();
         }, anchor);
     }
 
@@ -5074,6 +5092,7 @@ var SympyEditor = (function () {
         while (self.busy && !self.closed) await new Promise(function (r) { setTimeout(r, 25); });
         self._hideCaret();
         self.send(msg);
+        self._revealFormula();
         self.view.focus({ preventScroll: true });
       })();
       return true;
@@ -5090,6 +5109,7 @@ var SympyEditor = (function () {
       this._formAnchor = null;
       this._hideFnMenu();
       this.send(msg);
+      this._revealFormula();
       this.view.focus({ preventScroll: true });
     }
 

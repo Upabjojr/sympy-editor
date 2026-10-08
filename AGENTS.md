@@ -301,7 +301,12 @@ Two conventions between printer, document and front end:
   "apply" block, the unevaluated toggle after them.  `Editor.opsSelect`,
   `typeMenu`, `methodsMenu` and `fnInput` are the pickers' inputs, so
   `_updateToolbar` and the tests keep their names; `setActions(spec)`
-  changes `options.actions` live.  `{"action": "methods", "path"}` returns a
+  changes `options.actions` live.  An action sent from them - a transform
+  (`_applyOp`, and after its parameter form), a method or a function
+  (`callFunction`, `_insertFunctionAtCaret`) - calls `_revealFormula`: on a
+  phone the menus are a screen below the formula, so the page scrolls back
+  to `.se-stage` (`block: "nearest"`, smooth unless reduced motion), and
+  nothing moves when the formula is in sight or in full screen.  `{"action": "methods", "path"}` returns a
   snapshot with the target's list included regardless.
 - **Matrix rows, columns and shape.**  `Document.edit_matrix(path, op,
   rows, cols)` (`insert_row`, `insert_col`, `delete_row`, `delete_col`,

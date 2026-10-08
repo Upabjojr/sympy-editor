@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+* **An action brings the formula back into sight.**  On a phone the
+  Transform, Methods and function menus sit a screen or more below the
+  formula; picking an action there now scrolls back to the formula, so the
+  change - or the error on the status line under it - is seen as it happens.
+
 ## 0.1.3 — October 2026
 
 * **`sympy-editor`, the editor as a program.** `pip install sympy-editor`
