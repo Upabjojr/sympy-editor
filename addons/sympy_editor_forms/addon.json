@@ -4,5 +4,6 @@
   "module": "sympy_editor_forms",
   "version": "0.0.1",
   "description": "A simplification explorer: the selection rewritten by every SymPy simplification function, one card per different form.",
-  "requires": []
+  "requires": [],
+  "experimental": true
 }
