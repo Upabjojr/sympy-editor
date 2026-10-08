@@ -17,6 +17,7 @@ addons/
   sympy_editor_console/     a Python console and script runner, with `editor` for the formula (no dependency)
   sympy_editor_assumptions/ what SymPy knows about the selection; the symbols' assumptions as switches (no dependency)
   sympy_editor_handwriting/ writing on the formula by hand, read by math-ocr's stroke model (onnxruntime; not in Pyodide)
+  sympy_editor_export/      the selection as LaTeX, MathML, Python, C, Fortran, JS, Octave, Julia, Rust or a function (no dependency)
   demo.py                   a page with the first five, to try them in a browser
 ```
 
@@ -390,6 +391,15 @@ was assumed of each in every snapshot; `assume` switches one assumption of
 one symbol through `Document.retype` - every occurrence, one step of the
 history - and keeps a hint for that step when SymPy rewrote the formula by
 itself or `simplify` can now do more, which `simplify` applies.
+
+**`sympy_editor_export`** - *a custom widget, no node of its own*.  One
+query, `export`: the selection (a node, a range, or the whole formula)
+written by SymPy's printers - LaTeX, MathML, Python (math, NumPy, mpmath or
+SymPy source), C, Fortran, JavaScript, Octave/MATLAB, Julia, Rust - or as a
+whole function by `codegen`, with the free symbols as arguments.  Printers
+run with `strict=False`, so what a language lacks is in their own *Not
+supported* comment; a refusal comes back as words.  Each file has Copy (the
+host's clipboard, as the editor's Copy) and Save (`api.saveFile`).
 
 ## Open questions
 
