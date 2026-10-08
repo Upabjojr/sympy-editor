@@ -2,6 +2,7 @@
 """Store screenshots of the app, taken from the app's own page.
 
     python mobile/screenshots.py            # -> mobile/ios/build/screenshots/{iphone,ipad}/{raw,framed}/*.png
+                                            #    mobile/android/build/screenshots/{phone,tablet7,tablet10}/{raw,framed}/*.png
     python mobile/screenshots.py --set examples   # ... /{iphone,ipad}/examples/{raw,framed}: the app's own examples
     python mobile/screenshots.py --set addons     # ... /{iphone,ipad}/addons/{raw,framed}: the plot, the tree, LaTeX, the rules
     python mobile/screenshots.py --set console    # ... /{iphone,ipad}/console/{raw,framed}: the Python console
@@ -12,9 +13,13 @@ backend) opened in Playwright's WebKit - the engine of the iOS WebView -
 with ``window.SympyEditorPy`` bridged to ``mobile/app/sympy_editor_app.py``
 in this process, so the pictures are of the app editing, not of a mock-up.
 1242 x 2688 (the 6.5" iPhone) and 2064 x 2752 (the 13" iPad) are the
-sizes the App Store asks for; ``framed/`` puts each screen under a caption
-on a coloured ground, ``raw/`` is the screen alone.  Needs ``playwright`` (with ``playwright install webkit``)
-and Pillow.
+sizes the App Store asks for; Google Play wants 9:16 with no side over 3840
+pixels, and 1080 at least for a listing it may feature: 1080 x 1920 for the
+phone, 1216 x 2160 for the 7" tablet and 1800 x 3200 for the 10" one,
+taken in Chromium - the engine of Android's WebView - where the iOS ones are
+taken in WebKit.  ``framed/`` puts each screen under a caption on a coloured
+ground, ``raw/`` is the screen alone.  Needs ``playwright`` (with ``playwright
+install webkit chromium``) and Pillow.
 """
 
 from __future__ import annotations
@@ -40,7 +45,17 @@ DEVICES = {
     "iphone": (414, 896, 3, 1.0),      # the 6.5" iPhone: 1242 x 2688 pixels
     "iphone63": (393, 852, 3, 1.0),    # the 6.3" iPhone: 1179 x 2556
     "ipad": (1032, 1376, 2, 1.7),      # the 13" iPad:    2064 x 2752
+    "phone": (405, 720, 8 / 3, 1.0),   # Android phone:   1080 x 1920 (Google Play, 9:16; a Pixel is 412 wide)
+    "tablet7": (608, 1080, 2, 1.25),   # 7" Android tablet:  1216 x 2160 (Google Play, 9:16)
+    "tablet10": (900, 1600, 2, 1.6),   # 10" Android tablet: 1800 x 3200 (Google Play, 9:16, 1080 or more a side)
 }
+#: the Android devices: Chromium (the WebView's engine), under mobile/android/build
+ANDROID = {"phone", "tablet7", "tablet10"}
+
+
+def wide(device: str) -> bool:
+    """A screen wide enough for a long equation on one line."""
+    return DEVICES[device][0] >= 700
 ED = "document.querySelector('.sympy-editor').__sympyEditor"
 BRIDGE = """
 window.SympyEditorPy = {
@@ -95,7 +110,7 @@ def opaque(path: Path) -> None:
 class Screen:
     """The app's page over one starting expression."""
 
-    def __init__(self, pw, expr, work: Path, out: Path, device: str):
+    def __init__(self, pw, expr, work: Path, out: Path, device: str, off=()):
         self.w, self.h, self.scale, self.room = DEVICES[device]
         folder = work / "www"
         build_www.build(folder, native=True, expr=expr)
@@ -103,7 +118,7 @@ class Screen:
         # page that loaded Pyodide instead would be a picture of a spinner
         assert not (folder / "vendor" / "pyodide").exists(), "the bundle carries Pyodide: not the apps' page"
         self.srv, self.out = serve(folder), out
-        self.browser = pw.webkit.launch()
+        self.browser = (pw.chromium if device in ANDROID else pw.webkit).launch()
         ctx = self.browser.new_context(viewport={"width": self.w, "height": self.h}, device_scale_factor=self.scale,
                                        is_mobile=True, has_touch=True)
         ctx.expose_function("__py", lambda fn, args: getattr(app, fn)(*args))
@@ -116,6 +131,8 @@ class Screen:
         self.page.wait_for_selector(".sympy-editor .katex", timeout=60000)
         assert self.ev("!!window.SympyEditorPy && !window.pyodide && !window.loadPyodide"), "the page is not on the native backend"
         self.page.wait_for_timeout(600)
+        if off:                                  # add-on panels that would only be noise on this shot
+            self.send({"action": "addons", "disable": list(off)})
         # The apps carry the handwriting add-on with its model, on like the
         # others, and its tools are in every screen of theirs: so here, where
         # this Python can read strokes too (the add-on installed, a model found).
@@ -162,7 +179,13 @@ class Screen:
         while zoom > 0.5:
             self.ev(f"{ED}.setZoom({zoom})")
             self.page.wait_for_timeout(200)
-            if not self.ev("(() => { const v = document.querySelector('.se-view'); return v.scrollWidth > v.clientWidth + 1; })()"):
+            # the formula with a little room on either side, not merely inside
+            # the view: the glyphs' own width (a range over them - the KaTeX
+            # boxes are blocks as wide as the view)
+            if not self.ev("(() => { const v = document.querySelector('.se-view'), r = document.createRange();"
+                           " r.selectNodeContents(v.querySelector('.katex-html') || v);"
+                           " return v.scrollWidth > v.clientWidth + 1"
+                           " || r.getBoundingClientRect().width > v.clientWidth * 0.92; })()"):
                 break
             zoom = round(zoom - 0.05, 2)
         self.ev("document.querySelector('.se-view').scrollLeft = 0")
@@ -229,12 +252,18 @@ SHOTS = [
 ]
 
 
+#: the story is the editor's: the plot panel, on a tall screen in sight, would
+#: say a sum or a limit "cannot be plotted as it stands" in red (the add-ons
+#: set has plots of their own)
+STORY_OFF = ("plot",)
+
+
 def take(work: Path, out: Path, device: str) -> None:
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as pw:
         # the Basel problem
-        s = Screen(pw, Sum(1 / n**2, (n, 1, oo)), work, out, device)
+        s = Screen(pw, Sum(1 / n**2, (n, 1, oo)), work, out, device, off=STORY_OFF)
         s.fit(1.8)
         s.select("/")
         s.shot("01-select")
@@ -244,7 +273,7 @@ def take(work: Path, out: Path, device: str) -> None:
         s.shot("02-basel")
         s.close()
         # Euler's formula, then his identity: e^{ix} -> cos x + i sin x -> -1 at x = pi
-        s = Screen(pw, exp(I * x), work, out, device)
+        s = Screen(pw, exp(I * x), work, out, device, off=STORY_OFF)
         s.send({"action": "call", "path": "/", "func": "rewrite(cos)"})
         s.select("I*sin(x)")
         s.fit(1.7)
@@ -255,29 +284,29 @@ def take(work: Path, out: Path, device: str) -> None:
         s.shot("04-history")
         s.close()
         # the limit that defines e
-        s = Screen(pw, Limit((1 + 1 / n) ** n, n, oo), work, out, device)
+        s = Screen(pw, Limit((1 + 1 / n) ** n, n, oo), work, out, device, off=STORY_OFF)
         s.fit(1.8)
         s.shot("05-limit")
         s.close()
         # full screen: the Schroedinger equation, where the screen is wide enough
         # for it, the Gaussian integral where it is not
         psi, V = Function("psi")(x, t), Function("V")(x)
-        famous = Eq(I * hbar * Derivative(psi, t), -hbar**2 / (2 * m) * Derivative(psi, (x, 2)) + V * psi) if device == "ipad" \
+        famous = Eq(I * hbar * Derivative(psi, t), -hbar**2 / (2 * m) * Derivative(psi, (x, 2)) + V * psi) if wide(device) \
             else Eq(Integral(exp(-x**2), (x, -oo, oo)), sqrt(pi))
-        s = Screen(pw, famous, work, out, device)
+        s = Screen(pw, famous, work, out, device, off=STORY_OFF)
         s.full()
         s.fit(2.0)
         s.shot("06-full")
         s.close()
         # the Taylor series of the exponential
-        s = Screen(pw, exp(x), work, out, device)
+        s = Screen(pw, exp(x), work, out, device, off=STORY_OFF)
         s.send({"action": "call", "path": "/", "func": "series(x, 0, 7)"})
         s.select()
         s.fit(1.5)
         s.shot("07-taylor")
         s.close()
         # a rotation, inverted: the rotation back
-        s = Screen(pw, Matrix([[cos(t), -sin(t)], [sin(t), cos(t)]]), work, out, device)
+        s = Screen(pw, Matrix([[cos(t), -sin(t)], [sin(t), cos(t)]]), work, out, device, off=STORY_OFF)
         s.send({"action": "call", "path": "/", "func": "inv"})
         s.send({"action": "apply", "path": "/", "op": "simplify"})
         s.select()
@@ -735,7 +764,7 @@ def frame(raw: Path, caption: str, out: Path, device: str) -> None:
     from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
     w, h, scale, _ = DEVICES[device]
-    PW, PH = w * scale, h * scale
+    PW, PH = round(w * scale), round(h * scale)
     u = PW / 1242                                          # everything is laid out for the phone, then scaled
     size = round(92 * u)
     for candidate in ("/System/Library/Fonts/HelveticaNeue.ttc", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"):
@@ -790,14 +819,14 @@ def main(argv=None) -> int:
     shots, taker = {"story": (SHOTS, take), "examples": (EXAMPLE_SHOTS, take_examples),
                     "addons": (ADDON_SHOTS, take_addons), "console": (CONSOLE_SHOTS, take_console),
                     "handwriting": (HANDWRITING_SHOTS, take_handwriting)}[args.set]
-    out = HERE / "ios" / "build" / "screenshots"
     for device in args.device or sorted(DEVICES):
+        out = HERE / ("android" if device in ANDROID else "ios") / "build" / "screenshots"
         base = out / device / ("" if args.set == "story" else args.set)
         raw, framed, work = base / "raw", base / "framed", out / "work" / args.set   # a set's own: two can run at once
         for folder in (raw, framed, work):
             folder.mkdir(parents=True, exist_ok=True)
         w, h, scale, _ = DEVICES[device]
-        print(f"Taking the {device} screens ({w * scale} x {h * scale}), the {args.set} set")
+        print(f"Taking the {device} screens ({round(w * scale)} x {round(h * scale)}), the {args.set} set")
         taker(work, raw, device)
         taken = [(name, caption) for name, caption in shots if (raw / f"{name}.png").is_file()]
         for i, (name, caption) in enumerate(taken, 1):

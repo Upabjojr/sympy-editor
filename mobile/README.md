@@ -141,9 +141,12 @@ Store Connect asks for - from the app's own page in Playwright's WebKit,
 bridged to the app's Python, so they show the app computing (the Basel
 sum, Euler's formula worked into his identity, the limit that defines e, a
 rotation matrix inverted...) rather than a mock-up.
-`mobile/ios/build/screenshots/<device>/raw/` is the screen alone, as the
-Play Store listing has them; `framed/` the same under a caption on a
-coloured ground.  `--device iphone` (or `ipad`) takes one set only, and
+For Google Play it takes the Android phone at 1080 x 1920, the 7" tablet at
+1216 x 2160 and the 10" tablet at 1800 x 3200 (9:16, as Play asks) in
+Chromium, the engine of Android's WebView, under
+`mobile/android/build/screenshots/{phone,tablet7,tablet10}/`.
+`<device>/raw/` is the screen alone; `framed/` the same under a caption on a
+coloured ground.  `--device iphone` (or `ipad`, `phone`, `tablet7`, `tablet10`) takes one set only, and
 `--set examples` a second set, under `examples/`: the chooser of a new
 session, then each of the app's own examples with what one does with it.
 
