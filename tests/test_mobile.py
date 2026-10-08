@@ -1700,3 +1700,25 @@ def test_the_apps_have_no_network():
     out = subprocess.run([sys.executable, str(ROOT / "mobile/build.py"), "android", "--cdn"],
                          capture_output=True, text=True, timeout=60)
     assert out.returncode != 0 and "never use the network" in out.stderr
+
+
+def test_the_release_is_shrunk_and_keeps_what_is_reached_by_name():
+    """The release is built with R8 (smaller, and the App Bundle carries the
+    mapping file Play asks for to read crash reports); what is reached by
+    name and not by a call R8 can see is kept: the page's bridge methods,
+    ONNX Runtime (called from the handwriting add-on's Python by class name,
+    and through JNI) and Chaquopy."""
+    root = Path(__file__).resolve().parents[1] / "mobile" / "android" / "app"
+    gradle = (root / "build.gradle.kts").read_text(encoding="utf-8")
+    release = gradle[gradle.index("release {"):]
+    release = release[:release.index("}")]
+    assert "isMinifyEnabled = true" in release and '"proguard-rules.pro"' in release
+    rules = (root / "proguard-rules.pro").read_text(encoding="utf-8")
+    assert "@android.webkit.JavascriptInterface <methods>;" in rules
+    assert "-keep class ai.onnxruntime.** { *; }" in rules
+    assert "-keep class com.chaquo.python.** { *; }" in rules
+    # every class the add-ons' Python asks for by name is under a kept package
+    import re
+    for py in (Path(__file__).resolve().parents[1] / "addons").glob("*/*/*.py"):
+        for name in re.findall(r'jclass\("([\w.$]+)"\)', py.read_text(encoding="utf-8")):
+            assert name.startswith(("ai.onnxruntime.", "java.", "android.", "com.chaquo.")), (py.name, name)

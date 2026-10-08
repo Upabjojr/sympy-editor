@@ -12,7 +12,7 @@ android {
         applicationId = "org.sympy.editor"
         minSdk = 24          // the app's CPython (Chaquopy 16) needs Android 7.0
         targetSdk = 36
-        versionCode = 14          // 0.1.3; every release Android accepts as an update needs a higher one
+        versionCode = 15          // 0.1.3; every release Android accepts as an update needs a higher one
         versionName = "0.1.3"
         // Chaquopy ships a CPython runtime per ABI: these two cover phones,
         // tablets and the emulator (every other ABI is long obsolete).
@@ -46,9 +46,20 @@ android {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
             manifestPlaceholders["appLabel"] = "SymPy Editor (debug)"
+            // SYMPY_EDITOR_MINIFY_DEBUG=1: the debug build shrunk as the release
+            // is, to try R8's result on a phone beside the store app
+            if (System.getenv("SYMPY_EDITOR_MINIFY_DEBUG") == "1") {
+                isMinifyEnabled = true
+                proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            }
         }
         release {
-            isMinifyEnabled = false
+            // R8 shrinks and renames the code (proguard-rules.pro keeps what is
+            // reached by name: the page's bridges, ONNX Runtime, Chaquopy); the
+            // App Bundle carries the mapping file, which Play reads to give
+            // crash reports their names back.
+            isMinifyEnabled = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (keystore != null) signingConfig = signingConfigs.getByName("release")
         }
     }
