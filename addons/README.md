@@ -18,6 +18,7 @@ addons/
   sympy_editor_assumptions/ what SymPy knows about the selection; the symbols' assumptions as switches (no dependency)
   sympy_editor_forms/       the selection rewritten by every simplification function, one card per form (no dependency)
   sympy_editor_numeric/     the selection as a number: any precision, exact forms, why there is none, tables (no dependency)
+  sympy_editor_series/      series expansions of the selection: Taylor, Laurent, Puiseux, asymptotic, leading term (no dependency)
   sympy_editor_handwriting/ writing on the formula by hand, read by math-ocr's stroke model (onnxruntime; not in Pyodide)
   sympy_editor_export/      the selection as LaTeX, MathML, Python, C, Fortran, JS, Octave, Julia, Rust or a function (no dependency)
   sympy_editor_check/       "Check my work": is each step of the history equivalent to the one before (no dependency)
@@ -427,6 +428,15 @@ table mode varies one symbol over a range or a list (at most 500 rows,
 stopped after a few seconds) and copies as CSV or TSV through the host
 app's clipboard when there is one.  Two queries, `evaluate` and `table`;
 mpmath through SymPy, nothing else.
+
+**`sympy_editor_series`** - *a panel that computes and inserts*.  One query,
+`expand`: the selection's `series` in a variable about any point (`oo` and
+`-oo` included), at an order from 1 to 20, from either side, named after its
+powers (Taylor, Laurent, Puiseux, with logarithms, asymptotic), or its
+leading term; with the coefficients, and the truncation error at a sample
+point.  `insert` replaces the selection with the expansion, with or without
+its O term, as one step.  Every computation is time-boxed in a thread that
+is stopped when it overruns, and SymPy's failures are said in words.
 
 ## Open questions
 

@@ -66,6 +66,7 @@ pip install -e addons/sympy_editor_tree -e addons/sympy_editor_matching
 pip install -e addons/sympy_editor_console -e addons/sympy_editor_export
 pip install -e addons/sympy_editor_console -e addons/sympy_editor_forms
 pip install -e addons/sympy_editor_console -e addons/sympy_editor_numeric
+pip install -e addons/sympy_editor_console -e addons/sympy_editor_series
 ```
 
 Every installed add-on is then listed at the top of the drawer the **≡**
