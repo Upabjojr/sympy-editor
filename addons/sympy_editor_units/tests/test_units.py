@@ -205,3 +205,13 @@ def test_every_name_srepr_writes_is_read_back(name):
     doc.set(5 * q)
     state = doc.export()
     assert Document(0, addons=[ADDON], **state).expr == 5 * q
+
+
+def test_a_session_with_units_reopens_with_them_while_the_add_on_is_off():
+    # The apps open the last session before switching on the add-ons the user
+    # chose; srepr writes a unit by its bare name, which the editor alone
+    # read as a symbol - 5*meter/second came back as three plain names.
+    saved = _doc(5 * meter / second).export()
+    doc = Document(saved["history"][-1], history=saved["history"], index=saved["index"], available=[ADDON])
+    assert doc.expr == 5 * meter / second and doc.expr.atoms(Quantity) == {meter, second}
+    assert doc.snapshot()["addons"] == []                     # read with it, not switched on

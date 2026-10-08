@@ -249,6 +249,21 @@ def test_switching_on_and_off_at_run_time():
     assert doc.addons == {}
 
 
+def test_a_session_holding_an_off_addons_node_reopens_with_its_class():
+    """The apps open the last session before they put the user's switches on
+    it, so an add-on the user turned on is still off while the history is
+    read.  Its class must be read all the same - a step holding a Feynman
+    diagram came back as an undefined function ``Diagram`` and stayed one -
+    yet the add-on stays off until switched on."""
+    saved = Document(Boxed(x + y), addons=[ADDON]).export()
+    doc = Document(saved["history"][-1], history=saved["history"], index=saved["index"], available=[ADDON])
+    assert type(doc.expr) is Boxed and doc.expr == Boxed(x + y)
+    assert doc.snapshot()["addons"] == []                       # read, not switched on
+    assert doc.handle({"action": "addons", "enable": ["demo"]})["demo"]["boxes"] == 1
+    # and a name nothing provides is still a plain function, as before
+    assert Document("Function('Nobody')(Symbol('x'))", available=[ADDON]).expr == Function("Nobody")(x)
+
+
 def test_an_addon_that_cannot_load_is_listed_with_its_error():
     class Broken(Addon):
         name = "broken"

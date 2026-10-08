@@ -2946,6 +2946,38 @@ class Document:
                 local.setdefault(name, obj)
         return local
 
+    def _off_addon_names(self, text: str, names: Dict[str, Any]) -> Dict[str, Any]:
+        """The namespaces of add-ons that are *off* and know a name ``text``
+        uses which nothing on knows: a class it calls (``Diagram(...)``) or
+        an object ``srepr`` writes by name (a unit: ``meter``).  A session
+        is opened before the editor's switches are put on it (the apps: the
+        last session at start, then the add-ons the user turned on), so a
+        step holding a Feynman diagram was read as an undefined function
+        ``Diagram``, and ``5*meter`` as a symbol, and they stayed so once
+        the add-on came on.  Such an add-on is activated - its printers and
+        rebuilders, process-wide - but not switched on: that stays the
+        user's."""
+        bare = re.sub(r"'[^']*'|\"[^\"]*\"", "", text)       # names, not the strings inside Symbol('x')
+        wanted = {n for n in re.findall(r"\b[A-Za-z_]\w*", bare)
+                  if n not in names and getattr(sympy, n, None) is None}
+        found: Dict[str, Any] = {}
+        if not wanted:
+            return found
+        for name in list(self._catalog):
+            if name in self.addons:
+                continue
+            try:
+                addon = self._load(name)
+                ns = addon.namespace()
+            except Exception:  # noqa: BLE001 - one that cannot load reads nothing
+                continue
+            if addon.name in self.addons or not wanted & set(ns):
+                continue
+            addon.activate()
+            for key, obj in ns.items():
+                found.setdefault(key, obj)
+        return found
+
     def _read(self, text: str, declared: Optional[Dict[str, Any]] = None) -> Any:
         """Saved text - ``srepr``, or a line of SymPy source - read without
         running it (see ``invalid.read_srepr``/``read_source``): a file or a
@@ -2960,6 +2992,15 @@ class Document:
             pass
         except UnsafeText as exc:
             raise ValueError(f"Cannot read {_short(text)}: {exc}") from None
+        more = self._off_addon_names(text, names)
+        if more:
+            more.update(names)
+            try:
+                return self._read_step(text, more)
+            except _NotSrepr:
+                pass
+            except UnsafeText as exc:
+                raise ValueError(f"Cannot read {_short(text)}: {exc}") from None
         local = dict(names)
         local.update(declared if declared is not None else getattr(self, "declared", {}))
 
