@@ -614,8 +614,15 @@ save_html(expr, "page.html", addons=["tree", "plot"])                  # a self-
 serve(expr, addons=["matching"])                                       # the local server
 ```
 
-The **Add-ons** section at the top of the **≡** drawer switches any installed add-on on or off
-while editing.  Not installed?  A module name (`addons=["sympy_editor_tree"]`)
+The **Add-ons** window the **≡** menu opens switches any installed
+add-on on or off while editing, and installs new ones: paste the URL of a
+GitHub repository (or of a `.zip`), or choose a `.zip` with *From a file…*,
+tick what it holds, *Install* - on the desktop, in the web app (kept in the
+browser's storage) and in the Android and iOS apps (kept in the app's data)
+alike; a × on the row removes it again.  An add-on of your own goes the same
+way: `python addons/pack.py <folder>` zips a folder as *From a file…* takes
+it, and a repository is read as it stands - the manifest and the package
+beside it.  Not installed?  A module name (`addons=["sympy_editor_tree"]`)
 or the object itself (`addons=[ADDON]`) work too; `python addons/demo.py`
 builds a page with the drafts straight from the checkout.
 `addons/README.md` describes the architecture, and `addons/template/` is

@@ -174,6 +174,7 @@ var SympyEditor = (function () {
     "<section><h3>Applying functions</h3><ul>",
     "<li>The four menus at the foot of the tools are one kind of box: it lists everything it offers when it takes the focus, narrows the list as you type, and \u2191/\u2193 + <kbd>Enter</kbd> (or a click) pick. The first group holds the <b>actions</b>: <b>Transform \u25be</b> for the general operations - Simplify, Expand, Factor\u2026 and <i>Differentiate\u2026</i>, <i>Integrate\u2026</i>, <i>Solve for\u2026</i>, <i>Substitute\u2026</i>, which ask for their variable first -, and a second menu with the operations for the selection's type (Matrix, Integral, Equation\u2026). Picking one applies it at once, to the selection or, with nothing selected, to the whole expression.</li>",
     "<li><b>Add-ons</b>, at the top of what <b>\u2261</b> opens, is a window of its own: one card per add-on, with what it does, its switch and, when it is on, its <b>?</b> (one marked <i>Experimental</i> is new and not yet checked: it may give wrong answers or change, and in the apps it starts off until you switch it on); the box at its top searches them. Back (or <kbd>Esc</kbd>) in the Add-ons or File window goes back to the menu, the \u00d7 closes both. It switches on or off the add-ons installed beside the editor \u2014 a panel under the formula, tools, node types from other packages \u2014 without restarting anything; what an add-on kept waits for it to come back. In the apps every add-on is on until switched off, and a switch holds for every session and is remembered between launches. (A read-only editor has no \u2261, and there the switches keep a button of their own on the strip.)</li>",
+    "<li><b>Install an add-on</b>, at the foot of that window, takes the URL of a <b>GitHub repository</b> (or a folder in one) or of a <b>.zip</b>, and <i>From a file\u2026</i> takes a <b>.zip</b> you have: what it holds is listed with a check box each, and <i>Install</i> unpacks the ticked ones and switches them on. An add-on is code that runs with the editor\u2019s own rights, so install one you trust; a <b>\u00d7</b> on its card takes it away again. The apps keep what you install in their own data, a web page in the browser\u2019s storage.</li>",
     "<li>In a <b>matrix</b> or an <b>array</b> the four arrows move as it is drawn: <kbd>\u2190</kbd>/<kbd>\u2192</kbd> along the row, <kbd>\u2191</kbd>/<kbd>\u2193</kbd> between the rows \u2014 for the selection and for the caret alike. At the edge the usual meaning takes over: <kbd>\u2191</kbd> in the top row selects the matrix itself (again, its own parent), <kbd>\u2190</kbd>/<kbd>\u2192</kbd> step out of it. An array of any rank works the same way, because the rule follows the drawing: a rank-3 array is a row of matrices, so <kbd>\u2192</kbd> at the right edge of one block enters the next on the same line.</li>",
     "<li>In a <b>matrix</b> (the matrix, or anything in one of its entries) the row under the formula adds, beside the arrows, <b>+ row</b>, <b>+ col</b>, <b>\u2212 row</b>, <b>\u2212 col</b>: a new row or column of empty slots after the selected one (after the last, for the matrix itself), or the selected one taken away. The grip at the matrix\u2019s bottom-right corner <b>reshapes</b> it: the same entries laid out another way (SymPy\u2019s reshape, in reading order), so it snaps to the shapes that hold them all \u2014 12 entries go 1\u00d712, 2\u00d76, 3\u00d74, 4\u00d73, 6\u00d72, 12\u00d71 and nowhere else. Nothing is added or lost; the outline shows the shape it will take. To grow or shrink the matrix, use + row / + col / \u2212 row / \u2212 col.</li>",
     "<li>The second group is the <b>library</b>: <b>Methods \u25be</b> lists everything the selected object's class can do \u2014 .det(), .T, .diff()\u2026 \u2014 one pick calls it. A Lambda is itself a function: <b>( ) apply</b> evaluates it at the arguments you give.</li>",
@@ -2734,12 +2735,18 @@ var SympyEditor = (function () {
     }
 
     _fillAddonsMenu(available) {
+      // The window is there when the document knows an add-on - the shipped
+      // configurations all name some, so the installer below is reachable.
+      // It does not appear for a document that knows none: an entry that
+      // leads nowhere costs every user more than it gains the few who start
+      // from nothing (pip, or a page built with `available=`).
       if (this.addonsBlock) this.addonsBlock.hidden = !available.length;
       if (this.addonsEntry) {
         this.addonsEntry.hidden = !available.length;
         var on = available.filter(function (a) { return a.on; }).length;
         this.addonsEntry.setAttribute("data-count", on + " of " + available.length + " on");
       }
+      var canInstall = !this.opts.readOnly && !!(this.backend && this.backend.send);
       if (!this.addonsMenu) return;
       var self = this;
       this.addonsMenu.textContent = "";
@@ -2759,6 +2766,8 @@ var SympyEditor = (function () {
           if (a.experimental) text.push(h("span", { class: "se-addon-badge", title: "Experimental: new, and not yet checked - it may give wrong answers or change" }, ["Experimental"]));
           if (a.description) text.push(h("span", { class: "se-addon-desc" }, [a.description]));
           if (a.requires && a.requires.length) text.push(h("small", { class: "se-addon-needs" }, ["needs " + a.requires.join(", ")]));
+          // installed while editing: where it came from
+          if (a.user) text.push(h("small", { class: "se-addon-user" }, [(a.user.version ? "v" + a.user.version + " " : "") + "installed" + (a.user.source ? " from " + shortSource(a.user.source) : "")]));
           if (a.error) text.push(h("small", { class: "se-addon-error" }, [" " + a.error]));
           var row = h("label", { class: "se-addon-row", title: a.error || a.description || "" }, [box, h("span", { class: "se-addon-text" }, text)]);
           // its guide, when it has one and is on (the help comes with its front end)
@@ -2769,10 +2778,227 @@ var SympyEditor = (function () {
             q.addEventListener("click", function (ev) { ev.preventDefault(); ev.stopPropagation(); self.showHelp(help, a.label || a.name); });
             row.appendChild(q);
           }
+          if (a.user && !self.opts.readOnly) {
+            // installed while editing: it can go the same way
+            var rm = h("button", { type: "button", class: "se-addon-remove", title: "Remove this add-on from " + (self.backend && self.backend.installAddons ? "this browser" : "this app") }, ["\u00d7"]);
+            rm.addEventListener("click", function (ev) { ev.preventDefault(); ev.stopPropagation(); self._addonsRemove(a.name); });
+            row.appendChild(rm);
+          }
           self.addonsMenu.appendChild(row);
         })(available[i]);
       }
+      // Installing: a .zip, or a GitHub repository - kept as one element, so
+      // that a URL half typed survives the menu being filled again.
+      if (canInstall) {
+        if (!this.addonsInstall) this.addonsInstall = this._addonsInstallUi();
+        this.addonsMenu.appendChild(this.addonsInstall.root);
+      }
       if (this.sheetView) this._filterAddons();       // a snapshot refilled the list under the search
+    }
+
+    /* -- installing add-ons ----------------------------------------------
+     * An add-on is a folder with addon.json beside its package (the layout
+     * of its repository).  The page fetches it - a .zip (a file chosen, or
+     * a URL), or the files of a GitHub repository - and hands it to Python
+     * ({action: "addons", install: ...}), which unpacks it into the user
+     * directory: the app's data, or the Pyodide file system (where the
+     * runtime keeps the payload in IndexedDB and installs it again at every
+     * start).  Two steps: what the archive holds is listed first, with a
+     * check box each, then the chosen ones are installed and switched on. */
+
+    _addonsInstallUi() {
+      var self = this;
+      var url = h("input", { type: "text", class: "se-addon-url", inputmode: "url", spellcheck: "false",
+        placeholder: "GitHub repository, or a link to a .zip", title: "A GitHub repository (https://github.com/user/repo, a folder in one), or the URL of a .zip of an add-on" });
+      var fetchBtn = h("button", { type: "button", class: "se-addon-fetch", title: "See which add-ons the repository or the archive holds" }, ["Look up"]);
+      var fileInput = h("input", { type: "file", class: "se-addon-file-input", accept: ".zip,application/zip", hidden: "" });
+      var fileBtn = h("button", { type: "button", class: "se-addon-file", title: "A .zip of an add-on's folder (its repository, downloaded)" }, ["From a file\u2026"]);
+      var status = h("div", { class: "se-addons-status", "aria-live": "polite" });
+      var found = h("div", { class: "se-addons-found", hidden: "" });
+      var installBtn = h("button", { type: "button", class: "se-addons-do-install" }, ["Install"]);
+      var cancelBtn = h("button", { type: "button", class: "se-addons-cancel" }, ["Cancel"]);
+      var actions = h("div", { class: "se-addons-found-actions", hidden: "" }, [installBtn, cancelBtn]);
+      var root = h("div", { class: "se-addons-install" }, [
+        h("div", { class: "se-addons-install-title" }, ["Install an add-on"]),
+        h("div", { class: "se-addons-install-row" }, [url, fetchBtn]),
+        h("div", { class: "se-addons-install-row" }, [fileBtn, fileInput]),
+        status, found, actions,
+        h("div", { class: "se-addons-warning" }, ["An add-on is code: it runs in this " + (this.backend.installAddons ? "page" : "app") + " with its rights. Install only what you trust."])
+      ]);
+      var ui = { root: root, url: url, fetchBtn: fetchBtn, fileInput: fileInput, fileBtn: fileBtn, status: status, found: found,
+                 actions: actions, installBtn: installBtn, cancelBtn: cancelBtn, pending: null, busy: false };
+      fetchBtn.addEventListener("click", function () { self._addonsFetchUrl(); });
+      url.addEventListener("keydown", function (ev) {
+        ev.stopPropagation();
+        if (ev.key === "Enter") { ev.preventDefault(); self._addonsFetchUrl(); }
+        if (ev.key === "Escape") { ev.preventDefault(); self.addonsMenu.hidden = true; self.addonsBtn.focus({ preventScroll: true }); }
+      });
+      fileBtn.addEventListener("click", function () { fileInput.value = ""; fileInput.click(); });
+      fileInput.addEventListener("change", function () {
+        var file = fileInput.files && fileInput.files[0];
+        fileInput.value = "";                  // the same file chosen again is a choice too
+        if (file) self._addonsFromFile(file);
+      });
+      installBtn.addEventListener("click", function () { self._addonsInstallSelected(); });
+      cancelBtn.addEventListener("click", function () { self._addonsShowFound(null); self._addonsStatus(""); });
+      return ui;
+    }
+
+    _addonsStatus(text, isError) {
+      var ui = this.addonsInstall;
+      if (!ui) return;
+      ui.status.textContent = text || "";
+      ui.status.className = "se-addons-status" + (isError ? " se-addon-error" : "");
+    }
+
+    _addonsBusy(on) {
+      var ui = this.addonsInstall;
+      if (!ui) return;
+      ui.busy = !!on;
+      ui.fetchBtn.disabled = ui.fileBtn.disabled = ui.installBtn.disabled = !!on;
+      ui.root.classList.toggle("se-addons-busy", !!on);
+    }
+
+    /** What the user installed: names known to the menu, for the "already installed" note. */
+    _addonsInstalledVersions() {
+      var out = {};
+      ((this.state && this.state.addons_available) || []).forEach(function (a) { if (a.user) out[a.name] = a.user.version || ""; });
+      return out;
+    }
+
+    async _addonsFetchUrl() {
+      var ui = this.addonsInstall, self = this;
+      if (!ui || ui.busy) return;
+      var text = ui.url.value.trim();
+      if (!text) { ui.url.focus(); return; }
+      this._addonsShowFound(null);
+      this._addonsBusy(true);
+      try {
+        var gh = parseGithubUrl(text);
+        if (gh) {
+          this._addonsStatus("Reading " + gh.owner + "/" + gh.repo + (gh.path ? "/" + gh.path : "") + "\u2026");
+          var listing = await githubListing(gh, function (t) { self._addonsStatus(t); });
+          var found = await githubFindAddons(listing, gh.path, function (t) { self._addonsStatus(t); });
+          if (!found.length) throw new Error("No add-on there: an add-on is a folder with addon.json beside its package" + (listing.truncated ? " (the repository is too large to list in full)" : ""));
+          this._addonsShowFound(found, text, function (names) { return githubCollect(listing, found.filter(function (m) { return names.indexOf(m.name) >= 0; }), function (t) { self._addonsStatus(t); }); });
+        } else {
+          this._addonsStatus("Downloading\u2026");
+          var r;
+          try { r = await fetch(text); } catch (e) { throw new Error("The archive could not be fetched (the server may not allow a page to read it): download it and use From a file"); }
+          if (!r.ok) throw new Error("The archive could not be fetched: HTTP " + r.status);
+          var payload = { zip: b64FromBuffer(await r.arrayBuffer()) };
+          var got = await this._addonsInspect(payload);
+          this._addonsShowFound(got, text, function () { return Promise.resolve(payload); });
+        }
+      } catch (e) {
+        this._addonsStatus(String((e && e.message) || e), true);
+      } finally {
+        this._addonsBusy(false);
+      }
+    }
+
+    async _addonsFromFile(file) {
+      var ui = this.addonsInstall;
+      if (!ui || ui.busy) return;
+      this._addonsShowFound(null);
+      this._addonsBusy(true);
+      try {
+        this._addonsStatus("Reading " + file.name + "\u2026");
+        var payload = { zip: b64FromBuffer(await file.arrayBuffer()) };
+        var got = await this._addonsInspect(payload);
+        this._addonsShowFound(got, file.name, function () { return Promise.resolve(payload); });
+      } catch (e) {
+        this._addonsStatus(String((e && e.message) || e), true);
+      } finally {
+        this._addonsBusy(false);
+      }
+    }
+
+    /** Ask Python what an archive holds (nothing is installed). */
+    async _addonsInspect(payload) {
+      var snap = await this.send({ action: "addons", inspect: payload });
+      if (!snap) throw new Error("The editor is busy: try again in a moment");
+      if (snap.error) throw new Error(snap.error);
+      return (snap.addons_result && snap.addons_result.found) || [];
+    }
+
+    /** List what was found, a check box each; `collect(names)` makes the
+     *  payload to install for the names ticked. */
+    _addonsShowFound(found, source, collect) {
+      var ui = this.addonsInstall, self = this;
+      if (!ui) return;
+      ui.found.textContent = "";
+      ui.pending = null;
+      if (!found || !found.length) { ui.found.hidden = true; ui.actions.hidden = true; return; }
+      var have = this._addonsInstalledVersions();
+      found.forEach(function (m) {
+        var box = h("input", { type: "checkbox", value: m.name });
+        var installed = Object.prototype.hasOwnProperty.call(have, m.name) ? have[m.name] : (m.installed || null);
+        box.checked = true;
+        var text = [h("b", {}, [m.label || m.name]), m.version ? " " + m.version : ""];
+        if (m.description) text.push(h("small", {}, [" " + m.description]));
+        if (m.requires && m.requires.length) text.push(h("small", {}, [" needs " + m.requires.join(", ")]));
+        if (installed !== null && installed !== undefined) text.push(h("small", { class: "se-addon-user" }, [" (replaces " + (installed ? "v" + installed : "the installed one") + ")"]));
+        ui.found.appendChild(h("label", { class: "se-addon-row se-addon-found" }, [box].concat(text)));
+      });
+      ui.found.hidden = false;
+      ui.actions.hidden = false;
+      ui.pending = { found: found, source: source, collect: collect };
+      this._addonsStatus(found.length === 1 ? "One add-on found." : found.length + " add-ons found: tick the ones to install.");
+      // the list grew: a menu floating under its button is placed again (in
+      // the Add-ons window there is no button, and nothing floats)
+      if (this.addonsBtn) this._placeUnder(this.addonsMenu, this.addonsBtn);
+    }
+
+    async _addonsInstallSelected() {
+      var ui = this.addonsInstall, self = this;
+      if (!ui || ui.busy || !ui.pending) return;
+      var names = [];
+      ui.found.querySelectorAll("input:checked").forEach(function (b) { names.push(b.value); });
+      if (!names.length) { this._addonsStatus("Nothing ticked.", true); return; }
+      var pending = ui.pending;
+      this._addonsBusy(true);
+      try {
+        this._addonsStatus("Fetching " + names.join(", ") + "\u2026");
+        var payload = await pending.collect(names);
+        this._addonsStatus("Installing " + names.join(", ") + "\u2026");
+        var done;
+        if (this.backend.installAddons) {
+          done = await this.backend.installAddons(payload, names, pending.source || "");
+        } else {
+          var snap = await this.send({ action: "addons", install: payload, select: names, source: pending.source || "" });
+          if (!snap) throw new Error("The editor is busy: try again in a moment");
+          if (snap.error) throw new Error(snap.error);
+          done = (snap.addons_result && snap.addons_result.installed) || [];
+        }
+        var installed = done.map(function (m) { return m.name; });
+        var after = await this.send({ action: "addons", enable: installed });
+        var rows = (after && after.addons_available) || [];
+        var failed = rows.filter(function (a) { return installed.indexOf(a.name) >= 0 && a.error; });
+        this._addonsShowFound(null);
+        if (after && after.error) this._addonsStatus("Installed " + installed.join(", ") + ", but: " + after.error, true);
+        else if (failed.length) this._addonsStatus("Installed " + installed.join(", ") + "; " + failed.map(function (a) { return a.name + " cannot run here: " + a.error; }).join("; "), true);
+        else this._addonsStatus("Installed and switched on: " + installed.join(", ") + ".");
+        ui.url.value = "";
+      } catch (e) {
+        this._addonsStatus(String((e && e.message) || e), true);
+      } finally {
+        this._addonsBusy(false);
+      }
+    }
+
+    async _addonsRemove(name) {
+      var ui = this.addonsInstall;
+      if (ui && ui.busy) return;
+      this._addonsBusy(true);
+      try {
+        var snap = await this.send({ action: "addons", uninstall: [name] });
+        if (this.backend.forgetAddons) await this.backend.forgetAddons([name]);
+        if (snap && snap.error) this._addonsStatus(snap.error, true);
+        else this._addonsStatus("Removed " + name + ".");
+      } finally {
+        this._addonsBusy(false);
+      }
     }
 
     toggleAddonsMenu() {
@@ -7809,7 +8035,11 @@ var SympyEditor = (function () {
     _filterAddons() {
       if (!this.addonsMenu) return;
       var q = (this._addonFilter || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      var rows = this.addonsMenu.querySelectorAll(".se-addon-row"), shown = 0;
+      var all = this.addonsMenu.querySelectorAll(".se-addon-row"), rows = [], shown = 0;
+      for (var r = 0; r < all.length; r++) {
+        // the install section's own rows (what an archive holds) are not cards
+        if (!(all[r].closest && all[r].closest(".se-addons-install"))) rows.push(all[r]);
+      }
       for (var i = 0; i < rows.length; i++) {
         var text = rows[i].textContent.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
         var hit = !q || q.split(/\s+/).every(function (w) { return text.indexOf(w) >= 0; });
@@ -7819,7 +8049,10 @@ var SympyEditor = (function () {
       var none = this.addonsMenu.querySelector(".se-addon-none");
       if (!none) {
         none = h("p", { class: "se-addon-none", hidden: "" });
-        this.addonsMenu.appendChild(none);
+        // above the install section, which is not one of the rows searched
+        var tail = this.addonsInstall && this.addonsInstall.root;
+        if (tail && tail.parentNode === this.addonsMenu) this.addonsMenu.insertBefore(none, tail);
+        else this.addonsMenu.appendChild(none);
       }
       none.textContent = rows.length && !shown ? "No add-on matches \u201c" + this._addonFilter.trim() + "\u201d." : "";
       none.hidden = !(rows.length && !shown);
@@ -8610,11 +8843,15 @@ var SympyEditor = (function () {
     "if '/sympy_editor_pkg' not in sys.path:",
     "    sys.path.insert(0, '/sympy_editor_pkg')",
     "from sympy_editor.document import Document",
+    "from sympy_editor import addons as __sympy_editor_addons",
     "__sympy_editor_docs = {}",
     "def __sympy_editor_new(doc_id, srepr, settings):",
     "    __sympy_editor_docs[doc_id] = Document(srepr, **json.loads(settings))",
     "def __sympy_editor_handle(doc_id, msg):",
     "    return json.dumps(__sympy_editor_docs[doc_id].handle(json.loads(msg)))",
+    "def __sympy_editor_install(payload, select, source):",
+    "    done = __sympy_editor_addons.install_addons(json.loads(payload), select=json.loads(select) if select else None, source=source)",
+    "    return json.dumps(done)",
     "def __sympy_editor_close(doc_id):",
     "    __sympy_editor_docs.pop(doc_id, None)",
     ""
@@ -8627,7 +8864,11 @@ var SympyEditor = (function () {
   // thread, so a long computation leaves the page responsive and can be
   // stopped by terminating the worker (see pyodideRuntime).
   var PYODIDE_WORKER = [
-    "var newDoc = null, handle = null, closeDoc = null, py = null;",
+    "var newDoc = null, handle = null, install = null, closeDoc = null, py = null;",
+    "async function micropip(packages) {",
+    "  await py.loadPackage('micropip');",
+    "  await py.runPythonAsync('import micropip\\nawait micropip.install(' + JSON.stringify(packages) + ')');",
+    "}",
     "self.onmessage = async function (e) {",
     "  var m = e.data;",
     "  try {",
@@ -8653,6 +8894,7 @@ var SympyEditor = (function () {
     "      py.runPython(m.boot);",
     "      newDoc = py.globals.get('__sympy_editor_new');",
     "      handle = py.globals.get('__sympy_editor_handle');",
+    "      install = py.globals.get('__sympy_editor_install');",
     "      closeDoc = py.globals.get('__sympy_editor_close');",
     "      self.postMessage({ type: 'done', req: m.req });",
     "    } else if (m.type === 'packages') {",
@@ -8672,6 +8914,12 @@ var SympyEditor = (function () {
     "      self.postMessage({ type: 'done', req: m.req });",
     "    } else if (m.type === 'handle') {",
     "      self.postMessage({ type: 'done', req: m.req, json: handle(m.id, m.msg) });",
+    "    } else if (m.type === 'install') {",
+    "      self.postMessage({ type: 'done', req: m.req, json: install(m.payload, m.select, m.source) });",
+    "    } else if (m.type === 'micropip') {",
+    "      self.postMessage({ type: 'progress', text: 'Installing what the add-on needs…' });",
+    "      await micropip(m.packages);",
+    "      self.postMessage({ type: 'done', req: m.req });",
     "    } else if (m.type === 'close') {",
     "      if (closeDoc) closeDoc(m.id);",
     "      self.postMessage({ type: 'done', req: m.req });",
@@ -8749,8 +8997,16 @@ var SympyEditor = (function () {
       }
     }
     py.runPython(PYODIDE_BOOT);
-    return { py: py, newDoc: py.globals.get("__sympy_editor_new"), handle: py.globals.get("__sympy_editor_handle"),
-             close: py.globals.get("__sympy_editor_close") };
+    return {
+      py: py,
+      newDoc: py.globals.get("__sympy_editor_new"), handle: py.globals.get("__sympy_editor_handle"),
+      close: py.globals.get("__sympy_editor_close"),
+      install: py.globals.get("__sympy_editor_install"),
+      micropip: async function (packages) {
+        await py.loadPackage("micropip");
+        await py.runPythonAsync("import micropip\nawait micropip.install(" + JSON.stringify(packages) + ")");
+      }
+    };
   }
 
   /** Add-on packages written into a runtime that is running already (and
@@ -8772,15 +9028,115 @@ var SympyEditor = (function () {
     py.runPython("import importlib\nimportlib.invalidate_caches()");
   }
 
+  /** Where a Pyodide page keeps the add-ons installed while editing: their
+   *  payloads in IndexedDB (the file system of the runtime is gone with the
+   *  page), one record per source, installed again at every start. */
+  function addonStore() {
+    var dbp = null;
+    function open() {
+      if (dbp) return dbp;
+      dbp = new Promise(function (resolve) {
+        var req;
+        try { req = window.indexedDB && indexedDB.open("sympy-editor", 1); } catch (e) { req = null; }
+        if (!req) { resolve(null); return; }
+        req.onupgradeneeded = function () { req.result.createObjectStore("addons", { keyPath: "source" }); };
+        req.onsuccess = function () { resolve(req.result); };
+        req.onerror = function () { resolve(null); };
+        req.onblocked = function () { resolve(null); };
+      });
+      return dbp;
+    }
+    function tx(mode, fn) {
+      return open().then(function (db) {
+        if (!db) return null;
+        return new Promise(function (resolve, reject) {
+          var t = db.transaction("addons", mode);
+          var r = fn(t.objectStore("addons"));
+          t.oncomplete = function () { resolve(r ? r.result : null); };
+          t.onerror = function () { reject(t.error); };
+          t.onabort = function () { reject(t.error); };
+        });
+      });
+    }
+    return {
+      all: function () { return tx("readonly", function (st) { return st.getAll(); }).then(function (r) { return r || []; }); },
+      put: function (rec) { return tx("readwrite", function (st) { st.put(rec); }); },
+      remove: function (key) { return tx("readwrite", function (st) { st.delete(key); }); }
+    };
+  }
+
   /** One Python runtime (a worker, or the page) holding the Documents of
    *  every editor that shares it.  `interrupt()` terminates the worker; the
    *  next request starts a new one and re-creates the Documents from their
    *  last committed state (`docs`), so only the undo history is lost. */
   function makeRuntime(cfg) {
     var rt = { docs: {}, worker: null, ready: null, inPage: null, pending: {}, req: 0, report: function () {},
+               installs: null, store: addonStore(),
                extra: { packages: {}, micropip: [] } };    // brought by editors that joined it (rt.addPackages)
     function packagesOf() { return Object.assign({}, cfg.packages || {}, rt.extra.packages); }
     function micropipOf() { return (cfg.micropip || []).concat(rt.extra.micropip); }
+
+    /** The add-ons installed while editing, from the browser's storage (once). */
+    async function loadInstalls() {
+      if (rt.installs) return rt.installs;
+      try { rt.installs = await rt.store.all(); } catch (e) { rt.installs = []; }
+      return rt.installs;
+    }
+
+    /** Unpack one install record in the runtime and micropip what it needs. */
+    async function applyInstall(rec) {
+      var args = [JSON.stringify(rec.payload), rec.select ? JSON.stringify(rec.select) : "", rec.source || ""];
+      var json = rt.inPage ? rt.inPage.install(args[0], args[1], args[2]) : await post({ type: "install", payload: args[0], select: args[1], source: args[2] });
+      var done = JSON.parse(json);
+      var packages = [];
+      done.forEach(function (m) { (m.requires || []).forEach(function (pkg) { if (packages.indexOf(pkg) < 0) packages.push(pkg); }); });
+      if (packages.length) {
+        try { if (rt.inPage) await rt.inPage.micropip(packages); else await post({ type: "micropip", packages: packages }); }
+        catch (e) { if (window.console) console.warn("sympy-editor: an add-on's requirements could not be installed", e); }
+      }
+      return done;
+    }
+
+    async function replayInstalls() {
+      var records = await loadInstalls();
+      for (var i = 0; i < records.length; i++) {
+        rt.report("Installing add-ons\u2026");
+        try { await applyInstall(records[i]); }
+        catch (e) { if (window.console) console.warn("sympy-editor: the add-on from " + records[i].source + " could not be installed again", e); }
+      }
+    }
+
+    rt.installAddons = async function (payload, select, source) {
+      await rt.start();
+      var rec = { source: source || ("archive " + new Date().toISOString()), payload: payload, select: select || null };
+      var done = await applyInstall(rec);
+      rec.select = done.map(function (m) { return m.name; });
+      var records = await loadInstalls();
+      for (var i = records.length - 1; i >= 0; i--) {
+        // an earlier record of any of these add-ons: superseded
+        records[i].select = (records[i].select || []).filter(function (n) { return rec.select.indexOf(n) < 0; });
+        if (records[i].source === rec.source || !records[i].select.length) {
+          try { await rt.store.remove(records[i].source); } catch (e) { /* storage may be off */ }
+          records.splice(i, 1);
+        } else {
+          try { await rt.store.put(records[i]); } catch (e) { /* storage may be off */ }
+        }
+      }
+      records.push(rec);
+      try { await rt.store.put(rec); } catch (e) { /* storage may be off: installed for this visit only */ }
+      return done;
+    };
+
+    rt.forgetAddons = async function (names) {
+      var records = await loadInstalls();
+      for (var i = records.length - 1; i >= 0; i--) {
+        records[i].select = (records[i].select || []).filter(function (n) { return names.indexOf(n) < 0; });
+        try {
+          if (!records[i].select.length) { await rt.store.remove(records[i].source); records.splice(i, 1); }
+          else await rt.store.put(records[i]);
+        } catch (e) { /* storage may be off */ }
+      }
+    };
 
     function post(msg) {
       return new Promise(function (resolve, reject) {
@@ -8842,6 +9198,7 @@ var SympyEditor = (function () {
               sympyWheel: cfg.sympyWheel ? new URL(cfg.sympyWheel, document.baseURI).href : "",
               dir: PYODIDE_DIR, root: PYODIDE_ROOT, sources: cfg.sources,
               packages: packagesOf(), pipCode: micropipCode(micropipOf()), boot: PYODIDE_BOOT });
+            await replayInstalls();
             return;
           } catch (e) {
             if (window.console) console.warn("sympy-editor: Python could not start in a worker, using the page instead.", e);
@@ -8850,6 +9207,7 @@ var SympyEditor = (function () {
           }
         }
         rt.inPage = await pyodideInPage(Object.assign({}, cfg, { packages: packagesOf(), micropip: micropipOf() }), rt.report);
+        await replayInstalls();
       })().then(function () {
         // A restart (the next request after an interruption) reports its
         // progress to the editor that started the runtime - "Loading Python
@@ -8985,6 +9343,13 @@ var SympyEditor = (function () {
       },
       canInterrupt: function () { return !!rt && rt.canInterrupt(); },
       interrupt: function () { return !!rt && rt.interrupt(); },
+      /** Install add-on folders in the runtime, and keep them for the next
+       *  visit (the Editor then switches them on through the document). */
+      installAddons: async function (payload, select, source) {
+        await start(function () {});
+        return rt.installAddons(payload, select, source);
+      },
+      forgetAddons: function (names) { return rt ? rt.forgetAddons(names) : Promise.resolve(); },
       /** Switch to a document built from `state` (Document kwargs: history,
        *  index, symbols - a session), returning its snapshot. */
       openDocument: async function (state, report) {
@@ -9127,6 +9492,154 @@ var SympyEditor = (function () {
   /* ------------------------------------------------------------------ */
   /* Add-ons                                                             */
   /* ------------------------------------------------------------------ */
+
+  /** Base64 of a buffer, in chunks (btoa of one huge string overflows the stack). */
+  function b64FromBuffer(buffer) {
+    var bytes = new Uint8Array(buffer), out = "";
+    for (var i = 0; i < bytes.length; i += 0x8000) out += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(out);
+  }
+
+  /** "github.com/user/repo/tree/branch/path" from a source string, for the menu. */
+  function shortSource(source) {
+    var text = String(source).replace(/^https?:\/\//, "").replace(/^www\./, "");
+    return text.length > 48 ? text.slice(0, 47) + "\u2026" : text;
+  }
+
+  /** {owner, repo, ref, path} for a GitHub repository URL - the repository,
+   *  a folder in it (/tree/<ref>/<path>), an archive link, "user/repo" -
+   *  or null for any other URL. */
+  function parseGithubUrl(text) {
+    var t = text.trim();
+    var m = t.match(/^(?:https?:\/\/)?(?:www\.)?github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:\/(?:tree|blob)\/([^\/#?\s]+)(?:\/([^#?\s]*))?)?\/?(?:[#?].*)?$/);
+    if (m) return { owner: m[1], repo: m[2], ref: m[3] || "", path: (m[4] || "").replace(/\/+$/, "") };
+    m = t.match(/^(?:https?:\/\/)?(?:codeload\.)?github\.com\/([\w.-]+)\/([\w.-]+)\/(?:archive\/(?:refs\/(?:heads|tags)\/)?([^\/]+?)\.zip|zip\/refs\/(?:heads|tags)\/([^\/]+))$/);
+    if (m) return { owner: m[1], repo: m[2], ref: m[3] || m[4] || "", path: "" };
+    m = t.match(/^([\w.-]+)\/([\w.-]+)$/);
+    if (m && m[1] !== "." && m[2] !== "..") return { owner: m[1], repo: m[2], ref: "", path: "" };
+    return null;
+  }
+
+  /** The files of a GitHub repository at a ref, with the URLs to read them:
+   *  GitHub's API (the tree, recursive; 60 calls an hour without a token)
+   *  and raw.githubusercontent.com, and when the API refuses, jsDelivr's
+   *  mirror of public repositories - both send the CORS header a page
+   *  needs, which the archive download does not. */
+  async function githubListing(gh, report) {
+    var api = "https://api.github.com/repos/" + gh.owner + "/" + gh.repo;
+    var ref = gh.ref, files = null, truncated = false, viaApi = false;
+    async function getJson(url) {
+      var r = await fetch(url, { headers: { Accept: "application/json" } });
+      if (!r.ok) throw new Error("HTTP " + r.status + " for " + url);
+      return r.json();
+    }
+    try {
+      if (!ref) ref = (await getJson(api)).default_branch;
+      var tree = await getJson(api + "/git/trees/" + encodeURIComponent(ref) + "?recursive=1");
+      files = (tree.tree || []).filter(function (e) { return e.type === "blob"; }).map(function (e) { return { path: e.path, size: e.size || 0 }; });
+      truncated = !!tree.truncated;
+      viaApi = true;
+    } catch (e) {
+      report("GitHub's API did not answer (" + e.message + "); trying jsDelivr\u2026");
+      var refs = ref ? [ref] : ["main", "master"];
+      for (var i = 0; i < refs.length && !files; i++) {
+        try {
+          var flat = await getJson("https://data.jsdelivr.com/v1/package/gh/" + gh.owner + "/" + gh.repo + "@" + refs[i] + "/flat");
+          files = (flat.files || []).map(function (f) { return { path: f.name.replace(/^\//, ""), size: f.size || 0 }; });
+          ref = refs[i];
+        } catch (e2) { /* the next ref, or none */ }
+      }
+      if (!files) throw new Error("The repository " + gh.owner + "/" + gh.repo + " could not be read (is it public? " + e.message + ")");
+    }
+    return {
+      owner: gh.owner, repo: gh.repo, ref: ref, files: files, truncated: truncated,
+      urls: function (path) {
+        var raw = "https://raw.githubusercontent.com/" + gh.owner + "/" + gh.repo + "/" + ref + "/" + path;
+        var cdn = "https://cdn.jsdelivr.net/gh/" + gh.owner + "/" + gh.repo + "@" + ref + "/" + path;
+        return viaApi ? [raw, cdn] : [cdn, raw];
+      }
+    };
+  }
+
+  async function fetchFirst(urls, asText) {
+    var last = null;
+    for (var i = 0; i < urls.length; i++) {
+      try {
+        var r = await fetch(urls[i]);
+        if (r.ok) return asText ? r.text() : r.arrayBuffer();
+        last = new Error("HTTP " + r.status);
+      } catch (e) { last = e; }
+    }
+    throw last || new Error("could not fetch");
+  }
+
+  var ADDON_SKIP_DIRS = ["tests", "test", "__pycache__", ".git", ".github", "build", "dist", "node_modules"];
+  var ADDON_TEXT_EXTS = ["py", "js", "css", "json", "md", "txt", "toml", "cfg", "ini", "lark", "svg", "html", "csv", "yaml", "yml", "rst", "tex", "xml"];
+  var ADDON_MAX_FILE = 8 * 1024 * 1024;
+
+  function addonPathSkipped(rel) {
+    var parts = rel.split("/");
+    for (var i = 0; i < parts.length - 1; i++) if (ADDON_SKIP_DIRS.indexOf(parts[i]) >= 0) return true;
+    return /\.(pyc|pyo)$/.test(parts[parts.length - 1]);
+  }
+
+  /** The add-on folders of a listing (under `sub`, when given): every
+   *  addon.json read, with its package beside it - the shape Python's
+   *  find_addons gives. */
+  async function githubFindAddons(listing, sub, report) {
+    var prefix = sub ? sub.replace(/^\/+|\/+$/g, "") : "";
+    var have = {};
+    listing.files.forEach(function (f) { have[f.path] = true; });
+    var manifests = listing.files.filter(function (f) {
+      if (f.path.split("/").pop() !== "addon.json") return false;
+      if (prefix && f.path !== prefix + "/addon.json" && f.path.indexOf(prefix + "/") !== 0) return false;
+      return !addonPathSkipped(f.path);
+    });
+    var found = [];
+    for (var i = 0; i < manifests.length; i++) {
+      var path = manifests[i].path, folder = path.slice(0, -"addon.json".length).replace(/\/$/, "");
+      report("Reading " + path + "\u2026");
+      var data;
+      try { data = JSON.parse(await fetchFirst(listing.urls(path), true)); } catch (e) { continue; }
+      if (!data || !data.name || !data.module || !/^[a-z][a-z0-9_]*$/.test(data.name)) continue;
+      if (!have[(folder ? folder + "/" : "") + data.module + "/__init__.py"]) continue;
+      var count = listing.files.filter(function (f) { return (!folder || f.path === folder || f.path.indexOf(folder + "/") === 0) && !addonPathSkipped(folder ? f.path.slice(folder.length + 1) : f.path); }).length;
+      found.push({ name: String(data.name), label: String(data.label || data.name), module: String(data.module), version: String(data.version || ""),
+                   description: String(data.description || ""), requires: (data.requires || []).filter(function (r) { return typeof r === "string"; }),
+                   prefix: folder, files: count });
+    }
+    return found;
+  }
+
+  /** The files of the chosen add-on folders, as an install payload:
+   *  {files: {path: text | {b64}}} - text for sources, base64 otherwise. */
+  async function githubCollect(listing, chosen, report) {
+    var wanted = [];
+    chosen.forEach(function (m) {
+      listing.files.forEach(function (f) {
+        var under = !m.prefix || f.path === m.prefix || f.path.indexOf(m.prefix + "/") === 0;
+        if (!under || addonPathSkipped(m.prefix ? f.path.slice(m.prefix.length + 1) : f.path)) return;
+        if (f.size > ADDON_MAX_FILE) return;
+        if (!wanted.some(function (w) { return w.path === f.path; })) wanted.push(f);
+      });
+    });
+    var files = {}, done = 0, next = 0;
+    async function worker() {
+      while (next < wanted.length) {
+        var f = wanted[next++];
+        var ext = f.path.split(".").pop().toLowerCase();
+        var text = ADDON_TEXT_EXTS.indexOf(ext) >= 0;
+        var got = await fetchFirst(listing.urls(f.path), text);
+        files[f.path] = text ? got : { b64: b64FromBuffer(got) };
+        done++;
+        report("Fetching " + done + " of " + wanted.length + " files\u2026");
+      }
+    }
+    var workers = [];
+    for (var i = 0; i < Math.min(6, wanted.length); i++) workers.push(worker());
+    await Promise.all(workers);
+    return { files: files };
+  }
 
   // The front ends of the add-ons, by name - shared by every copy of this
   // script on the page (a notebook embeds one per fragment).  An add-on's
