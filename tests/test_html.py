@@ -24,7 +24,7 @@ def test_full_page_pyodide():
     assert "var SympyEditor" in html
     cfg = _config_from(html)
     assert cfg["backend"] == "pyodide"
-    assert set(cfg["sources"]) == {"__init__.py", "printer.py", "ops.py", "addons.py", "document.py"}
+    assert set(cfg["sources"]) == {"__init__.py", "printer.py", "invalid.py", "ops.py", "addons.py", "document.py"}
     assert cfg["snapshot"]["nodes"]["/"]["src"] == "x**2 + y"
     assert cfg["srepr"].startswith("Add(")
     assert "</script>" not in html.split("SympyEditor.mount", 1)[1].split("</script>", 1)[0]
@@ -97,6 +97,11 @@ def test_examples_are_valid_and_reach_pages_with_sessions():
     for (name, expr), r in zip(EXAMPLES, records):
         rebuilt = Document(r["srepr"]).expr                            # rebuilds in a Pyodide document
         assert rebuilt == expr or srepr(rebuilt) == srepr(expr), name  # (SymPy 1.14 orders a rebuilt MatAdd differently)
+        # a new session from it reads the record unevaluated, as saved text:
+        # SymPy's own srepr split -4*a*c into Mul(-1, 4, a, c), which came back
+        # as that, and the quadratic formula opened as sqrt(-1*4*a*c + b**2)
+        session = Document(x, history=[r["srepr"]], index=0)
+        assert session.expr == expr and session.snapshot()["src"] == str(expr), name
         tex, nodes = annotate(expr)
         assert strip_annotations(tex) == latex(expr) and () in nodes, name
     cfg = build_config(Document(x), options={"sessions": True})
@@ -110,3 +115,14 @@ def test_browser_sympy_is_the_pinned_wheel():
     assert cfg["sympyWheel"] == SYMPY_WHEEL and SYMPY_WHEEL.endswith(f"sympy-{SYMPY_VERSION}-py3-none-any.whl")
     assert cfg["pyodideIndex"] == f"https://cdn.jsdelivr.net/pyodide/v{PYODIDE_VERSION}/full/"
     assert build_config(Document(x), urls={"sympyWheel": ""})["sympyWheel"] == ""      # Pyodide's own package instead
+
+
+def test_an_element_id_is_escaped_where_it_is_written():
+    """The id went raw into the attribute and into the script's string."""
+    from sympy_editor import to_history_html
+    evil = 'a"></div><script>alert(1)</script>'
+    for page in (to_html(x, element_id=evil), to_history_html([x, x + 1], element_id=evil)):
+        assert "<script>alert(1)" not in page and 'id="a&quot;&gt;' in page
+        assert 'getElementById("a\\">\\u003c/div>' in page
+    assert 'getElementById("plain-id")' in to_html(x, element_id="plain-id", full_page=False)
+    assert "<title>7</title>" in to_html(x, title=7)

@@ -29,6 +29,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 from sympy import Basic, sympify
 
 from .document import render_step
+from .invalid import read_source
 
 __all__ = ["History"]
 
@@ -74,7 +75,13 @@ class History:
 
     def add(self, expr: Union[Basic, str], action: Optional[str] = None) -> Basic:
         """Append a step - the expression and what produced it."""
-        expr = expr if isinstance(expr, Basic) else sympify(expr)
+        # Text is read without running it (a history's steps may come from a
+        # file); what the safe reading refuses is the caller's own Python.
+        if not isinstance(expr, Basic):
+            try:
+                expr = read_source(expr) if isinstance(expr, str) else sympify(expr)
+            except ValueError:
+                expr = sympify(expr)
         self._exprs.append(expr)
         self._actions.append(action)
         return expr
@@ -83,10 +90,17 @@ class History:
     def from_document(cls, doc, **kwargs) -> "History":
         """The history a :class:`~sympy_editor.Document` has accumulated."""
         hist = doc.history_labels()
-        out = cls(printer_settings=getattr(doc, "printer_settings", None), **kwargs)
+        settings = kwargs.pop("printer_settings", None)
+        actions = kwargs.pop("actions", None)
+        index = kwargs.pop("index", None)
+        out = cls(printer_settings=getattr(doc, "printer_settings", None) if settings is None else settings, **kwargs)
         out._exprs = list(doc._history)
         out._actions = list(hist["actions"])
-        out.index = kwargs.get("index", hist["index"])
+        if actions is not None:                 # the caller's captions instead of the document's
+            if len(actions) > len(out._exprs):
+                raise ValueError(f"{len(actions)} actions for {len(out._exprs)} steps")
+            out._actions[:len(actions)] = [a if a is not None else out._actions[i] for i, a in enumerate(actions)]
+        out.index = hist["index"] if index is None else index
         return out
 
     # -- reading ------------------------------------------------------------

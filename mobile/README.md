@@ -119,8 +119,11 @@ signing asks for the keychain in a dialog; *Always Allow* answers it for
 good.  (`security import` refuses a `.p12` written by a recent OpenSSL:
 `openssl pkcs12 -in it.p12 -nodes | openssl pkcs12 -export -legacy -out legacy.p12` re-encodes it.)
 
-`CFBundleVersion`, which the store wants new at every upload, is the number
-of commits in the checkout (`IOS_BUILD_NUMBER` overrides it).  Two modules of
+`CFBundleVersion`, which the store wants new at every upload of a version, is
+`BUILD_NUMBER` in `mobile/build.py`: 1 for the first upload of a new version
+(`CFBundleShortVersionString`), one more for each further upload of the same
+version; the Mac app uses the same number (`IOS_BUILD_NUMBER` and
+`MACOS_BUILD_NUMBER` override it).  Two modules of
 the standard library are left out of the app, `_ssl` and `_hashlib`: they carry
 OpenSSL, which App Store review treats as a third-party SDK owing a privacy
 manifest (ITMS-91061).  The app opens no socket, and `hashlib` falls back on
@@ -185,8 +188,10 @@ as artifacts; with the secrets `ANDROID_KEYSTORE_BASE64` + passwords and
     `build.py` - with the standard library installed into the app and each
     extension module turned into the framework iOS insists on, by the script
     that travels with it.  `PythonRuntime.m` starts an isolated interpreter
-    (no environment, no bytecode written beside a signed bundle) and
-    `EditorView.swift` bridges it; a debug build sets `isInspectable`, so
+    (no environment, no bytecode written beside a signed bundle) - one per
+    process, `PythonRuntime.shared`, which every window of the Mac app uses
+    on one queue (`PythonHost`), each window's bridge naming its documents
+    `w<n>/<page's id>` - and `EditorView.swift` bridges it; a debug build sets `isInspectable`, so
     Safari's *Develop > Simulator* menu opens the Web Inspector on the page.
 - **Pyodide is not what the apps use, and iOS could not use it anyway.**  The
   bundle can still be built with it (`build_www.py` without `--native`, which
@@ -248,11 +253,28 @@ The apps carry the add-ons of `addons/` as folders of their own, one each,
 beside the app's Python (`src/main/python/addons/` on Android, `app/addons/`
 on iOS): `mobile/build.py` copies a folder's manifest (`addon.json`) and its
 package, not its tests, and `sympy_editor_app.py` registers the directory at
-start so that every document lists them.  They start off; the toolbar's
-**Add-ons ▾** menu switches them on and off, and the WebView keeps the
-switches between launches (`rememberAddons`).  What an add-on `requires`
+start so that every document lists them.  They are all on until switched
+off in the **Add-ons** section of the **≡** drawer; a switch holds for the
+whole app, every session included, and is kept in the app's own storage
+between launches (`rememberAddons`: the list of those switched off, so an
+add-on new in an update starts on).  What an add-on `requires`
 (its manifest) is installed beside SymPy: `install(...)` lines under
 `chaquopy.pip` in `android/app/build.gradle.kts` - `tests/test_mobile.py`
 checks they match the manifests - and `app_packages` on iOS.  See
 `addons/README.md`; adding an add-on from a repository at run time is the
 step not taken yet, and the folder layout is shaped for it.
+
+**Handwriting** is the one add-on staged apart (`"bundle": false` in its
+manifest), because it needs a model and native code.  Both apps take the
+model from a math-ocr checkout beside this one (`stage_ink`; without it the
+app is built without handwriting) and run it in ONNX Runtime: the Maven
+library on Android, and on iOS `onnxruntime.xcframework` - pinned in
+`build.py`, downloaded to the cache, linked into the app as a static library
+and given to the app's Python as the built-in module `_sympy_ort`
+(`ios/SymPyEditor/OrtModule.m`), since no onnxruntime wheel exists for iOS.
+It is 1.28, not Android's 1.29: the later iOS library carries a telemetry
+uploader, and the build refuses any library that imports a networking API
+(`check_no_network`), so the app cannot send anything through it.
+The iOS build puts the add-on, the model and NumPy (BeeWare's iOS wheel, for
+the device or the simulator being built for) in `ios/ink/`, a folder the Mac
+app does not share.

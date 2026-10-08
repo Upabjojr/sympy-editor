@@ -100,8 +100,34 @@ def test_move_a_subtree():
     assert "into itself" in snap["query"]["error"]
 
 
+def test_a_move_out_of_a_pair_lands_where_it_was_dropped():
+    # Taking a term out of a sum of two leaves the other term alone in its
+    # place: the destination must still be the node it was dropped on.
+    from sympy import Function
+    f = Function("f")
+    doc = Document(x + f(y), addons=[ADDON])
+    args = list(doc.expr.args)
+    _call(doc, "move", **{"from": [args.index(x)], "to": [args.index(f(y))]})
+    assert doc.expr == f(y, x)
+    doc = Document(x + y * f(z), addons=[ADDON])
+    mi = list(doc.expr.args).index(y * f(z))
+    m = doc.expr.args[mi]
+    _call(doc, "move", **{"from": [mi, list(m.args).index(y)], "to": [mi, list(m.args).index(f(z))]})
+    assert doc.expr == x + f(z, y)
+    # into its own parent: it stays a term, at the index asked for
+    doc = Document(x + y, addons=[ADDON])
+    _call(doc, "move", **{"from": [0], "to": []})
+    assert doc.expr == x + y
+    doc = Document(f(x, y, z), addons=[ADDON])
+    _call(doc, "move", **{"from": [0], "to": [], "index": 2})
+    assert doc.expr == f(y, x, z)
+
+
 def test_the_page_carries_the_addon():
-    doc = Document(x + y, addons=["sympy_editor_tree"])
+    # `available=[]`: this page carries the tree add-on and nothing else,
+    # whatever else happens to be installed beside it in this Python - the
+    # list micropip is given is the page's, not the machine's.
+    doc = Document(x + y, addons=["sympy_editor_tree"], available=[])
     cfg = build_config(doc)
     assert [a["name"] for a in cfg["addons"]] == ["tree"]
     assert "registerAddon(\"tree\"" in cfg["addons"][0]["js"]
@@ -132,3 +158,62 @@ def test_removable_says_what_can_leave_its_parent():
     assert "cannot be taken out of sin(x)" in snap["query"]["error"] and doc.expr == sin(x) + y * z
     snap = doc.handle({"action": "addon", "addon": "tree", "method": "move", "from": path, "to": by_src["y*z"]["path"]})
     assert "cannot be taken out of sin(x)" in snap["query"]["error"] and doc.expr == sin(x) + y * z
+
+
+def _refused(doc, method, **payload):
+    """The error a method answers with, the document left as it was."""
+    before, steps = doc.expr, len(doc.history_labels()["actions"])
+    snap = doc.handle(dict(payload, action="addon", addon="tree", method=method))
+    assert doc.expr == before and len(doc.history_labels()["actions"]) == steps
+    return (snap.get("query") or {}).get("error") or ""
+
+
+@pytest.mark.parametrize("bad", [[-1], [1.5], [True], [1, -1], [1, 0.5], [7], [1, 2], [0, 0], ["x"], [None], [[0]], "1/-1", "1/x", 5, {"0": 1}])
+@pytest.mark.parametrize("method, payload", [
+    ("set_head", {"head": "Mul"}), ("replace", {"src": "2"}), ("delete", {}), ("insert", {"src": "2"}), ("wrap", {"head": "sin"}),
+])
+def test_every_method_refuses_a_path_that_names_no_node(method, payload, bad):
+    """Each method read its path with ``int()`` and left the rest to whatever
+    it called next, so they disagreed: ``delete`` took ``[-1]`` and removed
+    the last argument, ``replace`` took ``[1.5]`` for ``[1]`` and ``[True]``
+    too, while ``replace`` refused the ``[-1]`` that ``delete`` accepted.  A
+    path is whole numbers, zero or more, that lead to a node - for all of
+    them, and said before anything changes."""
+    from sympy import Function
+    doc = Document(x + y * z + Function("f")(x, y), addons=[ADDON])
+    error = _refused(doc, method, path=bad, **payload)
+    assert error.startswith("ValueError: Not an argument path"), error
+
+
+def test_a_move_refuses_the_same_paths_at_either_end():
+    """``move`` reads two paths, and ``to: [1.2]`` was taken for ``[1]``:
+    both ends are checked as every other path is."""
+    from sympy import Function
+    doc = Document(x + y * z + Function("f")(x, y), addons=[ADDON])
+    for bad in ([-1], [1.5], [True], [7], [1, 2], "1/x"):
+        assert "Not a path to move from" in _refused(doc, "move", **{"from": bad, "to": [1]}), bad
+        assert "Not a path to move to" in _refused(doc, "move", **{"from": [0], "to": bad}), bad
+    # and the place among the arguments is a whole number too
+    for method, payload in (("move", {"from": [0], "to": [1]}), ("insert", {"path": [1], "src": "2"})):
+        for bad in (1.5, True, -1, "x"):
+            assert "Not a place among the arguments" in _refused(doc, method, index=bad, **payload), (method, bad)
+
+
+def test_the_paths_the_panel_sends_are_read_as_before():
+    """What was accepted with reason still is: a list of ints, the same as
+    text ("1/0"), no path at all for the root, a whole number written 1.0,
+    and an index beyond the end for the end."""
+    from sympy import Function
+    f = Function("f")
+    doc = Document(x + f(y, z), addons=[ADDON])
+    at = list(doc.expr.args).index(f(y, z))
+    _call(doc, "replace", path="%d/0" % at, src="2")
+    assert doc.expr == x + f(2, z)
+    _call(doc, "replace", path=[float(at), 1.0], src="3")
+    assert doc.expr == x + f(2, 3)
+    _call(doc, "insert", path=[at], src="y", index=99)
+    assert doc.expr == x + f(2, 3, y)
+    _call(doc, "insert", path=[at], src="z", index=0)
+    assert doc.expr == x + f(z, 2, 3, y)
+    _call(doc, "wrap", head="sin")
+    assert doc.expr == sin(x + f(z, 2, 3, y))

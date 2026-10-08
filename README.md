@@ -1,5 +1,10 @@
 # sympy-editor
 
+<p>
+  <a href="https://apps.apple.com/app/sympy-editor/id6807581349"><img src="https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg" alt="Download on the App Store" height="40" align="middle"></a>
+  <a href="https://play.google.com/store/apps/details?id=org.sympy.editor"><img src="https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png" alt="Get it on Google Play" height="64" align="middle"></a>
+</p>
+
 A click-to-edit, WYSIWYG-style editor for [SymPy](https://www.sympy.org)
 expressions.  Expressions are rendered as LaTeX (with [KaTeX](https://katex.org))
 in HTML; every sub-expression is selectable, and a selection can be replaced by
@@ -49,6 +54,38 @@ that runs its own SymPy in the browser — useful for notebooks exported with
 picks the kernel widget when anywidget is installed and falls back to Pyodide
 with a warning otherwise.
 
+#### Add-ons in the notebook
+
+Each add-on is a package of its own, so `pip install sympy-editor` brings
+none of them.  Install the ones you want — none is on PyPI yet, so from a
+checkout — and restart the kernel:
+
+```
+pip install -e addons/sympy_editor_plot -e addons/sympy_editor_latex
+pip install -e addons/sympy_editor_tree -e addons/sympy_editor_matching
+pip install -e addons/sympy_editor_console
+```
+
+Every installed add-on is then listed at the top of the drawer the **≡**
+button opens, to switch on and off while editing, and their Python runs in
+**this** kernel — the plot's samples are the kernel's SymPy at work:
+
+```python
+from sympy_editor import edit, installed_addons
+
+installed_addons()                               # what this kernel has
+edit(sin(x))                                     # every one listed, none on
+edit(sin(x), addons=["sympy_editor_plot"])       # on from the start
+edit(sin(x), available=["plot", "tree"])         # only these two listed
+edit(sin(x), available=[])                       # the editor alone
+```
+
+`addons=` switches them on, `available=` says which to list instead of all of
+them; each may be named by module, by add-on name, or given as an `Addon`,
+and their front ends are sent when they are switched on, not before.  An
+add-on whose Python is not installed in the kernel is listed with the reason
+rather than silently missing.  `examples/addons.ipynb` walks through it.
+
 `on_change` is also how the editor drives another widget.
 `examples/plot_alongside.ipynb` puts a graph beside the formula — every
 committed edit redraws it, and every free symbol but `x` grows a slider —
@@ -72,6 +109,44 @@ until they are ready (`options={"preload": False}` defers that to the first
 edit).  Use `editable=False` for a view-only page (still
 selectable).
 
+### Tutorials: a page that plays itself
+
+A tutorial is the editor page playing a script of timed steps: captions
+describing what is going on, an arrow and a pulsing ring on whatever is about
+to be pressed, then the press itself. It is meant to be watched, or recorded
+as a video. Nothing in the editor's interface starts one, and no ordinary page,
+server, widget or app carries any of it; only a page built for it plays.
+
+```python
+from sympy_editor import save_tutorial_html
+
+save_tutorial_html({
+    "expression": "x**2/y - sin(x)",
+    "steps": [
+        {"at": 0, "caption": "Click any piece of the formula to select it"},
+        {"after": 2, "click": {"path": "/1/d"}},
+        {"after": 1.5, "click": ".se-toolbar [data-cmd=\"parent\"]", "say": "Up: what holds it"},
+        {"after": 1.5, "type": {"target": ".se-source", "text": "(x + 1)**2", "enter": True}},
+        {"after": 1.5, "apply": "expand"},
+    ],
+}, "tutorial.html")
+```
+
+or `python -m sympy_editor.tutorial script.json -o tutorial.html`. A step
+happens `"at"` a time or `"after"` the previous one, and never while Python is
+still busy with the one before. It does one thing: `caption`, `point`, `click`,
+`choose`, `type`, `key`, `set`, `apply`, `undo`/`redo`, `zoom`, `addons` or
+`wait`. A caption goes beside what the step is about, or at the top, centre or
+bottom of the editor. When the script is over, everything of the tutorial goes
+and the page is the editor as a reader finds it. `full_page=False` gives a
+fragment to embed in a page of one's own; it shares the page's one Python
+runtime with any other editor there. `sympy_editor/tutorial.py` documents every
+kind of step.
+`examples/tutorial/` has a tour of the editor built this way
+(`python examples/tutorial/build.py`). On a page that includes
+`static/tutorial.js`, `SympyEditorTutorial.run(editor, script)` plays one from
+JavaScript.
+
 ### Local server (scripts, plain Python sessions)
 
 ```python
@@ -84,9 +159,9 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | Action | Mouse | Keyboard |
 | --- | --- | --- |
 | Select sub-expression | click its middle (its left/right edge places a caret before/after it instead; next to a matrix entry or a power's base the caret *extends* it: `+ 1` adds, `y` multiplies) | ↓ (enter children), ←/→ (siblings) |
-| Previous / next sibling (or move the caret; with nothing selected, a caret at the start / the end) | **←** / **→** (toolbar and action bar) | ←/→ |
+| Previous / next sibling (or move the caret; with nothing selected, a caret at the start / the end) | **←** / **→** (the row under the formula) | ←/→ |
 | Select enclosing expression | click again on the same spot, or **↑** | ↑ |
-| Go inside: the sub-expression you came up from, or the first one (on an atom: a caret after it) | **↓** (toolbar or action bar) | ↓ |
+| Go inside: the sub-expression you came up from, or the first one (on an atom: a caret after it) | **↓** (the row under the formula) | ↓ |
 | Select a range of adjacent terms / factors | drag across them (mouse or pen); on a touch screen hold a finger still on the first one until it is selected, then drag | Shift+→ / Shift+← grow and shrink the range; ←/→/↓ collapse it, ↑ selects the whole sum/product |
 | Replace selection by typing | | just start typing (SymPy syntax) |
 | Change the operator between two arguments | click the operator itself (`+`, `−`, `⋅`, `=`, the `−` of `x − y`...): it is selected and a small palette appears; pick `+ − × ÷ ^ =` or **Delete** (side by side, the two multiply: `x + y` → `xy`) | with the operator selected, type `+ - * / ^ = < > & \|`; Del removes it; Esc deselects; ←/→/↓ select an argument, ↑ the node.  In a sum `*` binds just the two terms (`x + y + z` → `xy + z`); in a product `+` splits it there (`x·y·z` → `x + yz`).  A lone operator typed at a caret does the same |
@@ -94,30 +169,34 @@ new_expr = serve(expr)   # opens the browser; returns when you press "Done"
 | LaTeX shortcuts in the field | | `\theta` becomes `θ` as you type (Greek letters, `\infty`, `\sin`, `\cdot`, `\le`...); Greek letters are SymPy's names (`θ` is `theta`, `λ` is `lamda`, `∞` is `oo`) |
 | A function at a caret | function box | With a caret shown and nothing selected, the function is added at the caret with an empty box for its argument (`sin(□)`), the box selected to fill |
 | Templates | `\int`, `\sum`, `\prod`, `\lim`, `\diff`, `\frac`, `\binom`, `\matrix` | The whole construction, with faint empty boxes where its parts go: the first box is selected, type to fill it, Tab moves to the next (Shift+Tab back). The boxes are the symbols `_1`, `_2`... in the source line |
+| The palette | The `√ ∫ Σ ▾` button | Fraction, power, square root, integrals, sums, limits, matrices… as buttons drawn the way they look: at the caret it goes in with empty boxes, around the selection (or the whole formula) the selection becomes its main part, unevaluated. Then the first box is selected; Tab in a field goes on to the next |
 | A refused edit | | The message shows under the formula and the formula flickers red for half a second |
 | Edit selection's existing text | double-click / **Edit** | Enter |
 | Apply / cancel an edit | click elsewhere applies | Enter / Esc |
 | Remove the selection entirely (on the whole expression: the formula is emptied and a field takes its place - type the new expression there, it is previewed as you type, Enter applies it; Esc brings the old one back) | **Delete** | Del |
 | Remove the node but keep its argument (`cos(θ)` → `θ`, `∫f dx` → `f`) | **Unwrap** | Backspace — a node with several arguments (`x²`: the base or the exponent, a sum, a fraction) asks which one to leave, with the one ↑ came from ready to confirm |
 | Put the node inside a function (`x` → `cos(x)`, `f(x)`, `∫x dx`) | `Document.wrap(path, "cos")` / `{"action": "wrap"}` | — (the function box **calls** a function; wrap builds without computing) |
-| Keep only the selection (it becomes the whole expression) | **Isolate** | Ctrl+Shift+I |
+| Keep only the selection (it becomes the whole expression) | **Extract** | Ctrl+Shift+I |
 | Moving in a matrix or an array | ← → ↑ ↓ | directional, as it is drawn: along the row, between the rows, for the selection and the caret alike (an array of any rank too - a rank-3 one is a row of matrices, and → crosses into the next block). At the edge the usual meaning takes over: ↑ in the top row selects the matrix itself |
-| Rows and columns of a matrix | in a matrix (the matrix, or anything in an entry) the action bar has **+ row** / **+ col** (a new row / column of empty slots after the selected one; after the last for the matrix itself) and **− row** / **− col** (the selected one removed); the **grip** at the matrix's bottom-right corner *reshapes* it when dragged - the same entries laid out another way, so it snaps to the shapes that hold them all (12 entries: 1×12, 2×6, 3×4, 4×3, 6×2, 12×1), nothing added or lost | `Document.insert_row/insert_col/delete_row/delete_col(path)`, `reshape_matrix(path, rows, cols)`, `resize_matrix(...)` (grows and truncates), `{"action": "matrix", "op", "rows", "cols"}` |
+| Rows and columns of a matrix | in a matrix (the matrix, or anything in an entry) the row under the formula has, beside the arrows, **+ row** / **+ col** (a new row / column of empty slots after the selected one; after the last for the matrix itself) and **− row** / **− col** (the selected one removed); the **grip** at the matrix's bottom-right corner *reshapes* it when dragged - the same entries laid out another way, so it snaps to the shapes that hold them all (12 entries: 1×12, 2×6, 3×4, 4×3, 6×2, 12×1), nothing added or lost | `Document.insert_row/insert_col/delete_row/delete_col(path)`, `reshape_matrix(path, rows, cols)`, `resize_matrix(...)` (grows and truncates), `{"action": "matrix", "op", "rows", "cols"}` |
 | Transform the selection | pick an operation in the **Transform ▾** menu (general) or the type menu ("Matrix ▾", "Array ▾"...) - the first group of the last toolbar row, both lists chosen by `options={"actions": ...}`: it applies at once, or asks for what it needs first (the array tools want their axes) | |
 | Matrix ↔ array | "Matrix ▾ → As array"; "Array ▾ → As matrix (rank 2)" — a `MatrixSymbol` becomes an `ArraySymbol` (entries stay implicit), an explicit matrix an explicit array | |
 | Array tools | "Array ▾" (for explicit arrays *and* array symbols): permute axes `(1, 0)`, contract axes `(0, 1)`, diagonal over axes, reshape, rank, explicit entries | |
 | Reshape | "Matrix ▾" / "Array ▾" → Reshape… — a matrix reshaped to a rank other than 2 becomes an array | |
+| Differentiate, integrate, solve, substitute | **Transform ▾** → Differentiate… (by `x`, `x, 2`, `x, y`), Integrate… (over `x` or `(x, 0, 1)`), Solve for… (an unknown picked from the selection's symbols; the solutions as a set), Substitute… (replace / with) - each asks for what it needs, and the first three build `Derivative`, `Integral`, `Subs` with **keep unevaluated** on | |
 | Derive by array | **Transform ▾** → Derive by array… — by `x` or `[x, y]`, for an expression (its gradient), a matrix or an array, symbolic or explicit | |
-| Copy / cut / paste a part | **Copy** / **Paste** (toolbar or action bar) | Ctrl+C / Ctrl+X copy the selection's SymPy source; Ctrl+V pastes over a selection or at a caret |
+| Copy / cut / paste a part | **Copy** / **Paste** (toolbar) | Ctrl+C / Ctrl+X copy the selection's SymPy source; Ctrl+V pastes over a selection or at a caret |
 | Apply any SymPy function | the **function box** in the toolbar (the library group, beside Methods): it lists every function of SymPy, type to narrow the list, pick one; a function that needs parameters asks for them (symbol parameters offer the selection's free symbols — `solve` on `sin(x)cos(y)` asks x or y); `diff(x)`, `.T`, `det()` typed in full apply as written | |
 | Call a method of the selection's class | the **Methods** menu (the library group) lists every public method and property of the selected object's class (of the whole expression when nothing is selected) — `.det()`, `.T`, `.rref()` on a matrix, `.diff()`, `.as_poly()` on an expression; picking one calls it, and a method that needs parameters asks for them.  A `Lambda` is itself a function: its menu starts with **( ) apply**, which asks for the arguments and evaluates it there (`(3)` in the function box does the same) | |
 | Undo / redo | ↺ / ↻ | Ctrl+Z / Ctrl+Shift+Z |
 | Zoom the formula | **−** / **100%** (reset) / **+**, Ctrl+mouse wheel, pinch with two fingers | Ctrl+plus / Ctrl+minus / Ctrl+0 |
 | Scroll a formula wider (or, in full screen, taller) than the view | the arrow strips along the edges it runs past (each scrolls a screen and goes once that end is in sight), the scrollbar, the mouse wheel over the formula, a drag on its empty space; on a phone one finger dragged anywhere across it, or two fingers moving together | |
 
-A small action bar appears under whatever is selected — ↑ parent, ↓ inside,
-Edit, Unwrap, Delete, Copy — so these actions are one click or one tap away
-from the object; the same commands sit in the toolbar and on the keys.
+Nothing pops up under a selection: the four arrows sit in a row just under
+the formula, at its left (in a matrix the row and column buttons join them,
+and on a touch screen the keyboard button is at its right end), and Edit,
+Unwrap, Delete, Extract, Copy and Paste are in the toolbar - every command
+has one fixed place, and the keys do the same.
 
 Editing happens *inside* the formula: the selected node is swapped for a small
 text field at its position, and the formula re-renders when you press Enter.
@@ -131,9 +210,10 @@ it**, tap a gap for a caret and tap it again to insert, tap an operator to
 change it from its palette; **hold a finger still on a node** until it is
 selected, then drag across its neighbours to select a range - dragging to the
 edge of the view scrolls the formula along and keeps taking in what appears,
-so the range reaches terms that were off the screen; the toolbar has ↑
-for the parent and a keyboard button that opens the keyboard for the selection, the
-caret or the whole expression; the menus apply an operation as soon as it is
+so the range reaches terms that were off the screen; the row under the formula has the arrows (↑
+for the parent) and, at its right end, a keyboard button that
+opens the keyboard for the selection, the caret or the whole expression (it
+blinks when there is one); the menus apply an operation as soon as it is
 picked.  Two fingers zoom the formula and, when it is larger than the view,
 scroll it; one finger dragged across it scrolls it sideways (a plain swipe
 never selects, so a tap that wobbles is still a tap); the arrow strips at the
@@ -141,7 +221,13 @@ edges scroll a screen at a time; and vertical swipes still scroll the page.
 Transformations act on the selected sub-expression only (on the whole formula
 when nothing is selected).
 
-Typed input is parsed with `sympy.parsing.sympy_parser.parse_expr` in the
+Typed input is read as mathematics is written: `2x`, `3(x + 1)`, `sin x`,
+`sin^2 x`, `|x|` for an absolute value, `x = 2` for an equation (`Eq`), `e`
+for Euler's number, `x^2` or `x**2` for a power; a bracket left open at the
+end is closed.  A name is one symbol however long (`xy`, as SymPy spells it);
+`Document(parser="split")` splits names into letters instead
+(`xyz` → `x*y*z`), and `parser="strict"` is Python's syntax alone (`2*x`).
+Underneath, `sympy.parsing.sympy_parser.parse_expr` reads the text in the
 context of the expression, so existing symbols keep their assumptions and
 undefined functions (and `MatrixSymbol`s / `IndexedBase`s) are reused.  Names
 that do not occur in the current expression become plain symbols - unless the
@@ -218,7 +304,7 @@ determinants/traces and N-dimensional `Array`s are supported: every entry is
 selectable and editable, and the container is rebuilt around the edit (see
 `examples/demo_matrices.py` and `examples/demo_matrices.ipynb`).  An explicit
 matrix also changes shape in place: with the matrix or one of its entries
-selected, the action bar adds and removes rows and columns (new entries are
+selected, the row under the formula adds and removes rows and columns (new entries are
 empty slots to fill, like a template's), and the grip at its bottom-right
 corner reshapes it by dragging: the same entries laid out another way, as
 `Matrix.reshape` does, snapping to the shapes that hold every one of them.
@@ -266,6 +352,21 @@ step - what each step changed in red and green.  Both computed on the device,
 offline.*  They are also on the live page, in context:
 **[screenshots of the apps](https://upabjojr.github.io/sympy-editor/#on-a-phone)**.
 
+### Mac app
+
+`python desktop/build.py --run` builds the editor as a Mac application and
+opens it: the same page in a window, editing in the app's own CPython.
+Nothing is installed and nothing is downloaded at run time - the interpreter,
+SymPy and the add-ons are inside the `.app` (about 180 MB), which runs on
+macOS 11 and later, on Apple silicon and Intel alike.
+
+It is the iOS app's shell in a window - the same Swift and Objective-C, with a
+few `#if os(macOS)` branches - so a fix to one is a fix to both.  The
+interpreter is the macOS build of the release the iOS app pins, which carries
+the standard library inside `Python.framework`, so the app embeds the
+framework and installs nothing.  To hand the app to someone else, sign it with
+a Developer ID certificate and notarize it; see `desktop/README.md`.
+
 ### Web app
 
 `python webapp/build.py` builds the same page as an installable, offline-capable
@@ -305,7 +406,7 @@ tall it is (a fraction, a matrix with its brackets).
 
 ### Evaluated or unevaluated
 
-The **unevaluated** toggle next to the function box decides what a
+The **keep unevaluated** toggle next to the function box decides what a
 transformation or a SymPy function produces: off, the result is computed
 (the determinant of a numeric matrix is a number); on, its symbolic form is
 built - `Determinant(M)`, `Inverse(A)`, `Transpose`, `Trace`, `Derivative(f,
@@ -422,6 +523,14 @@ page instead, without interruption); the local server and the Jupyter widget
 interrupt the thread doing the work (`interrupt_thread`), so nothing else is
 lost.
 
+### Files
+
+Every editor that edits has the **≡** button, with or without sessions and
+add-ons.  Its **File** section opens a formula kept in a file (**Open
+formula…**: a `.sympy` file, or a line of SymPy source), keeps this one with
+its whole history (**Save formula…**), and writes the history out as a
+Python script, as a web page that works offline, or to the printer.
+
 ### Sessions and history (mobile app, or `options={"sessions": True}`)
 
 The **≡** button opens a lateral drawer, out of the widget, listing your
@@ -451,14 +560,15 @@ gesture, key and tool in one box (Esc closes it).
 
 The toolbar is organised in three rows of related blocks: the session and
 its timeline (sessions, undo/redo, History, ?, Done) with the zoom; the
-selection (navigation arrows, then Edit/Unwrap/Delete/Isolate and the
+selection (navigation arrows, then Edit/Unwrap/Delete/Extract and the
 clipboard); and what to apply (the Transform, type and Methods menus, the
 function box, the unevaluated toggle).  The blocks sit in columns - three
 from 44rem, and on a narrow screen they spread across each line instead -
 so the left column starts at the left edge, the right one ends at the right
 edge, and the strip reads as a grid rather than a wall of buttons.  A block
-never breaks apart: what belongs together stays together, and the action bar
-under a selection wraps the same way, so every button stays reachable.
+never breaks apart: what belongs together stays together.  The arrows that
+move the selection are not in the strip: they are in the row under the
+formula.
 
 ## Add-ons
 
@@ -466,17 +576,20 @@ The editor can be extended from outside: an add-on is a package of its own
 that gives a document node types from another library, transformations,
 data beside every snapshot and methods of its own, and a panel of HTML and
 JavaScript under the formula - through one contract,
-`sympy_editor.addons.Addon`, and one message.  Four drafts live in
+`sympy_editor.addons.Addon`, and one message.  Five drafts live in
 [`addons/`](addons/README.md): the expression tree as an editable graph,
 the graph of the selection drawn by Plotly.js, rewrite rules with
 wildcards matched many-to-one by
-[sympy-matching](https://github.com/Upabjojr/sympy-matching), and LaTeX
+[sympy-matching](https://github.com/Upabjojr/sympy-matching), LaTeX
 import - a box under the formula that reads LaTeX with an Earley parser
 (through [Lark](https://github.com/lark-parser/lark)), offers a menu for
 every ambiguous part (`f(x)` applied or multiplied, how far `\sin x \cos y`
 reaches) and a switch for every constant name (`\pi` the constant, or a
 symbol called `pi`), and puts the reading over the selection or in place of
-the whole expression.
+the whole expression; and a Python console - input and output as in IPython,
+or a whole script run at once - in the same Python as the editor (the app's
+own on a phone, the server's, Pyodide in a standalone page), where `editor`
+reads and changes the formula: `editor.selection = expand(editor.selection)`.
 
 An add-on is a package of its own, made by anyone, found by the editor
 once it is installed (`pip install -e addons/sympy_editor_tree` for a
@@ -491,7 +604,7 @@ save_html(expr, "page.html", addons=["tree", "plot"])                  # a self-
 serve(expr, addons=["matching"])                                       # the local server
 ```
 
-The **Add-ons** section at the top of the **≡** drawer switches any installed
+The **Add-ons** window the **≡** menu opens switches any installed
 add-on on or off while editing, and installs new ones: paste the URL of a
 GitHub repository (or of a `.zip`), or choose a `.zip` with *From a file…*,
 tick what it holds, *Install* - on the desktop, in the web app (kept in the
@@ -501,7 +614,7 @@ integrals of QED expanded into Feynman diagrams, drawn and editable - is the
 add-on kept out of the apps to be installed that way
 (`python addons/pack.py sympy_editor_feynman` zips it).  Not installed?  A module name (`addons=["sympy_editor_tree"]`)
 or the object itself (`addons=[ADDON]`) work too; `python addons/demo.py`
-builds a page with the four drafts straight from the checkout.
+builds a page with the drafts straight from the checkout.
 `addons/README.md` describes the architecture, and `addons/template/` is
 an add-on to copy when writing your own.
 
@@ -516,22 +629,46 @@ KaTeX turns that into `<span data-path="/1/0">`, so the DOM knows which node
 of the expression tree each glyph belongs to.  Editing operations
 (`Document.replace/delete/insert/operator/apply/call/undo/redo`) rebuild the
 tree and re-render.
-See `AGENTS.md` for the architecture and design notes, and
+See `AGENTS.md` for the architecture and design notes,
 [`docs/cursor-and-selection.md`](docs/cursor-and-selection.md) for what the
-cursor and the selection do - the one description the page, the server, the
-Jupyter widget and the apps all follow.
+cursor and the selection do, [`docs/editing-rules.md`](docs/editing-rules.md)
+for what each edit does to the expression, and
+[`docs/file-format.md`](docs/file-format.md) for what a saved formula holds -
+the one description the page, the server, the Jupyter widget and the apps all
+follow.
 
 ## Dependencies and licences
 
 | Component | Licence | How it is used |
 | --- | --- | --- |
-| SymPy | BSD-3 | required |
+| [SymPy](https://www.sympy.org) (Copyright (c) 2006-2023 SymPy Development Team) | BSD-3 | required: it does all the mathematics; its licence follows sympy-editor's in [`LICENSE`](LICENSE) |
 | anywidget (+ ipywidgets, traitlets) | MIT / BSD-3 | optional, Jupyter widget |
-| KaTeX | MIT | loaded from a CDN by the browser (URL configurable) |
-| Pyodide | MPL-2.0 | loaded from a CDN by the browser, standalone HTML only |
+| KaTeX | MIT | loaded from a CDN by the browser (URL configurable), vendored into the apps and the web bundle |
+| Pyodide (+ CPython, micropip) | MPL-2.0 / PSF-2.0 | loaded from a CDN by the browser, standalone HTML and the web bundle only |
 | SymPy wheel (PyPI) | BSD-3 | loaded by the browser into Pyodide (the newest SymPy, ahead of Pyodide's own package) |
+| lark, sympy-matching, NumPy, onnxruntime, Plotly.js | MIT / BSD-3 | the add-ons' own: LaTeX, rewrite rules, plot, handwriting |
+| Chaquopy, ONNX Runtime for Android, androidx, Kotlin | MIT / Apache-2.0 | the Android app is built on them |
+| ONNX Runtime for iOS, NumPy (BeeWare's build) | MIT / BSD-3 | the iOS app's handwriting runs on them |
+| Python-Apple-support (BeeWare) | MIT | the iOS and Mac apps' CPython |
+| CPython, with OpenSSL, libffi, XZ, bzip2, SQLite, mpdecimal | PSF-2.0 / Apache-2.0 / MIT / 0BSD / bzip2 / public domain / BSD-2 | the apps' Python interpreter |
 
-sympy-editor itself is BSD-3-Clause.
+[`THIRD-PARTY.md`](THIRD-PARTY.md) has the whole of it - every component each
+build carries, with its terms and what it is used for - and each bundle carries
+the same list in its own `vendor/NOTICE.txt`, with the editor's `LICENSE` (and
+so SymPy's) after it.
+
+sympy-editor is free software under the **GNU Affero General Public License,
+version 3 or later** (AGPL-3.0-or-later): use it, change it and share it, and
+whoever shares a changed version - or lets people use one over a network -
+must offer its source under the same licence. [`LICENSE`](LICENSE) carries SymPy's
+licence after sympy-editor's own. Versions up to and including 0.1.1 were
+released under the BSD 3-Clause License.
+
+**Add-ons may have their own licence.** Each add-on is a separate package, and
+its licence is the one stated in its folder (a `LICENSE` file, or the `license`
+in its `pyproject.toml`); check it before you redistribute an add-on or a build
+that carries it. Today all the add-ons in [`addons/`](addons), the add-on template
+([`addons/template`](addons/template)) included, are AGPL-3.0-or-later, as sympy-editor is.
 
 ## Development
 

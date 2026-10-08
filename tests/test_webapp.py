@@ -36,9 +36,46 @@ def test_cdn_build_has_the_pwa_files(tmp_path):
     sw = (out / "sw.js").read_text()
     files = json.loads(re.search(r"var FILES = (\[.*?\]);", sw).group(1))
     assert "./index.html" in files and "./manifest.webmanifest" in files and "./sw.js" not in files
-    assert re.search(r'var CACHE = "sympy-editor-[0-9a-f]{12}"', sw)
+    assert "./" in files                        # the bare URL opens offline too
+    # filled from the network, never from the HTTP cache: a new cache holding
+    # the previous build's files would never be replaced
+    assert 'new Request(u, { cache: "reload" })' in sw and "cache.addAll(FILES)" not in sw
+    assert re.search(r'var CACHE = PREFIX \+ "[0-9a-f]{12}"', sw)
+    # named by where the app lives: the caches of an origin are everybody's
+    assert 'var PREFIX = "sympy-editor " + new URL(self.registration.scope).pathname + " ";' in sw
+    assert "k !== CACHE" not in sw and "caches.match(" not in sw        # its own caches, and no others
     # a rebuilt, identical bundle keeps its cache name; a different page changes it
     assert mod.build(tmp_path / "dist2", cdn=True) and (tmp_path / "dist2" / "sw.js").read_text() == sw
+
+
+def test_the_precache_lists_what_this_build_wrote(tmp_path):
+    """The worker precaches every file it finds in the output folder, and the
+    folder stays from one build to the next: a `--cdn` build into one that
+    had held a vendored build listed 38 files under `vendor/` - to download
+    at install, for a page that loads none of them - and a rebuild after a
+    SymPy bump listed the old wheel beside the new.  The pictures kept beside
+    the derivations page are content, and stay listed."""
+    mod = _load()
+    out = tmp_path / "dist"
+    for name in ("vendor/katex/katex.min.js", "vendor/katex/fonts/KaTeX_Main-Regular.woff2",
+                 "vendor/pyodide/sympy-1.13.3-py3-none-any.whl",
+                 "vendor/pyodide/removed-addon-dep-1.0-py3-none-any.whl"):
+        (out / name).parent.mkdir(parents=True, exist_ok=True)
+        (out / name).write_bytes(b"of an earlier build")
+    (out / "derivations").mkdir()
+    (out / "derivations" / "jupyter-widget.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    mod.build(out, cdn=True)
+    files = json.loads(re.search(r"var FILES = (\[.*?\]);", (out / "sw.js").read_text()).group(1))
+    assert [f for f in files if "vendor" in f] == [], files
+    assert "./derivations/jupyter-widget.png" in files and "./index.html" in files
+    assert sorted(f[2:] for f in files if f != "./") == sorted(
+        p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file() and p.name != "sw.js")
+    # the showcase is a folder dropped into a site as it is: the same there
+    shelf = tmp_path / "shelf"
+    (shelf / "vendor" / "pyodide").mkdir(parents=True)
+    (shelf / "vendor" / "pyodide" / "sympy-1.13.3-py3-none-any.whl").write_bytes(b"of an earlier build")
+    mod.shelf_site(shelf, cdn=True)
+    assert not (shelf / "vendor").exists()
 
 
 def test_service_worker_installs_and_caches(tmp_path):
@@ -60,9 +97,67 @@ def test_service_worker_installs_and_caches(tmp_path):
             page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
             page.wait_for_function("navigator.serviceWorker.ready.then(() => true)", timeout=30000)
             keys = page.evaluate("caches.keys()")
-            assert any(k.startswith("sympy-editor-") for k in keys), keys
-            cached = page.evaluate("caches.keys().then(ks => caches.open(ks.find(k => k.startsWith('sympy-editor-'))).then(c => c.keys())).then(rs => rs.map(r => r.url))")
+            assert any(k.startswith("sympy-editor / ") for k in keys), keys
+            cached = page.evaluate("caches.keys().then(ks => caches.open(ks.find(k => k.startsWith('sympy-editor / '))).then(c => c.keys())).then(rs => rs.map(r => r.url))")
             assert any(u.endswith("/index.html") for u in cached) and any(u.endswith("/manifest.webmanifest") for u in cached)
+            root = f"http://127.0.0.1:{httpd.server_address[1]}/"
+            assert root in cached, cached                    # the bare URL, for opening it offline
+            assert page.evaluate("fetch('manifest.webmanifest').then(r => r.json()).then(m => m.name)") == "SymPy Editor"
+            browser.close()
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_the_service_worker_keeps_to_its_own_caches(tmp_path):
+    """The caches of an origin are shared by every site served from it, and
+    `<user>.github.io` serves each project from a folder: on activation the
+    worker deleted every cache but its own - another site's, a second copy of
+    this app's - and it answered requests from whichever cache held the
+    address, its own or not.  It now names its caches by where it lives,
+    replaces those (and the ones it made before they were so named), and
+    reads from its own alone."""
+    playwright = pytest.importorskip("playwright.sync_api")
+    mod = _load()
+    site = tmp_path / "site"
+    out = mod.build(site / "app", cdn=True)
+    (site / "index.html").write_text("<!DOCTYPE html><title>the origin's other tenants</title>", encoding="utf-8")
+    import http.server, functools
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(site))
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    origin = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        with playwright.sync_playwright() as p:
+            try:
+                browser = p.chromium.launch()
+            except Exception as exc:
+                pytest.skip(f"chromium not available: {exc}")
+            page = browser.new_page()
+            page.goto(origin + "/index.html")
+            # what the origin holds before the app is opened: another site's
+            # cache - with an answer of its own for an address of the app's -,
+            # an earlier build of the app here, under each of the names it
+            # has had, and a copy of the app that lives elsewhere
+            page.evaluate("""async (origin) => {
+                const put = async (name, url, body) =>
+                    (await caches.open(name)).put(url, new Response(body, {headers: {"Content-Type": "application/json"}}));
+                await put("another-site-v1", origin + "/app/manifest.webmanifest", '{"name": "not this app"}');
+                await put("sympy-editor-0123456789ab", origin + "/app/index.html", "an earlier build");
+                await put("sympy-editor /app/ 0123456789ab", origin + "/app/index.html", "an earlier build");
+                await put("sympy-editor-ba9876543210", origin + "/copy/index.html", "a copy elsewhere");
+                await put("sympy-editor /copy/ 0123456789ab", origin + "/copy/index.html", "a copy elsewhere");
+                await put("sympy-editor /app/more/ 0123456789ab", origin + "/app/more/index.html", "a copy below");
+            }""", origin)
+            page.goto(origin + "/app/index.html")
+            page.wait_for_function("""navigator.serviceWorker.ready.then(
+                (reg) => reg.active.state === "activated" && !!navigator.serviceWorker.controller)""", timeout=30000)
+            keys = set(page.evaluate("caches.keys()"))
+            own = {k for k in keys if re.fullmatch(r"sympy-editor /app/ [0-9a-f]{12}", k)}
+            assert len(own) == 1 and "sympy-editor /app/ 0123456789ab" not in own, keys
+            assert keys - own == {"another-site-v1", "sympy-editor-ba9876543210", "sympy-editor /copy/ 0123456789ab",
+                                  "sympy-editor /app/more/ 0123456789ab"}, keys
+            # and a request is answered from the app's own cache, whoever else holds the address
             assert page.evaluate("fetch('manifest.webmanifest').then(r => r.json()).then(m => m.name)") == "SymPy Editor"
             browser.close()
     finally:
@@ -125,8 +220,9 @@ def test_the_shelf_opens_with_an_editor_of_its_own(tmp_path):
     """The page is about an editor, so it starts with one: a live editor above
     everything else, sharing the copy of editor.js the viewers already carry,
     and the button beside the title now says which editor it opens instead.
-    Python is not loaded until somebody edits something (`preload` false), so
-    a visitor who only reads pays nothing for it."""
+    It plays the tour of examples/tutorial - without its History part, with
+    a button to stop it - and so starts Python at once; it keeps no sessions
+    and no add-ons in the browser, which editor.html on the same site does."""
     build = _load()
     out = build.shelf_site(tmp_path / "shelf", cdn=True)
     page = (out / "index.html").read_text(encoding="utf-8")
@@ -136,7 +232,15 @@ def test_the_shelf_opens_with_an_editor_of_its_own(tmp_path):
     assert mount in page
     line = page.split(mount, 1)[1].splitlines()[0]              # the config is one line of JSON
     cfg = json.loads(line.removesuffix(");").replace("\\u003c", "<"))
-    assert cfg["backend"] == "pyodide" and cfg["options"]["preload"] is False
+    assert cfg["backend"] == "pyodide" and cfg["options"].get("preload") is not False
+    assert not cfg["options"].get("sessions") and not cfg["options"].get("rememberAddons")
+    run = 'SympyEditorTutorial.run(document.getElementById("try-the-editor"), '
+    assert run in page and page.count("if (!window.SympyEditorTutorial) {") == 1
+    tour = page.split(run, 1)[1].splitlines()[0]
+    assert '"stopButton": true' in tour and '"part": "history"' not in tour and "se-history-close" not in tour
+    # it stops when the reader goes elsewhere, and the button in the text plays it again
+    assert '"stopOnLeave": true' in tour and '"playButton": "try-the-editor-play"' in tour
+    assert page.index('id="try-the-editor-play"') < page.index('<div id="try-the-editor"></div>')
     assert cfg["sources"] and cfg["srepr"]                       # it computes, and knows what to start from
     assert ">Open standalone editor</a>" in page                 # the button names the other one
     assert "Open the editor" not in page
@@ -153,9 +257,15 @@ def test_the_shelf_s_editor_asks_to_be_touched_once(tmp_path):
     lands, and then never again (a reload asks once more).  The pulse is on a
     ring laid over the box - scaling the formula would soften the type - and
     it lets the clicks through."""
+    from sympy import Symbol
+    from sympy_editor import Document
+    from sympy_editor.html import build_config
     build = _load()
-    out = build.shelf_site(tmp_path / "shelf", cdn=True)
-    page = (out / "index.html").read_text(encoding="utf-8")
+    # a front page with an editor and no tour (the site's plays a tour, which
+    # is its invitation)
+    cfg = build_config(Document(Symbol("x")), backend="pyodide", options={"preload": False})
+    page = build.derivations_page(tmp_path / "try", urls=None, editor_href="editor.html",
+                                  editor=cfg).read_text(encoding="utf-8")
     assert "@keyframes se-view-notice" in page
     ring = page.split("section.try .se-stage::after {", 1)[1].split("}", 1)[0]
     for said in ("position: absolute", "inset: 0", "pointer-events: none",   # over the box, not in its way
@@ -180,6 +290,9 @@ def test_the_shelf_s_editor_asks_to_be_touched_once(tmp_path):
     bare = build.derivations_page(tmp_path / "bare", urls=None, editor_href="../index.html").read_text(encoding="utf-8")
     assert "The editor's box asks to be used" not in bare
     assert 'classList.add("se-edited")' not in bare
+    # ...nor on the site's front page, whose editor plays the tour instead
+    site = (build.shelf_site(tmp_path / "shelf", cdn=True) / "index.html").read_text(encoding="utf-8")
+    assert "The editor's box asks to be used" not in site and "SympyEditorTutorial.run(" in site
 
 
 def test_the_shelf_s_play_buttons_ask_to_be_pressed(tmp_path):
@@ -225,7 +338,7 @@ def test_the_shelf_carries_the_licence_and_the_privacy_statement(tmp_path):
     out = build.derivations_page(tmp_path / "shelf", urls=None, editor_href="editor.html")
     folder = out.parent
     licence = (folder / "license.html").read_text(encoding="utf-8")
-    assert "BSD 3-Clause License" in licence and "Redistribution and use" in licence
+    assert "GNU Affero General Public License" in licence and "Remote Network Interaction" in licence
     assert (folder / "LICENSE.txt").read_text(encoding="utf-8") == (build.ROOT / "LICENSE").read_text(encoding="utf-8")
     privacy = (folder / "privacy.html").read_text(encoding="utf-8")
     for said in ("no accounts, no cookies, no analytics", "make no network\nrequests",
@@ -266,3 +379,96 @@ def test_the_shelf_teaches_and_shows_the_notebook_only_when_it_can(tmp_path):
     page = build.derivations_page(shot, urls=None, editor_href="editor.html").read_text(encoding="utf-8")
     assert heading in page and '<span class="phone"><img src="android-editor.png"' in page
     assert "android-history.png" not in page
+
+
+def _every_addons_packages():
+    """Skip unless this Python has every bundled add-on's own packages.  The
+    site is built where it has them (webapp.yml installs lark and
+    sympy-matching), and opens with all four on; a checkout tested without
+    them cannot switch those two on, so there is no claim to check."""
+    pytest.importorskip("lark")
+    pytest.importorskip("sympy_matching")
+
+
+def test_the_site_opens_with_every_add_on_switched_on(tmp_path):
+    """The site is the shop window: everything the editor can do is on when it
+    opens, rather than waiting behind a menu nobody has been told about.  An
+    app builds the same bundle with them merely available, and remembers what
+    its owner leaves on, so the flag is the web site's alone."""
+    _every_addons_packages()
+    mod = _load()
+    out = mod.build(tmp_path / "dist", cdn=True)
+    index = (out / "index.html").read_text(encoding="utf-8")
+    snapshot = json.loads(re.search(r'"snapshot":\s*(\{.*?\}),\s*"options"', index, re.S).group(1)) \
+        if re.search(r'"snapshot":\s*(\{.*?\}),\s*"options"', index, re.S) else None
+    on = re.search(r'"addons":\s*(\[[^\]]*\])', index)
+    assert on, "the page says nothing about which add-ons are on"
+    names = json.loads(on.group(1))
+    assert sorted(names) == ["console", "latex", "matching", "plot", "tree"], names
+    # and every one of them is listed as available too, so they can be switched off
+    available = re.findall(r'"name":\s*"([a-z]+)",\s*"label"', index)
+    for name in names:
+        assert name in available, (name, available)
+
+
+def test_a_bundle_leaves_the_add_ons_off_unless_asked(tmp_path):
+    """What the apps build: the add-ons are there to switch on, but the editor
+    opens without them (and the app remembers the choice from last time)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("build_www", ROOT / "mobile" / "build_www.py")
+    build_www = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(build_www)
+    out = build_www.build(tmp_path / "app", cdn=True)
+    index = (out / "index.html").read_text(encoding="utf-8")
+    on = re.search(r'"addons":\s*(\[[^\]]*\])', index)
+    assert on and json.loads(on.group(1)) == [], on.group(1) if on else "no addons key"
+    assert '"name": "plot"' in index          # ... but they are all there to be switched on
+
+
+def test_the_showcase_site_opens_with_the_add_ons_on(tmp_path):
+    """shelf_site builds what upabjojr.github.io/sympy-editor serves: the
+    front page with the tour playing on an editor, and editor.html beside it.
+    editor.html opens with the add-ons switched on - the site is where
+    somebody sees what the editor can do; the front page's editor lists them
+    all and the tour switches on the ones it shows.  Both must name the
+    packages the browser installs for them."""
+    _every_addons_packages()
+    mod = _load()
+    out = mod.shelf_site(tmp_path / "shelf", cdn=True)
+    for name in ("index.html", "editor.html"):
+        page = (out / name).read_text(encoding="utf-8")
+        for addon in ("plot", "tree", "matching", "latex"):
+            assert f'"name": "{addon}"' in page, (name, addon)                  # listed, to be switched on
+        if name == "editor.html":
+            on = re.search(r'"addons":\s*(\[[^\]]*\])', page)
+            assert on, (name, "the page does not say which add-ons are on")
+            assert sorted(json.loads(on.group(1))) == ["console", "latex", "matching", "plot", "tree"], (name, on.group(1))
+        # the two that need something from PyPI say so, or the browser cannot
+        # install them and they would come up switched on but broken
+        micropip = re.search(r'"micropip":\s*(\[[^\]]*\])', page)
+        assert micropip and "lark" in micropip.group(1), (name, micropip.group(1) if micropip else None)
+
+
+def test_a_missing_add_on_requirement_does_not_stop_the_build(tmp_path, monkeypatch):
+    """Switching an add-on on imports it.  A machine without lark (which is
+    what CI is) must still build the site - saying which add-on stayed off -
+    rather than failing outright, as it did once."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("build_www", ROOT / "mobile" / "build_www.py")
+    build_www = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(build_www)
+
+    from sympy import Symbol
+    real_enable = build_www.Document.enable
+
+    def refuse(self, spec_name, *a, **k):
+        if "latex" in str(spec_name):
+            raise ImportError("no lark here")
+        return real_enable(self, spec_name, *a, **k)
+
+    monkeypatch.setattr(build_www.Document, "enable", refuse)
+    doc = build_www.document_with_addons(Symbol("x"), enable=True)
+    on = list(doc.addons)
+    assert "latex" not in on, on                       # it stayed off
+    assert on, "the others should still be on"
+    assert any(a["name"] == "latex" for a in doc.available_addons())   # still there to switch on

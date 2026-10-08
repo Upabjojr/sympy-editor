@@ -41,6 +41,14 @@ resting state; a caret is what you get when you point *between* things.
 
 ## 3. Pointing with a finger
 
+On a screen narrower than 44rem only the page's title with the menu (≡) at
+its right, the session row (undo, redo, the zoom, and History and ? at
+its right end) and the add-ons' own tools (the LaTeX button, the pen) stay above
+the formula; under the formula come the four arrows, the line naming the
+selection, the source line, then the editing tools - where the thumbs are,
+and not between the top of the screen and the work - and the add-ons'
+panels last.
+
 Touch has no hover, no double-click and no keyboard, so three gestures differ.
 Everything else is as above.
 
@@ -48,9 +56,10 @@ Everything else is as above.
 |---|---|
 | Tap | selects, exactly like a click |
 | **Tap the selected node again** | opens the field on it — this replaces double-click, which is ignored on touch |
-| **Hold still on a node** (`longPress`, 450 ms by default) | selects it and starts a range: keep the finger down and drag over its neighbours |
+| **Hold still on a node** (`longPress`, 450 ms by default) | selects it and starts a range: keep the finger down and drag over its neighbours. In the apps the selection is felt too (the platform's haptics), since the finger covers what it selected |
 | Drag a held selection past the edge of the view | the formula scrolls itself and the range keeps growing over what comes into sight |
 | Two fingers | pan and pinch-zoom; never selects |
+| Android's **Back** | what Esc does, one thing per press: closes the help, the history, the drawer, the LaTeX field, the pen, an edit — then lets the selection or the caret go, then leaves full screen; with nothing left, the app goes to the background |
 
 While a drag is drawing a range the selection box is **moved, never
 rebuilt**, so it stays painted for the whole gesture, growing into its new
@@ -80,6 +89,8 @@ The arrows mean the same thing everywhere: **↑ out, ↓ in, ← → along**.
 | ↓ | **a caret just to the right of the glyph** |
 | `+ - * / ^ =` | changes the operator |
 | Del / Backspace | removes it — the two terms then multiply |
+
+A change of operator that is refused leaves the operator selected.
 
 ### From a range
 
@@ -140,9 +151,24 @@ typed is spliced in at that point:
 * `,` makes a new argument;
 * an operator alone, typed between two arguments, changes the operator.
 
-Clicking a gap and typing is different from arrowing to a side of an operator:
-a click in a gap inserts a **new argument** there, attached to neither
-neighbour.
+Which side the caret is on is what it shows. A click on the edge of a term
+puts it on that term. A caret with no side of its own - a click in the gap,
+an arrow key - belongs to the neighbour it is drawn against: in `x + 1` the
+gap holds the `+`, and a caret drawn after it, in front of the `1`, is on the
+side of the `1`. So `r` typed there gives `x + r` (that is `x + r*1`), and
+typed with the caret against the `x`, before the `+`, it gives `r*x + 1`.
+Where nothing is drawn between the two (the factors of `x y`) the caret is on
+the left one.
+
+A node that draws something of its own around its arguments — the name and
+the parentheses of `f(x, y)` — has an inside and an outside. A caret outside
+it, left of the `f` or right of the `)`, is beside the call: `r` typed there
+gives `r*f(x, y)`. Inside, in front of the `x`, it gives `f(r*x, y)`.
+
+↓ from an operator puts the caret just after it, on its own line only. A
+caret attached to the term on its left stands at the end of that term in the
+source line (`x| + y`), and the source cursor at `x|` gives that caret. A
+resize of the view redraws the caret where it was.
 
 ## 6. Ranges
 
@@ -164,6 +190,10 @@ right edge of one block enters the next.
 At an edge the ordinary meaning takes over: ↑ in the top row selects the
 matrix itself, ← / → step out of it.
 
+In a grid, ←/→ from a cell (or from anything inside one) go to the cell
+beside it in the same drawn row; at the row's end they step out of the grid,
+never onto the next row.
+
 ## 8. Templates and empty slots
 
 `\int`, `\sum`, `\prod`, `\lim`, `\diff`, `\frac`, `\binom` and `\matrix`
@@ -172,7 +202,36 @@ parts go. The first box is selected; **Tab** moves to the next, **Shift+Tab**
 back. The boxes are the placeholder symbols `_1`, `_2`… in the source line.
 
 Tab also moves between empty slots when there are any; with none, Tab puts a
-caret beside the selection.
+caret beside the selection. Tab in an open field applies what was typed and
+then selects the next box (Shift+Tab the one before), so a fraction is filled
+with `1` Tab `2`; a field left as it was just moves on. When what was typed
+holds boxes of its own (a `\frac` typed into a box), its first box comes
+first.
+
+The **palette** — the `√ ∫ Σ ▾` button beside Paste —
+offers the same constructions as buttons drawn the way they look: fraction,
+power, square root, absolute value, exponential, logarithm, factorial,
+binomial, integral, definite integral, derivative, limit, sum, product, a
+2 × 2 matrix. Where it puts one depends on the state, as for typing:
+
+- **a caret**: the construction goes in at the caret with its boxes empty (a
+  new term in a sum, a factor in a product);
+- **a selection or a range**: the selection becomes the construction's main
+  part — `x` selected and ∫ pressed gives `∫ x d□`; the matrix takes it as
+  its first entry;
+- **nothing selected**: the whole formula is the main part; an empty formula
+  becomes the construction;
+- **an operator selected**: the button is greyed out.
+
+The first empty box is selected after it. Arrows walk the palette, Enter or
+Space presses, Esc (and Back on Android) close it.
+
+Each template typed gets boxes of its own: `\frac` twice in one field gives
+four boxes, not two pairs with the same names, and none takes the name of a
+box already in the formula. A command is expanded when the field is
+committed too — `\int` followed at once by Enter builds the integral, as a
+space after it would have. After a change, the first *new* box is selected,
+also when the change was typed over a preview.
 
 ## 9. What the hosts share, and where they differ
 
@@ -193,19 +252,53 @@ widget, and the keyboard rules apply on a tablet with a keyboard attached.
 
 Two pieces of interface follow the pointer rather than the host:
 
-* the **keyboard button** on the tool strip appears only where the pointer is
-  coarse. It opens the field for whatever is current: the selection, the
-  caret, or the whole expression.
-* the **arrow buttons** on the tool strip do exactly what the arrow keys do,
-  so everything reachable by keyboard is reachable by finger.
+* the **keyboard button** appears only where the pointer is coarse: an icon
+  at the right end of the row just under the formula. It opens the field for whatever
+  is current: the selection, the caret, or the whole expression. When a
+  selection, a range, an operator or a caret appears it blinks for a couple
+  of seconds in the accent colour (not under reduced motion, where it only
+  takes the colour), to say the keyboard opens there; it does not blink
+  again for the same thing drawn again, nor while a field is open.
+* the **arrow buttons**, at the left of the row just under the formula, do
+  exactly what the arrow keys do, so everything reachable by keyboard is
+  reachable by finger. In a matrix the row also holds **+ row**, **+ col**,
+  **− row** and **− col**.
 
-## 10. Two rules that hold everywhere
+No bar pops up under a selection or a caret: every command has one fixed
+place - the arrows in that row, Edit, Unwrap, Delete, Extract, Copy and Paste
+on the tool strip. Only the operator palette (under a selected operator) and
+the chooser that asks which argument to keep appear at the selection.
+
+## 10. Three rules that hold everywhere
 
 **A command applies to what is pointed at.** With a node selected it applies
 to that node; with a range, to those arguments; with a caret and nothing
 selected, a function is *added at the caret* rather than applied to the whole
 expression; with nothing at all, to the whole expression.
 
+**Keys go to what is in front.** While the guide, the history or the
+sessions drawer is open, keys are theirs: Esc closes them and nothing typed
+reaches the formula behind. A focused toolbar button or check box takes its
+own Space and Enter. A character typed with AltGr (Option on a Mac) is a
+character like any other, and Enter while an input method is composing
+finishes the composition — it never commits the field.
+
 **A refused edit never changes the selection.** The message appears under the
 formula and the formula flickers red for half a second; what was selected
-stays selected.
+stays selected, and the text that was refused comes back in its field, the
+caret at its end, to be corrected rather than typed again.
+
+**Nothing typed is lost to a request.** A character typed while Python is
+still answering - an add-on asking after a tap, a Simplify computing - is
+kept, Backspace takes it back, and the field opens with all of it once the
+answer is in: at the caret, over the range or over the selection, wherever
+the answer left them.
+
+**Scrolling and zooming never take the pointing away.** A formula scrolled -
+by a finger, the wheel, the edge arrows, or by the pen bringing its space to
+write in into sight - keeps its selection and its caret where they were; the
+caret goes only when its place does.
+
+A refused edit changes nothing: the caret or the selection stays, and an
+expression refused in the empty view stays in its field to be corrected. The
+error line goes away at the next change of selection.

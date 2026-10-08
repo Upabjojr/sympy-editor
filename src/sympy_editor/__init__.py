@@ -27,7 +27,7 @@ sessions::
     save_history_html(steps, "steps.html")
 """
 
-from .addons import Addon, installed_addons, load_addon
+from .addons import Addon, installed_addons, load_addon, register_addons_folder
 from .document import Document
 from .history import History
 from .html import (display_history, display_html, save_history_html, save_html,
@@ -47,8 +47,9 @@ from .printer import (
     strip_annotations,
 )
 from .server import EditorServer, serve
+from .tutorial import save_tutorial_html, to_tutorial_html
 
-__version__ = "0.1.0"
+__version__ = "0.1.3"
 
 __all__ = [
     "Addon",
@@ -68,6 +69,7 @@ __all__ = [
     "get_at",
     "get_ops",
     "installed_addons",
+    "register_addons_folder",
     "load_addon",
     "make_op",
     "parse_path",
@@ -79,6 +81,8 @@ __all__ = [
     "strip_annotations",
     "to_history_html",
     "to_html",
+    "to_tutorial_html",
+    "save_tutorial_html",
 ]
 
 
@@ -97,6 +101,29 @@ def edit(expr, backend="auto", **kwargs):
         the kernel.  The same page as :func:`to_html`.
     ``"auto"`` (default)
         ``"kernel"`` when anywidget is installed, ``"pyodide"`` otherwise.
+
+    Add-ons work here as they do anywhere else, and are given the same two
+    ways - by name, by module, or as an :class:`~sympy_editor.addons.Addon`:
+
+    ``addons=[...]``
+        switched on from the start, their panels under the formula.
+    ``available=[...]``
+        the ones to list, instead of every add-on installed in the kernel:
+        they are switched on and off from the top of the drawer the **≡**
+        button opens (their front ends are sent when they are switched on,
+        not before), and ``available=[]`` lists none.
+
+    >>> edit(sin(x), addons=["sympy_editor_plot"])            # doctest: +SKIP
+    >>> edit(sin(x), available=["plot", "tree"])              # doctest: +SKIP
+
+    With neither, every installed add-on is listed and none is switched on.
+    Each add-on is a package of its own, so ``pip install sympy-editor`` has
+    none of them: install the ones wanted (in a checkout, ``pip install -e
+    addons/sympy_editor_plot``; none is on PyPI yet) and restart the kernel.
+    An add-on runs in **this** kernel, so its Python - `sympy-matching` for
+    the rewrite rules, `lark` for the LaTeX reader - is the kernel's to
+    import; one that cannot be imported is listed with the reason rather than
+    silently missing.
     """
     if backend not in ("auto", "kernel", "pyodide"):
         raise ValueError("backend must be 'auto', 'kernel' or 'pyodide'")
@@ -111,5 +138,7 @@ def edit(expr, backend="auto", **kwargs):
 
         warnings.warn("anywidget is not installed: using the Pyodide (in-browser) editor; edits will not reach the kernel. "
                       "pip install 'sympy-editor[jupyter]' for the kernel-backed widget.", stacklevel=2)
+        for name in ("store", "save_dir"):     # the widget's own: a page keeps in the browser
+            kwargs.pop(name, None)
         return display_html(expr, **kwargs)
     return SympyEditorWidget(expr, **kwargs)

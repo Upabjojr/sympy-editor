@@ -1,0 +1,406 @@
+"""Tutorials (sympy_editor.tutorial, static/tutorial.js): a page that plays a
+script of timed steps on the editor.  The player is checked on a real editor
+against real Python - captions in order, the arrow and the ring before every
+press, the presses doing what a person's would - and the rest of the package
+is checked to carry none of it: nothing in the app changes."""
+import json
+import threading
+import urllib.request
+from contextlib import closing
+
+import pytest
+from sympy import sin, symbols, sympify
+
+from sympy_editor import Document, to_html
+from sympy_editor.html import default_urls, read_static
+from sympy_editor.server import EditorServer
+from sympy_editor.tutorial import ELEMENT_PREFIX, load_tutorial, main, save_tutorial_html, to_tutorial_html
+
+x, y = symbols("x y")
+PLAYER = "SympyEditorTutorial"
+
+
+# ---- the script ----------------------------------------------------------
+
+def test_a_script_loads_from_a_dict_json_text_or_a_file(tmp_path):
+    script = {"steps": [{"at": 0, "caption": "hello"}, {"after": 1, "click": {"path": "/1"}}]}
+    path = tmp_path / "s.json"
+    path.write_text(json.dumps(script), encoding="utf-8")
+    for given in (script, json.dumps(script), str(path), path):
+        assert load_tutorial(given) == script
+    loaded = load_tutorial(script)
+    loaded["steps"].append({"wait": True})
+    assert len(script["steps"]) == 2                          # a copy: the caller's script is left alone
+
+
+@pytest.mark.parametrize("script, says", [
+    ({}, "needs 'steps'"),
+    ({"steps": []}, "needs 'steps'"),
+    ({"steps": [{"at": 0}]}, "step 0: says what it does"),
+    ({"steps": [{"caption": "a", "click": ".b"}]}, "step 0: says what it does"),
+    ({"steps": [{"wait": True}, {"at": 1, "after": 2, "wait": True}]}, "step 1: says when"),
+    ({"steps": [{"at": -1, "wait": True}]}, "step 0: 'at' is a number of seconds"),
+    ({"steps": [{"click": 5}]}, "step 0: click needs a target"),
+    ({"steps": [{"point": {"text": "x"}}]}, "step 0: point needs a target"),
+    ({"steps": [{"type": {"target": ".f"}}]}, "step 0: type needs"),
+    ({"steps": [{"zoom": 0}]}, "step 0: zoom is a positive number"),
+    ({"steps": [{"apply": {"path": "/"}}]}, "step 0: apply takes"),
+    ({"steps": [{"addons": ["plot"]}]}, "step 0: addons takes"),
+    ({"steps": [{"wait": True, "sayy": "typo"}]}, "step 0: unknown key(s) sayy"),
+    ({"steps": [{"wait": True}], "stepz": []}, "unknown key(s) stepz"),
+    ({"steps": [{"wait": True}], "speed": 0}, "'speed' is a positive number"),
+    ({"steps": [{"wait": True, "position": "left"}]}, "step 0: position is one of"),
+    ({"steps": [{"wait": True, "size": "huge"}]}, "step 0: size is"),
+    ({"steps": [{"caption": "a", "near": 3}]}, "step 0: near needs a target"),
+    ({"steps": [{"choose": {"target": "select"}}]}, "step 0: choose needs"),
+])
+def test_a_script_at_fault_is_refused_naming_the_step(script, says):
+    with pytest.raises(ValueError) as err:
+        load_tutorial(script)
+    assert says in str(err.value)
+
+
+# ---- the page, and the app left as it was --------------------------------
+
+def test_the_page_is_the_ordinary_editor_page_with_the_player_after_it():
+    script = {"title": "A tour", "expression": "x**2 + 1", "steps": [{"at": 0, "caption": "hi </script> there"}]}
+    page = to_tutorial_html(script)
+    assert page.count(f'SympyEditor.mount(document.getElementById("{ELEMENT_PREFIX}') == 1
+    assert '"fullPage": true' in page and '"stopButton": true' in page      # a way out, by default
+    assert read_static("editor.js").strip() in page and read_static("tutorial.js").strip() in page
+    assert read_static("tutorial.css").strip() in page and "<title>A tour</title>" in page
+    assert page.index("SympyEditor.mount(") < page.index(f"{PLAYER}.run(")          # the editor first
+    assert "hi </script> there" not in page                                        # the script is escaped
+    assert '"x**2 + 1"' in page or "x**2 + 1" in page
+
+
+def test_a_fragment_embeds_beside_other_editors_sharing_their_scripts():
+    """Embedded in a page of one's own: no page of its own around it, its own
+    element, and every script guarded - one copy of the editor, one of the
+    player, whatever else is on the page (and so one Python runtime)."""
+    script = {"expression": "x**2", "steps": [{"at": 0, "caption": "hi"}]}
+    one = to_tutorial_html(script, full_page=False)
+    two = to_tutorial_html(script, full_page=False)
+    assert one.startswith("<style>") and not one.lstrip().startswith("<!DOCTYPE")
+    assert "if (!window.SympyEditor) {" in one and "if (!window.SympyEditorTutorial) {" in one
+    assert '"fullPage": false' in one
+    ids = [f.split(f'id="{ELEMENT_PREFIX}')[1].split('"')[0] for f in (one, two)]
+    assert ids[0] != ids[1]                                       # two on a page do not collide
+
+
+def test_nothing_else_carries_the_player():
+    """The app is unchanged: an ordinary page, a served page and the widget
+    have no tutorial in them, nor anything to start one with."""
+    for page in (to_html(x**2 / y), to_html(x, backend="readonly"), to_html(x, full_page=False)):
+        assert PLAYER not in page and "se-tour" not in page
+    srv = EditorServer(Document(x), port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with closing(urllib.request.urlopen(srv.url, timeout=10)) as r:
+            served = r.read().decode("utf-8")
+    finally:
+        srv.shutdown()
+        srv.server_close()
+    assert "SympyEditor.mount(" in served and PLAYER not in served
+    assert PLAYER not in read_static("editor.js") and "se-tour" not in read_static("editor.css")
+    anywidget = pytest.importorskip("anywidget")   # noqa: F841
+    from sympy_editor.widget import SympyEditorWidget
+    assert PLAYER not in SympyEditorWidget._esm
+
+
+def test_the_command_line_builds_a_page_and_refuses_a_bad_script(tmp_path, capsys):
+    good = tmp_path / "tour.json"
+    good.write_text(json.dumps({"expression": "sin(x)", "steps": [{"at": 0, "caption": "hi"}]}), encoding="utf-8")
+    assert main([str(good)]) == 0 and PLAYER in (tmp_path / "tour.html").read_text(encoding="utf-8")
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps({"steps": [{"at": 0}]}), encoding="utf-8")
+    assert main([str(bad), "-o", str(tmp_path / "bad.html")]) == 1
+    assert "step 0" in capsys.readouterr().err and not (tmp_path / "bad.html").exists()
+    out = save_tutorial_html({"steps": [{"wait": True}]}, tmp_path / "w.html", expr="y")
+    assert out.is_file()
+
+
+# ---- the player, on a real editor ----------------------------------------
+
+# Only the tests that drive a page need Playwright: a module-level
+# importorskip took every test of this file with it, the Python ones above too.
+try:
+    from playwright import sync_api as playwright
+except ImportError:
+    playwright = None
+
+
+def _online(url):
+    try:
+        with closing(urllib.request.urlopen(urllib.request.Request(url, method="HEAD"), timeout=5)):
+            return True
+    except Exception:
+        return False
+
+
+WATCH = """
+window.__tour = {steps: [], rings: 0, end: null, placed: {}, picked: []};
+addEventListener('DOMContentLoaded', () => {
+  const s = document.createElement('select');
+  s.id = 'pick'; s.innerHTML = '<option value="a">a</option><option value="b">b</option>';
+  s.addEventListener('change', () => window.__tour.picked.push(s.value));
+  document.body.appendChild(s);
+});
+const box = r => r && {left: r.left, top: r.top, right: r.right, bottom: r.bottom};
+addEventListener('sympy-editor-tutorial-step', e => {
+  const i = e.detail.index;
+  const cap = document.querySelector('.se-tour-caption');
+  const sel = document.querySelector('.se-view .se-selected[data-path]');
+  window.__tour.steps.push({i: i,
+    caption: cap && !cap.hidden ? cap.textContent : null,
+    source: (document.querySelector('.se-source') || {}).textContent,
+    count: (document.querySelector('.se-history-head .se-play-count') || {}).textContent || null,
+    code: cap && !cap.hidden ? [...cap.querySelectorAll('code')].map(c => c.textContent) : [],
+    selected: sel ? sel.getAttribute('data-path') : null});
+  setTimeout(() => {           // the arrow and the ring are up by now: where did the caption go?
+    const c = document.querySelector('.se-tour-caption'), r = document.querySelector('.se-tour-ring');
+    window.__tour.placed[i] = {caption: c && !c.hidden ? box(c.getBoundingClientRect()) : null,
+                               ring: r && !r.hidden ? box(r.getBoundingClientRect()) : null,
+                               width: innerWidth, height: innerHeight};
+  }, 220);
+});
+addEventListener('sympy-editor-tutorial-end', e => {
+  window.__tour.end = e.detail;
+  window.__tour.after = {layers: document.querySelectorAll('.se-tour-layer').length,
+                         running: document.documentElement.classList.contains('se-tour-running'),
+                         history: !!document.querySelector('.se-history-view')};
+});
+new MutationObserver(recs => recs.forEach(r => {
+  if (r.target.classList && r.target.classList.contains('se-tour-ring') && !r.target.hidden) window.__tour.rings++;
+})).observe(document, {subtree: true, attributes: true, attributeFilter: ['hidden']});
+"""
+
+
+def _apart(a, b):
+    return a["right"] <= b["left"] or b["right"] <= a["left"] or a["bottom"] <= b["top"] or b["bottom"] <= a["top"]
+
+
+@pytest.mark.skipif(playwright is None or not _online(default_urls()["katexJs"]), reason="needs Playwright and the KaTeX CDN")
+def test_the_player_plays_a_script_on_a_real_editor():
+    doc = Document(x**2 / y - sin(x))
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    script = {"speed": 4, "steps": [
+        {"at": 0, "caption": "A formula you can click"},
+        {"after": 0.4, "click": {"path": "/1/d"}, "say": "Click a piece to select it"},
+        {"after": 0.4, "click": '.se-keyrow [data-cmd="parent"]', "say": "Up to what holds it"},
+        {"after": 0.4, "click": {"path": "/"}, "say": "The whole formula"},
+        {"after": 0.4, "click": '.se-toolbar [data-cmd="edit"]', "say": "Edit it where it is"},
+        {"after": 0.4, "type": {"target": "focused", "text": "(x + 1)**2", "enter": True}},
+        {"after": 0.4, "apply": "expand", "say": "Transform it"},
+        {"after": 0.4, "undo": True},
+        {"after": 0.4, "point": ".se-ops", "say": "Every transformation is in this menu"},
+        {"after": 0.4, "zoom": 1.5},
+        {"after": 0.4, "choose": {"target": "#pick", "value": "b"}, "say": "A choice from a list"},
+        {"after": 0.4, "click": '.se-toolbar [data-cmd="history"]', "say": "Every edit, `kept`"},
+        {"after": 0.6, "click": '.se-history-head .se-play-step[title^="The next"]'},
+        {"after": 0.4, "caption": None},
+    ]}
+    # the page from the server's own address, so that the player's presses
+    # reach this very Document through its API
+    page_html = to_tutorial_html(script, expr=doc, backend="http", api_url="/api", token=srv.token)
+    try:
+        with playwright.sync_playwright() as p:
+            try:
+                browser = p.chromium.launch()
+            except Exception as exc:
+                pytest.skip(f"chromium not available: {exc}")
+            page = browser.new_page(viewport={"width": 1000, "height": 800})
+            errors = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.add_init_script(WATCH)
+            page.route(srv.url + "tour", lambda route: route.fulfill(body=page_html, content_type="text/html"))
+            page.goto(srv.url + "tour")
+            page.wait_for_function("() => window.__tour && window.__tour.end", timeout=60000)
+            tour = page.evaluate("window.__tour")
+            zoom = page.evaluate("document.querySelector('.sympy-editor').__sympyEditor.zoom")
+            browser.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+    assert tour["end"]["errors"] == [] and errors == []
+    at = {s["i"]: s for s in tour["steps"]}
+    assert [s["i"] for s in tour["steps"]] == list(range(len(script["steps"])))    # every step, in order
+    assert at[1]["caption"] == "A formula you can click"                           # a caption stays until the next
+    assert at[2]["caption"] == "Click a piece to select it" and at[2]["selected"] == "/1/d"
+    assert at[3]["selected"] == "/1"                                               # the parent button, pressed
+    assert at[6]["source"] == "(x + 1)**2"                                         # typed over it, in the formula itself
+    assert at[7]["source"] == "x**2 + 2*x + 1"                                     # and expanded
+    assert doc.expr == sympify("(x + 1)**2")                                       # and undone
+    assert tour["rings"] >= 6                                                      # arrow and ring on every press and point
+    assert zoom == 1.5 and tour["picked"] == ["b"]                                 # chose from the list
+    # every caption said beside a target stays clear of its ring, on the screen
+    for i in (1, 2, 4, 8, 10):                                                     # the steps with a caption and a ring
+        placed = tour["placed"][str(i)]
+        cap, ring = placed["caption"], placed["ring"]
+        assert cap and ring and _apart(cap, ring), (i, placed)
+        assert cap["left"] >= 0 and cap["top"] >= 0 and cap["right"] <= placed["width"] and cap["bottom"] <= placed["height"]
+    assert at[13]["count"] and at[13]["count"].startswith("2 /")                   # the History, one step on
+    assert at[12]["caption"] == "Every edit, kept" and at[12]["code"] == ["kept"]  # backticks: code, as text
+    # and at the end, nothing of the tutorial is left - the History it left
+    # open shut too: the editor as a reader finds it
+    assert tour["after"] == {"layers": 0, "running": False, "history": False}
+
+
+def test_the_example_tour_is_a_script_that_builds(tmp_path):
+    """examples/tutorial: tour.json is a valid script, and build.py turns it
+    into a page with the two add-ons the tour switches on."""
+    import importlib.util
+    from pathlib import Path
+    here = Path(__file__).resolve().parent.parent / "examples" / "tutorial"
+    script = load_tutorial(here / "tour.json")
+    assert len(script["steps"]) > 10 and set(script["addons"]) == {"plot", "tree", "matching", "latex"}
+    # every add-on is listed in the menu; the tour leaves the tree alone
+    assert not any("Expression tree" in json.dumps(s) for s in script["steps"])
+    spec = importlib.util.spec_from_file_location("tour_build", here / "build.py")
+    build = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(build)
+    out = tmp_path / "tour.html"
+    assert build.main(["--out", str(out)]) == 0
+    page = out.read_text(encoding="utf-8")
+    assert PLAYER in page and "sympy_editor_plot" in page and "sympy_editor_tree" in page
+    assert "sympy_editor_matching" in page and "sympy_editor_latex" in page
+    assert "sympy-matching" in page and "lark" in page       # what the browser installs for those two
+
+
+def test_a_part_of_the_script_can_be_left_out_and_the_stop_button_turned_off():
+    """A page may leave a named part out (the site leaves out the History),
+    and a recording may do without the Stop button."""
+    script = {"steps": [{"at": 0, "caption": "one"},
+                        {"after": 1, "caption": "two", "part": "history"},
+                        {"after": 1, "caption": "three", "part": "history"},
+                        {"after": 1, "caption": "four"}]}
+    page = to_tutorial_html(script, expr="x", backend="readonly", skip=["history"])
+    assert '"two"' not in page and '"three"' not in page and '"one"' in page and '"four"' in page
+    assert '"stopButton": true' in page
+    assert '"stopButton": false' in to_tutorial_html(script, expr="x", backend="readonly", stop_button=False)
+    with pytest.raises(ValueError, match="leaves no step"):
+        to_tutorial_html({"steps": [{"wait": True, "part": "p"}]}, expr="x", backend="readonly", skip=["p"])
+    with pytest.raises(ValueError, match="part is the name"):
+        load_tutorial({"steps": [{"wait": True, "part": ""}]})
+
+
+@pytest.mark.skipif(playwright is None or not _online(default_urls()["katexJs"]), reason="needs Playwright and the KaTeX CDN")
+def test_the_stop_button_stops_the_tour_and_leaves_the_editor_usable():
+    """Stopped mid-way: the overlay goes, nothing after it is pressed or
+    changed, and the editor is there to use."""
+    doc = Document(x**2 / y - sin(x))
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    script = {"steps": [
+        {"at": 0, "caption": "A long wait, for somebody to stop it", "position": "top"},
+        {"after": 30, "set": "cos(x)"},                               # never reached: stopped before
+    ]}
+    page_html = to_tutorial_html(script, expr=doc, backend="http", api_url="/api", token=srv.token)
+    try:
+        with playwright.sync_playwright() as p:
+            try:
+                browser = p.chromium.launch()
+            except Exception as exc:
+                pytest.skip(f"chromium not available: {exc}")
+            page = browser.new_page(viewport={"width": 1000, "height": 800})
+            errors = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.add_init_script("addEventListener('sympy-editor-tutorial-end', e => { window.__end = e.detail; });")
+            page.route(srv.url + "tour", lambda route: route.fulfill(body=page_html, content_type="text/html"))
+            page.goto(srv.url + "tour")
+            stop = page.locator(".se-tour-stop")
+            stop.wait_for(state="visible", timeout=30000)
+            page.wait_for_selector(".se-tour-caption.shown", timeout=30000)
+            stop.click()                                              # a real click: the button takes the pointer
+            page.wait_for_function("() => !!window.__end", timeout=35000)
+            end = page.evaluate("window.__end")
+            layers = page.evaluate("document.querySelectorAll('.se-tour-layer').length")
+            # the editor is usable: a click on the formula selects, as ever
+            page.locator('.se-view [data-path="/1/d"]').first.click(force=True)
+            selected = page.evaluate("(document.querySelector('.se-view .se-selected[data-path]') || {}).getAttribute && document.querySelector('.se-view .se-selected[data-path]').getAttribute('data-path')")
+            browser.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+    assert layers == 0 and errors == []
+    assert doc.expr == x**2 / y - sin(x)                              # the step after the stop never ran
+    assert selected == "/1/d"
+
+
+@pytest.mark.skipif(playwright is None or not _online(default_urls()["katexJs"]), reason="needs Playwright and the KaTeX CDN")
+def test_a_link_or_a_scroll_past_stops_the_tour_and_the_play_button_plays_it_again():
+    """A reader gone elsewhere - a link followed, the page scrolled on past
+    the editor - is not watching: the tour stops.  The page's Play button,
+    out of sight while a tour plays, plays it again from the start on a
+    fresh editor."""
+    doc = Document(x**2 / y - sin(x))
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    script = {"steps": [
+        {"at": 0, "caption": "A long wait, for somebody to go elsewhere", "position": "top"},
+        {"after": 30, "set": "cos(x)"},                               # never reached
+    ]}
+    page_html = to_tutorial_html(script, expr=doc, backend="http", api_url="/api", token=srv.token,
+                                 stop_on_leave=True, play_button="play")
+    # the page's own, before the player: its button, a link, and a long way down
+    player = "<script>\nif (!window.SympyEditorTutorial)"
+    assert '"stopOnLeave": true, "playButton": "play"' in page_html
+    page_html = page_html.replace(player, '<button type="button" class="se-tour-play" id="play">Play</button>'
+                                  '<a id="away" href="#below">below</a><div style="height: 4000px"></div>'
+                                  '<p id="below">the end</p>\n' + player, 1)
+    try:
+        with playwright.sync_playwright() as p:
+            try:
+                browser = p.chromium.launch()
+            except Exception as exc:
+                pytest.skip(f"chromium not available: {exc}")
+            page = browser.new_page(viewport={"width": 1000, "height": 800})
+            errors = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.add_init_script("window.__ends = []; window.__starts = 0;"
+                                 "addEventListener('sympy-editor-tutorial-end', e => window.__ends.push(e.detail));"
+                                 "addEventListener('sympy-editor-tutorial-step', e => { if (!e.detail.index) window.__starts++; });")
+            page.route(srv.url + "tour", lambda route: route.fulfill(body=page_html, content_type="text/html"))
+            page.goto(srv.url + "tour")
+            play = page.locator("#play")
+            page.wait_for_selector(".se-tour-caption.shown", timeout=30000)
+            playing = {"play": play.is_visible()}
+            page.locator("#away").click()                             # a link followed: stopped at once
+            page.wait_for_function("() => window.__ends.length === 1", timeout=5000)
+            linked = page.evaluate("({end: window.__ends[0], hash: location.hash,"
+                                   " layers: document.querySelectorAll('.se-tour-layer').length})")
+            linked["play"] = play.is_visible()
+            page.evaluate("window.__old = document.querySelector('.sympy-editor')")
+            play.click()                                              # played again, on a fresh editor
+            page.wait_for_function("() => window.__starts === 2", timeout=30000)
+            page.wait_for_selector(".se-tour-caption.shown", timeout=30000)
+            again = page.evaluate("({old: window.__old.isConnected, editors: document.querySelectorAll('.sympy-editor').length})")
+            again["play"] = play.is_visible()
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")   # scrolled on past the editor
+            page.wait_for_function("() => window.__ends.length === 2", timeout=5000)
+            scrolled = page.evaluate("({end: window.__ends[1], layers: document.querySelectorAll('.se-tour-layer').length,"
+                                     " y: scrollY})")
+            scrolled["play"] = play.is_visible()
+            browser.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+    assert errors == []
+    assert playing == {"play": False}                                 # no Play button while it plays
+    assert linked == {"end": {"errors": [], "stopped": True}, "hash": "#below", "layers": 0, "play": True}
+    assert again == {"old": False, "editors": 1, "play": False}
+    assert scrolled["end"] == {"errors": [], "stopped": True} and scrolled["layers"] == 0 and scrolled["play"]
+    assert scrolled["y"] > 3000                                       # and nothing pulled the page back up
+    assert doc.expr == x**2 / y - sin(x)                              # no step after a stop ran
+
+
+def test_the_players_options_cannot_close_its_script():
+    """The options went through json.dumps: a button id holding </script>
+    ended the script there, and the rest of it was the page's."""
+    script = {"title": "T", "steps": [{"caption": "hello"}]}
+    evil = "</script><script>alert(1)</script>"
+    page = to_tutorial_html(script, expr="x", play_button=evil, element_id='e"x')
+    assert "<script>alert(1)" not in page and "\\u003c/script>\\u003cscript>alert(1)" in page
+    assert 'getElementById("e\\"x")' in page and 'id="e&quot;x"' in page
+    assert "<title>7</title>" in to_tutorial_html({"title": 7, "steps": [{"caption": "hello"}]}, expr="x")

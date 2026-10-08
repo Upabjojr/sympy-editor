@@ -63,7 +63,8 @@ ENTRY_POINT_GROUP = "sympy_editor.addons"
 #: An add-on *folder* - what a checkout of an add-on's repository is, and
 #: what the apps bundle one as - carries this manifest beside the Python
 #: package: ``{"name", "label", "module", "version", "requires": [...],
-#: "description"}``.  :func:`scan_addons` reads a directory of such folders.
+#: "description"[, "bundle": false][, "experimental": true]}``.
+#: :func:`scan_addons` reads a directory of such folders.
 MANIFEST = "addon.json"
 #: Directories of add-on folders, ``os.pathsep``-separated, that count as
 #: installed (the apps point it at the folders they bundle).
@@ -229,6 +230,11 @@ class Addon:
         scripts and styles the add-on reads at import); an add-on that needs
         more (data files) adds them."""
         mod = importlib.import_module(self.module)
+        # A package only.  An add-on written in a script or a notebook has
+        # the module "__main__" (or a lone file): its directory is whatever
+        # lies beside it, and every .py there went into the page.
+        if not getattr(mod, "__path__", None):
+            return {}
         root = Path(getattr(mod, "__file__", "") or "").parent
         if not root.is_dir() or not (root / "__init__.py").is_file():
             return {}
@@ -259,16 +265,12 @@ class Addon:
 
 
 def _entry_points(group: str):
-    """``importlib.metadata.entry_points`` for one group, on every Python
-    this package supports (3.9 returns a dict, 3.10+ has ``select``)."""
+    """``importlib.metadata.entry_points`` for one group."""
     try:
         from importlib.metadata import entry_points
     except ImportError:  # pragma: no cover
         return []
-    eps = entry_points()
-    if hasattr(eps, "select"):
-        return list(eps.select(group=group))
-    return list(eps.get(group, []))  # type: ignore[union-attr]
+    return list(entry_points(group=group))
 
 
 def read_manifest(folder: Union[str, Path]) -> Optional[Dict[str, Any]]:
@@ -281,10 +283,20 @@ def read_manifest(folder: Union[str, Path]) -> Optional[Dict[str, Any]]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    if not isinstance(data, dict) or not data.get("name") or not data.get("module"):
+    if not isinstance(data, dict):
         return None
-    data.setdefault("label", data["name"])
-    data.setdefault("requires", [])
+    name, module = data.get("name"), data.get("module")
+    # Text, and of the right shape: a name or a module of another type raised
+    # from inside the scan, and every Document() with it.
+    if not isinstance(name, str) or not NAME_RE.match(name):
+        return None
+    if not isinstance(module, str) or not all(part.isidentifier() for part in module.split(".")):
+        return None
+    if not isinstance(data.get("label", ""), str):
+        data["label"] = name
+    data.setdefault("label", name)
+    requires = data.get("requires", [])
+    data["requires"] = [r for r in requires if isinstance(r, str)] if isinstance(requires, list) else []
     data["folder"] = str(Path(folder).resolve())
     return data
 
@@ -298,15 +310,45 @@ def scan_addons(directory: Union[str, Path]) -> Dict[str, Dict[str, Any]]:
     repositories will be found later."""
     out: Dict[str, Dict[str, Any]] = {}
     root = Path(directory)
-    if not root.is_dir():
+    try:
+        folders = sorted(p for p in root.iterdir() if p.is_dir()) if root.is_dir() else []
+    except OSError:                    # a directory that cannot be read holds no add-on
         return out
-    for folder in sorted(p for p in root.iterdir() if p.is_dir()):
-        manifest = read_manifest(folder)
-        if manifest is None:
+    for folder in folders:
+        try:
+            manifest = read_manifest(folder)
+            if manifest is None:
+                continue
+            package = folder / manifest["module"].split(".")[0]
+            if package.is_dir() and str(folder.resolve()) not in sys.path:
+                sys.path.append(str(folder.resolve()))
+        except OSError:                # one folder that cannot be read: the others still count
             continue
-        if (folder / manifest["module"]).is_dir() and str(folder.resolve()) not in sys.path:
-            sys.path.append(str(folder.resolve()))
-        out[manifest["name"]] = manifest
+        out.setdefault(manifest["name"], manifest)     # two folders of one name: the first, as installed() does
+    return out
+
+
+def addon_manifest(addon: "Addon") -> Dict[str, Any]:
+    """The manifest (``addon.json``) beside the package an add-on comes from,
+    when there is one - its description and version, for the Add-ons window
+    - else ``{}``.  An add-on object may say them itself: a ``description``
+    or ``version`` attribute wins."""
+    module = type(addon).__module__.split(".")[0]
+    found: Dict[str, Any] = {}
+    mod = sys.modules.get(module)
+    path = getattr(mod, "__file__", None)
+    if path:
+        try:
+            found = read_manifest(Path(path).resolve().parent.parent) or {}
+        except (OSError, ValueError):
+            found = {}
+    out = dict(found)
+    for key in ("description", "version"):
+        value = getattr(addon, key, None)
+        if isinstance(value, str) and value:
+            out[key] = value
+    if getattr(addon, "experimental", None) is True:
+        out["experimental"] = True
     return out
 
 
@@ -596,8 +638,9 @@ def _now() -> str:
 
 
 def load_addon(spec: Union[str, Addon]) -> Addon:
-    """An :class:`Addon` from an instance, an entry-point name (``"tree"``,
-    see :func:`installed`), a module name (``"sympy_editor_tree"``: its
+    """An :class:`Addon` from an instance, the name of an installed add-on
+    (``"tree"``, from an entry point or an add-on folder: see
+    :func:`installed`), a module name (``"sympy_editor_tree"``: its
     ``ADDON``) or ``"module:object"`` (``"my_pkg.addons:PLOT"``).  A class is
     instantiated with no arguments."""
     if isinstance(spec, Addon):
@@ -609,11 +652,15 @@ def load_addon(spec: Union[str, Addon]) -> Addon:
                 addon = ep.load()
                 break
         if addon is None:
-            # the name of an add-on folder (bundled, or installed while
-            # editing): its manifest says the module
-            folders = installed() if ":" not in spec else {}
-            target = folders.get(spec, spec) if not _importable(spec) else spec
-            mod_name, _, attr = target.partition(":")
+            # A name from an add-on folder (bundled, registered through
+            # register_addons_folder / SYMPY_EDITOR_ADDONS, or installed
+            # while editing): installed() knows what to load it by.  Without
+            # this a name resolved for Document(addons=[...]), which goes
+            # through the catalogue, but not for available=[...] or for a
+            # bare load_addon() - and the error said the name was installed
+            # in the same breath as refusing it.
+            folders = installed() if ":" not in spec and not _importable(spec) else {}
+            mod_name, _, attr = folders.get(spec, spec).partition(":")
             try:
                 mod = importlib.import_module(mod_name)
             except ImportError as exc:

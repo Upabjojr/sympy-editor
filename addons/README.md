@@ -14,9 +14,11 @@ addons/
   sympy_editor_plot/        the graph of the selection, drawn by Plotly.js (numpy optional)
   sympy_editor_matching/    rewrite rules matched many-to-one              (sympy-matching)
   sympy_editor_latex/       LaTeX in: a first reading, every ambiguity a choice, constants as switches (lark)
+  sympy_editor_console/     a Python console and script runner, with `editor` for the formula (no dependency)
+  sympy_editor_handwriting/ writing on the formula by hand, read by math-ocr's stroke model (onnxruntime; not in Pyodide)
   sympy_editor_feynman/     path integrals of QED as Feynman diagrams, drawn and editable  (no dependency; not bundled: install it while editing)
   demo.py                   a page with the drafts, to try them in a browser
-  pack.py                   zips an add-on folder for "From a file…" in the Add-ons section
+  pack.py                   zips an add-on folder for "From a file…" in the Add-ons window
 ```
 
 All of them are **drafts**: they work end to end (each has tests, and the
@@ -61,7 +63,7 @@ entry point, the way pytest learns of its plugins.
    share one add-on object; state is kept per document.
 
 3. **Or try the page**: `python addons/demo.py` writes `addons/demo.html`
-   with the three drafts (no install needed, it reads them from the
+   with the drafts (no install needed, it reads them from the
    checkout), `python addons/demo.py --serve` runs them on the local server.
 
 4. **Switch them while editing.**  The **Add-ons** section at the top of the **≡** drawer lists
@@ -222,8 +224,9 @@ message travels.  Add-ons keep that shape.  They do not get a second channel:
   `export_state(doc)` / `restore_state(doc, data)` carry it with a session
   (`Document.export()["addon_state"]`), as JSON the add-on parses back; in
   Jupyter `w.addon_state` is the same dict, live.  What should outlive a
-  session - a library of rule sets - the add-on keeps in the browser's
-  storage from its panel (`localStorage`, which every host has).
+  session - a library of rule sets - the add-on keeps from its panel
+  through `api.keep`, its editor's keeper (the app's storage, the server's
+  or the kernel's store; the browser's only on a standalone page).
 
 ### The `api` a panel receives
 
@@ -231,16 +234,38 @@ message travels.  Add-ons keep that shape.  They do not get a second channel:
 api.name, api.options        // the add-on's name, and Addon.client_options() from Python
 api.state()                  // the last snapshot; api.node(path) one entry of its node table
 api.selected(), api.range()  // the selection (a view path) and the range, as the editor holds them
+api.rangeIndices()           // the range's argument indices, as `children` in the editor's messages (null without one)
 api.select(path)             // select in the formula
-api.call(method, payload)    // → Promise: the query's result, or the new snapshot for a change
+api.call(method, payload[, {quiet: true}])   // → Promise: the query's result, or the new snapshot for a change;
+                             // quiet: no "Working…" overlay over the editor, the focus left alone - for a
+                             // question the panel shows its own progress for (the LaTeX box reads as one types)
+                             // without it the overlay still waits `backgroundAfter` (2.5 s), not the editor's
+                             // 0.4 s: an add-on's work does not block the editor unless it hangs.  A query's
+                             // answer carries the result only, not a snapshot of the formula
 api.send(msg)                // any editor message ({action: "apply", ...})
 api.status(text), api.error(text)
-api.h(tag, attrs, children)  // the editor's element helper; api.katex(); api.loadScript(url)
+api.h(tag, attrs, children)  // the editor's element helper; api.katex(); api.loadScript(url) - once per URL and page
+api.keep.read(name)          // → Promise of the text kept under `name` (or null); api.keep.write(name, text):
+                             // this editor's keeper - the app's storage, the server's or the kernel's store,
+                             // the browser's only on a standalone page.  Not SympyEditor.keep, which asks
+                             // the editor made last: on a page with several it may be another backend
+api.openFile(accept)         // → Promise of {name, text} the user picked (null for none): the host app's picker,
+                             // a file input in a browser
+api.saveFile(name, mime, text)   // offer text as a file, as the editor saves its own: the host app, the kernel,
+                             // the share sheet, or a download
 api.editor                   // the Editor itself, for what the above does not cover
 ```
 
+`onSelect(path, range)` is called when the selection really changes - another
+node, range, operator or caret - and once after each new state; never for the
+same selection drawn again (a relayout, a zoom, the "Working…" overlay going
+away).  A panel that asks Python about the selection may still remember what
+it asked for last and ask nothing for the same target: on a phone a query
+outlasts the overlay's 0.4 s, and asking again on every redraw made each
+answer bring the next question, for ever.
+
 `def.mount(api)` returns `{element, title, help, onState(snap), onSelect(path,
-range), commands: {cmd: fn}, destroy(), historyStep(step, i, prev),
+range), onZoom(zoom), onBack(), commands: {cmd: fn}, destroy(), historyStep(step, i, prev),
 historyStepHtml(step, i, prev), historyCss, historyTools(target)}`, all optional (`help` is HTML for
 the guide behind the panel's "?", shown as the editor's own guide is - write
 one: a feature that is not in it does not exist for the user; the `history*`
@@ -248,7 +273,10 @@ hooks draw something under every step of the history - an element in the
 drawer's list, static markup plus CSS in the self-contained report, from what
 the Python side's `contribute_step(doc, step, expr)` put in the step - the
 tree add-on draws each step's tree; `historyTools` returns buttons for the
-history's strip and the drawer's list - expand or collapse every tree); `def.tools` is a list of
+history's strip and the drawer's list - expand or collapse every tree; `onBack`
+answers the system's Back - Android's button, through `SympyEditor.back()` -
+by closing what the add-on has open and returning true, or false when it has
+nothing open: the LaTeX field closes, the handwriting pen goes down); `def.tools` is a list of
 `{cmd, label, title, run(api)}` toolbar buttons, which the editor puts in a
 block of their own (`data-block="addon:<name>"`) and disables while it is busy.
 The panel goes in a collapsible box under the source line
@@ -272,6 +300,9 @@ sympy_editor_tree/            the folder: a checkout of the add-on's repository
 
 The manifest's optional `"bundle": false` marks a folder the apps must not
 ship (the template is one: an example to copy).
+An optional `"experimental": true` marks an add-on not yet checked: the
+Add-ons window shows an *Experimental* badge on its card (it is on by
+default like any other).
 
 `sympy_editor.addons.scan_addons(directory)` reads every such folder under a
 directory, puts the folder on `sys.path` and returns the manifests by name;
@@ -293,7 +324,7 @@ are the part that must not change for it.
 | Jupyter widget (`edit(expr, addons=[...])`) | the kernel: whatever is installed (`pip install`, or a folder named in `SYMPY_EDITOR_ADDONS`); the Add-ons menu lists it all, `w.addon_state` is the live state |
 | `serve()` | the same process |
 | standalone HTML (Pyodide) | the add-on's package is written into the page beside the editor's modules (`cfg["packages"]`, from `Addon.python_sources()`), and what it `requires` is `micropip`-installed first (`cfg["micropip"]`).  The tree and plot add-ons need nothing; matching needs `sympy-matching`, pure Python since 0.0.4. |
-| the mobile apps | `mobile/build.py` stages every add-on folder of `addons/` beside the app's Python (`addons/<folder>/`, manifest and package, no tests), one folder each; `sympy_editor_app.py` registers that directory at start, so every document lists them and the page switches them on and off; the app's pip step installs what the manifests `require` (Chaquopy's `pip { install(...) }` on Android - a test keeps it in step with the manifests -, `app_packages` on iOS).  The bundle starts with every add-on off and `rememberAddons` on: the switches are kept in the WebView's storage between launches. |
+| the mobile apps | `mobile/build.py` stages every add-on folder of `addons/` beside the app's Python (`addons/<folder>/`, manifest and package, no tests), one folder each; `sympy_editor_app.py` registers that directory at start, so every document lists them and the page switches them on and off; the app's pip step installs what the manifests `require` (Chaquopy's `pip { install(...) }` on Android - a test keeps it in step with the manifests -, `app_packages` on iOS).  The page has `rememberAddons` on: every add-on is on until the user switches it off, a switch holds for the whole app - every session, not the one open - and what is switched off is kept in the app's own storage between launches (`SympyEditorApp.keepWrite`), as is what an add-on keeps through `api.keep`. |
 
 `Document(addons=[...])` accepts `Addon` objects, entry-point names (an
 installed add-on registers under the `sympy_editor.addons` group: `tree`,
@@ -349,7 +380,7 @@ fixes, reproduced - not in the editor's.  `pytest addons/` runs them all,
 `addons/tests/test_demo_page.py` included, which refuses a stale
 `demo.html`.
 
-## The three drafts
+## The drafts
 
 **`sympy_editor_tree`** - *new interface + custom widget*.  `contribute` puts
 the real argument tree in the snapshot (`snap["tree"]`, capped at 400 nodes),
@@ -360,7 +391,8 @@ report, the nodes the previous step did not have in green - how the tree
 evolved.  In the panel, click selects the same piece in the formula
 (argument paths and view paths agree except under fractions, where the
 nearest ancestor is selected), double-click edits a leaf's value or an inner
-node's head, drag drops a subtree under another node, `Delete` removes, the
+node's head, a drag with a mouse or a pen drops a subtree under another node
+(a finger scrolls the panel and never drags), `Delete` removes, the
 panel's fields add an argument or wrap.  Every edit is a method (`set_head`,
 `replace`, `delete`, `insert`, `wrap`, `move`) made with the editor's own path
 helpers on the real `args`, so SymPy's evaluation applies and undo works.
@@ -369,7 +401,8 @@ helpers on the real `args`, so SymPy's evaluation applies and undo works.
 query, `samples`: Python evaluates the node at a view path (with the sliders'
 values substituted, the first free symbol on the axis, an equation as two
 curves) with `lambdify` - numpy when present, `math` otherwise, a non-real
-value a gap - and `plot.js` draws with Plotly.js from the CDN, or an SVG
+value a gap - and `plot.js` draws with Plotly.js from the CDN (from the bundle's own copy
+in the apps and the web app: the page option `localAssets`), or an SVG
 polyline when the CDN is out of reach.  It follows the selection, so
 selecting the numerator plots the numerator.  SymPy's plotting module is not
 used.
@@ -384,6 +417,20 @@ matching the selection with their bindings, and *Rewrite* / *Rewrite all*
 both as buttons and as ops in the Transform menu (`context=True`: they read
 the document's rules).
 
+**`sympy_editor_console`** - *a Python console beside the formula*.  Two
+tabs: a console that behaves as IPython (`In [n]` / `Out[n]` typeset, `_`,
+`obj?`, `%who`, `%time`, Tab completion, an unfinished block asking for the
+next line) and a script editor that runs a whole file as `python file.py`
+does, then leaves its names in the console (IPython's `%run`).  Both run in
+the document's Python - the app's own interpreter, the server's process,
+Pyodide - with SymPy imported, the formula's symbols in scope, and `editor`
+to read and change the formula (`editor.expr`, `editor.selection`,
+`editor["/1"]`, `editor.apply(...)`), each change a step of the history.
+Nothing but the standard library: no IPython.  A run that changed the formula
+answers as a query with `changed: true`, and the panel then asks for a fresh
+snapshot - an add-on method answers either a query or a change, and a run is
+both (its output and a new formula).
+
 ## Open questions
 
 These are the decisions this PR leaves open on purpose:
@@ -392,9 +439,8 @@ These are the decisions this PR leaves open on purpose:
    data)` carry an add-on's state under `export()["addon_state"]`, so a
    session switch keeps a rule set; `Document(addon_state=...)` gives it back
    when the add-on is on.  Persistence beyond a session is the add-on's:
-   the rules panel mirrors its library to `localStorage`, which the pages,
-   the apps' web views and JupyterLab all have, and in Jupyter the state is
-   also Python (`w.addon_state`).
+   the rules panel mirrors its library to its editor's keeper (`api.keep`),
+   and in Jupyter the state is also Python (`w.addon_state`).
 2. **Global registries.**  Kinds are per document (`doc.kinds`), so a
    switched-off add-on leaves no classification behind; rebuilders and printer
    methods for foreign classes are still process wide, which only shows when

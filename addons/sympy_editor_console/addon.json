@@ -1,0 +1,8 @@
+{
+  "name": "console",
+  "label": "Python console",
+  "module": "sympy_editor_console",
+  "version": "0.0.1",
+  "description": "A Python console beside the formula: input and output as in IPython, or a whole script run at once, with `editor` to read and change the formula.",
+  "requires": []
+}

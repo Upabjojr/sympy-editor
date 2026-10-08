@@ -128,6 +128,11 @@ def test_methods_query_change_and_error():
     snap = doc.handle({"action": "addon", "addon": "demo", "method": "count"})
     assert snap["query"] == {"addon": "demo", "method": "count", "result": {"n": 2}}
     assert not doc.can_undo                          # a query commits nothing
+    # and its answer is the query alone: the whole snapshot riding along was
+    # most of its cost (half a second on a phone) and every front end drops it
+    assert "latex" not in snap and "nodes" not in snap and snap["error"] is None and isinstance(snap["seq"], int)
+    failed = doc.handle({"action": "addon", "addon": "demo", "method": "no_such_method"})
+    assert "latex" not in failed and failed["query"]["error"]
     snap = doc.handle({"action": "addon", "addon": "demo", "method": "box_it"})
     assert doc.expr == Boxed(x + y) and snap["addon"] == {"name": "demo", "method": "box_it"}
     assert doc.history_labels()["actions"][-1] == "Demo did box_it"
@@ -171,10 +176,14 @@ def test_the_widget_passes_the_front_end():
     from sympy_editor.widget import SympyEditorWidget
     w = SympyEditorWidget(x + y, addons=[ADDON])
     assert w.options["addons"][0]["name"] == "demo"
+    sent = []                                  # a query's answer is a message of its own, not the trait
+    w.send = lambda content, buffers=None: sent.append(content)
+    before = w.snapshot
     w._on_msg(w, {"action": "addon", "addon": "demo", "method": "count", "_req": 7}, [])
     w.wait(5)
-    snap = json.loads(w.snapshot)
+    snap = sent[-1]
     assert snap["query"]["result"] == {"n": 2} and snap["_req"] == 7
+    assert w.snapshot == before
 
 
 def test_installed_lists_entry_points_and_specs_name_objects(tmp_path, monkeypatch):
@@ -197,6 +206,24 @@ def test_installed_lists_entry_points_and_specs_name_objects(tmp_path, monkeypat
         api_version = mod.API_VERSION + 1
     with pytest.raises(ValueError, match="API version"):
         load_addon(Future())
+
+
+
+def test_every_installed_addon_is_listed_unless_available_says_otherwise(tmp_path, monkeypatch):
+    """What installing an add-on gets you: every document - a widget, a page,
+    the server - lists it without being asked, switched off.  ``available=``
+    names what to list instead, and ``available=[]`` nothing (what edit() and
+    the README promise)."""
+    import sympy_editor.document as document
+    (tmp_path / "an_installed_addon.py").write_text(
+        "from sympy_editor import Addon\nclass A(Addon):\n    name = 'installed_one'\nADDON = A()\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setattr(document, "installed", lambda: {"installed_one": "an_installed_addon:ADDON"})
+    listed = lambda **kw: [a["name"] for a in Document(x, **kw).available_addons()]
+    assert listed() == ["installed_one"]                    # nothing asked for: what is installed
+    assert Document(x).snapshot()["addons"] == []           # listed, not switched on
+    assert listed(available=[]) == []                       # the editor alone
+    assert listed(available=[ADDON]) == [ADDON.name]        # only what available= names
 
 
 def test_switching_on_and_off_at_run_time():
@@ -324,6 +351,33 @@ def test_addon_folders_are_found_by_their_manifest(tmp_path, monkeypatch):
         assert installed()["folderish"] == "my_addon_pkg"
     finally:
         ADDON_FOLDERS.remove(str(tmp_path.resolve()))
+
+
+def test_a_folder_registered_addon_loads_by_its_name(tmp_path, monkeypatch):
+    """An add-on from a folder is named by its manifest, not by its module,
+    and the name is what a reader has: installed_addons() hands out names,
+    so ``available=list(installed_addons())`` passes names in.  Both have to
+    reach the same add-on - once the name only worked through the
+    catalogue, so addons=["plot"] opened and available=["plot"] came back
+    saying "plot" was not installed while listing it among the installed."""
+    from sympy_editor.addons import ADDON_FOLDERS, register_addons_folder
+    folder = tmp_path / "named-addon"
+    (folder / "named_addon_pkg").mkdir(parents=True)
+    (folder / "named_addon_pkg" / "__init__.py").write_text(
+        "from sympy_editor import Addon\nclass A(Addon):\n    name = 'byname'\n    label = 'By name'\nADDON = A()\n")
+    (folder / "addon.json").write_text(json.dumps(
+        {"name": "byname", "label": "By name", "module": "named_addon_pkg", "version": "0.1"}))
+    register_addons_folder(tmp_path)
+    try:
+        assert load_addon("byname").name == "byname"           # the name...
+        assert load_addon("named_addon_pkg").name == "byname"  # ...and the module
+        assert list(Document(x, addons=["byname"]).addons) == ["byname"]
+        listed = {a["name"]: a for a in Document(x, available=["byname"]).available_addons()}
+        assert "error" not in listed["byname"] and listed["byname"]["label"] == "By name"
+    finally:
+        ADDON_FOLDERS.remove(str(tmp_path.resolve()))
+    with pytest.raises(ValueError):        # gone with the folder, and it says so
+        load_addon("byname")
 
 
 def test_the_repositorys_addon_folders_carry_manifests():
@@ -533,3 +587,102 @@ def test_the_page_config_and_the_widget_options_carry_the_user_addons(user_dir):
     cfg = build_config(doc)
     assert "sympy_editor_zzz" in cfg["packages"] and "static/z.js" in cfg["packages"]["sympy_editor_zzz"]
     assert cfg["document"]["addons"] == ["sympy_editor_zzz"]
+
+
+def test_an_addon_switched_on_by_name_before_any_snapshot(tmp_path, monkeypatch):
+    """A page lists its add-ons by module (``available=["sympy_editor_console"]``)
+    and switches them by name.  A session opened and set to the editor's
+    add-ons at once sent the switch before any snapshot had named the modules;
+    where nothing is installed by name - Pyodide - "console" was refused, the
+    formula flickered red and a moment's keys were lost."""
+    import sympy_editor.addons as addons_module
+    (tmp_path / "a_module_addon.py").write_text(
+        "from sympy_editor import Addon\nclass A(Addon):\n    name = 'by_name'\nADDON = A()\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setattr(addons_module, "installed", lambda: {})                    # as in Pyodide
+    monkeypatch.setattr(addons_module, "_entry_points", lambda group: [])
+    doc = Document(x, available=["a_module_addon"])
+    snap = doc.handle({"action": "addons", "enable": ["by_name"]})                  # the first message it gets
+    assert snap["error"] is None and snap["addons"] == ["by_name"]
+
+
+def test_a_folder_that_is_not_an_addon_stops_nothing(tmp_path, monkeypatch):
+    """A manifest with a name or a module of the wrong type, or a directory
+    that cannot be read, raised from inside the scan - and with it every
+    Document() made while that folder was registered."""
+    from sympy_editor import addons as addons_module
+    from sympy_editor.addons import installed, read_manifest, scan_addons
+
+    def folder(name, manifest):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "addon.json").write_text(json.dumps(manifest), encoding="utf-8")
+        return tmp_path / name
+
+    for i, manifest in enumerate([{"name": ["a"], "module": "m"}, {"name": "a", "module": 5}, {"name": 5, "module": "m"},
+                                  {"name": "a", "module": "../m"}, {"name": "A b", "module": "m"}, ["a"], {"name": "a"}]):
+        assert read_manifest(folder(f"bad{i}", manifest)) is None, manifest
+    good = folder("good", {"name": "fine", "module": "fine_pkg.sub", "label": 3, "requires": ["lark", 7]})
+    (good / "fine_pkg").mkdir()
+    folder("twin", {"name": "fine", "module": "other_pkg"})
+    before = list(sys.path)
+    try:
+        found = scan_addons(tmp_path)
+        assert list(found) == ["fine"] and found["fine"]["module"] == "fine_pkg.sub"
+        assert found["fine"]["label"] == "fine" and found["fine"]["requires"] == ["lark"]
+        assert str(good.resolve()) in sys.path                     # the package's top level is what is looked for
+        monkeypatch.setattr(addons_module, "ADDON_FOLDERS", [str(tmp_path)])
+        monkeypatch.setenv("SYMPY_EDITOR_ADDONS", str(tmp_path / "missing"))
+        assert installed()["fine"] == "fine_pkg.sub"
+        real = Path.iterdir
+
+        def unreadable(self):
+            if self == tmp_path:
+                raise PermissionError(13, "Permission denied", str(self))
+            return real(self)
+
+        monkeypatch.setattr(Path, "iterdir", unreadable)
+        assert scan_addons(tmp_path) == {}
+        assert Document(x).expr == x                               # and a document is made all the same
+    finally:
+        sys.path[:] = before
+
+
+def test_an_addon_written_in_a_script_embeds_no_file_of_its_neighbours(tmp_path, monkeypatch):
+    """The default python_sources() took the directory of the add-on's
+    module: for one defined in a script, whatever lay beside the script -
+    every .py of the project went into the page."""
+    import importlib
+    (tmp_path / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "secrets_config.py").write_text("PASSWORD = 'hunter2'\n", encoding="utf-8")
+    (tmp_path / "lone_addon.py").write_text(
+        "from sympy_editor import Addon\n"
+        "class Lone(Addon):\n    name = 'lone'\nADDON = Lone()\n", encoding="utf-8")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    try:
+        addon = importlib.import_module("lone_addon").ADDON
+        assert addon.python_sources() == {}
+        page = to_html(x, addons=[addon])
+        assert "hunter2" not in page
+    finally:
+        sys.modules.pop("lone_addon", None)
+
+
+def test_an_experimental_add_on_is_said_so_in_the_catalogue():
+    """``"experimental": true`` in an add-on's manifest - or an
+    ``experimental = True`` attribute - reaches the Add-ons window through
+    ``available_addons``, which puts the badge on its card."""
+    from sympy import Symbol
+    from sympy_editor import Document
+    from sympy_editor.addons import Addon
+
+    class New(Addon):
+        name = "newone"
+        label = "A new one"
+        experimental = True
+
+    class Old(Addon):
+        name = "oldone"
+        label = "An old one"
+    doc = Document(Symbol("x"), available=[New(), Old()])
+    flags = {a["name"]: a.get("experimental", False) for a in doc.available_addons()}
+    assert flags == {"newone": True, "oldone": False}

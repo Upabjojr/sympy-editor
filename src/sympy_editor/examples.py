@@ -11,7 +11,9 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from sympy import (Array, Determinant, Eq, Function, ImmutableMatrix, Integral, Limit, MatrixSymbol, Rational,
-                   Sum, Trace, cos, exp, eye, oo, pi, sin, sqrt, srepr, symbols)
+                   Sum, Trace, cos, exp, eye, oo, pi, sin, sqrt, symbols)
+
+from .document import srepr   # read back unevaluated: SymPy's own writes -4*a*c as Mul(-1, 4, a, c)
 
 __all__ = ["EXAMPLES", "examples"]
 

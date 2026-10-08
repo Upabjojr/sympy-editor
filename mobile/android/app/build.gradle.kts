@@ -12,8 +12,8 @@ android {
         applicationId = "org.sympy.editor"
         minSdk = 24          // the app's CPython (Chaquopy 16) needs Android 7.0
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 14          // 0.1.3; every release Android accepts as an update needs a higher one
+        versionName = "0.1.3"
         // Chaquopy ships a CPython runtime per ABI: these two cover phones,
         // tablets and the emulator (every other ABI is long obsolete).
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
@@ -22,7 +22,8 @@ android {
 
     // Release signing from the environment (see mobile/README.md); without a
     // keystore the release APK/AAB is built unsigned and can be signed later.
-    val keystore = System.getenv("ANDROID_KEYSTORE")
+    // (blank as well as unset: a workflow passes an absent secret as "")
+    val keystore = System.getenv("ANDROID_KEYSTORE")?.takeIf { it.isNotBlank() }
     signingConfigs {
         if (keystore != null) {
             create("release") {
@@ -72,6 +73,9 @@ chaquopy {
             // a test keeps this list in step with the manifests)
             install("sympy-matching>=0.0.4")
             install("lark>=1.1")
+            // the handwriting add-on reads strokes with math-ocr's numpy code
+            // (its model is staged by mobile/build.py stage_ink)
+            install("numpy")
         }
     }
 }
@@ -79,4 +83,6 @@ chaquopy {
 dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.webkit:webkit:1.11.0")
+    // the handwriting add-on's model (mobile/build.py stage_ink) runs in ONNX Runtime
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.29.0")
 }

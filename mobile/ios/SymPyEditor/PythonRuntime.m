@@ -1,6 +1,10 @@
 #import "PythonRuntime.h"
 
 #import <Python/Python.h>
+#import <TargetConditionals.h>
+#if !TARGET_OS_OSX
+#import "OrtModule.h"
+#endif
 
 NSErrorDomain const SymPyEditorPythonErrorDomain = @"org.sympy.editor.python";
 
@@ -55,8 +59,20 @@ static NSString *drainError(void) {
     return text.length ? text : @"unknown Python error";
 }
 
-@implementation PythonRuntime {
-    PyObject *_app;        // the sympy_editor_app module
+/// The sympy_editor_app module, once imported: process-wide, as the
+/// interpreter is.
+static PyObject *sympyEditorApp = NULL;
+/// Whether the two directories are on sys.path already (a failed import
+/// retried must not add them twice).
+static BOOL packagesAdded = NO;
+
+@implementation PythonRuntime
+
++ (PythonRuntime *)shared {
+    static PythonRuntime *runtime = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ runtime = [[PythonRuntime alloc] init]; });
+    return runtime;
 }
 
 - (void)dealloc {
@@ -83,10 +99,52 @@ static NSString *drainError(void) {
 }
 
 - (BOOL)startAndReturnError:(NSError **)error {
-    if (_app != NULL) return YES;
+    // One interpreter per process, whichever window asks first: the lock and
+    // Py_IsInitialized() make sure it is initialized once, and a failed
+    // import is retried without initializing again.
+    @synchronized ([PythonRuntime class]) {
+        if (sympyEditorApp != NULL) return YES;
 
-    NSString *resources = [NSBundle mainBundle].resourcePath;
+        NSString *resources = [NSBundle mainBundle].resourcePath;
+        if (!Py_IsInitialized() && ![self initializeWithResources:resources error:error]) return NO;
+
+        PyGILState_STATE gil = PyGILState_Ensure();
+        BOOL ready = packagesAdded;
+        if (!ready) {
+            ready = [self addPackages:[resources stringByAppendingPathComponent:@"app_packages"]
+                                  app:[resources stringByAppendingPathComponent:@"app"]
+                                error:error];
+            packagesAdded = ready;
+        }
+        if (ready) {
+            sympyEditorApp = PyImport_ImportModule("sympy_editor_app");
+            if (sympyEditorApp == NULL) {
+                if (error) *error = pythonError(drainError());
+                ready = NO;
+            }
+        }
+        PyGILState_Release(gil);
+        return ready;
+    }
+}
+
+/// Py_PreInitialize and Py_InitializeFromConfig, once in the process; the GIL
+/// is handed back before returning, so that every call from here on takes it
+/// the same way (PyGILState_Ensure).
+- (BOOL)initializeWithResources:(NSString *)resources error:(NSError **)error {
     PyStatus status;
+
+#if !TARGET_OS_OSX
+    // ONNX Runtime, which the handwriting add-on's model runs on, is a module
+    // built into the app (OrtModule.m): there is no wheel of it for iOS.  It
+    // must be in the table before the interpreter starts, and it is told to
+    // send nothing anywhere before it is ever loaded.
+    setenv("ORT_DISABLE_TELEMETRY", "1", 1);
+    if (PyImport_AppendInittab("_sympy_ort", PyInit__sympy_ort) < 0) {
+        if (error) *error = pythonError(@"cannot register the ONNX Runtime module");
+        return NO;
+    }
+#endif
 
     // An isolated interpreter: it must read nothing of the environment, and
     // it cannot write .pyc files next to a bundle that is already signed.
@@ -104,9 +162,18 @@ static NSString *drainError(void) {
     config.write_bytecode = 0;
     config.install_signal_handlers = 0;   // the app owns its signals, not Python
 
-    // PYTHONHOME: `python/lib/python3.x` in the bundle, put there by the
-    // "Process Python libraries" build phase (Python.xcframework/build/utils.sh).
-    wchar_t *home = Py_DecodeLocale([[resources stringByAppendingPathComponent:@"python"] UTF8String], NULL);
+    // PYTHONHOME: on iOS `python/lib/python3.x` in the bundle, put there by
+    // the "Process Python libraries" build phase (Python.xcframework/build/
+    // utils.sh).  The Mac app embeds a whole Python.framework instead, the
+    // standard library inside it, so home is the framework's current version
+    // and nothing is unpacked beside the app.
+#if TARGET_OS_OSX
+    NSString *homePath = [[NSBundle mainBundle].privateFrameworksPath
+                          stringByAppendingPathComponent:@"Python.framework/Versions/Current"];
+#else
+    NSString *homePath = [resources stringByAppendingPathComponent:@"python"];
+#endif
+    wchar_t *home = Py_DecodeLocale(homePath.UTF8String, NULL);
     status = PyConfig_SetString(&config, &config.home, home);
     PyMem_RawFree(home);
     if (!PyStatus_Exception(status)) status = PyConfig_Read(&config);
@@ -116,31 +183,22 @@ static NSString *drainError(void) {
         if (error) *error = pythonError([NSString stringWithFormat:@"cannot start Python: %s", status.err_msg]);
         return NO;
     }
-
-    // Py_InitializeFromConfig left the GIL held by this thread; whether the
-    // rest works or not, hand it back before returning, so that every call
-    // from here on takes it the same way (-call:arguments:error:).
-    BOOL ready = [self addPackages:[resources stringByAppendingPathComponent:@"app_packages"]
-                               app:[resources stringByAppendingPathComponent:@"app"]
-                             error:error];
-    if (ready) {
-        _app = PyImport_ImportModule("sympy_editor_app");
-        if (_app == NULL) {
-            if (error) *error = pythonError(drainError());
-            ready = NO;
-        }
-    }
+    // Py_InitializeFromConfig left the GIL held by this thread: hand it back.
     PyEval_SaveThread();
-    return ready;
+    return YES;
 }
 
 - (NSString *)call:(NSString *)function
          arguments:(NSArray<NSString *> *)arguments
              error:(NSError **)error {
+    if (sympyEditorApp == NULL) {
+        if (error) *error = pythonError(@"Python has not started");
+        return nil;
+    }
     PyGILState_STATE gil = PyGILState_Ensure();
     NSString *answer = nil;
 
-    PyObject *callable = PyObject_GetAttrString(_app, function.UTF8String);
+    PyObject *callable = PyObject_GetAttrString(sympyEditorApp, function.UTF8String);
     PyObject *argv = callable ? PyTuple_New((Py_ssize_t)arguments.count) : NULL;
     if (argv != NULL) {
         for (NSUInteger i = 0; i < arguments.count; i++) {

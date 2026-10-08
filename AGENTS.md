@@ -2,7 +2,12 @@
 
 The behaviour of the cursor and the selection - every state, every key, and
 what differs on a touch screen - is written down in
-`docs/cursor-and-selection.md`.  Change that file with the behaviour.
+`docs/cursor-and-selection.md`.  What each edit does to the expression - and
+what it leaves behind in the awkward cases, such as deleting the exponent of
+a power, which unwraps it and leaves the base - is in
+`docs/editing-rules.md`; what a saved formula holds is in
+`docs/file-format.md`.  Change those files with the behaviour: they are the
+description, and the code is meant to match them.
 
 ## What this project is
 
@@ -11,9 +16,15 @@ A WYSIWYG editor for SymPy expressions.  Requirements set by the project owner:
 - Render SymPy expressions nicely using LaTeX in HTML.
 - Expressions must be **selectable and click-editable** (structural editing of
   sub-expressions, not free-form LaTeX editing).
-- **No GPL dependencies** (GPL is incompatible with this project's BSD-3
-  licence).  Check the licence of anything you add: runtime, optional or
-  vendored, Python or JavaScript.
+- **Dependencies compatible with AGPL-3.0-or-later**, this project's licence:
+  BSD, MIT, Apache-2.0, MPL-2.0, and LGPL/GPL version 3 or later are;
+  GPL-2.0-only is not.  Check the licence of anything you add: runtime,
+  optional or vendored, Python or JavaScript.  And credit it, in the same change: a row in
+  `THIRD-PARTY.md` (the section of every build that carries it), the
+  README's table, the bundle's NOTICE (`mobile/build_www.py`: `NOTICE_*`,
+  `ASSET_LICENCES`, or the wheels' own metadata) and the "Credits and
+  licences" section of `HELP_HTML`.  `tests/test_credits.py` refuses a
+  declared dependency that THIRD-PARTY.md does not name.
 - Must work both **integrated in Jupyter** and as **standalone HTML**.
 - **No npx / node.js package dependencies.**  No bundler, no `package.json`,
   no build step.  JavaScript is plain, hand-written and shipped as static
@@ -53,6 +64,8 @@ src/sympy_editor/
   html.py       Standalone HTML (full page or fragment) with the `pyodide`,
                 `http` or `readonly` backend; embeds the core modules for Pyodide.
   server.py     Stdlib http.server backend: serve(expr) -> edited expr.
+  store.py      Where a Python behind the page keeps what the page keeps
+                (Store, default_store): the server's and the widget's.
   widget.py     anywidget widget (optional dependency): kernel-backed editing.
   static/
     editor.js   The whole front end (plain script, no imports/exports).
@@ -60,9 +73,14 @@ src/sympy_editor/
     widget.js   anywidget entry point; widget.py concatenates editor.js + this.
   addons.py     The add-on contract (Addon) and loader: node types, ops, data
                 and methods from a package outside this one; see addons/.
+  invalid.py    Expressions SymPy refuses to build (InvalidExpr, printed
+                Invalid(MatMul, A, B)): the per-node validity check every
+                commit goes through, and the tolerant rebuild/parse/srepr
+                reading used when a document allows them.
 tests/          pytest suite (printer round-trips, document ops, HTML, server).
 examples/       demo.py generates demo.html / runs the server.
-addons/         Add-on drafts, each a package of its own (tree, plot, matching, latex, feynman).
+addons/         Add-on drafts, each a package of its own (tree, plot, matching, latex,
+                console, handwriting, feynman).
 ```
 
 Data flow: Python `Document.snapshot()` → JSON (`latex`, `latex_plain`,
@@ -131,7 +149,21 @@ Two conventions between printer, document and front end:
   into the parent).  Elsewhere one neighbour is combined; `,` inserts an
   argument.
   An edge-click caret remembers its side (`gap.attach`), so the left edge
-  of `y` attaches typed text to `y`, the right edge of `x` to `x`.
+  of `y` attaches typed text to `y`, the right edge of `x` to `x`.  A caret
+  with no side of its own (a click in the gap, an arrow key) takes the side
+  it is *drawn* on: `_showCaret` records `gap.drawn` and `_insertMessage`
+  sends `attach` for the nearer end of the gap - after the `+` of `x + 1`
+  an `r` is `x + r*1`, not `r*x + 1` (`Document.insert` joins the left
+  neighbour when told nothing, which is right only for a caret drawn there);
+  not for a text that opens with an operator - `+ w` is a new term wherever
+  in the gap.  The end gaps of a node that draws glyphs of its own around
+  its arguments (`f(x, y)`: `_gapsOf` compares the host's visual rect with
+  its first and last argument) stop at the node's edge; for the root, the
+  room outside is an *extend* gap of the node (`r*f(x, y)`, where it used
+  to type `f(r*x, y)` from a caret drawn left of the `f`).  The rule behind
+  all of it: **what is typed lands where the caret is drawn** - check a
+  change to carets against the cases of
+  `test_text_typed_at_a_caret_joins_the_term_the_caret_is_drawn_against`.
   An operator typed at either end of the text takes the neighbour on that
   side whichever one the caret is attached to ("*y*" between the factors
   of `x*z` gives `x*y*z`); with one neighbour a far-side operator is dropped.
@@ -157,8 +189,9 @@ Two conventions between printer, document and front end:
   `{"action": "operator", "path", "left", "right", "op"}` ->
   `Document.operator`: in a sum `*`/`/`/`^` bind the two terms and `-`
   negates the right one, in a product `+`/`-` split it at the operator, a
-  relation or connective (`= < > & |`) needs the two arguments to be the
-  whole node; honours the unevaluated toggle (`lazy`).  A lone operator
+  relation or connective (`= < > & |`, and `<=`/`>=`/`!=` -
+  `RELATION_OPERATORS`, what the pen's ≤ ≥ ≠ become) needs the two arguments
+  to be the whole node; honours the unevaluated toggle (`lazy`).  A lone operator
   typed at a caret between two arguments is routed to `Document.operator`
   by `Document.insert`.  The node the junction belonged to is selected
   after the change.
@@ -168,7 +201,8 @@ Two conventions between printer, document and front end:
   focus}` indexes the parent's display-ordered children (`_displayChildren`).
   Messages carry `children: [arg indices]` with `replace`/`delete`/`apply`
   (`printer.extract_range/replace_range/delete_range`); the range's source is
-  built in the front end from the children's sources.  Drags use pointer
+  built in the front end from the children's sources (`_rangeSource`
+  parenthesizes the operands of `&`/`|`).  Drags use pointer
   events (mouse, touch, pen alike): a mouse or pen drag selects at once; a
   finger selects only after a *long press* (`_hold`, `opts.longPress` ms
   with the finger still - `_beginHold` selects the node under it, marks the
@@ -178,8 +212,10 @@ Two conventions between printer, document and front end:
   is prevented for touch (Android would open its menu and cancel the
   touch), the non-passive `touchmove` listener keeps a held drag from the
   browser, and the click after a held drag is suppressed as after a moved
-  one.  `touch-action: pan-y pinch-zoom` keeps vertical scrolling and
-  pinch-zoom on phones, and `@media (pointer: coarse)` enlarges targets.
+  one.  `touch-action: pan-x pan-y` lets one finger scroll the formula
+  sideways and the page up and down; two fingers zoom the formula, never the
+  page (no `pinch-zoom`: iOS took it up), and `@media (pointer: coarse)`
+  enlarges targets.
 - **Source line.**  `AnnotatedStrPrinter` (same mixin as the LaTeX printer,
   markers instead of `\htmlData`) gives `snapshot["spans"]`: the character
   span of every node in `str(expr)` (empty if the marked output would not
@@ -190,6 +226,31 @@ Two conventions between printer, document and front end:
   the document selection, which would move focus into the editable line);
   Enter sends `set`, Esc reverts.  `beginEdit("/")`
   edits there - the rendering is never swapped for a text field.
+- **The selection named.**  The status line names a node or a range with
+  `_setStatusOf(type, src)`: `b.se-status-type` (the interface's font,
+  bold) and `code.se-status-src` coloured by `pyRender`; its text stays
+  "Type: src", which the tests read.  Other status messages are plain text
+  (`_setStatus`).
+- **Python colouring.**  `pyTokens` (a hand-written tokenizer: keywords,
+  constants, builtins, classes by shape - capitalised with a lower-case
+  letter -, functions as called names, attributes, symbols, numbers,
+  strings, comments, operators, brackets, IPython magics), `pyRender` (a
+  span per token, `.se-py-<kind>`, a bracket with `data-at`; the source
+  line's `<mark>` and `.se-source-caret` cut tokens where they fall) and
+  `pyBracketPair`/`pyShowBrackets` (`.se-py-match` on the bracket by the
+  cursor and its partner, `.se-py-unmatched` alone) are exposed as
+  `SympyEditor.python`.  Every write of the source line goes through
+  `_writeSource`; typing is recoloured on input with the selection kept as
+  text offsets (`textOffsetOf`, `selectTextOffsets`), so the line keeps its
+  own undo (`_undoSource`, Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y) - the browser's
+  does not survive a rewrite.  The line sits in `details.se-source-box`
+  ("Python", open by `sourceOpen`, kept as `source-open` through the
+  keeper).  The console add-on colours its transcript with `render` and its
+  textareas with `colourField`: a `pre.pc-hl` under the field, glyph for
+  glyph (same font, padding, border width; no bold or italic), the field's
+  text transparent, the value setter wrapped so text set from code is
+  coloured too.  Tests that put a selection in the line walk its text nodes
+  (`_select_source_text`): it is no longer one text node.
 - **Function box.**  `{"action": "call", "path", "func": "diff(x)"}` →
   `Document.call`: a public callable of `sympy` is called as `f(node, *args)`,
   a `.name`/attribute of the node otherwise; extra args are parsed in the
@@ -252,9 +313,9 @@ Two conventions between printer, document and front end:
   `{"action": "matrix", "op", "path", "rows", "cols"}`, labelled "Matrix:
   new row" ... in the history.  `_node_info` marks explicit matrices with
   `matrix: {rows, cols}`; the front end's `_matrixContext()` walks the
-  selection's ancestors to the nearest such node, `_placeActions` shows the
-  `+ row / + col / − row / − col` buttons (`matrow`...) of the action bar
-  for it, and `_placeMatrixHandle` (from `_applySelection`) puts the grip
+  selection's ancestors to the nearest such node, `_applyToolbar` shows the
+  `+ row / + col / − row / − col` buttons (`matrow`..., `.se-mat-tools` in
+  the row under the formula) for it, and `_placeMatrixHandle` (from `_applySelection`) puts the grip
   `.se-mat-handle` on the matrix's bottom-right corner - re-appended to the
   view at every state, like the boxes, since the rendering is replaced.
   Dragging the grip (its own pointer listeners stop propagation and capture
@@ -283,7 +344,7 @@ Two conventions between printer, document and front end:
   rule crosses its blocks.  At the edge of the grid each key falls back to
   what it did before - `↑` in the top row selects the matrix, `←/→` step out
   of it, so every cell stays reachable and the way out is unchanged.  The
-  keys and the toolbar/action-bar arrows go through the same `command()`
+  keys and the arrow buttons under the formula go through the same `command()`
   cases, and `_updateToolbar` asks `_gridTarget`/`_gridCaretTarget` (dry
   runs) so a button is live exactly when the move exists.
 - **A drag that leaves the formula.**  `_extendDragTo(x, y)` hit-tests a
@@ -314,7 +375,9 @@ Two conventions between printer, document and front end:
   box; `_animateChange` diffs old and new nodes with `diffNodes`, which
   aligns the two trees (`buildTree`) from the root down: in corresponding
   containers, children with the same `src` are kept with everything inside
-  them (any order: SymPy reorders terms), remaining children that are
+  them - those in the same place first, then in any order (SymPy reorders
+  terms; paired in any order at once, the integrand's `x` of `\int x dx`
+  took the `dx`'s place when it became `x^3`), remaining children that are
   containers of the same `type` are paired in order and aligned in turn,
   the rest goes / comes as a whole - so unwrapping `cos(x)**2` in
   `sin(x)**2 + cos(x)**2` colours `cos(x)**2` (exponent included) and
@@ -372,7 +435,14 @@ Two conventions between printer, document and front end:
   `MatrixSymbol(name, rows, cols)`, `Function(name)`, `IndexedBase(name)`.
 - **Long computations.**  `Editor.send` shows the spinner overlay after
   `workingAfter` ms and the Interrupt button after `interruptAfter` ms when
-  the backend has `interrupt()` (and `canInterrupt()` allows).  Backends:
+  the backend has `interrupt()` (and `canInterrupt()` allows).  An add-on's
+  request (`_addonCall`) and switching add-ons on (`_enforceAddons`, the
+  Add-ons menu) are `background`: they wait `backgroundAfter` (2.5 s) before
+  blocking anything - add-on loading must not block the editor, and on a
+  phone each panel's first request flashed the overlay over the formula; one
+  that hangs still gets it, and its Interrupt, then.  And a query's answer is
+  the query alone (`Document._query_answer`): the whole snapshot it used to
+  carry was most of its cost, and every front end throws it away.  Backends:
   the HTTP server takes `{"action": "interrupt"}` on another connection and
   raises `Interrupted` in the thread holding the lock
   (`interrupt_thread`, `PyThreadState_SetAsyncExc`); the widget runs each
@@ -389,12 +459,28 @@ Two conventions between printer, document and front end:
   snapshot, with `history` = `history_labels()`: the `str` of every step and
   the index) carry a document's state; `{"action": "goto", "index"}` →
   `Document.goto` moves within the history.  With `options.sessions` the
-  editor keeps a list of sessions in `localStorage` (`SESSIONS_KEY`), saves
-  the current one after each committed change (debounced `_saveSession`)
+  editor keeps a list of sessions through the keeper (`Keep`, name `sessions`:
+  the app's files, the server's or the kernel's store, `localStorage` only on
+  a plain page - see docs/file-format.md), saves
+  the current one after each committed change (debounced `_saveSession`;
+  never behind a request in flight - it waits for the request to end, and
+  after an Interrupt for the user's next request, `_saveWhenIdle`: sent
+  behind a computation it was thrown away with it, and in a Pyodide page it
+  was what restarted Python, the loading overlay coming up by itself)
   and switches with `backend.openDocument(state)` (Pyodide: a new document
-  id in the shared runtime).  All of it lives in a lateral drawer
-  (`.se-drawer`, `position: fixed`, the ≡ toolbar button, Esc / backdrop /
-  × close it), not in the widget's own layout; the history is a sub-tab
+  id in the shared runtime).  The ≡ menu (`.se-drawer`, `position:
+  fixed`; Esc / backdrop / × close it) starts it: **New session…**
+  (`newSessionRow`, its chooser opening under it) heads the menu, and the
+  **Sessions** entry (`data-count` "3 sessions") opens the list in a window
+  of its own (`showSheet("sessions")`, which brings the list up to date as
+  opening the menu does; a session picked there opens and the window goes,
+  `_openFromList`) - the owner's call: the list had taken over the menu.
+  The window is the screen's width and never scrolls sideways (the cards
+  stretch to it, names wrap, a wide history formula scrolls in its own
+  row: `test_the_sessions_window_fits_the_screen_and_searches`), and
+  `.se-session-search` finds a session by its name or the formula it holds
+  (`_filterSessions`, re-applied when the list is refilled).
+  Not in the widget's own layout; the history is a sub-tab
   (`.se-subtabs`, `showDrawerTab("history")` toggles `.se-drawer-pane`)
   nested in the current session's card, so the hierarchy session ⊃ history
   is visible.  `history_labels()` also carries `steps` (annotated LaTeX +
@@ -409,6 +495,18 @@ Two conventions between printer, document and front end:
   committed), a copy of the current expression, or an example
   (`sympy_editor.examples.EXAMPLES`, carried as `cfg.examples` →
   `options.examples` when `sessions` is on).  The mobile bundle turns it on.
+  At start the page's own expression is only a stand-in for the last
+  session, which `_initSessions` opens a moment later: `mount` keeps the
+  rendering, the source line and the add-on panels hidden (`se-restoring`,
+  `visibility`, so nothing moves) until the sessions have answered - five
+  seconds at most - and the change animation is skipped meanwhile, or its
+  ghost would show the stand-in fading out.  Not for a backend handed an
+  expression of its own (`givenDocument`), whose expression is the work.
+  When nothing replaced the page's own snapshot by the end of start-up (no
+  session reopened, no add-on switch restored: a first install, or an empty
+  current session), `mount` asks the backend for one: the page is built
+  with the builder's add-on catalogue, and an app's Python carries add-ons
+  the page was built without (handwriting, staged with its model).
 - **Wrap.**  `{"action": "wrap", "path", "func"[, "args", "children"]}` →
   `Document.wrap` puts the node (or range) inside a function - the inverse of
   unwrap: `cos`, `sqrt`, `Integral` with `args="x"` (or `func="Integral(x)"`).
@@ -430,7 +528,8 @@ Two conventions between printer, document and front end:
   cannot be kept.  The front end then opens the `.se-keep` chooser instead of
   deciding (`_askKeep`): the child ↑ came from (`_cameFrom`) is the focused
   button, so ↑, Backspace, Enter keeps it and any other argument can be picked
-  instead; Escape cancels, ←/→ move between the choices.  A node with a single
+  instead; Escape cancels, ←/→ move between the choices (↑ and Backspace are
+  handled in the chooser's own keydown, not left to bubble).  A node with a single
   candidate is unwrapped straight away.  Backspace/Unwrap button.  Delete
   removes.
 - **Matrices and arrays.**  The "array" kind covers explicit `NDimArray`s *and*
@@ -490,7 +589,11 @@ Two conventions between printer, document and front end:
   exist for them.  Update it in the same commit as the feature -
   `test_help_button_shows_the_guide` checks a phrase from each area.
 - **Tool blocks and columns.**  Every tool lives in a `.se-block`
-  (`data-block`: session, zoom, sessions, nav, edit, clip, apply) built by
+  (`data-block`: session, zoom, sessions, edit, clip, apply - the arrows are
+  in the row under the formula, and `clip` takes the middle and right-hand
+  columns in their place: Copy and Paste at its left, the palette's button
+  at the right edge - `margin-left: auto`; narrow, the block fills the rest
+  of its line the same way) built by
   the `block()` helper, and a block never breaks apart.  Under 44rem the
   blocks spread across each line (`justify-content: space-between`); from
   44rem `.se-tools` becomes a three-column grid and `:nth-child(3n+1/2/0)`
@@ -585,8 +688,9 @@ Two conventions between printer, document and front end:
   break it and both are easy to reintroduce: `contenteditable` must be
   `"true"`, not `"plaintext-only"` (a drag over a plaintext-only line
   selects nothing in Chromium, though a double-click does), and
-  `_placeActions` must do nothing while the source has the focus - the
-  floating bar appearing under the pointer takes the drag apart.  A test
+  nothing may appear under the pointer while the source has the focus - a
+  floating bar popping up there took the drag apart (there is no such bar
+  any more: see "The row under the formula").  A test
   drags over `sin(x)` and checks both the text and the formula.
 - **Touch sizes.**  The `any-pointer: coarse` rule lists every control that
   grows for a finger.  A control added later and left out of that list stays
@@ -607,7 +711,11 @@ Two conventions between printer, document and front end:
   the leading minus of a product is the same).  When that count changes the
   node draws itself differently, so `align` marks the node even though its
   arguments still line up - the radical goes red while the radicand stays
-  black through `rep-kept` / `se-diff-kept`.  Do not make `align` keep a node
+  black through `rep-kept` / `se-diff-kept`.  A node drawn as its virtual
+  parts (`n`/`d`, `neg`) is compared by those parts instead (`shape`): a
+  denominator `a` becoming `a*x` adds a SymPy argument to the fraction's
+  `Mul` but not a place in its drawing, and counting arguments marked the
+  whole fraction; the bar coming or going still marks it.  Do not make `align` keep a node
   unconditionally again: that is exactly the bug where a vanished sqrt sign
   was drawn as unchanged.
 - **No image is committed.**  `*.png` is ignored; `mobile/make_icons.py`
@@ -615,13 +723,24 @@ Two conventions between printer, document and front end:
   when they are missing (the manifest points at `@mipmap/ic_launcher`, so a
   build without them stops).  The workflows install librsvg for that.  If a
   size or a shape needs changing, change the script, never a PNG.
+- **Saved-file versions.**  A `.sympy` file carries `"sympy-editor"` (its
+  format, `SAVE_FORMAT`) and `"min-reader"` (`SAVE_MIN_READER`, the oldest
+  reader that can take it); a session's export carries `"format"`.
+  `upgrade_file` brings an older format up through `MIGRATIONS` (one
+  `@migration(n)` per format, never removed), reads a newer one only when
+  its `min-reader` allows, and refuses the rest by name; `Document(format=)`
+  does the same for a kept session (`sessionState` in editor.js marks the
+  ones kept before sessions had a format as format 1).  Changing the
+  format means: bump `SAVE_FORMAT`, bump `SAVE_MIN_READER` too if the change
+  breaks older readers, add the migration, and freeze a file of the new
+  format in `tests/formats/` with a test - docs/file-format.md, "Versions".
 - **Full screen.**  `.se-view` lives on a `.se-stage` (`position:
   relative`) beside `.se-fullbtn`, not inside it: within the view a wide
   formula would scroll the button out of sight.  `Editor.setFullscreen`
   toggles `.se-full` on the root - `position: fixed`, a column flex box, the
   stage and the view taking the leftover height, the toolbar, the source line
-  and the Symbols panel all hidden (the corner button and the floating action
-  bar are what is left), the formula centred and drawn at 1.9em - and Esc
+  and the Symbols panel all hidden (the corner button and the row under the
+  formula are what is left), the formula centred and drawn at 1.9em - and Esc
   leaves it when nothing is selected (the last `Escape` branch of `_onKey`).
   The panel is only the fallback: `_browserFullscreen` asks for the real
   thing through the Fullscreen API (a user gesture is needed, and an iframe
@@ -633,7 +752,7 @@ Two conventions between printer, document and front end:
   ignores `hide()` from an unfocused window and undoes it when focus comes
   back, so the activity remembers `wantsFullscreen` and applies it again in
   `onWindowFocusChanged`.  The button is 44x44 on a coarse pointer - a
-  target, not a glyph.  The overlay boxes, the caret and the action bar are
+  target, not a glyph.  The overlay boxes, the caret and the operator palette are
   placed in pixels, and the view keeps changing size *after* the class is
   toggled (the browser's full screen, a phone's bars going away, a
   rotation, a window resize): a `ResizeObserver` on `.se-view`
@@ -641,6 +760,22 @@ Two conventions between printer, document and front end:
   the selection again whenever the view's size changes -
   `test_the_selection_follows_the_view_into_full_screen` resizes the
   viewport after the toggle and checks the box sits on the glyphs.
+- **The row under the formula.**  `.se-keyrow`, right under `.se-stage`,
+  always there (so nothing under it moves) and kept in full screen: the four
+  arrows at its left (`.se-nav`; they are not on the tool strip), then
+  `.se-mat-tools` - `+ row / + col / − row / − col`, shown only while the
+  selection is in an explicit matrix; the row wraps when they do not fit a
+  phone - and, at the right end, the keyboard's button (icon only,
+  `buttons.keyboard`, `data-cmd="keyboard"`), shown for a coarse pointer
+  only.  **No bar floats under the selection** (the `.se-actions` bar is
+  gone, on the owner's request: it covered what was being worked on): every
+  command has one fixed place - the arrows here, Edit / Unwrap / Delete /
+  Isolate / Copy / Paste on the strip.  Do not bring a pop-up back for a
+  new command; the operator palette (`.se-opbar`) and the keep chooser are
+  the only things that appear at the selection.  `_hintKeyboard` (from `_applyToolbar`) gives it
+  `.se-hint` - four beats of `se-key-hint`, `KEY_HINT_MS` - when the
+  selection, range, junction or caret is a new one, not when the same one is
+  drawn again and not while a field is open.
 - **Touch keyboards.**  `noAutoCaps` (applied by `h()` to every text input,
   and by hand to the contenteditable source line) turns off
   `autocapitalize`, `autocorrect`, `autocomplete` and `spellcheck`: what is
@@ -656,13 +791,88 @@ Two conventions between printer, document and front end:
   looks like what it does.  Dark mode redefines the same tokens; the
   transitions are dropped under `prefers-reduced-motion`.  Keep the
   paddings as they are - the toolbar-row and arrow tests measure them.
+- **Tool icons and tooltips.**  Edit, Unwrap, Delete, Extract, Copy and
+  Paste are icons (`toolSvg(cmd)`, `TOOL_ICONS`: a pencil, brackets opening,
+  a bin, a crop, two sheets, a clipboard; one stroke weight, `.se-icon`
+  sized), each with an `aria-label` of its name and a `title` that starts
+  with it ("Delete: remove the selection entirely (Del)").  Every button has
+  a title - `test_the_edit_tools_are_icons_and_every_button_has_a_tip`
+  refuses one without.  With a mouse the browser shows it; on a touch screen
+  `_wireTips` (on the root and on `this.chrome`) shows it in `.se-tip` when
+  a finger rests on a button for `longPress` ms - greyed ones too, found
+  through `elementsFromPoint` - and swallows the click that ends that hold;
+  a new touch hides it, and it fades 1.6 s after the finger lifts.
 - **Icons.**  The four navigation arrows are `arrowSvg(dir)`: one drawing
   rotated, sized to the text line box (`.se-icon`), so they match each
   other and the buttons beside them on every platform.  As text glyphs they
   came from whichever installed font had them - the horizontal pair twice
   as wide as the vertical one, often another weight and baseline.
+- **What the platform does, the platform does.**  Everything the page needs
+  that is not Python goes to the host when there is one, and falls back to
+  the browser only on a plain page (the standalone Pyodide HTML, the web
+  app).  The host is `window.SympyEditorApp` (Kotlin `ReportBridge`, Swift
+  `FilesBridge`, the same method names): `Host.tell(method, ...)` for what
+  the page tells it (`copyText`, `haptic` - a long press that selected -,
+  `printHtml`, `setFullscreen`, `saveFile`/`shareFile`, `keepWrite`),
+  `Host.ask(method, ...)` for what it answers, later, through
+  `SympyEditor.hostAnswer(token, value)` (`pasteText`: a WebView's page may
+  not read the clipboard on Android, and iOS asks every time).  The other
+  way, the host calls into the page: `SympyEditor.back()` (Android's Back:
+  `Editor.back()` closes help, history, drawer, an add-on's own - the
+  `onBack` hook -, the keep chooser, the function form, an edit, the
+  selection, full screen, one per press, and false with nothing open, when
+  the app goes to the background), `SympyEditor.flush()` (on pause /
+  resign-active: the session save waiting in `_scheduleSessionSave` goes at
+  once - and, since that save waits for Python's answer, which a page being
+  closed never gets, `_keepCommittedNow` first keeps the committed formula
+  as the next step of the saved history, synchronously; `pagehide` and `visibilitychange` do the same in any browser) and
+  `SympyEditor.openText(name, text)` (a `.sympy` opened with the app - an
+  Android VIEW/SEND intent, `onOpenURL` on iOS and the Mac -, queued in
+  `pendingOpen` until `editorReady`; the hosts queue it too until the page
+  has loaded).  Printing is a WebView of its own, scripts off and no bridge
+  (`printReport` in Kotlin, `ReportPrinter` in Swift); iOS full screen hides
+  the status bar and the home indicator through `HostChrome`, the Mac
+  toggles the window's.  On the Python side the widget is the host of its
+  own storage and files: `keep` and `writefile` are answered as custom
+  messages (never through the `snapshot` trait, which a second display
+  draws), from a `store.Store` - the server's, by default - and into
+  `save_dir`.  `test_both_hosts_answer_every_native_call_the_page_makes`
+  checks both hosts have every method the page calls; add one in Kotlin,
+  Swift and editor.js together.
+- **Sessions that fail, and backends that hold one document.**  A backend
+  moves to a new document only after it exists, and closes the one it leaves
+  (`SympyEditorPy.close`, bridged by both apps; the Pyodide runtime's
+  `close`).  `openSession` resolves true/false; `openText` waits for the
+  editor to be idle (`_whenIdle`), and `newSession`/`deleteSession` refuse
+  while busy (deleting the current session opens another first).  A stored
+  session that cannot be opened stays in the list flagged `broken`
+  (`.se-session-broken`) and the editor starts afresh.  `http` and the widget
+  hold one document: their `openDocument` sends `{"action": "load", "state"}`,
+  which swaps in `server.load_session(doc, state)` (settings, add-on catalogue
+  and `on_change` listeners kept; a state it cannot read is refused and the
+  document stays as it was); handed an expression of their own
+  (`givenDocument`), they give it a session rather than reopening the last.
+  Each editor keeps through its own backend (`Keep.of(editor)`;
+  `SympyEditor.setKeeper` only sets a fallback); writes of one name go one
+  after another, latest wins, a failed write is retried once and then kept in
+  the browser for that write only.  The session list is shared by every
+  editor on one keeper, so it is never written unread: `_saveSessions` waits
+  for the writes in flight (`Keep.settled`), reads the list strictly, merges
+  in by row `id` what this editor changed since it last read or wrote
+  (`_noteKept`, `_mergeSessions`) and writes that.  A page being closed
+  cannot wait for a read: with a remote keeper `_keepCommittedNow` writes the
+  one session under `session-last` (sent with fetch's `keepalive` when small
+  enough, `KEEPALIVE_MAX`), which `_readSessions` puts in its row at the next
+  start.  `parseSessions` reads a damaged list as none.  The widget puts only committed snapshots
+  in its trait: previews, queries and errors come back as custom messages,
+  paired by per-view `_req` ids.  `server._Running` sets, clears and
+  delivers an interrupt under one lock and cancels a late delivery, so an
+  answer always goes out; the same holds in `sympy_editor_app`
+  (`interrupt(doc_id=None)` names the document it is for).
 - **Backends.**  `Editor` only needs `{send(msg, report) -> snapshot}`, plus
-  the optional `warmup`, `openDocument`, `interrupt`/`canInterrupt`.
+  the optional `warmup`, `openDocument`, `interrupt`/`canInterrupt`, `keep`
+  (the storage seam, see file-format.md) and `saveFile` (the widget: a file
+  written by the kernel).
   `http` (the local server), `pyodide` (a worker in the page), `readonly`,
   and `native`: the *host application* runs Python.  The native backend
   hands JSON to `window.SympyEditorPy` (injected by the host) with a
@@ -678,6 +888,49 @@ Two conventions between printer, document and front end:
   Pyodide out of the bundle (~1 MB instead of ~24 MB).  A debug build turns
   on WebView debugging: `adb forward tcp:9222 localabstract:webview_devtools_remote_<pid>`
   and Playwright's `connect_over_cdp` then drive the app on the device.
+- **The menu's windows.**  The ≡ drawer holds entries (`.se-drawer-nav`,
+  `.se-drawer-entry[data-sheet]`): **Add-ons** (hidden when there is none
+  to switch; `data-count` "2 of 7 on") and **File**, each opening a window
+  of its own over the editor - `showSheet(kind)` / `closeSheet()`, dressed
+  as the guide (`.se-history-view.se-sheet-view[data-sheet]`), a dialog
+  like the others (`trapTab`, `_opener`/`_refocus`, Esc, Back).  The window
+  An add-on's `addon.json` (or its object) may say `"experimental": true`:
+  the card carries an *Experimental* badge (`.se-addon-badge`) - new, not
+  yet checked by the owner; it is still on by default like any other.
+  `.se-addon-search` filters the add-on cards (`_filterAddons`, every word
+  in the card's text, accents aside; kept across refills).  The windows'
+  ×, like the guide's, sits in the header's corner group
+  (`.se-head-group.se-head-close`): loose in the header it stood off the
+  right edge by the room the header keeps for that group.  Back and Esc in
+  a window opened from the menu go back to the menu (`sheetBack`; Esc is
+  stopped there, or the reopened menu would close on the same press); the
+  × closes both.
+  The window borrows the same elements as before - `this.addonsMenu` (rows built by
+  `_fillAddonsMenu`: switch, name, version, description from the add-on's
+  `addon.json` through `addon_manifest`, what it needs, and its "?" when it
+  is on) and `this.filesBody` (the file actions; a chosen one closes the
+  window) - and gives them back when it closes.  The add-ons and the files
+  grew too many for folds in a side panel (the owner's call).  In File,
+  everything written out goes two ways, a row each (`.se-file-row`): the
+  formula, the history as Python, the history as a web page, with **Save…**
+  (`_deliver(..., "save")` → the host's `saveFile`: Android's save dialog,
+  iOS's Files export picker, the Mac's save panel; else the kernel's folder
+  or a download) and **Share…** (`"share"` → `shareFileText`: the host's
+  `shareFile` - the share sheet, nothing kept on the device -, the Web Share
+  API, else saved).  Share buttons show only where sharing is
+  (`canShareFiles`, checked when the window opens); the history view's
+  Save menu offers the shares too.
+  Android opens a `.sympy` file handed over without a name
+  (`content://media/...`, typed `application/octet-stream`) through a VIEW
+  filter for that type: Android knows no `.sympy`.
+- **Overlays are dialogs.**  Help, the history view and the drawer carry
+  `aria-modal`, take the focus when they open (their close button), keep
+  Tab inside (`trapTab`, from their own keydown handlers) and give the
+  focus back to the control that opened them (`_opener()` at opening,
+  `_refocus(opener)` at closing - the formula view when it is gone).  The
+  pickers' list and rows have ids, and `_highlight` sets
+  `aria-activedescendant` and `aria-selected`.  A new overlay should do the
+  same; `test_the_overlays_are_dialogs_for_the_keyboard` is the check.
 - **Help view.**  The toolbar's "?" (`showHelp`/`closeHelp`) overlays
   `HELP_HTML` - the whole gesture/key/tool guide, static content in
   `.se-help-body` (multi-column via `column-width`), dressed as the
@@ -686,16 +939,48 @@ Two conventions between printer, document and front end:
   the formula view, whose handler would swallow Esc otherwise); opening
   the history view closes it.  Keep HELP_HTML in step with README's table
   when gestures change.
-- **Layout stability.**  `.sympy-editor` is `display: block` and
-  `.se-status` has its own full line under the tool rows (`flex: 0 0 100%;
-  min-width: 0; min-height: 1.3em`): the status text must never change the
-  container's width nor move the tools, either of which moves the formula
-  under the pointer between two clicks.  The tools sit in `.se-tools` in three logical rows -
-  session/timeline + zoom, selection navigation + edits + clipboard, and
+- **Layout stability.**  `.sympy-editor` is `display: block` (a column flex
+  box under 44rem, see below) and `.se-status` is a full-width line of the
+  root right after the toolbar (`display: block; width: 100%; min-width: 0;
+  min-height: 1.3em`): the status text must never change the container's
+  width nor move the tools, either of which moves the formula under the
+  pointer between two clicks.  **The toolbar is three strips**, `.se-tools`
+  all: `.se-tools-head` (the session block - undo, redo -, the zoom between
+  two `.se-sep` rules, and the `help` block at the right end: History, Done,
+  a rule, ?), `.se-tools-main` (the
+  edits, the clipboard, the menus; `this.tools` points at it from the split
+  on, so `block()` lands there) and `.se-tools-addons` (the add-ons' own
+  tool blocks - the LaTeX button, the pen's - right above the formula,
+  hidden when empty).  **The menu button (≡) is the page's**: a page from
+  `render_page` has `<span class="se-page-menu" data-editor="<id>">` beside
+  its `<h1>` in `header.page-head` (beside, not in: the heading reads the
+  title alone), and the editor moves the drawer's button there
+  (`this.chrome`, a `.se-chrome` span carrying the colour tokens with a
+  `.se-menubar` inside, which shares the toolbar buttons' rules - not
+  `.se-toolbar`, which pages and tests address as the editor's own; its
+  clicks go through the
+  same `onCommandClick`, `_opener`/`_refocus` know it, `destroy` removes
+  it).  Without such a place (a notebook, a fragment) ≡ stays after ? in
+  the `help` block.  Wide, the strips are rows of the same three-column
+  grid (the add-ons' strip is a flex row).  **On a phone the formula comes
+  first, under the head strip and the add-ons' tools**: under 44rem the root
+  is a column flex box and `.se-toolbar` is `display: contents`, so its
+  strips are items of the column - head `order: -3`, add-ons' tools `-2`,
+  `.se-stage` and `.se-keyrow` `-1`, the main strip `1`, `.se-addons` `2` -
+  and the screen reads title with ≡, session row (↺ ↻ | − 100% + | …
+  History | ?), the add-ons' tools, formula, arrows, status line, source line,
+  Symbols, the editing tools, then the add-on panels.  All of it is the
+  owner's call, on the device: the session row and ≡ never leave the top,
+  the add-ons' tools stand right above the formula, and the editing tools
+  never come after the panels (`test_the_menu_button_sits_on_the_title_line`,
+  `test_the_add_ons_tools_are_right_above_the_formula`).
+  `test_status_line_names_the_selection_on_its_own_line` checks the order
+  at both widths; full screen is not affected, it hides the toolbar.  The tools sit in `.se-tools` in three logical rows -
+  session/timeline + zoom, edits + clipboard, and
   the two groups of pickers (actions, library) + the toggle - forced by `.se-break` spans
   (`flex-basis: 100%`), with `.se-sep` rules between the blocks of a row;
   each row still wraps onto more lines when narrow, and the status line sits
-  under them at every width; `.se-actions` wraps too (`max-width: calc(100% - 8px)`), so no
+  under them at every width; `.se-opbar` wraps too (`max-width: calc(100% - 8px)`), so no
   button is ever off-screen.
 - **Zoom and sideways scrolling.**  `Editor.setZoom(zoom, anchorX)` sets the
   CSS variable `--se-zoom` on `.se-view` (`font-size: calc(base *
@@ -703,14 +988,14 @@ Two conventions between printer, document and front end:
   gap cache and the caret and redraws the selection; sources: the −/100%/+
   buttons, Ctrl+wheel, Ctrl+plus/minus/0 and a two-pointer pinch
   (`_pointers`/`_pinch`; a non-passive `touchstart` listener prevents the
-  browser's own pinch when two fingers land, so `touch-action: pan-y` can
+  browser's own pinch when two fingers land, so `touch-action: pan-x pan-y` can
   stay for one-finger page scrolling).  The pinch also scrolls: the
   fingers' centre drags the content along (`_pinch.cx/cy`, applied to
   `scrollLeft`/`scrollTop` before the zoom, which is anchored at the
   centre), so two fingers moving together pan a formula larger than the
   view - sideways, and up and down in full screen, where the view has a
   height of its own.  `rememberZoom` (option; on in the
-  mobile bundle) keeps it in `localStorage`.  A formula wider than the view
+  mobile bundle) keeps it through the keeper (`Keep`, name `zoom`).  A formula wider than the view
   (`overflow-x: auto`) scrolls with a plain wheel over it (the event reaches
   the page again at the ends), by dragging its empty space with a mouse
   (`_pan`; a mouse drag that starts on a glyph still selects a range) or
@@ -768,6 +1053,38 @@ Two conventions between printer, document and front end:
   box remembers the caret when it takes the focus (`_fnCaret`): loading the
   function list re-renders the formula, which drops the live caret, and the
   insertion waits while the editor is busy rather than being dropped.
+- **The palette.**  `MATH_PALETTE` in editor.js lists the constructions a
+  mathematical formula editor offers as buttons (fraction, power, √, |·|, e^,
+  log, !, binomial, ∫, definite ∫, d/dx, lim, Σ, Π, a 2 × 2 matrix), each
+  with its KaTeX `icon`, the source it `insert`s at a caret and what it
+  `wrap`s a selection in.  The `√ ∫ Σ ▾` button (`buttons.palette`,
+  `data-cmd="palette"`, at the right end of the clipboard block's row,
+  Copy and Paste at that block's left - never under the Transform menu,
+  where it landed in the apply row)
+  opens `.se-palette-menu`, a grid of `.se-palette-item`s drawn by KaTeX on
+  first open (`_drawPalette`; the button's own label is drawn when KaTeX is
+  there, `_drawPaletteLabel`).  `insertTemplate(key)` routes like typing: at
+  a caret (`this.caret`, or `_paletteCaret` taken when the menu opened - the
+  items take the focus) through `_insertAtCaret`, the same path as a
+  function picked at a caret (`+ ` in front in a sum); on a selection, a
+  range (`children`) or the root with nothing selected, a `wrap` message -
+  `Document.wrap`, which builds unevaluated; with the empty field open, a
+  `set`.  `freshSlots` numbers the slots afresh.  A `wrap` whose `func` holds
+  `$` is a template (`Document._wrap_template`): read with a stand-in name
+  there, then the node itself `xreplace`d in - the matrix's first entry,
+  where no function call puts the selection; never send the selection's text
+  back to be parsed (`sqrt(4)` came back as `2`).  The template is read
+  outside the node's context, or a matrix's stand-in became a matrix symbol
+  that `Matrix` spread out as a block.  A menu: arrows walk it, Esc / Tab /
+  a press elsewhere / Back close it; greyed out on an operator.  The n-th
+  root is left out on purpose: SymPy draws `root(x, n)` as `x^(1/n)`.
+- **Tab in a field.**  With empty slots in the formula, Tab (Shift+Tab) in an
+  inline field is `_commitToSlot`: the field is applied and the next
+  (previous) slot is selected - by name (`_slotAfterCommit`, read in
+  `setState`), since paths move with the change; a template typed in the
+  field still wins with its own first slot, and a field that sends nothing
+  just moves on.  The browser's own Tab took the focus away, the blur
+  applied the field and the selection stayed on the construction.
 - **Name resolution.**  `Document.parse` uses `parse_expr(local_dict=namespace())`:
   declared/used names win, then SymPy's globals, then new symbols.
   `` `name` `` (backticks) forces a Symbol for that parse; `_collision_note`
@@ -804,11 +1121,25 @@ carries it unchanged.  The front end part is a plain script (`Addon.js`,
 `loadAddons` puts the CSS in the page and runs the script once,
 `Editor._mountAddons` gives each a box under the source line (`.se-addons`,
 `.se-addon-<name>`) and a toolbar block (`data-block="addon:<name>"`), and
-`onState`/`onSelect`/`destroy` follow the editor; a `help` (HTML) on the
-definition or the instance puts a "?" in the box's summary that opens it in
-the editor's help overlay (`showHelp(html, title)`, the same page as the
+`onState`/`onSelect`/`onZoom`/`destroy` follow the editor (`onSelect`
+through `_notifySelect`: only for a selection that is another one - node,
+range, operator, caret - or the first after a new state or a mount, never
+for one merely drawn again; every redraw used to tell it, the "Working…"
+overlay going away included, and on a phone the plot and the rules panels
+asked Python again on each answer, for ever - keep it that way, and keep the
+panels' own guard, `drawnKey` / `askedKey`); a tool button of
+an add-on's own is the add-on's to enable - `_updateToolbar` only takes them
+away when there is nothing to work on (closed, no state), and leaves alone any
+marked `data-addon-off="1"` (the handwriting add-on's eraser, with no pen:
+without this a tap that changes the selection woke every one of them); a
+`help` (HTML) on the definition or the instance puts a "?" in the box's
+summary that opens it in the editor's help overlay (`showHelp(html, title)`, the same page as the
 toolbar's "?") - every add-on with a panel should have one.  `api.call(method, payload)`
-is the promise of a query's result or the new snapshot.  A Pyodide page
+is the promise of a query's result or the new snapshot; `api.rangeIndices()`
+gives a range's `children` as the editor's own messages carry them, and
+`api.loadScript(url)` loads a URL once per page (a failed load is tried again).
+An add-on whose `mount` throws is not mounted again until it is switched off
+and on (`_addonsFailed`).  A Pyodide page
 carries the add-ons' packages (`cfg["packages"]`, written under
 `/sympy_editor_pkg/<module>/`) and `micropip`-installs their `requires`
 (`cfg["micropip"]`); `document["addons"]` / `document["available"]` name them by module for
@@ -822,8 +1153,10 @@ editor can load a front end it has not seen.  `Addon.export_state(doc)` /
 `restore_state(doc, data)` carry an add-on's state under
 `Document.export()["addon_state"]` (a session; `Document(addon_state=)`
 gives it back when the add-on is on; `w.addon_state` in the widget is the
-live dict); what must outlive a session the add-on mirrors to
-`localStorage` from its panel (the rules panel's library).
+live dict); what must outlive a session the add-on keeps through
+`api.keep` from its panel (the rules panel's library) - its own editor's
+keeper; `SympyEditor.keep` asks the editor made last, which on a page with
+several may be one that keeps nothing.
 An add-on is a *folder* with `addon.json` (`name`, `label`, `module`,
 `version`, `requires`) beside its package - the layout of a checkout of its
 repository; `scan_addons(dir)` finds such folders and puts them on
@@ -833,13 +1166,21 @@ points.  The apps bundle them that way: `mobile/build.py` `stage_addons`
 copies every folder of `addons/` (no tests) beside the app's Python,
 `sympy_editor_app.py` registers the directory at import, `build_www` builds
 the page from a `Document(available=[their modules])` with
-`rememberAddons` on (`ADDONS_KEY` in localStorage, `_restoreAddons` at
-mount), and the manifests' `requires` go to Chaquopy's `pip` list (a test
-checks) and iOS's `app_packages`.  **Installing while editing**: `addons.install_addons(payload, select,
-into, source)` unpacks add-on folders from `{"zip": base64}` or `{"files":
-{path: text | {"b64"}}}` (paths that escape are refused, tests/caches left
-out, 40 MB cap) into `user_dir()` - `USER_ADDONS_DIR` / `SYMPY_EDITOR_USER_ADDONS`
-/ `~/.sympy-editor/addons`, `/sympy_editor_user_addons` under Pyodide - with
+`rememberAddons` on (name `addons` in the keeper, `_restoreAddons` at
+mount).  With it the switches are the editor's, not a session's: the keeper
+holds `{"off": [names]}` - every add-on is on until switched off, one new in
+an update too - `_addonsSwitched` records any `addons` message the editor
+sends, and `_enforceAddons` puts the switches on every document opened (the
+last session at start, `openSession`, and once more after the start-up
+catalogue refresh, which brings in what only the app's Python carries); an
+older kept list of those *on* is read as nothing kept.  The manifests'
+`requires` go to Chaquopy's `pip` list (a test
+checks) and iOS's `app_packages`.  **Installing while editing**:
+`addons.install_addons(payload, select, into, source)` unpacks add-on
+folders from `{"zip": base64}` or `{"files": {path: text | {"b64"}}}`
+(paths that escape are refused, tests/caches left out, 40 MB cap) into
+`user_dir()` - `USER_ADDONS_DIR` / `SYMPY_EDITOR_USER_ADDONS` /
+`~/.sympy-editor/addons`, `/sympy_editor_user_addons` under Pyodide - with
 an `installed.json` index (source, version); `inspect_addons`,
 `uninstall_addon`, `user_installed` go with it, `installed()` counts the
 directory, `load_addon(name)` resolves a folder's name through it, and a
@@ -848,28 +1189,29 @@ directory, `load_addon(name)` resolves a folder's name through it, and a
 The message is the same `{"action": "addons"}` with `inspect`, `install` +
 `select` + `source`, `uninstall`, answered under `snap["addons_result"]`
 (`found`/`installed`/`removed`); `addons_available` rows carry `user:
-{version, source}`.  Front end: `_fillAddonsMenu` appends the install
-section (`.se-addons-install`: URL + *Look up*, *From a file…*, the found
-list with check boxes, *Install*; a × per user row) and the menu shows
-whenever installing is possible; `parseGithubUrl`/`githubListing`/
-`githubFindAddons`/`githubCollect` read a repository through the API and
-raw.githubusercontent.com with jsDelivr as the fallback (the archive
-download has no CORS header); a `.zip` goes to Python as base64.  The
-Pyodide runtime installs at its own level (`rt.installAddons`, worker
-messages `install`/`micropip`, `__sympy_editor_install` in the boot),
-keeps the payloads in IndexedDB (`addonStore`, one record per source) and
-replays them at every start - an interrupt restarts the worker - and
-`forgetAddons` drops them; the other backends install through the
-document (the apps' `sympy_editor_app.py` points `set_user_dir` into
-`HOME`, Android's `MainActivity` answers `onShowFileChooser` for the file
-input).  Tests: `tests/test_addons.py` (the installer),
+{version, source}`.  Front end: `_fillAddonsMenu` ends the list with the
+install section (`.se-addons-install`: URL + *Look up*, *From a file…*,
+the found list with check boxes, *Install*; a × per user row) in the
+Add-ons window;
+`parseGithubUrl`/`githubListing`/`githubFindAddons`/`githubCollect` read a
+repository through the API and raw.githubusercontent.com with jsDelivr as
+the fallback (the archive download has no CORS header); a `.zip` goes to
+Python as base64.  The Pyodide runtime installs at its own level
+(`rt.installAddons`, worker messages `install`/`micropip`,
+`__sympy_editor_install` in the boot), keeps the payloads in IndexedDB
+(`addonStore`, one record per source) and replays them at every start - an
+interrupt restarts the worker - and `forgetAddons` drops them; the other
+backends install through the document (the apps' `sympy_editor_app.py`
+points `set_user_dir` into `HOME`, Android's `MainActivity` answers
+`onShowFileChooser` for the file input).  Tests: `tests/test_addons.py`
+(the installer),
 `test_browser.py::test_addons_install_from_a_zip_file_and_remove` and
 `..._from_a_github_repository` (GitHub stood in by `page.route`),
 `test_mobile.py::test_the_app_keeps_the_addons_the_user_installs`.
 `addons/pack.py` zips a folder; `addons/sympy_editor_feynman` is
 `"bundle": false`, the one to install that way.  Adding an add-on from a
-repository by hand = cloning it into that directory; keep the folder
-format and the scan stable for that.
+repository later = cloning it into that directory; keep the folder format
+and the scan stable for that.
 `Addon.contribute_step(doc, step, expr)` adds to each step of
 `history_labels()["steps"]` (on a copy: the render cache stays plain), and
 the front end hooks `historyStep` (an element for the drawer's rows,
@@ -886,7 +1228,7 @@ of its own under `addons/<pkg>/tests/` (unit and Playwright), and a fix to
 an add-on comes with a test there - `pytest addons/` runs them all,
 including `addons/tests/test_demo_page.py`, which refuses a stale
 `addons/demo.html` (rebuild with `python addons/demo.py` after any change);
-the mobile bundles do not carry add-ons.  Rebuilders and printer methods
+the mobile bundles carry them as folders beside the app's Python (above).  Rebuilders and printer methods
 are process-wide registries: activation adds, nothing removes; kinds are
 not.
 
@@ -901,9 +1243,55 @@ not.
 
 ## Key design decisions
 
+- **Invalid expressions: checked at every commit, kept only when allowed.**
+  The editor builds with the constructors (`rebuild`, `Add(a, b)` for an
+  operator, anything under `evaluate(False)`), and those let through what
+  SymPy's operators refuse: `Add(2, M)`, `Pow(M, 1/2)` of a non-square `M`,
+  `conjugate(Eq(...))`.  Such a step used to be committed, and a saved
+  session holding one could not be reopened (its `srepr` raised on reading
+  back) - the formula flickered red and the history never showed.
+  `Document._commit` now checks the tree node by node (`invalid.first_problem`:
+  the node's constructor run unevaluated, and evaluated too when an argument
+  is a matrix or not a scalar - cheap there, unlike `factorial(10**6)`).
+  With `allow_invalid` off the edit is refused; on (`Document(allow_invalid=True)`,
+  `{"action": "settings"}`, the *allow invalid* check box, exported with a
+  session) the offending node becomes an `InvalidExpr` subclass per head
+  (`invalid("MatMul")(A, B)`), whose args are the children in the view tree.
+  Operators and calls that raise are caught where they happen: `rebuild`
+  consults `printer.rebuild_fallback` (set by `allowing_invalid` around the
+  tree helpers), `Document.parse` retries with `tolerant_parse` (the Python
+  AST of the input with operators and SymPy calls routed through helpers),
+  and `operator`/`call`/`wrap` catch their constructor.  Rebuilding an
+  invalid node tries its head again (`build`), so an edit that fixes an
+  argument heals it.  Reading `srepr` (`_coerce`) is always tolerant, and
+  so is the expression a document is created with: saved data always opens.
+  A named object (`MatrixSymbol` given an expression for its shape) is never
+  kept invalid.
+
 - **Tree paths, not LaTeX positions.**  Paths are `args` indices
   (`"/"` = root, `"/1/0"` = `expr.args[1].args[0]`).  Editing rebuilds
   ancestors with `node.func(*args)`, so SymPy auto-evaluation applies.
+- **Draw order.**  The search follows the order in which the printer *draws*
+  a node's pieces and lists only what it draws (`_child_order`, per printer):
+  by default the arguments in order with a transparent container's contents
+  in its place; `AnnotatedLatexPrinter` overrides Integral (limits outer
+  first, `dx` before the integrand), Sum/Product, Derivative (variables last
+  first), Subs and Limit; `AnnotatedStrPrinter` overrides Sum/Integral
+  (limits first).  A matrix's shape and a sparse matrix's or array's keys are
+  never candidates: a sparse entry is `/2/i/1` (the value of its Dict item)
+  and an empty cell is drawn unannotated (clicking it selects the matrix).
+  When adding a printer that draws out of argument order, add its order there.
+- **Saved text is read, never run.**  `invalid.read_srepr` / `read_source`
+  read history steps, declared names, files and add-on state (the rewrite
+  rules: `Document.parse_saved`) by walking the syntax tree - SymPy's
+  constructors, the editor's and the add-ons' names, literals - never
+  `sympify`/`parse_expr`; steps come back unevaluated, exactly as saved
+  (`_SaveReprPrinter` writes a product's factors as stored).  Text typed in
+  the editor, and a string given to `Document(...)` by the Python using it,
+  keep `parse_expr`/`sympify`: that is the user's own code.  The Python
+  script export writes a step as constructors under `evaluate(False)` when
+  source would not rebuild it.  Each history step carries its declared names
+  (`_decls`), so undo undoes a retype.
 - **Locating nodes while printing.**  SymPy's printer does not print the tree
   verbatim (`x - y` prints a negated term; `x/y**2` synthesises `Pow(y, 2)`;
   matrix/limit containers are traversed directly).  `AnnotatedLatexPrinter`
@@ -952,9 +1340,9 @@ not.
   and top-level `const`/`let` (it is inlined into classic `<script>` tags,
   possibly several times per page, and concatenated into an ES module for
   anywidget).  Use `var SympyEditor = (function () { ... })();`.
-- Pyodide-backed pages embed the *source* of `printer.py`, `ops.py`,
-  `addons.py`, `document.py`; those four modules must import nothing but
-  SymPy, the standard library and each other.
+- Pyodide-backed pages embed the *source* of `printer.py`, `invalid.py`,
+  `ops.py`, `addons.py`, `document.py` (`html.EMBEDDED_MODULES`); those
+  modules must import nothing but SymPy, the standard library and each other.
 
 ## Mobile apps (`mobile/`)
 
@@ -966,7 +1354,18 @@ pip package.  The rule is minimal wrapping and maximal sharing:
   `www/vendor/` so the app works offline.  `--native` (what both apps use)
   leaves Pyodide out - the app has an interpreter of its own; without it the
   Pyodide subset SymPy needs is vendored too (about 30 MB), which is what the
-  web app and a desktop preview want.  Test it in a desktop browser with
+  web app and a desktop preview want.  **A bundle never goes online**:
+  whatever the page or an add-on would fetch is in it.  The add-ons'
+  requirements are wheels beside Pyodide (`vendor_wheels`: pip resolves the
+  closure for Pyodide's Python, pure-Python wheels only, cached by
+  requirements; `urls["wheels"]` → `cfg["micropip"]` names them, and
+  `micropipCode` installs them with `deps=False`, resolved against the page
+  since the worker is a blob), and the CDN scripts an add-on names in its
+  `client_options` (Plotly) are copied under `vendor/addons/`
+  (`vendor_assets`, each with a line in `ASSET_LICENCES` for the NOTICE) and
+  mapped by the page option `localAssets`, which `loadScript`/`ensureCss`
+  consult.  `test_vendored_bundle_is_self_contained` switches the LaTeX and
+  rules add-ons on with every outside request blocked.  Test it in a desktop browser with
   `python -m http.server -d mobile/www` (it must be served, not opened as a
   file: WebAssembly and fetch need an origin).
 - `mobile/android/`: a Gradle/Kotlin project whose only activity is a WebView
@@ -987,6 +1386,40 @@ pip package.  The rule is minimal wrapping and maximal sharing:
   own.  `mobile/app/sympy_editor_app.py` is that Python, shared: `build.py`
   stages it and a fresh `src/sympy_editor` into each platform's tree, so add a
   bridge method in three places or none - Kotlin, Swift, and the module.
+- **The apps have no network.**  The privacy statement says nothing leaves
+  the device, and the apps are built so that nothing can: Android's manifest
+  removes `INTERNET` and `ACCESS_NETWORK_STATE` (`tools:node="remove"` - ONNX
+  Runtime's library adds both, and a `TelemetryInitializer` provider that
+  uploads to Microsoft at launch, removed too), opts out of the WebView's
+  metrics and Safe Browsing, and `MainActivity` sets `ORT_DISABLE_TELEMETRY`;
+  iOS and the Mac compile a WebKit content rule list blocking every
+  `http(s)`/`ws(s)` load before the page loads.  `mobile/build.py --cdn` is
+  refused.  The handwriting add-on sets `ORT_DISABLE_TELEMETRY` before any
+  import of onnxruntime on the desktop too.  A new dependency is checked for
+  what it connects to (`test_the_apps_have_no_network`, and
+  `aapt2 dump permissions` on a built APK lists none).
+- **Handwriting in the apps.**  The add-on is staged apart from the others
+  (`"bundle": false`), with math-ocr's two modules and its model
+  (`stage_ink`), and the model runs in ONNX Runtime behind the one call the
+  beam search makes, `run(None, feeds)`: `_JavaSession` on Android (the Maven
+  library through Chaquopy), `_NativeSession` on iOS.  There is no
+  onnxruntime wheel for iOS, so `onnxruntime.xcframework` (pinned by version
+  and checksum in `build.py`, a static library) is linked into the app and
+  `OrtModule.m` makes it the built-in module `_sympy_ort` - registered with
+  `PyImport_AppendInittab` before the interpreter starts, tensors in and out
+  as (type code, shape, bytes), no NumPy on the C side.  NumPy itself is
+  BeeWare's iOS wheel, per platform (device / simulator), so the iOS build
+  stages all of it in `mobile/ios/ink/` (`ios_ink`), which
+  `sympy_editor_app.py` puts on the path when it is there - never in `app/`
+  or `app_packages/`, which the Mac app shares.  `PythonRuntime.m` is shared
+  too: its ONNX lines are under `#if !TARGET_OS_OSX`.  The iOS library is
+  pinned to 1.28 on purpose: from 1.29 it carries Microsoft's telemetry
+  client (an NSURLSession uploader to `mobile.events.data.microsoft.com`),
+  and iOS has no permission to remove as Android's manifest does.
+  `check_no_network` reads every iOS slice with `nm` and `strings` and stops
+  the build if the library imports a networking API or names the collector -
+  an off-switch (`ORT_DISABLE_TELEMETRY`, still set) is not a guarantee.
+  Bump the version only to a release that passes it.
 - **Glyphs a platform may lack are drawn, not typed.**  iOS has no character
   for the arrows, the keyboard, the hamburger or ✕: the arrows, the
   full-screen brackets and the keyboard are SVG (`arrowSvg`, `expandSvg`,
@@ -996,6 +1429,19 @@ pip package.  The rule is minimal wrapping and maximal sharing:
   `editor.js`/Python so that desktop, Android and iOS stay identical.
   `tests/test_mobile.py` builds the bundle and, with
   `SYMPY_EDITOR_SLOW_TESTS=1`, edits in it with all external requests blocked.
+
+- **One interpreter per process.**  `PythonRuntime.shared` (dispatch_once)
+  and `PythonHost.shared` (one queue) serve every Mac window; each window's
+  `PythonBridge` prefixes the page's document ids with its name (`w2/doc1`),
+  asks `interrupt(<window>)`, and closes its documents when it goes.  A dead
+  page process reloads the page (`webViewWebContentProcessDidTerminate`;
+  Android `onRenderProcessGone` → `recreate()`).  Android keeps a pending save
+  (its text in a cache file) and the `opening` token in the saved instance
+  state, and its Python executor is per process.  The Mac app quits
+  `.terminateLater`, after every window's flush has reached `keepWrite` - at
+  once when `SympyEditor.flush()` says nothing was waiting - or 1.5 s;
+  closing a window flushes too.  The web app's worker precaches `./` and
+  fetches with `cache: "reload"`.
 
 ## Web app (`webapp/`)
 
@@ -1012,7 +1458,7 @@ builds a `--cdn` copy and checks the worker installs and caches in Chromium;
 
 ## Conventions
 
-- Python ≥ 3.9, SymPy ≥ 1.14 (`pyproject.toml`); no type-checking tooling
+- Python ≥ 3.10, SymPy ≥ 1.14 (`pyproject.toml`); no type-checking tooling
   enforced; keep type hints and docstrings.  In the browser, Pyodide's own
   sympy package lags behind (1.13.3 in Pyodide 0.28), so the pages load
   the `SYMPY_VERSION` wheel from PyPI (`SYMPY_WHEEL`, `urls["sympyWheel"]`;

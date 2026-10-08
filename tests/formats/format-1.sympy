@@ -1,0 +1,26 @@
+{
+ "sympy-editor": 1,
+ "min-reader": 1,
+ "saved": "2026-09-21T12:00:00+00:00",
+ "expr": "x**2 + 1",
+ "session": {
+  "format": 1,
+  "history": [
+   "Pow(Symbol('x'), Integer(2))",
+   "Add(Integer(1), Pow(Symbol('x'), Integer(2)))",
+   "Add(Integer(1), Pow(Symbol('x'), Integer(2)))"
+  ],
+  "index": 1,
+  "labels": [
+   null,
+   "Edit: x**2 → x**2 + 1",
+   "Transform: Factor"
+  ],
+  "symbols": [
+   "MatrixSymbol(Str('M'), Integer(2), Integer(2))",
+   "Symbol('t', positive=True)"
+  ],
+  "allow_invalid": false
+ },
+ "name": "a formula of format 1"
+}

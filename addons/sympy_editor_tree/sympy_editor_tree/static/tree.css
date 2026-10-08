@@ -4,7 +4,12 @@
 .se-addon-tree .tree-bar select, .se-addon-tree .tree-field { font: inherit; font-size: 12px; padding: 2px 6px; }
 .se-addon-tree .tree-field { width: 9em; }
 .se-addon-tree .tree-hint { color: var(--se-muted); font-size: 11px; margin-left: auto; }
-.se-addon-tree .tree-scroll { overflow: auto; max-width: 100%; }
+/* One finger scrolls the box, as it does in any overflowing box; two are
+   left to the panel, which reads them as a pinch (pinch-zoom here would
+   be the whole page's).  The grab cursor shows only over empty space -
+   a node's own pointer cursor wins over it. */
+.se-addon-tree .tree-scroll { overflow: auto; max-width: 100%; touch-action: pan-x pan-y; cursor: grab; }
+.se-addon-tree .tree-scroll.tree-panning { cursor: grabbing; }
 .se-addon-tree .tree-svg { display: block; font: 12px var(--se-mono); }
 .se-addon-tree .tree-edges line { stroke: var(--se-muted); stroke-width: 1.2; }
 .se-addon-tree .tree-node { cursor: pointer; outline: none; }

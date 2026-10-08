@@ -77,24 +77,46 @@ if ("serviceWorker" in navigator) {{
 """
 
 SW = """// sympy-editor web app: precache the bundle, serve it from the cache (offline).
-var CACHE = "sympy-editor-%(hash)s";
+// The caches of an origin belong to every site served from it - each
+// <user>.github.io/<project>/ beside this one - so this app's are named by
+// where it lives, and it opens, searches and deletes those alone.  (A space
+// between the parts: a path never holds one, so no place's names begin with
+// another's.)
+var PREFIX = "sympy-editor " + new URL(self.registration.scope).pathname + " ";
+var CACHE = PREFIX + "%(hash)s";
 var FILES = %(files)s;
+// An earlier build of this app, to be replaced: named as this one is or, from
+// before the names said where, "sympy-editor-<hash>" - which another copy of
+// the app on this origin may have made too, so that one is ours only when what
+// it holds is from here.
+function outdated(name) {
+  if (name === CACHE) return Promise.resolve(false);
+  if (name.indexOf(PREFIX) === 0) return Promise.resolve(true);
+  if (!/^sympy-editor-[0-9a-f]{12}$/.test(name)) return Promise.resolve(false);
+  return caches.open(name).then(function (cache) { return cache.keys(); }).then(function (held) {
+    return held.length > 0 && held.every(function (r) { return r.url.indexOf(self.registration.scope) === 0; });
+  });
+}
 self.addEventListener("install", function (event) {
-  event.waitUntil(caches.open(CACHE).then(function (cache) { return cache.addAll(FILES); }).then(function () { return self.skipWaiting(); }));
+  event.waitUntil(caches.open(CACHE).then(function (cache) { return cache.addAll(FILES.map(function (u) { return new Request(u, { cache: "reload" }); })); }).then(function () { return self.skipWaiting(); }));
 });
 self.addEventListener("activate", function (event) {
   event.waitUntil(caches.keys().then(function (keys) {
-    return Promise.all(keys.filter(function (k) { return k !== CACHE; }).map(function (k) { return caches.delete(k); }));
+    return Promise.all(keys.map(function (k) {
+      return outdated(k).then(function (old) { return old ? caches.delete(k) : false; });
+    }));
   }).then(function () { return self.clients.claim(); }));
 });
 self.addEventListener("fetch", function (event) {
   if (event.request.method !== "GET") return;
   var url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;    // CDN files (a --cdn build) go to the network
-  event.respondWith(caches.match(event.request, { ignoreSearch: true }).then(function (hit) {
-    return hit || fetch(event.request).then(function (response) {
-      if (response.ok) { var copy = response.clone(); caches.open(CACHE).then(function (cache) { cache.put(event.request, copy); }); }
-      return response;
+  event.respondWith(caches.open(CACHE).then(function (cache) {
+    return cache.match(event.request, { ignoreSearch: true }).then(function (hit) {
+      return hit || fetch(event.request).then(function (response) {
+        if (response.ok) cache.put(event.request, response.clone());
+        return response;
+      });
     });
   }));
 });
@@ -343,7 +365,7 @@ header a.button code {{ font-size: 0.85em; }}
 <body>
 <main>
 <header>
-  <p class="eyebrow">Free &amp; open source \u00b7 BSD 3-Clause</p>
+  <p class="eyebrow">Free &amp; open source \u00b7 AGPL-3.0</p>
   <h1><img src="icon.svg" alt="" width="56" height="56"> SymPy Editor</h1>
   <p>A click-to-edit editor for SymPy expressions: select a piece of a formula
   and change it in place - type over it, apply any SymPy function to it, pull
@@ -411,7 +433,7 @@ as a single file that works offline.
 <nav class="legal">\u00a9 2026 <a href="https://github.com/Upabjojr">Francesco Bonazzi</a> \u00b7
 <a href="https://github.com/Upabjojr/sympy-editor">GitHub</a> \u00b7
 <a href="https://pypi.org/project/sympy-editor/">PyPI</a> \u00b7
-<a href="license.html">License (BSD 3-Clause)</a> \u00b7
+<a href="license.html">License (AGPL-3.0)</a> \u00b7
 <a href="privacy.html">Privacy</a></nav></footer>
 </main>
 <script>
@@ -539,16 +561,19 @@ def doc_pages(folder: Path) -> None:
     (folder / "LICENSE.txt").write_text(licence, encoding="utf-8")
     card = lambda icon, title, body: f'<section class="card">{DOC_ICONS[icon]}<div><h2>{title}</h2>{body}</div></section>'
     (folder / "license.html").write_text(DOC_PAGE.replace("\\u2014", "\u2014").replace("\\u2190", "\u2190").format(
-        title="License", description="SymPy Editor is free software under the BSD 3-Clause License.",
-        lead="SymPy Editor is free software, under the BSD 3-Clause License.",
+        title="License", description="SymPy Editor is free software under the GNU Affero General Public License.",
+        lead="SymPy Editor is free software, under the GNU Affero General Public License, version 3 or later.",
         body=card("scale", "In short",
-                  """<p>Use it, copy it, change it, redistribute it &mdash; commercially or
-not &mdash; as long as the copyright notice travels with it, and without
-using the author's name to promote what you make from it. It comes with no
-warranty. The short version is not the licence; the licence is:</p>""")
+                  """<p>Use it, copy it, study it, change it, redistribute it &mdash; commercially or
+not. Whoever shares it, changed or not, passes the same freedoms on: the
+source, under the same licence. And whoever changes it and lets people use
+the changed version over a network &mdash; a web site, say &mdash; must offer
+them its source too. It comes with no warranty. The mathematics is <a href="https://www.sympy.org">SymPy</a>'s, and the editor
+carries a copy of it: SymPy's own licence follows the editor's. The short version is not the
+licence; the licence is:</p>""")
              + f'<pre class="licence">{html.escape(licence)}</pre>',
         footer='The same text as a plain file: <a href="LICENSE.txt">LICENSE.txt</a>. '
-               'The rendering (KaTeX) and the in-browser Python (Pyodide, SymPy) have free licences of their own, '
+               'The rendering (KaTeX) and the in-browser Python (Pyodide) have free licences of their own, '
                'listed in <a href="https://github.com/Upabjojr/sympy-editor">the repository</a>.'),
         encoding="utf-8")
     cards = "".join(card(icon, title, body) for icon, title, body in PRIVACY_CARDS)
@@ -556,7 +581,7 @@ warranty. The short version is not the licence; the licence is:</p>""")
         title="Privacy", description="SymPy Editor collects no data: the mathematics stays on your device.",
         lead="The short version: the editor computes on your device, and nothing you type is sent anywhere by us.",
         body=cards,
-        footer="This page describes SymPy Editor 0.1.0 (September 2026). "
+        footer="This page describes SymPy Editor 0.1.3 (October 2026). "
                "If the facts change, this page changes with them."),
         encoding="utf-8")
 
@@ -607,6 +632,21 @@ TRY = """<h2 class="shelf">Try it</h2>
 </section>"""
 
 
+#: ...or a tour of it, playing where the editor will be (examples/tutorial):
+#: the editor at work, pressed and typed into for real, with a button to stop
+#: it; stopped or over, it is the editor, to use - and the button at the end
+#: of the text plays it again.
+TOUR = """<h2 class="shelf">Try it</h2>
+<section class="try">
+  <p>A short tour plays here: the editor at work, pressed and typed into for
+  real. Stop it whenever you like, and the editor is yours \u2014 click any piece
+  of the formula and change it in place. Python runs in your browser, and every
+  result is computed on your device.
+  <button type="button" class="se-tour-play" id="{element}-play">\u25b6 Play the tour</button></p>
+  <div id="{element}"></div>
+</section>"""
+
+
 CARD = """<section class="card" id="{slug}">
   <span class="steps">{steps} steps</span>
   <h3>{title}</h3>
@@ -630,7 +670,7 @@ def manifest() -> dict:
 
 def derivations_page(folder: Path, *, urls: dict | None = None,
                      editor_href: str = "../index.html",
-                     editor: dict | None = None) -> Path | None:
+                     editor: dict | None = None, tour: dict | None = None) -> Path | None:
     """The project introduced, then the whole shelf of worked derivations,
     each with its own player, as `folder/index.html`.
 
@@ -656,7 +696,18 @@ def derivations_page(folder: Path, *, urls: dict | None = None,
     try_editor = try_watch = ""
     if editor is not None:
         element = "try-the-editor"
-        try_editor, try_watch = TRY.format(element=element), TRY_SCRIPT
+        if tour is not None:
+            # the tour plays on that editor: its player after the mounts, its
+            # overlay's style with the section (and no invitation to pulse -
+            # the tour is the invitation).  A reader who follows a link or
+            # scrolls on past it has stopped watching, and it stops; the
+            # button in the section's text plays it again.
+            from sympy_editor.tutorial import player_css, player_html
+            try_editor = player_css() + TOUR.format(element=element)
+            try_watch = player_html(element, tour, full_page=False, stop_button=True,
+                                    stop_on_leave=True, play_button=f"{element}-play")
+        else:
+            try_editor, try_watch = TRY.format(element=element), TRY_SCRIPT
         mounts.append(f'SympyEditor.mount(document.getElementById("{element}"), {_script_json(editor)});')
     for i, (slug, make) in enumerate(shelf.DERIVATIONS):
         history = make()
@@ -718,31 +769,52 @@ def shelf_site(out: Path, *, cache: Path | None = None, cdn: bool = False) -> Pa
     it is for.
     """
     out.mkdir(parents=True, exist_ok=True)
-    urls = None if cdn else build_www.vendor(out, cache or Path.home() / ".cache" / "sympy-editor", pyodide=False)
+    cache = cache or Path.home() / ".cache" / "sympy-editor"
+    build_www.clear_vendored(out, cache)       # the folder is dropped into a site as it is: nothing of an earlier build
+    urls = None if cdn else build_www.vendor(out, cache, pyodide=False)
     write_icons(out)
     from sympy_editor import to_html
 
     icon = '<link rel="icon" href="icon.svg" type="image/svg+xml">\n<link rel="apple-touch-icon" href="icon-192.png">\n'
     # the mark beside the title, as the apps wear it: this page is the project's
     # own, and says so where a plain page would say nothing
-    editor = to_html(build_www.demo_expression(), title=NAME, head=icon,
+    # With the add-ons switched on: the plot, the tree, the rewrite rules and
+    # the LaTeX reader are what the editor can do, and the page that shows it
+    # off should show them rather than leave them behind a menu.  Their Python
+    # requirements are installed in the browser when the page boots.
+    # Sessions and the history behind the drawer's button, as the apps have
+    # them: several expressions, each with its own undo history, kept in the
+    # browser between visits.  It is also where the add-ons' switches live,
+    # so without it the page has no way to turn one off.
+    SHOWCASE = {"sessions": True, "rememberZoom": True, "rememberAddons": True}
+    editor = to_html(build_www.document_with_addons(build_www.demo_expression(), enable=True),
+                     title=NAME, head=icon, options=dict(SHOWCASE),
                      logo=build_www.app_logo())   # Pyodide from the CDN, ~0.5 MB
     (out / "editor.html").write_text(editor, encoding="utf-8")
-    # ...and the same editor embedded at the top of the page itself, sharing
-    # the copy of editor.js the viewers already carry.  Pyodide is not
-    # vendored here (`pyodide=False` above), so it comes from the CDN either
-    # way, and only once somebody edits something.
-    from sympy_editor import Document
+    # ...and at the top of the front page, the tour of examples/tutorial
+    # playing on an editor of its own, sharing the copy of editor.js the
+    # viewers already carry (Pyodide comes from the CDN: `pyodide=False`
+    # above).  Without the tour's History part, which opens a view over the
+    # whole editor; with a button to stop it.  Its add-ons are all there to
+    # switch on and the tour switches on the ones it shows.  No sessions and
+    # no remembered add-ons: editor.html, on the same site, keeps the
+    # reader's own in the browser, and the tour is not to add to them.
+    from sympy import sympify
     from sympy_editor.html import build_config
-    live = build_config(Document(build_www.demo_expression()), backend="pyodide",
-                        urls=urls, options={"preload": False})
-    derivations_page(out, urls=urls, editor_href="editor.html", editor=live)
+    from sympy_editor.tutorial import load_tutorial, without_parts
+    tour = without_parts(load_tutorial(ROOT / "examples" / "tutorial" / "tour.json"), ["history"])
+    live = build_config(build_www.document_with_addons(sympify(tour["expression"])),
+                        backend="pyodide", urls=urls, options={})
+    derivations_page(out, urls=urls, editor_href="editor.html", editor=live, tour=tour)
     return out
 
 
 def build(out: Path, *, cdn: bool = False, cache: Path | None = None) -> Path:
     head = HEAD.format(theme=THEME, short=SHORT_NAME)
-    build_www.build(out, cdn=cdn, cache=cache, title=NAME, head=head)
+    # The site is the shop window: everything the editor can do is on when it
+    # opens - the plot, the tree, the rewrite rules, the LaTeX reader - rather
+    # than waiting behind a menu nobody has been told about.
+    build_www.build(out, cdn=cdn, cache=cache, title=NAME, head=head, enable_addons=True)
     vendored = (out / "vendor/katex/katex.min.js").is_file()
     derivations_page(                           # before sw.js: the precache lists what is there
         out / "derivations",
@@ -750,11 +822,13 @@ def build(out: Path, *, cdn: bool = False, cache: Path | None = None) -> Path:
               if vendored else None))
     (out / "manifest.webmanifest").write_text(json.dumps(manifest(), indent=2), encoding="utf-8")
     write_icons(out)
+    # What is there is what this build wrote (build_www clears what an earlier
+    # one vendored), and the pictures kept beside the derivations page.
     files = sorted(p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file() and p.name != "sw.js")
     digest = hashlib.sha256()
     for name in files:
         digest.update(name.encode()); digest.update((out / name).read_bytes())
-    (out / "sw.js").write_text(SW % {"hash": digest.hexdigest()[:12], "files": json.dumps(["./" + f for f in files])}, encoding="utf-8")
+    (out / "sw.js").write_text(SW % {"hash": digest.hexdigest()[:12], "files": json.dumps(["./"] + ["./" + f for f in files])}, encoding="utf-8")
     return out
 
 

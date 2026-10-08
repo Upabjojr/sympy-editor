@@ -14,12 +14,14 @@ Environment for signing:
   iOS:              IOS_TEAM_ID (Apple developer team), optional IOS_EXPORT_METHOD (development, ad-hoc, app-store-connect);
                     without an Apple ID in Xcode, IOS_API_KEY_ID + IOS_API_ISSUER_ID (App Store Connect API key) and,
                     to sign with a certificate of the keychain, IOS_PROVISIONING_PROFILE (the name of an installed profile);
-                    IOS_BUILD_NUMBER (CFBundleVersion, default: the number of commits)
+                    IOS_BUILD_NUMBER (CFBundleVersion, default: BUILD_NUMBER in this file)
 """
 
 from __future__ import annotations
 
 import argparse
+import gzip
+import hashlib
 import os
 import platform
 import plistlib
@@ -27,8 +29,8 @@ import shutil
 import subprocess
 import sys
 import tarfile
-import urllib.request
 import zipfile
+import zlib
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -41,6 +43,33 @@ APP = HERE / "app"                      # the Python side both apps run
 #: (the standard library and the tools to install it travel with it).
 PYTHON_APPLE_SUPPORT = "3.13-b14"
 
+#: ONNX Runtime for iOS, which the handwriting add-on's model runs on: the
+#: archive its CocoaPod is made from (onnxruntime.xcframework, a static
+#: library, and its LICENSE), pinned by version and checksum.
+#:
+#: Not the Android app's 1.29: from that release the iOS library carries
+#: Microsoft's telemetry client (1DS: an uploader to
+#: mobile.events.data.microsoft.com over NSURLSession, with a reachability
+#: monitor and an offline store), and iOS has no permission to take away as
+#: Android's manifest does.  1.28 has none of it - no network call of any
+#: kind - and :func:`ios_onnxruntime` refuses a library that has
+#: (:data:`ONNXRUNTIME_FORBIDDEN`), so bumping this cannot bring it in.
+ONNXRUNTIME_IOS = "1.28.0"
+ONNXRUNTIME_IOS_SHA256 = "b503cf5949ab718a1dff17d1643237ecc0fecf50ad86264572dcafddb140a327"
+#: What the library must not reach for (its undefined symbols, by nm) or
+#: carry (its strings): anything that opens a connection, and the collector.
+ONNXRUNTIME_FORBIDDEN = ("NSURLSession", "NSURLConnection", "CFNetwork", "CFHTTP", "CFSocket", "CFStream",
+                         "_nw_", "SCNetwork", "_getaddrinfo", "_gethostby", "_socket", "_connect", "_sendto",
+                         "_curl_", "_SSL_")
+ONNXRUNTIME_FORBIDDEN_TEXT = ("events.data.microsoft.com", "OneCollector", "Applications6Events")
+
+#: NumPy built for iOS: PyPI has no such wheel, BeeWare's index does (the
+#: project that packages the interpreter above).
+IOS_NUMPY = "2.5.2.post1"
+IOS_WHEELS = "https://pypi.anaconda.org/beeware/simple"
+#: Files of a wheel that never go into the app (see ios_ink).
+IOS_WHEEL_JUNK = (".a", ".o", ".lib", ".h", ".c", ".pxd", ".pyx", ".pyi")
+
 #: Where the downloads live, as in build_www.py.
 CACHE = Path.home() / ".cache" / "sympy-editor"
 
@@ -50,10 +79,21 @@ def run(cmd, cwd=None, env=None):
     subprocess.run(cmd, cwd=cwd, env=env, check=True)
 
 
+#: What a build for an app says to ``--cdn``, here and in desktop/build.py
+#: (and build_www.py, to ``--cdn --android``).  The apps have no network:
+#: Android's manifest takes the permission out, and WebKit blocks every
+#: http(s) load on iOS and the Mac.  A bundle that loads KaTeX from a CDN
+#: would be a blank page there.
+NO_CDN = ("--cdn: the apps never use the network, so their bundle carries everything; "
+          "use mobile/build_www.py --cdn for a page to open in a browser")
+
+
 def build_www(cdn: bool, *, android: bool = False, native: bool = False, debug: bool = False) -> None:
-    cmd = [sys.executable, str(HERE / "build_www.py")]
+    """The bundle of an app (mobile/www, which the three apps share).  Never
+    one that loads from the CDNs, whoever asks: see :data:`NO_CDN`."""
     if cdn:
-        cmd.append("--cdn")
+        sys.exit(NO_CDN)
+    cmd = [sys.executable, str(HERE / "build_www.py")]
     if android:
         cmd.append("--android")
     if native:
@@ -71,14 +111,50 @@ DEBUG_TITLE = "SymPy Editor (debug)"
 
 
 def download(url: str, dest: Path) -> Path:
-    """Fetch ``url`` once into ``dest`` (a file in the cache)."""
+    """Fetch ``url`` once into ``dest`` (a file in the cache): all of it, or
+    nothing - ``build_www.download`` writes it under another name until it is
+    as long as the server said, so a connection that dropped leaves no piece
+    here for the next build to take for the file."""
     if dest.is_file():
         return dest
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    print("  downloading", url, flush=True)
-    with urllib.request.urlopen(url, timeout=300) as resp, open(dest, "wb") as out:
-        shutil.copyfileobj(resp, out)
-    return dest
+    if str(HERE) not in sys.path:
+        sys.path.insert(0, str(HERE))
+    from build_www import download as whole
+
+    return whole(url, dest, timeout=300)
+
+
+def unpack(archive: Path, root: Path) -> Path:
+    """Unpack the downloaded ``archive`` into ``root``: all of it, or nothing.
+
+    Into a folder beside ``root`` that takes its name once everything is out:
+    unpacked in place, an archive that was cut short left the start of a
+    framework there, and every later build found the folder and used it.  An
+    archive that cannot be read is deleted, so that the next build downloads
+    it again instead of failing on the same file."""
+    part = root.with_name(root.name + ".part")
+    shutil.rmtree(part, ignore_errors=True)
+    part.mkdir(parents=True)
+    print(f"+ unpacking {archive.name}", flush=True)
+    try:
+        if archive.suffix == ".zip":              # ONNX Runtime's archive
+            with zipfile.ZipFile(archive) as zf:
+                zf.extractall(part)
+        else:
+            with tarfile.open(archive) as tar:
+                try:
+                    tar.extractall(part, filter="tar")
+                except TypeError:                     # no extraction filter before 3.12
+                    tar.extractall(part)
+        shutil.rmtree(root, ignore_errors=True)
+        part.replace(root)
+    except (tarfile.TarError, zipfile.BadZipFile, EOFError, gzip.BadGzipFile, zlib.error) as exc:
+        archive.unlink(missing_ok=True)
+        sys.exit(f"{archive} could not be unpacked ({exc}): the cached copy was deleted - "
+                 "build again to download it afresh")
+    finally:
+        shutil.rmtree(part, ignore_errors=True)
+    return root
 
 
 def sympy_version() -> str:
@@ -139,6 +215,61 @@ def stage_addons(dest: Path) -> Path:
         shutil.copytree(src, dest / src.name, ignore=ADDON_SKIP)
     print(f"+ staged {len(list(dest.iterdir()))} add-ons in {dest}")
     return dest
+
+
+#: The handwriting add-on: its manifest says "bundle": false - a Pyodide page
+#: cannot run it, nor can the Mac app, which shares the iOS app's staged
+#: add-ons - and the Android and iOS builds stage it themselves, with what it
+#: reads with (stage_ink, ios_ink).
+INK_ADDON = "sympy_editor_handwriting"
+INK_MODEL_FILES = ("encoder.onnx", "decoder_step.onnx", "vocab.json", "meta.json")
+#: The model's attribution and licence terms, beside its files in the export:
+#: they travel with the model, and the add-on's guide shows them.
+INK_MODEL_NOTICE = "NOTICE"
+
+
+def stage_ink(dest: Path, wanted: bool) -> bool:
+    """The handwriting add-on in an app's build (debug or release), in
+    ``dest`` - beside the app's Python on Android, the ``ink`` folder on iOS:
+    the add-on's folder, math-ocr's ``mathocr.tokenizer`` and
+    ``mathocr.data.inkml`` (the features the model was trained on), and the
+    model as the package ``mathocr_model``, which ONNX Runtime runs
+    (onnxruntime-android in build.gradle.kts, onnxruntime.xcframework on iOS).
+
+    The model is math-ocr's and must never reach git: every folder staged
+    here is git-ignored.  Its NOTICE - the terms it is distributed under -
+    goes into the app with it, and a build whose export has none says so."""
+    for name in ("mathocr", "mathocr_model"):
+        shutil.rmtree(dest / name, ignore_errors=True)
+    shutil.rmtree(dest / "addons" / INK_ADDON, ignore_errors=True)
+    if not wanted:
+        return False
+    sys.path.insert(0, str(ADDONS / INK_ADDON))
+    from sympy_editor_handwriting.recognizer import StrokeRecognizer
+    rec = StrokeRecognizer()
+    root, model = rec.root, rec.model_dir()
+    if root is None or model is None or not all((model / f).is_file() for f in INK_MODEL_FILES):
+        print("+ no handwriting model (a math-ocr checkout beside this one, or SYMPY_EDITOR_MATHOCR): not staged")
+        return False
+    shutil.copytree(ADDONS / INK_ADDON, dest / "addons" / INK_ADDON, ignore=ADDON_SKIP)
+    package = dest / "mathocr"
+    (package / "data").mkdir(parents=True)
+    for init in (package / "__init__.py", package / "data" / "__init__.py"):
+        init.write_text("", encoding="utf-8")
+    shutil.copyfile(root / "mathocr" / "tokenizer.py", package / "tokenizer.py")
+    shutil.copyfile(root / "mathocr" / "data" / "inkml.py", package / "data" / "inkml.py")
+    models = dest / "mathocr_model"
+    models.mkdir()
+    (models / "__init__.py").write_text('"""math-ocr\'s stroke model, staged into an app\'s build: never commit it."""\n',
+                                        encoding="utf-8")
+    for f in INK_MODEL_FILES:
+        shutil.copyfile(model / f, models / f)
+    if (model / INK_MODEL_NOTICE).is_file():
+        shutil.copyfile(model / INK_MODEL_NOTICE, models / INK_MODEL_NOTICE)
+    else:
+        print(f"warning: {model} has no {INK_MODEL_NOTICE}: the app carries the model without the terms it is distributed under")
+    print(f"+ staged the handwriting add-on and {model}")
+    return True
 
 
 def addon_requirements() -> list[str]:
@@ -224,6 +355,7 @@ def android_build(release: bool, cdn: bool) -> list[Path]:
     # about which of the two is open.
     build_www(cdn, android=True, debug=not release)
     copy_python_sources(ANDROID / "app" / "src" / "main" / "python")
+    stage_ink(ANDROID / "app" / "src" / "main" / "python", wanted=True)
     make_icons(ANDROID / "app/src/main/res/mipmap-mdpi/ic_launcher.png",
                ANDROID / "app/src/debug/res/mipmap-mdpi/ic_launcher.png")
     gradlew = ANDROID / ("gradlew.bat" if platform.system() == "Windows" else "gradlew")
@@ -252,17 +384,10 @@ def ios_runtime() -> Path:
     root = CACHE / "python-apple-support" / PYTHON_APPLE_SUPPORT
     framework = root / "Python.xcframework"
     if not framework.is_dir():
-        archive = download(
+        unpack(download(
             f"https://github.com/beeware/Python-Apple-support/releases/download/"
             f"{PYTHON_APPLE_SUPPORT}/Python-{version}-iOS-support.{build}.tar.gz",
-            CACHE / "python-apple-support" / f"Python-{version}-iOS-support.{build}.tar.gz")
-        print(f"+ unpacking {archive.name}", flush=True)
-        root.mkdir(parents=True, exist_ok=True)
-        with tarfile.open(archive) as tar:
-            try:
-                tar.extractall(root, filter="tar")
-            except TypeError:                     # no extraction filter before 3.12
-                tar.extractall(root)
+            CACHE / "python-apple-support" / f"Python-{version}-iOS-support.{build}.tar.gz"), root)
     link = IOS / "Python.xcframework"
     if link.is_symlink() or link.exists():
         link.unlink() if link.is_symlink() else shutil.rmtree(link)
@@ -298,6 +423,101 @@ def ios_packages() -> Path:
     return packages
 
 
+def ios_onnxruntime() -> Path:
+    """Stage ONNX Runtime for iOS: ``onnxruntime.xcframework``, downloaded
+    once into the cache, checked against its pinned checksum and linked into
+    ``mobile/ios``, where ``project.yml`` links it into the app (a static
+    library: nothing of it is embedded).  The app's Python reaches it through
+    the module ``OrtModule.m`` builds into the interpreter."""
+    root = CACHE / "onnxruntime" / ONNXRUNTIME_IOS
+    framework = root / "onnxruntime.xcframework"
+    if not framework.is_dir():
+        name = f"pod-archive-onnxruntime-c-{ONNXRUNTIME_IOS}.zip"
+        archive = download(f"https://download.onnxruntime.ai/{name}", CACHE / "onnxruntime" / name)
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+        if digest != ONNXRUNTIME_IOS_SHA256:
+            archive.unlink()
+            sys.exit(f"{name}: sha256 {digest}, not the pinned {ONNXRUNTIME_IOS_SHA256}")
+        unpack(archive, root)
+    check_no_network(framework)
+    link = IOS / "onnxruntime.xcframework"
+    if link.is_symlink() or link.exists():
+        link.unlink() if link.is_symlink() else shutil.rmtree(link)
+    link.symlink_to(framework, target_is_directory=True)
+    print(f"+ linked {link} -> {framework}")
+    return link
+
+
+def check_no_network(framework: Path) -> None:
+    """Refuse an ONNX Runtime that could send anything anywhere.
+
+    The app's privacy statement says nothing leaves the device.  The library
+    is linked into the app itself, so what it imports the app can call: every
+    iOS slice is read with ``nm`` and ``strings``, and one that reaches for a
+    networking API, or names Microsoft's telemetry collector, stops the build
+    - an environment variable asking it not to upload is not a guarantee."""
+    for binary in sorted(framework.glob("ios-*/onnxruntime.framework/onnxruntime")):
+        wanted = subprocess.run(["nm", "-u", str(binary)], capture_output=True, text=True).stdout
+        if not wanted.strip():
+            sys.exit(f"{binary}: nm listed no symbols, so the library cannot be checked for network code")
+        found = sorted({line.strip() for line in wanted.splitlines()
+                        if any(bad in line for bad in ONNXRUNTIME_FORBIDDEN)})
+        text = subprocess.run(["strings", "-a", str(binary)], capture_output=True, text=True, errors="replace").stdout
+        found += [bad for bad in ONNXRUNTIME_FORBIDDEN_TEXT if bad in text]
+        if found:
+            sys.exit(f"{binary} can reach the network ({', '.join(found[:8])}): the app must not carry it.\n"
+                     f"Pin an ONNX Runtime without the telemetry client (ONNXRUNTIME_IOS).")
+    print(f"+ checked {framework.name}: no networking, no telemetry collector")
+
+
+def ios_ink(simulator: bool) -> Path:
+    """Stage ``mobile/ios/ink``: what the handwriting add-on needs in the iOS
+    app - the add-on, math-ocr's modules and model (:func:`stage_ink`), and
+    NumPy built for the platform being built for, the device or the simulator.
+
+    A folder of its own, made afresh by every build, because none of it is
+    the Mac app's, which shares ``app`` and ``app_packages``: NumPy's
+    extension modules are per platform.  Without a model the folder holds a
+    note and nothing else, and the app says it has no handwriting model."""
+    dest = IOS / "ink"
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.mkdir(parents=True)
+    (dest / "README.txt").write_text(
+        "What the handwriting add-on reads with, staged by mobile/build.py (ios_ink): never commit it.\n",
+        encoding="utf-8")
+    if not stage_ink(dest, wanted=True):
+        return dest
+    arch, sdk = (simulator_arch(), "iphonesimulator") if simulator else ("arm64", "iphoneos")
+    # The wheel is fetched once into the cache and installed from there: the
+    # index is a small server, and a build must not wait on it every time.
+    wheels = CACHE / "ios-wheels" / f"{arch}_{sdk}"
+    target = ["--no-deps", "--only-binary=:all:", "--implementation", "cp",
+              "--python-version", PYTHON_APPLE_SUPPORT.split("-")[0], "--platform", f"ios_13_0_{arch}_{sdk}"]
+    if not list(wheels.glob(f"numpy-{IOS_NUMPY}-*.whl")):
+        run([sys.executable, "-m", "pip", "download", "--quiet", "--dest", str(wheels), *target,
+             "--index-url", IOS_WHEELS, f"numpy=={IOS_NUMPY}"])
+    run([sys.executable, "-m", "pip", "install", "--quiet", "--target", str(dest), "--no-compile", *target,
+         "--no-index", "--find-links", str(wheels), f"numpy=={IOS_NUMPY}"])
+    for junk in [d for d in sorted(dest.rglob("*")) if d.is_dir() and d.name in ("tests", "__pycache__")] + [dest / "bin"]:
+        shutil.rmtree(junk, ignore_errors=True)
+    # What a wheel carries for building against it - static libraries, headers,
+    # Cython declarations - is no use in an app, and the store refuses a
+    # bundle with a standalone library in it (numpy/random/lib/libnpyrandom.a).
+    for extra in sorted(dest.rglob("*")):
+        if extra.is_file() and extra.suffix in IOS_WHEEL_JUNK:
+            extra.unlink()
+    for folder in sorted((d for d in dest.rglob("*") if d.is_dir()), reverse=True):
+        if not any(folder.iterdir()):
+            folder.rmdir()
+    licence = CACHE / "onnxruntime" / ONNXRUNTIME_IOS / "LICENSE"
+    if licence.is_file():                       # MIT: the notice travels with the library
+        shutil.copyfile(licence, dest / "onnxruntime-LICENSE.txt")
+    size = sum(f.stat().st_size for f in dest.rglob("*") if f.is_file())
+    print(f"+ staged NumPy {IOS_NUMPY} ({arch}, {sdk}) and the handwriting model in {dest} ({size / 1e6:.0f} MB)")
+    return dest
+
+
 def simulator_arch() -> str:
     """The one architecture a simulator build needs: this Mac's own.
 
@@ -330,6 +550,8 @@ def ios_build(simulator: bool, cdn: bool, method: str, launch: bool = False) -> 
     copy_python_sources(IOS / "app")
     ios_runtime()
     ios_packages()
+    ios_onnxruntime()
+    ios_ink(simulator)
     make_icons(IOS / "SymPyEditor/Assets.xcassets/AppIcon.appiconset/icon-1024.png")
     if not shutil.which("xcodegen"):
         sys.exit("xcodegen not found: brew install xcodegen (or create the project by hand, see mobile/README.md)")
@@ -412,14 +634,18 @@ def export_options(method: str, team: str, profile: str | None = None) -> bytes:
     return plistlib.dumps(options)
 
 
+#: Apple's build number (CFBundleVersion) of this version: it counts the
+#: uploads of one CFBundleShortVersionString, so it starts again at 1 with each
+#: new version and goes up by one for each further upload of the same version,
+#: iOS and macOS alike.  (Android's versionCode, in build.gradle.kts, never
+#: starts again: Google Play wants it higher than every earlier upload.)
+BUILD_NUMBER = 1
+
+
 def build_number() -> str:
-    """CFBundleVersion: the store wants every upload's to be new, and the
-    count of commits only grows (1 outside a checkout: set IOS_BUILD_NUMBER)."""
-    try:
-        out = subprocess.run(["git", "rev-list", "--count", "HEAD"], cwd=HERE, capture_output=True, text=True, check=True).stdout
-        return str(int(out.strip()))
-    except (OSError, subprocess.CalledProcessError, ValueError):
-        return "1"
+    """CFBundleVersion for iOS and macOS: :data:`BUILD_NUMBER`, unless
+    ``IOS_BUILD_NUMBER`` / ``MACOS_BUILD_NUMBER`` say otherwise."""
+    return str(BUILD_NUMBER)
 
 
 def api_key_arguments() -> list[str]:
@@ -457,10 +683,14 @@ def main(argv=None) -> int:
     ap.add_argument("--release", action="store_true", help="Android: release APK + AAB instead of a debug APK")
     ap.add_argument("--simulator", action="store_true", help="iOS: build a simulator .app instead of an .ipa")
     ap.add_argument("--run", action="store_true", help="iOS: install the simulator .app and launch it")
-    ap.add_argument("--cdn", action="store_true", help="bundle without vendored assets (needs network at run time)")
+    ap.add_argument("--cdn", action="store_true",
+                    help="refused: the apps never use the network (their manifests forbid it); "
+                         "build_www.py --cdn makes a CDN page for a browser")
     ap.add_argument("--method", default=os.environ.get("IOS_EXPORT_METHOD", "development"),
                     help="iOS export method: development, ad-hoc, app-store-connect")
     args = ap.parse_args(argv)
+    if args.cdn:
+        sys.exit(NO_CDN)
     made = (android_build(args.release, args.cdn) if args.platform == "android"
             else ios_build(args.simulator, args.cdn, args.method, args.run))
     print("\nBuilt:" if made else "\nNo artifacts found.")

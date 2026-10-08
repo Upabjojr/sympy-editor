@@ -1,169 +1,524 @@
 /*
- * sympy-editor add-on "latex": LaTeX in, under the formula.
+ * sympy-editor add-on "latex": LaTeX typed into the formula itself.
  *
- * A box for LaTeX; Python reads it (method "read") and answers with a first
- * reading, the ambiguities of the text - each a menu of the readings it
- * allows, the whole expression under each - and the constant names it uses,
- * each a switch (\pi the constant, or a symbol called pi).  Every change
- * asks again; "insert" puts the reading into the document, over the
- * selection or as the whole expression.
+ * There is no box under the editor to type in: the LaTeX goes where it will
+ * land.  The tool (or the L key's button) opens a field *in the formula* -
+ * over the selection, at the cursor, or after the whole expression - and the
+ * formula opens a space for it, as it does for handwriting.  What is typed is
+ * read as it is typed (Python's "read"), shown beside the field as it will
+ * look and under the editor as SymPy would get it; nothing changes in the
+ * document until "Apply to the formula" says so, and then the strip shows the
+ * formula before and after, to keep or to take back.
+ *
+ * The ambiguities of the text - each a row of the readings it allows, typeset - and
+ * the constant names it uses - each a switch - live in that strip, as the
+ * handwriting add-on's do: one shape for both, since both end in the same
+ * question ("which reading did you mean, and shall it go in?").
  */
-SympyEditor.registerAddon("latex", {
-  tools: [
-    { cmd: "focus", label: "LaTeX", title: "Type or paste LaTeX in the box under the formula",
-      run: function (api) {
-        var box = document.querySelector(".se-addon-latex .ltx-input");
-        if (box) { var d = box.closest("details"); if (d) d.open = true; box.focus(); }
-      } }
-  ],
-  mount: function (api) {
-    var h = api.h;
-    var input = h("textarea", { class: "ltx-input", rows: "2", spellcheck: "false", autocomplete: "off", autocapitalize: "off",
-      placeholder: "\\frac{x^2}{2} + \\sin x \\cos y … (Ctrl+Enter inserts)",
-      title: "LaTeX to read: type or paste it; the reading appears below, with its ambiguities" });
-    var readBtn = h("button", { type: "button", class: "ltx-read", title: "Read the LaTeX again" }, ["Read"]);
-    var preview = h("div", { class: "ltx-preview", "aria-live": "polite" });
-    var src = h("code", { class: "ltx-src", title: "The reading as SymPy source" });
-    var note = h("div", { class: "ltx-note" });
-    var ambig = h("div", { class: "ltx-ambig" });
-    var consts = h("div", { class: "ltx-consts" });
-    var insertSel = h("button", { type: "button", class: "ltx-insert", disabled: "" }, ["Replace the selection"]);
-    var insertAll = h("button", { type: "button", class: "ltx-insert-all", disabled: "" }, ["Replace the whole expression"]);
-    var element = h("div", { class: "ltx-panel" }, [
-      h("div", { class: "ltx-row" }, [input, readBtn]),
-      note, preview, src, ambig, consts,
-      h("div", { class: "ltx-actions" }, [insertSel, insertAll])
-    ]);
+SympyEditor.registerAddon("latex", (function () {
+  return {
+    tools: [
+      { cmd: "type", label: "LaTeX", title: "Type LaTeX into the formula: over the selection, at the cursor, or at its end",
+        run: function () { this.setTyping(!this.typing()); } }
+    ],
 
-    var choices = {};         // ambiguity key -> alternative index (the user's picks and the reader's own decisions)
-    var constants = {};       // constant name -> on/off (the user's switches; the defaults otherwise)
-    var last = null;          // the last reading
-    var seq = 0, timer = null, katex = null;
+    mount: function (api) {
+      var h = api.h;
+      var editor = api.editor, view = editor && editor.view;
 
-    api.katex().then(function (k) { katex = k; if (last && last.ok) render(last); }, function () {});
-
-    function typeset(el, tex, fallback) {
-      el.textContent = "";
-      if (katex && tex) {
-        try { el.innerHTML = katex.renderToString(tex, { throwOnError: false, displayMode: false }); return; }
-        catch (e) { /* fall through to the text */ }
+      /* ---- the strip under the editor: what the LaTeX reads as ---- */
+      var note = h("div", { class: "ltx-note", "aria-live": "polite" });
+      var helpBtn = h("button", { type: "button", class: "ltx-help", title: "How typing LaTeX works" }, ["?"]);
+      var readingOf = h("div", { class: "ltx-reading-of" });
+      //: What is typed, as it will look.  It is shown here and not beside the
+      //: field: in the formula the two stood side by side, the LaTeX and the
+      //: expression it reads as, and the same thing twice reads as two.
+      var preview = h("div", { class: "ltx-preview", "aria-live": "polite" });
+      var src = h("code", { class: "ltx-src", title: "What SymPy gets of it" });
+      var ambig = h("div", { class: "ltx-ambig" });
+      var consts = h("div", { class: "ltx-consts" });
+      var parseBlock = h("div", { class: "ltx-parse", hidden: "" }, [ambig, consts]);
+      var applyBtn = h("button", { type: "button", class: "ltx-apply", disabled: "",
+                                   title: "Put this reading into the formula" }, ["Apply to the formula"]);
+      var actions = h("div", { class: "ltx-actions", hidden: "" }, [applyBtn]);
+      var wasFormula = h("span", { class: "ltx-formula ltx-was" });
+      var nowFormula = h("span", { class: "ltx-formula ltx-now" });
+      var keepBtn = h("button", { type: "button", class: "ltx-keep", title: "Leave the formula as it now is" }, ["Keep"]);
+      var backBtn = h("button", { type: "button", class: "ltx-back", title: "The formula as it was" }, ["Undo the change"]);
+      var appliedRow = h("div", { class: "ltx-applied", hidden: "" }, [
+        h("div", { class: "ltx-applied-row" }, [h("span", { class: "ltx-applied-label" }, ["from"]), wasFormula]),
+        h("div", { class: "ltx-applied-row" }, [h("span", { class: "ltx-applied-label" }, ["to"]), nowFormula]),
+        h("div", { class: "ltx-applied-ask" }, [keepBtn, backBtn])]);
+      var element = h("div", { class: "ltx-panel", hidden: "" },
+        [h("div", { class: "ltx-head" }, [note, helpBtn]), readingOf, preview, src, parseBlock, actions, appliedRow]);
+      if (editor && editor.addonHost && editor.addonHost.parentNode) {
+        editor.addonHost.parentNode.insertBefore(element, editor.addonHost);
       }
-      el.textContent = fallback || tex || "";
-    }
+      element.addEventListener("keydown", function (ev) { ev.stopPropagation(); });
 
-    function schedule() { clearTimeout(timer); timer = setTimeout(read, 450); }
+      /* ---- the field, in the formula ---- */
+      var field = h("input", { type: "text", class: "ltx-field", spellcheck: "false", autocomplete: "off",
+                               autocapitalize: "off", "aria-label": "LaTeX to put into the formula",
+                               placeholder: "\\frac{x^2}{2}" });
+      var typing = false, room = null, aim = null, anchored = null;
+      //: The pieces the field stands in the place of, hidden while it does.
+      var covered = [];
+      //: While a reading is going in, what it replaces stays hidden: it is
+      //: about to go, and showing it again for the moment the change takes
+      //: would be a flicker of something already spent.
+      var applying = false;
+      var choices = {}, constants = {}, last = null;
+      var seq = 0, timer = null, katex = null;
+      var applied = null, mine = 0, puts = 0, guide;
 
-    function read() {
-      clearTimeout(timer);
-      var text = input.value.trim();
-      if (!text) { clear(); return; }
-      var my = ++seq;
-      element.classList.add("ltx-busy");
-      api.call("read", { latex: text, choices: choices, constants: constants }).then(function (res) {
-        if (my !== seq) return;
-        element.classList.remove("ltx-busy");
-        last = res;
-        if (res.ok && res.choices) choices = res.choices;   // every decision, so the next pick changes only itself
-        render(res);
-      }, function (e) {
-        if (my !== seq) return;
-        element.classList.remove("ltx-busy");
-        last = null;
-        clear();
-        note.textContent = String(e && e.message || e);
-        note.className = "ltx-note error";
-      });
-    }
-
-    function clear() {
-      preview.textContent = ""; src.textContent = ""; ambig.textContent = ""; consts.textContent = "";
-      note.textContent = ""; note.className = "ltx-note";
-      insertSel.disabled = insertAll.disabled = true;
-    }
-
-    function render(res) {
-      if (!res.ok) {
-        clear();
-        note.textContent = res.error || "This LaTeX could not be read";
-        note.className = "ltx-note error";
-        return;
-      }
-      note.className = "ltx-note";
-      note.textContent = res.ambiguities.length
-        ? (res.ambiguities.length === 1 ? "One part of this can be read two ways: pick below." : res.ambiguities.length + " parts of this can be read several ways: pick below.")
-        : "";
-      typeset(preview, res.latex, res.src);
-      src.textContent = res.src;
-      // the ambiguities: a menu per point, the whole expression under each alternative
-      ambig.textContent = "";
-      res.ambiguities.forEach(function (a) {
-        var sel = h("select", { class: "ltx-choice", title: "How to read " + a.fragment });
-        a.options.forEach(function (o, i) {
-          var opt = h("option", { value: String(i) }, [o.invalid ? "(not a reading)" : o.src]);
-          if (o.invalid) opt.disabled = true;
-          if (i === a.choice) opt.selected = true;
-          sel.appendChild(opt);
+      api.katex().then(function (k) {
+        katex = k;
+        if (last && last.ok) drawGhost(last.latex);
+        // readings offered before KaTeX came were written as text
+        Array.prototype.forEach.call(ambig.querySelectorAll(".ltx-option[data-tex]"), function (b) {
+          typesetInto(b, b.getAttribute("data-tex"), b.title);
         });
-        sel.addEventListener("change", function () { choices[a.key] = parseInt(sel.value, 10); read(); });
-        var shown = h("span", { class: "ltx-shown" });
-        var current = a.options[a.choice];
-        typeset(shown, current && current.latex, current && current.src);
-        ambig.appendChild(h("label", { class: "ltx-point" }, [h("code", { class: "ltx-fragment" }, [a.fragment]), " → ", sel, shown]));
+      }, function () {});
+      // The parsers are built as the add-on is switched on, not at the first
+      // reading: in a thread of its own where Python has threads, and where it
+      // has none (Pyodide) by this request, which goes before what comes next.
+      api.call("warm", { background: true }, { quiet: true }).then(null, function () {});
+
+      /* ---- where the LaTeX will go ---- */
+      function aimNow() {
+        var r = api.range && api.range(), sel = api.selected && api.selected();
+        // `paths`: what the reading will replace, by path - kept with the aim
+        // so that it is still known once the selection itself has gone (the
+        // field takes the focus, and the editor lets the selection go).
+        if (r) return { kind: "range", path: r.parent, children: editor._rangeIndices(),
+                        paths: editor._rangePaths ? editor._rangePaths() : [] };
+        if (sel) return { kind: "selection", path: sel, paths: [sel] };
+        var caret = api.insertion && api.insertion();
+        if (caret) return { kind: "caret", caret: caret };
+        return { kind: "end" };
+      }
+      function aimWords(a) {
+        if (!a) return "";
+        if (a.kind === "range") return "This takes the selected range's place:";
+        if (a.kind === "selection") return "This takes the selection's place:";
+        if (a.kind === "caret") return "This goes in at the cursor:";
+        return "This goes after the formula:";
+      }
+      function elementFor(path) {
+        if (!view || !path) return null;
+        var els = view.querySelectorAll("[data-path]");
+        for (var i = 0; i < els.length; i++) if (els[i].getAttribute("data-path") === path) return els[i];
+        return null;
+      }
+      /** The pieces this reading will replace, as they are drawn now: the
+       *  ones the aim named when the field was opened. */
+      function replaced() {
+        if (!aim || !aim.paths) return [];
+        return aim.paths.map(elementFor).filter(function (el) { return !!el; });
+      }
+      /** Take them off the screen: the field stands where they were, so what
+       *  will happen is plain - this is a replacement, not an insertion. */
+      function cover(els) {
+        uncover();
+        els.forEach(function (el) {
+          covered.push({ el: el, display: el.style.display });
+          el.style.display = "none";
+        });
+      }
+      function uncover() {
+        covered.forEach(function (was) {
+          try { was.el.style.display = was.display || ""; } catch (e) { /* rendered again */ }
+        });
+        covered = [];
+      }
+
+      /** The piece the field is put beside, and on which side of it. */
+      function anchor() {
+        var c = api.caret && api.caret();
+        if (c && c.leftEl) return { el: c.leftEl, side: "after" };
+        if (c && c.rightEl) return { el: c.rightEl, side: "before" };
+        var r = api.range && api.range();
+        if (r && editor._rangePaths) {
+          var paths = editor._rangePaths();
+          var last1 = paths.length ? elementFor(paths[paths.length - 1]) : null;
+          if (last1) return { el: last1, side: "after" };
+        }
+        var sel = api.selected && api.selected();
+        var el = sel ? elementFor(sel) : null;
+        if (el) return { el: el, side: "after" };
+        var all = view ? view.querySelectorAll("[data-path]") : [];
+        return all.length ? { el: all[0], side: "end" } : null;
+      }
+
+    //: What the field keeps to itself.  It sits inside the formula, where the
+    //: editor watches for taps, drags, long presses and keys of its own: while
+    //: it is open it is what the user is working in, so none of that is the
+    //: editor's - a tap in the field must not select the piece behind it, nor
+    //: a double tap open the editor's own box over it.
+    var OWN_EVENTS = ["pointerdown", "pointerup", "pointermove", "pointercancel",
+                      "mousedown", "mouseup", "mousemove", "click", "dblclick", "contextmenu",
+                      "touchstart", "touchend", "touchmove",
+                      "keydown", "keyup", "keypress"];
+
+      /* ---- opening and closing the place to type ---- */
+      /** Open the field where the LaTeX will land.  `again` re-places a field
+       *  that was already open (the formula was drawn afresh, or the selection
+       *  moved): where it aims is asked of the editor only when it is opened
+       *  anew, since putting the field in the formula is itself a change the
+       *  editor answers - and the answer must not move the target. */
+      function openField(again) {
+        if (!view) return;
+        var held = again && aim ? aim : null;
+        var wanted = again && anchored && anchored.el && anchored.el.isConnected ? anchored : null;
+        closeField(true);
+        aim = held || aimNow();
+        var a = wanted || anchor();
+        anchored = a;
+        // Replacing something: it goes off the screen and the field stands in
+        // its place; adding at a cursor or at the end leaves the formula whole.
+        var goes = replaced();
+        if (goes.length) a = { el: goes[0], side: "before" };
+        var holder = h("span", { class: "ltx-slot" }, [field]);
+        OWN_EVENTS.forEach(function (type) {
+          // stopped, not prevented: the field still takes the tap, the caret
+          // still moves in the text, the keyboard still comes up
+          holder.addEventListener(type, function (ev) { ev.stopPropagation(); });
+        });
+        if (!a) view.appendChild(holder);
+        else if (a.side === "before" && a.el.parentNode) a.el.parentNode.insertBefore(holder, a.el);
+        else if (a.el.parentNode) a.el.parentNode.insertBefore(holder, a.el.nextSibling);
+        else view.appendChild(holder);
+        room = holder;
+        if (goes.length) cover(goes);
+        if (editor && editor.root) editor.root.classList.add("se-typing-latex");
+        element.setAttribute("data-aim", aim.kind);
+        readingOf.textContent = aimWords(aim);
+        showPanel();
+        focusField();
+      }
+
+      /** The field takes the focus - and, on a phone, the keyboard with it.
+       *  A WebView raises the keyboard when a field is focused in answer to a
+       *  tap; the host is asked as well, since a field put there by script is
+       *  not always taken for one (Android's MainActivity.showKeyboard). */
+      function focusField() {
+        field.focus();
+        field.select();
+        var app = window.SympyEditorApp;
+        if (app && app.showKeyboard) {
+          try { app.showKeyboard(); } catch (e) { /* the focus alone, then */ }
+        }
+      }
+      function closeField(quiet) {
+        // The field goes, and the keyboard with it: a phone keeps the keyboard
+        // up for as long as something is focused, so the formula takes the
+        // focus back (which is where the editor's own keys belong anyway).
+        var had = document.activeElement === field;
+        if (!applying) uncover();
+        if (room && room.parentNode) room.parentNode.removeChild(room);
+        room = null;
+        if (had) {
+          try { field.blur(); } catch (e) { /* gone already */ }
+          if (view && view.focus) view.focus({ preventScroll: true });
+        }
+        if (editor && editor.root) editor.root.classList.remove("se-typing-latex");
+        if (!quiet) showPanel();
+      }
+      function setTyping(on) {
+        typing = !!on;
+        var button = editor && editor.root ? editor.root.querySelector('[data-cmd="addon:latex:type"]') : null;
+        if (button) {
+          button.setAttribute("aria-pressed", typing ? "true" : "false");
+          button.classList.toggle("ltx-on", typing);
+        }
+        if (typing) {
+          openField();
+          say(field.value ? "" : "Type LaTeX here — it goes where the field is.");
+        } else {
+          closeField();
+          if (!applied) clearReading();
+        }
+      }
+      function showPanel() {
+        element.hidden = !(typing || (last && last.ok) || applied);
+      }
+      function say(text, bad) {
+        note.textContent = text || "";
+        note.className = "ltx-note" + (bad ? " error" : "");
+        showPanel();
+      }
+
+      /* ---- reading what is typed ---- */
+      function schedule() { clearTimeout(timer); timer = setTimeout(read, 400); }
+      function read() {
+        clearTimeout(timer);
+        var text = field.value.trim();
+        if (!text) { last = null; clearReading(); return; }
+        var my = ++seq;
+        element.classList.add("ltx-busy");
+        // quiet: the editor's overlay would cover the formula and take the
+        // focus out of the field while one types
+        api.call("read", { latex: text, choices: choices, constants: constants }, { quiet: true })
+          .then(function (res) {
+            if (my !== seq) return;
+            element.classList.remove("ltx-busy");
+            last = res;
+            if (res.ok && res.choices) choices = res.choices;   // every decision: the next pick changes only itself
+            render(res);
+          }, function (e) {
+            if (my !== seq) return;
+            element.classList.remove("ltx-busy");
+            last = null;
+            clearReading();
+            say(String((e && e.message) || e), true);
+          });
+      }
+      function clearReading() {
+        element.classList.remove("ltx-stale");
+        src.textContent = "";
+        ambig.textContent = "";
+        consts.textContent = "";
+        parseBlock.hidden = true;
+        actions.hidden = true;
+        applyBtn.disabled = true;
+        drawGhost("");
+        showPanel();
+      }
+      /** The reading, typeset, under the editor - where the SymPy source of
+       *  it is: one showing of it, said twice over (as mathematics, and as
+       *  what SymPy will get). */
+      function drawGhost(tex) {
+        preview.textContent = "";
+        if (!tex) { preview.hidden = true; return; }
+        preview.hidden = false;
+        if (katex) {
+          try {
+            preview.innerHTML = katex.renderToString(tex, { throwOnError: false, displayMode: false, output: "html" });
+            return;
+          } catch (e) { /* the source under it stands for it */ }
+        }
+        preview.textContent = tex;
+      }
+      /** The readings of one ambiguous part, as buttons showing each whole
+       *  expression typeset: a pick reads the text again with it. */
+      function drawChoice(a) {
+        var row = h("div", { class: "ltx-choice", role: "radiogroup", "aria-label": "How to read " + a.fragment });
+        a.options.forEach(function (o, i) {
+          var on = i === a.choice;
+          var b = h("button", { type: "button", class: "ltx-option" + (on ? " ltx-chosen" : ""), role: "radio",
+                                "data-index": String(i), "aria-checked": on ? "true" : "false",
+                                title: o.invalid ? "Not a reading" : o.src });
+          if (o.invalid) { b.disabled = true; b.textContent = "(not a reading)"; }
+          else { b.setAttribute("data-tex", o.latex || ""); typesetInto(b, o.latex, o.src); }
+          b.addEventListener("click", function () {
+            if (on) return;
+            choices[a.key] = i;
+            read();
+          });
+          row.appendChild(b);
+        });
+        return row;
+      }
+      function typesetInto(el, tex, fallback) {
+        el.textContent = "";
+        if (katex && tex) {
+          try {
+            el.innerHTML = katex.renderToString(tex, { throwOnError: false, displayMode: false, output: "html" });
+            return;
+          } catch (e) { /* the text, then */ }
+        }
+        el.textContent = fallback || tex || "";
+      }
+      function render(res) {
+        if (!res.ok && res.incomplete) {
+          // The text stops mid-expression: it is being typed, not wrong.  The
+          // last reading stays, dimmed - it is not this text's - and cannot go in.
+          say(res.error);
+          note.className = "ltx-note pending";
+          if (src.textContent) element.classList.add("ltx-stale");
+          actions.hidden = true;
+          applyBtn.disabled = true;
+          return;
+        }
+        element.classList.remove("ltx-stale");
+        if (!res.ok) {
+          clearReading();
+          say(res.error || "This LaTeX could not be read", true);
+          return;
+        }
+        var more = res.more > 0
+          // the reader offers the first parts of a long text, not all of them
+          ? " " + res.more + (res.more === 1 ? " more part is" : " more parts are") +
+            " not offered: put the text in piece by piece to choose there."
+          : "";
+        say(res.ambiguities.length
+            ? (res.ambiguities.length === 1 ? "One part of this can be read two ways: pick below."
+                                            : res.ambiguities.length + " parts of this can be read several ways: pick below.") + more
+            : "");
+        readingOf.textContent = aimWords(aim);
+        drawGhost(res.latex);
+        src.textContent = res.src;
+        ambig.textContent = "";
+        res.ambiguities.forEach(function (a) {
+          ambig.appendChild(h("div", { class: "ltx-point" },
+            [h("code", { class: "ltx-fragment" }, [a.fragment]), " \u2192 ", drawChoice(a)]));
+        });
+        consts.textContent = "";
+        res.constants.forEach(function (c) {
+          var box = h("input", { type: "checkbox" });
+          box.checked = !!c.on;
+          box.addEventListener("change", function () { constants[c.name] = box.checked; read(); });
+          consts.appendChild(h("label", { class: "ltx-const", title: c.label },
+            [box, " ", h("code", {}, [c.name]), " is " + c.value + " (" + c.label + ")"]));
+        });
+        parseBlock.hidden = !ambig.children.length && !consts.children.length;
+        actions.hidden = !!applied;
+        applyBtn.disabled = !!applied;
+        showPanel();
+      }
+
+      /* ---- putting it in ---- */
+      function payload() {
+        var p = { latex: field.value.trim(), choices: choices, constants: constants, path: "/" };
+        if (aim.kind === "range") { p.path = aim.path; p.children = aim.children; }
+        else if (aim.kind === "selection") p.path = aim.path;
+        else if (aim.kind === "caret") p.caret = aim.caret;
+        else p.end = true;
+        return p;
+      }
+      function apply() {
+        if (!last || !last.ok || !aim) return;
+        var was = applied ? applied.before : step(), my = ++puts;
+        applying = true;           // what it replaces stays off the screen: it is going
+        setTyping(false);          // first: onState and onSelect follow the change, and would open it again
+        mine++;
+        var back = applied ? api.send({ action: "undo" }) : Promise.resolve();
+        back.then(function () { return api.call("insert", payload()); }).then(function () {
+          mine = Math.max(0, mine - 1);
+          applying = false;
+          covered = [];            // the formula was drawn afresh: what was hidden went with it
+          if (my !== puts) return;
+          applied = { before: was };
+          showApplied(was, step());
+          say("In the formula.");
+        }, function (e) {
+          mine = Math.max(0, mine - 1);
+          applying = false;
+          uncover();               // it did not go in: what it would have replaced comes back
+          if (my !== puts) return;
+          say(String((e && e.message) || e), true);
+        });
+      }
+      function step() {
+        var st = api.state && api.state();
+        return { latex: st && st.latex, plain: (st && st.latex_plain) || "", nodes: st && st.nodes };
+      }
+      function showApplied(was, now) {
+        var diff = null;
+        try {
+          diff = editor && editor._diffNodes && was.nodes && now.nodes ? editor._diffNodes(was.nodes, now.nodes) : null;
+        } catch (e) { diff = null; }
+        var marked = false;
+        if (editor && editor._renderMarked && was.latex && now.latex) {
+          try {
+            wasFormula.innerHTML = editor._renderMarked(was.latex, diff && diff.oldKept, "rep-removed");
+            nowFormula.innerHTML = editor._renderMarked(now.latex, diff && diff.newKept, "rep-added");
+            marked = true;
+          } catch (e) { marked = false; }
+        }
+        if (!marked) {
+          wasFormula.textContent = was.plain;
+          nowFormula.textContent = now.plain;
+        }
+        wasFormula.setAttribute("data-latex", was.plain);
+        nowFormula.setAttribute("data-latex", now.plain);
+        appliedRow.hidden = false;
+        actions.hidden = true;
+        showPanel();
+      }
+      function hideApplied() {
+        appliedRow.hidden = true;
+        applied = null;
+        puts++;
+        showPanel();
+      }
+      /** Back to the formula: after Keep there is nothing more to read down
+       *  here, and the formula is what one works on next. */
+      function backToFormula() {
+        var target = (editor && (editor.stage || editor.view)) || null;
+        if (!target || !target.scrollIntoView) return;
+        var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        try { target.scrollIntoView({ block: "nearest", behavior: reduce ? "auto" : "smooth" }); }
+        catch (e) { target.scrollIntoView(true); }
+      }
+      keepBtn.addEventListener("click", function () { hideApplied(); last = null; clearReading(); backToFormula(); });
+      backBtn.addEventListener("click", function () {
+        mine++;
+        var done = function () { mine = Math.max(0, mine - 1); };
+        api.send({ action: "undo" }).then(done, done);
+        hideApplied();
+        last = null;
+        clearReading();
       });
-      // the constants: a switch per name that occurs
-      consts.textContent = "";
-      res.constants.forEach(function (c) {
-        var box = h("input", { type: "checkbox" });
-        box.checked = !!c.on;
-        box.addEventListener("change", function () { constants[c.name] = box.checked; read(); });
-        consts.appendChild(h("label", { class: "ltx-const", title: c.label }, [box, " ", h("code", {}, [c.name]), " is " + c.value + " (" + c.label + ")"]));
+      applyBtn.addEventListener("click", apply);
+      helpBtn.addEventListener("click", function () { api.showHelp(guide, "LaTeX"); });
+
+      field.addEventListener("input", function () { choices = {}; schedule(); });   // new text: the old picks are not its
+      field.addEventListener("keydown", function (ev) {
+        ev.stopPropagation();                        // the editor's keys are not for the field
+        if (ev.key === "Escape") { ev.preventDefault(); setTyping(false); return; }
+        if (ev.key === "Enter") { ev.preventDefault(); if (!applyBtn.disabled) apply(); }
       });
-      updateInsert();
+
+      guide = "<section><h3>LaTeX into the formula</h3><ul>"
+        + "<li><b>LaTeX</b>, among the editor's tools, opens a field <i>in the formula</i>: over the selection, at the cursor, or after the whole expression - wherever what you type will go. It is drawn as what it is - in dashes, on tinted paper - because it is not part of the formula yet.</li>"
+        + "<li>Opened on a selection, the field stands <i>in that piece's place</i> and the piece is taken off the screen until the field goes: what is typed replaces it. At a cursor the formula is left whole and what is typed is added there - the line under the editor says which it will be.</li>"
+        + "<li>What is typed is read as you type. Under the editor: the reading as it will look and what SymPy gets of it, the parts that can be read more than one way - <code>f(x)</code> applied or multiplied, how far <code>\\sin x \\cos y</code> reaches - each a row of its readings, typeset, to pick from, and a switch for each name that usually means a constant (<code>\\pi</code>, <code>e</code>, <code>i</code>, <code>\\gamma</code>).</li>"
+        + "<li>What SymPy itself writes reads back as it was - <code>f{\\left(x \\right)}</code> is <code>f</code> applied, <code>\\operatorname{asin}</code> is SymPy's <code>asin</code>. Names come out as SymPy spells them, so they can be typed in the line under the formula: <code>x_{1}</code> is <code>x_1</code>, <code>\\hat{v}</code> is <code>vhat</code>, <code>x'</code> is <code>xprime</code> - drawn just as they were written.</li>"
+        + "<li>A <code>d</code> before a letter is a differential only under an integral or a fraction bar (<code>\\frac{\\partial^2 f}{\\partial x \\partial y}</code>); anywhere else <code>d x</code> is a product. A number too large to work out - <code>10^{10^{8}}</code>, <code>20000!</code> - is kept as written.</li>"
+        + "<li>A text is read in one go up to 1000 characters and a few seconds' work; of a long one the first twelve parts that can be read several ways are offered, and the line under the editor says how many more there are. Put a long formula in piece by piece.</li>"
+        + "<li>A text that stops in the middle of an expression (<code>\\frac{x</code>, <code>x +</code>) or of a command (<code>\\fr</code>) is <i>not finished yet</i>, not wrong: the last reading stays, dimmed, until it reads again.</li>"
+        + "<li><b>Apply to the formula</b> (or <kbd>Enter</kbd>) puts it in - nothing changes before that - and then the formula before and after is shown, what went in red and what came in green, to <b>Keep</b> (which takes you back up to the formula) or to <b>Undo the change</b>. <kbd>Esc</kbd> closes the field and leaves the formula alone.</li>"
+        + "</ul></section>";
+
+      return {
+        title: "LaTeX",
+        help: guide,
+        typing: function () { return typing; },
+        setTyping: setTyping,
+        /** The system's Back (Android): the field closes, as Esc closes it,
+         *  and what it would have replaced comes back. */
+        onBack: function () {
+          if (!typing) return false;
+          setTyping(false);
+          return true;
+        },
+        onSelect: function () {
+          // The field is put back where it stood - the formula may have been
+          // drawn around it afresh - aimed where it was aimed when it opened:
+          // putting it in the formula is itself something the editor answers
+          // (a caret or a selection let go), and that answer must not move
+          // the target.  To aim elsewhere, close the field and open it there.
+          if (!typing) return;
+          var text = field.value;
+          openField(true);                       // where it aims was settled when it opened
+          field.value = text;
+          if (text.trim()) read();
+        },
+        onState: function () {
+          if (!mine && applied) hideApplied();     // edited in the editor itself: what we did is answered for
+          if (typing) {                            // the formula was rendered again: the field went with it
+            var text = field.value;
+            openField(true);
+            field.value = text;
+          }
+        },
+        destroy: function () {
+          clearTimeout(timer);
+          closeField(true);
+          if (element.parentNode) element.parentNode.removeChild(element);
+        }
+      };
     }
-
-    function updateInsert() {
-      var ok = !!(last && last.ok);
-      insertAll.disabled = !ok;
-      var sel = api.selected(), r = api.range();
-      insertSel.disabled = !ok || (!sel && !r) || sel === "/";
-      insertSel.textContent = r ? "Replace the selected range" : "Replace the selection";
-    }
-
-    function insert(path) {
-      if (!last || !last.ok) return;
-      var text = input.value.trim();
-      var payload = { latex: text, choices: choices, constants: constants, path: path };
-      var r = api.range();
-      if (path !== "/" && r) { payload.path = r.parent; payload.children = api.editor._rangeIndices(); }
-      api.call("insert", payload).then(function () {
-        note.textContent = "Inserted.";
-        note.className = "ltx-note";
-      }, function (e) {
-        note.textContent = String(e && e.message || e);
-        note.className = "ltx-note error";
-      });
-    }
-
-    input.addEventListener("input", function () { choices = {}; schedule(); });   // new text: the old picks no longer apply
-    input.addEventListener("keydown", function (ev) {
-      ev.stopPropagation();                        // the editor's keys are not for the box
-      if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); insert(api.selected() && api.selected() !== "/" ? api.selected() : "/"); }
-    });
-    readBtn.addEventListener("click", read);
-    insertSel.addEventListener("click", function () { insert(api.range() ? api.range().parent : api.selected()); });
-    insertAll.addEventListener("click", function () { insert("/"); });
-
-    return {
-      element: element,
-      title: "LaTeX",
-      help: "<section><h3>LaTeX in</h3><ul>"
-        + "<li>Type or paste LaTeX in the box; the reading appears under it, rendered and as SymPy source.</li>"
-        + "<li>Where the text can be read in several ways — <code>f(x)</code> applied or multiplied, how far <code>\\sin x \\cos y</code> reaches — a menu shows every reading of that part; the first is the usual convention, pick another and the whole follows.</li>"
-        + "<li>Names that usually mean a constant — <code>\\pi</code>, <code>e</code>, <code>i</code>, <code>\\gamma</code> — are switches: the constant, or a plain symbol of that name.</li>"
-        + "<li><b>Replace the selection</b> puts the reading over what is selected; <b>Replace the whole expression</b> (or Ctrl+Enter) makes it the formula.</li>"
-        + "</ul></section>",
-      onSelect: function () { updateInsert(); },
-      destroy: function () { clearTimeout(timer); }
-    };
-  }
-});
+  };
+})());

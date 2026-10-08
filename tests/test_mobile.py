@@ -30,6 +30,271 @@ def test_cdn_bundle(tmp_path):
     assert "Integral" in page and not (out / "vendor").exists()
 
 
+def _load_app_builder():
+    """mobile/build.py, by path: `mobile` is a folder of scripts, not a package."""
+    spec = importlib.util.spec_from_file_location("mobile_build", ROOT / "mobile" / "build.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_a_build_takes_away_what_an_earlier_one_vendored(tmp_path):
+    """The output folder stays from one build to the next, and only
+    `vendor/addons` was cleared: the wheel of the SymPy before a bump, of a
+    requirement an add-on no longer has, the fonts of another KaTeX stayed
+    beside the new ones, and went into the APK with them (it takes the folder
+    whole).  A build now makes `vendor/` afresh - and leaves alone what is not
+    its own, the download cache first of all."""
+    mod = _load_builder()
+    out = tmp_path / "www"
+    left = ["vendor/pyodide/sympy-1.13.3-py3-none-any.whl", "vendor/pyodide/removed-addon-dep-1.0-py3-none-any.whl",
+            "vendor/katex/fonts/KaTeX_Gone-Regular.woff2", "vendor/addons/cdn.example/old.min.js", "vendor/OLD-NOTICE.txt"]
+    for name in left:
+        (out / name).parent.mkdir(parents=True, exist_ok=True)
+        (out / name).write_bytes(b"of an earlier build")
+    (out / "notes.txt").write_text("not the build's", encoding="utf-8")
+    mod.build(out, native=True)
+    for name in left:
+        assert not (out / name).exists(), name
+    assert (out / "vendor/katex/katex.min.js").is_file() and (out / "notes.txt").is_file()
+    # a page that loads from the CDNs has nothing vendored under it
+    (out / "vendor/katex/fonts/KaTeX_Gone-Regular.woff2").write_bytes(b"of an earlier build")
+    mod.build(out, cdn=True)
+    assert not (out / "vendor").exists()
+    # and the downloads are never what is cleared
+    with pytest.raises(SystemExit, match="give --cache a place of its own"):
+        mod.build(out, cdn=True, cache=out / "vendor" / "cache")
+    # a vendor/ that is a link elsewhere: the link goes, not what it points at
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "kept.txt").write_text("kept", encoding="utf-8")
+    (out / "vendor").symlink_to(elsewhere, target_is_directory=True)
+    mod.build(out, cdn=True)
+    assert not (out / "vendor").exists() and (elsewhere / "kept.txt").is_file()
+
+
+class _Server:
+    """A server on this machine that answers every request with `body` -
+    all of it, or (`sent`) only its first bytes, announced as `announced`."""
+
+    def __init__(self, body, announced=None, sent=None):
+        self.body, self.announced, self.sent, self.requests = body, announced, sent, 0
+        outer = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                outer.requests += 1
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(outer.body) if outer.announced is None else outer.announced))
+                self.end_headers()
+                self.wfile.write(outer.body if outer.sent is None else outer.body[:outer.sent])
+                self.wfile.flush()
+                self.close_connection = True         # ...and the line goes dead
+
+            def log_message(self, *args):
+                pass
+
+        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.httpd.server_address[1]}/"
+
+    def __enter__(self):
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+        return self
+
+    def __exit__(self, *exc):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+def test_a_download_cut_short_is_not_kept(tmp_path):
+    """A server that announces a megabyte and hangs up after a kilobyte is no
+    error to a reader, only a short answer: the kilobyte was written into the
+    cache under the file's own name, and every later build took it for the
+    file without asking again.  A download is written beside its place and
+    moved there when it is as long as it was said to be."""
+    mod, build = _load_builder(), _load_app_builder()
+    body = bytes(range(256)) * 4000
+    cache, dest = tmp_path / "cache", tmp_path / "out" / "katex.min.js"
+    with _Server(body, announced=1_000_000, sent=1000) as server:
+        url = server.url + "npm/katex/katex.min.js"
+        with pytest.raises(SystemExit, match="stopped at 1000 bytes of 1000000"):
+            mod.fetch(url, dest, cache)
+        assert not dest.exists()
+        assert [p for p in cache.rglob("*") if p.is_file()] == []       # nothing of it, under any name
+        # the apps' interpreter comes through mobile/build.py, in the same way
+        archive = tmp_path / "cache" / "Python-3.13-iOS-support.tar.gz"
+        with pytest.raises(SystemExit, match="stopped at 1000 bytes of 1000000"):
+            build.download(server.url + "Python-3.13-iOS-support.tar.gz", archive)
+        assert not archive.exists() and list(archive.parent.glob("*.part")) == []
+        # the server sends it all: kept, and not asked for a second time
+        server.announced = server.sent = None
+        asked = server.requests
+        assert mod.fetch(url, dest, cache).read_bytes() == body
+        assert mod.fetch(url, tmp_path / "out" / "again.js", cache).read_bytes() == body
+        assert server.requests == asked + 1
+        assert build.download(server.url + "Python-3.13-iOS-support.tar.gz", archive).read_bytes() == body
+        assert [p.name for p in cache.rglob("*.part")] == []
+
+
+def _fake_downloads(mod, cache, monkeypatch):
+    """A download cache holding everything `vendor()` asks for, made here:
+    small files under the names of the real ones, the lock naming the digest
+    of each of its packages as Pyodide's does.  Returns {name: cached path}."""
+    import hashlib
+    import json
+    import zipfile
+
+    def place(url, data):
+        path = cache / url.split("://", 1)[1]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return path
+
+    def archive(name):
+        path = cache / "made" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(path, "w") as z:
+            z.writestr(name + "/content.py", "x = 1\n" * 500)
+        return path.read_bytes()
+
+    katex = f"https://cdn.jsdelivr.net/npm/katex@{mod.KATEX_VERSION}/dist/"
+    place(katex + "katex.min.js", b"// katex")
+    place(katex + "katex.min.css", b"@font-face{src:url(fonts/KaTeX_Main-Regular.woff2)}")
+    place(katex + "fonts/KaTeX_Main-Regular.woff2", b"a font")
+    pyodide = mod.default_urls()["pyodideIndex"]
+    placed, packages = {}, {}
+    for name, depends in (("mpmath", []), ("micropip", ["packaging"]), ("packaging", [])):
+        file_name = f"{name}-1.0-py3-none-any.whl"
+        data = archive(file_name)
+        placed[name] = place(pyodide + file_name, data)
+        packages[name] = {"file_name": file_name, "depends": depends, "sha256": hashlib.sha256(data).hexdigest()}
+    for name in mod.PYODIDE_CORE:
+        data = archive(name) if name.endswith(".zip") else b"core: " + name.encode()
+        if name == "pyodide-lock.json":
+            data = json.dumps({"info": {"python": "3.13.2"}, "packages": packages}).encode()
+        placed[name] = place(pyodide + name, data)
+    # SymPy's wheel comes from PyPI, which files it under the BLAKE2b-256 of its content
+    data = archive("sympy-0.0-py3-none-any.whl")
+    digest = hashlib.blake2b(data, digest_size=32).hexdigest()
+    wheel = f"https://files.pythonhosted.org/packages/{digest[:2]}/{digest[2:4]}/{digest[4:]}/sympy-0.0-py3-none-any.whl"
+    monkeypatch.setattr(mod, "SYMPY_WHEEL", wheel)
+    placed["sympy"] = place(wheel, data)
+    return placed
+
+
+def test_a_damaged_file_in_the_cache_is_not_shipped(tmp_path, monkeypatch):
+    """What the cache held was trusted for being there: a wheel cut short by
+    a dropped connection went into every bundle built after it.  Where
+    something says what a file must be it is checked each time it is used -
+    Pyodide's lock carries the SHA-256 of each of its packages, which
+    `vendor()` read past; PyPI files a wheel under its BLAKE2b-256; a zip
+    carries its own directory and checksums.  A file that fails is deleted
+    from the cache and the build stops, naming it."""
+    mod = _load_builder()
+    cache, out = tmp_path / "cache", tmp_path / "www"
+    placed = _fake_downloads(mod, cache, monkeypatch)
+    monkeypatch.setattr(mod.urllib.request, "urlopen",
+                        lambda url, **kw: pytest.fail(f"the cache has it all, and {url} was asked for"))
+    urls = mod.vendor(out, cache)
+    assert urls["sympyWheel"] == "vendor/pyodide/sympy-0.0-py3-none-any.whl"
+    assert sorted(p.name for p in (out / "vendor" / "pyodide").glob("*.whl")) == [
+        "micropip-1.0-py3-none-any.whl", "mpmath-1.0-py3-none-any.whl", "packaging-1.0-py3-none-any.whl",
+        "sympy-0.0-py3-none-any.whl"]
+    for name, says in (("micropip", "sha256"),                  # named in the lock
+                       ("packaging", "sha256"),                 # ...or needed by one that is
+                       ("sympy", "blake2b-256"),                # PyPI's address
+                       ("python_stdlib.zip", "not a whole archive")):
+        whole = placed[name].read_bytes()
+        placed[name].write_bytes(whole[:len(whole) // 2])       # as a dropped connection left it
+        mod.clear_vendored(out)
+        with pytest.raises(SystemExit) as stopped:
+            mod.vendor(out, cache)
+        assert placed[name].name in str(stopped.value) and says in str(stopped.value), stopped.value
+        assert "the cached copy was deleted" in str(stopped.value)
+        assert not placed[name].exists()
+        assert not (out / "vendor" / "pyodide" / placed[name].name).exists()
+        placed[name].write_bytes(whole)
+    assert mod.vendor(out, cache) == urls                        # whole again: it builds
+
+
+def test_a_download_that_is_not_what_it_should_be_is_refused(tmp_path):
+    """The same check at the door: a file that arrives whole, by its length,
+    and is not the one its digest names never reaches the cache."""
+    import hashlib
+
+    mod = _load_builder()
+    body = b"a wheel, or so it says" * 100
+    with _Server(body) as server:
+        url = server.url + "pyodide/micropip-1.0-py3-none-any.whl"
+        with pytest.raises(SystemExit, match="sha256"):
+            mod.fetch(url, tmp_path / "out.whl", tmp_path / "cache", digest=("sha256", "0" * 64))
+        assert [p for p in (tmp_path / "cache").rglob("*") if p.is_file()] == []
+        right = ("sha256", hashlib.sha256(body).hexdigest())
+        assert mod.fetch(url, tmp_path / "out.whl", tmp_path / "cache", digest=right).read_bytes() == body
+    assert mod.url_digest("https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js") is None
+    assert mod.url_digest(mod.SYMPY_WHEEL) == ("blake2b-256", "".join(mod.SYMPY_WHEEL.split("/")[4:7]))
+
+
+def test_an_interpreter_cut_short_is_not_unpacked_into_its_place(tmp_path):
+    """The apps' CPython is an archive unpacked in the cache, and a folder
+    that is there is taken for the interpreter.  Unpacked in place, an
+    archive cut short left the start of one; it is unpacked beside its place
+    and moved there whole, and an archive that cannot be read is deleted so
+    that the next build asks for it again."""
+    import tarfile
+
+    build = _load_app_builder()
+    source = tmp_path / "source" / "Python.xcframework"
+    source.mkdir(parents=True)
+    for i in range(40):
+        (source / f"module{i}.py").write_bytes(os.urandom(4000))
+    whole = tmp_path / "whole.tar.gz"
+    with tarfile.open(whole, "w:gz") as tar:
+        tar.add(source, arcname="Python.xcframework")
+    archive, root = tmp_path / "cache" / "Python-iOS-support.tar.gz", tmp_path / "cache" / "3.13-b14"
+    archive.parent.mkdir()
+    archive.write_bytes(whole.read_bytes()[:whole.stat().st_size // 2])
+    with pytest.raises(SystemExit, match="could not be unpacked"):
+        build.unpack(archive, root)
+    assert not archive.exists() and not root.exists()
+    assert list((tmp_path / "cache").iterdir()) == []              # nothing half-made left beside it
+    archive.write_bytes(whole.read_bytes())
+    assert build.unpack(archive, root) == root
+    assert len(list((root / "Python.xcframework").iterdir())) == 40 and archive.exists()
+    for script in ("mobile/build.py", "desktop/build.py"):         # both interpreters come this way
+        text = (ROOT / script).read_text(encoding="utf-8")
+        assert "unpack(" in text and "extractall(root" not in text, script
+        assert "urlopen" not in text, script                       # and are downloaded by the one download there is
+
+
+def test_no_app_is_built_from_a_page_that_needs_the_network():
+    """The apps block the network, so a bundle that loads KaTeX from a CDN
+    shows a blank page in them.  mobile/build.py refused `--cdn`;
+    desktop/build.py took it - and wrote the CDN page into mobile/www, which
+    the next iOS build shares - and `build_www.py --cdn --android` copied one
+    into the Android app's assets.  All three say the same thing now, before
+    anything is written."""
+    import subprocess
+
+    mod, build = _load_builder(), _load_app_builder()
+    assert mod.NO_CDN == build.NO_CDN and "never use the network" in build.NO_CDN
+    with pytest.raises(SystemExit, match="never use the network"):
+        build.build_www(True, native=True)                         # whoever calls it
+    desktop = (ROOT / "desktop" / "build.py").read_text(encoding="utf-8")
+    refusal, first = desktop.index("sys.exit(mobile.NO_CDN)"), desktop.index("made = macos_build(")
+    assert desktop.index("args = ap.parse_args(argv)") < refusal < first
+    out = subprocess.run([sys.executable, str(ROOT / "desktop" / "build.py"), "--cdn"],
+                         capture_output=True, text=True, timeout=60)
+    assert out.returncode != 0 and out.stderr.strip() == build.NO_CDN, out.stderr
+    # --android: refused in main(), before build() and copy_android_assets()
+    www = (ROOT / "mobile" / "build_www.py").read_text(encoding="utf-8")
+    main = www[www.index("def main(argv=None)"):]
+    assert main.index("if args.cdn and args.android:") < main.index("sys.exit(NO_CDN)") < main.index("out = build(")
+    with pytest.raises(SystemExit, match="never use the network"):
+        mod.main(["--cdn", "--android", "--out", str(ROOT / "mobile" / "never-written")])
+    assert not (ROOT / "mobile" / "never-written").exists()
+
+
 @pytest.mark.skipif(not os.environ.get("SYMPY_EDITOR_SLOW_TESTS"), reason="set SYMPY_EDITOR_SLOW_TESTS=1")
 def test_vendored_bundle_is_self_contained(tmp_path):
     """Build the offline bundle and edit in it with every non-local request blocked."""
@@ -39,10 +304,18 @@ def test_vendored_bundle_is_self_contained(tmp_path):
     for name in ("vendor/katex/katex.min.js", "vendor/pyodide/pyodide.asm.wasm", "vendor/pyodide/python_stdlib.zip", "vendor/NOTICE.txt"):
         assert (out / name).exists(), name
     assert any(p.name.startswith("sympy-") for p in (out / "vendor" / "pyodide").iterdir())
+    # the add-ons' requirements, with what they depend on, are wheels in the
+    # bundle, each named in the NOTICE with its licence
+    wheels = {p.name.split("-")[0].lower() for p in (out / "vendor" / "pyodide").glob("*.whl")}
+    assert {"lark", "sympy_matching", "omnimatch", "multiset"} <= wheels, wheels
+    listed = (out / "vendor" / "NOTICE.txt").read_text(encoding="utf-8")
+    assert "lark " in listed and "sympy-matching " in listed and "MIT" in listed
 
     handler = type("H", (http.server.SimpleHTTPRequestHandler,), {"log_message": lambda *a: None})
     handler.extensions_map.update({".wasm": "application/wasm", ".whl": "application/zip", ".mjs": "text/javascript"})
-    srv = socketserver.TCPServer(("127.0.0.1", 0), lambda *a, **k: handler(*a, directory=str(out), **k))
+    # threads: Chromium opens a connection ahead of need and may leave it
+    # idle, which held a one-at-a-time server - and Pyodide's files behind it
+    srv = socketserver.ThreadingTCPServer(("127.0.0.1", 0), lambda *a, **k: handler(*a, directory=str(out), **k))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     external = []
     try:
@@ -51,11 +324,20 @@ def test_vendored_bundle_is_self_contained(tmp_path):
             page = b.new_page()
             errors = []
             page.on("pageerror", lambda e: errors.append(str(e)))
+            warnings = []
+            page.on("console", lambda m: warnings.append(m.text) if m.type in ("warning", "error") else None)
             page.route("**/*", lambda route: (external.append(route.request.url), route.abort())
                        if "127.0.0.1" not in route.request.url else route.continue_())
             page.goto(f"http://127.0.0.1:{srv.server_address[1]}/index.html")
             page.wait_for_selector(".se-view .katex [data-path]", timeout=30000)
             page.wait_for_function("document.querySelector('.se-loading').hidden", timeout=240000)
+            # then the add-ons are switched on (every one starts on) and their
+            # panels ask their first questions, one request after another for
+            # a few seconds: the editor takes keys once it has stayed idle
+            page.wait_for_function("""() => { const ed = document.querySelector('.sympy-editor').__sympyEditor;
+                if (ed.busy) { window.__idleSince = null; return false; }
+                window.__idleSince = window.__idleSince || performance.now();
+                return performance.now() - window.__idleSince > 1000; }""", timeout=120000, polling=100)
             assert page.evaluate("document.fonts.check('12px KaTeX_Main')")
             page.locator('[data-path="/"]').click(force=True)   # selects the glyph under the centre
             page.keyboard.press("Escape")                        # clear it...
@@ -67,6 +349,21 @@ def test_vendored_bundle_is_self_contained(tmp_path):
             page.keyboard.press("Enter")
             page.wait_for_function("document.querySelector('.se-source').textContent === 'x**2 + 1'", timeout=240000)
             assert page.locator(".se-error").is_hidden()
+            # The add-ons' requirements (lark, sympy-matching and what it needs)
+            # came from the bundle, not from PyPI: both add-ons work offline.
+            ed = "document.querySelector('.sympy-editor').__sympyEditor"
+            page.evaluate(ed + ".send({action: 'addons', enable: ['latex', 'matching']})")
+            page.wait_for_selector(".se-addon-matching .mt-field", timeout=60000)
+            read = page.evaluate("(ed) => eval(ed).send({action: 'addon', addon: 'latex', method: 'read', "
+                                 "latex: '\\\\frac{x}{2}'}).then(s => s.query.result.reading || s.query.result)", ed)
+            assert read["ok"] and read["src"] == "x/2", read
+            page.locator(".mt-field").fill("x**2 -> y")
+            page.locator(".mt-field").press("Enter")
+            page.wait_for_function("document.querySelectorAll('.mt-rules li').length === 1", timeout=60000)
+            assert not [m for m in warnings if "could not be installed" in m], warnings
+            # and what the plot add-on loads from a CDN comes from the bundle
+            from sympy_editor_plot import PLOTLY_JS
+            assert page.evaluate("(u) => SympyEditor.loadScript(u).then(() => !!window.Plotly)", PLOTLY_JS)
             assert errors == []
             b.close()
     finally:
@@ -150,7 +447,7 @@ def test_the_app_python_module_edits_documents():
     assert snap["error"] is None and snap["src"] == "1"
     # an edit that cannot work comes back as an error inside the snapshot
     snap = json.loads(app.handle("d1", json.dumps({"action": "set", "src": "x +"})))
-    assert snap["error"] and "parse" in snap["error"].lower()
+    assert snap["error"] and "cannot read" in snap["error"].lower()
     # documents are independent, and unknown ones are refused
     json.loads(app.new_doc("d2", srepr(x * y), "{}"))
     assert json.loads(app.handle("d1", '{"action": "snapshot"}'))["src"] == "1"
@@ -162,6 +459,10 @@ def test_the_app_python_module_edits_documents():
     state = json.dumps({"history": [srepr(x), srepr(x + 1)], "index": 1})
     snap = json.loads(app.new_doc("d3", srepr(x + 1), state))
     assert snap["src"] == "x + 1" and snap["can_undo"]
+    # a session saved by a newer app, with a setting this one does not know: opened all the same
+    state = json.dumps({"history": [srepr(x), srepr(x + 1)], "index": 1, "a_setting_from_a_newer_app": True})
+    snap = json.loads(app.new_doc("d4", srepr(x + 1), state))
+    assert snap["src"] == "x + 1" and snap["can_undo"] and snap["error"] is None
     assert json.loads(app.version())["sympy"]
 
 
@@ -174,8 +475,10 @@ def test_native_bundle_has_no_pyodide(tmp_path):
     assert '"pyodideJs"' not in page and "vendor/pyodide" not in page   # nothing of Pyodide to load
     assert (out / "vendor" / "katex" / "katex.min.js").exists()      # KaTeX is still vendored
     assert not (out / "vendor" / "pyodide").exists()
-    size = sum(p.stat().st_size for p in out.rglob("*") if p.is_file())
+    addons = out / "vendor" / "addons"          # the add-ons' CDN files (Plotly, ~4.6 MB): offline
+    size = sum(p.stat().st_size for p in out.rglob("*") if p.is_file() and addons not in p.parents)
     assert size < 5e6, size          # ~1 MB, against ~24 MB with Pyodide
+    assert sum(p.stat().st_size for p in addons.rglob("*") if p.is_file()) < 8e6
 
 
 def test_the_android_app_is_configured_for_its_own_python():
@@ -234,15 +537,652 @@ def test_both_bridges_offer_what_the_page_calls():
     about box - hence a subset, not an equality.)"""
     src = (ROOT / "src" / "sympy_editor" / "static" / "editor.js").read_text(encoding="utf-8")
     called = set(re.findall(r'call\("(\w+)"', src))
-    assert called == {"newDoc", "handle"}, called
-    for bridge in ("mobile/ios/SymPyEditor/EditorView.swift",
-                   "mobile/android/app/src/main/java/org/sympy/editor/MainActivity.kt"):
-        text = (ROOT / bridge).read_text(encoding="utf-8")
-        for method in called:
-            assert method in text, (bridge, method)
+    assert {"newDoc", "handle", "interrupt"} <= called <= {"newDoc", "handle", "interrupt", "close"}, called
+    # `close` is bridged whether or not this page calls it yet: a document
+    # the page leaves must not stay in the app's Python for ever
+    offered = called | {"close"}
+    kotlin = (ROOT / "mobile/android/app/src/main/java/org/sympy/editor/MainActivity.kt").read_text(encoding="utf-8")
+    swift = (ROOT / "mobile/ios/SymPyEditor/EditorView.swift").read_text(encoding="utf-8")
+    injected = swift[swift.index("window.SympyEditorPy = {"):swift.index("};", swift.index("window.SympyEditorPy = {"))]
+    functions = swift[swift.index("private static let functions"):]
+    functions = functions[:functions.index("]") + 1]
+    python = {"newDoc": "new_doc", "handle": "handle", "interrupt": "interrupt", "close": "close"}
+    for method in offered:
+        assert re.search(r"@JavascriptInterface\s+fun " + method + r"\(req: String", kotlin), ("android", method)
+        assert method + ': forward("' + method + '")' in injected, ("ios", method)
+        assert '"%s": "%s"' % (method, python[method]) in functions, ("ios", method)
+        assert 'callAttr("%s"' % python[method] in kotlin, ("android", method)
     mod = _load_app_module()
-    for function in ("new_doc", "handle", "version", "close"):
+    for function in ("new_doc", "handle", "version", "close", "interrupt"):
         assert callable(getattr(mod, function))
+
+
+def test_both_hosts_offer_the_files_the_page_asks_of_them():
+    """What the page asks of the app that is not Python - keeping a formula in
+    a file, opening one, sharing what it writes out - is `window.SympyEditorApp`,
+    and both hosts answer with the same names: Kotlin in MainActivity's
+    ReportBridge, Swift in FilesBridge.  The answer to an opening comes back
+    through `SympyEditor.openedFile`, which both hosts call by that name."""
+    src = (ROOT / "src" / "sympy_editor" / "static" / "editor.js").read_text(encoding="utf-8")
+    asked = set(re.findall(r"app\.(\w+)\(", src))
+    assert {"saveFile", "shareFile", "openFile", "keepRead", "keepWrite"} <= asked, asked
+    hosts = {"ios": ROOT / "mobile/ios/SymPyEditor/FilesBridge.swift",
+             "android": ROOT / "mobile/android/app/src/main/java/org/sympy/editor/MainActivity.kt"}
+    for name, path in hosts.items():
+        text = path.read_text(encoding="utf-8")
+        for method in ("saveFile", "shareFile", "openFile", "keepRead", "keepWrite", "showKeyboard"):
+            assert method in text, (name, method)
+        assert "SympyEditor.openedFile" in text, name
+        assert "SympyEditor.keptValue" in text, name
+        assert "hostError" in text, name
+    # and the page has somewhere for those answers to arrive
+    assert "openedFile: function (token, name, text)" in src
+    assert "keptValue: function (token, text)" in src
+    assert "hostError: function (message)" in src
+
+
+def test_both_hosts_answer_every_native_call_the_page_makes():
+    """Everything the page hands to the platform - the clipboard, haptics,
+    printing, full screen, Back, the flush on going to the background, a
+    file opened with the app from elsewhere - has an answer in both hosts:
+    a method of the injected SympyEditorApp for what the page asks
+    (Host.tell / Host.ask in editor.js), and a call into the page for what
+    the host tells it (SympyEditor.back, flush, openText, hostAnswer)."""
+    src = (ROOT / "src" / "sympy_editor" / "static" / "editor.js").read_text(encoding="utf-8")
+    asked = set(re.findall(r'Host\.(?:tell|ask)\("(\w+)"', src))
+    assert {"copyText", "pasteText", "haptic", "printHtml"} <= asked, asked
+    kotlin = (ROOT / "mobile/android/app/src/main/java/org/sympy/editor/MainActivity.kt").read_text(encoding="utf-8")
+    swift = (ROOT / "mobile/ios/SymPyEditor/FilesBridge.swift").read_text(encoding="utf-8")
+    injected = swift[swift.index("window.SympyEditorApp = {"):swift.index("};", swift.index("window.SympyEditorApp = {"))]
+    for method in asked | {"setFullscreen"}:
+        assert re.search(r"@JavascriptInterface\s+fun " + method + r"\(", kotlin), ("android", method)
+        assert method + ': forward("' + method + '")' in injected, ("ios", method)
+        assert 'case "' + method + '"' in swift, ("ios", method)
+    for call in ("SympyEditor.hostAnswer", "SympyEditor.openText", "SympyEditor.flush"):
+        assert call in kotlin and call in swift, call
+    assert "SympyEditor.back()" in kotlin                           # the one Back button there is
+    for name in ("hostAnswer: function (token, value)", "flush: function ()", "back: function ()",
+                 "openText: function (name, text)"):
+        assert name in src, name
+
+
+def test_a_saved_formula_opens_with_the_apps():
+    """A .sympy file tapped in a file manager or a mail opens in the app:
+    Android's manifest takes it by type and by extension (and a formula
+    shared as text), and iOS and the Mac declare it as a type of their own,
+    which the pickers already offer by that name."""
+    manifest = (ROOT / "mobile/android/app/src/main/AndroidManifest.xml").read_text(encoding="utf-8")
+    assert 'android:launchMode="singleTask"' in manifest       # a second tap reaches the running app
+    assert "android.intent.action.VIEW" in manifest and "android.intent.action.SEND" in manifest
+    assert 'android:mimeType="application/x-sympy-editor+json"' in manifest
+    assert 'android:pathPattern=".*\\\\.sympy"' in manifest
+    yaml = pytest.importorskip("yaml")
+    swift = (ROOT / "mobile/ios/SymPyEditor/FilesBridge.swift").read_text(encoding="utf-8")
+    assert 'UTType("org.sympy.editor.formula")' in swift
+    for spec in ("mobile/ios/project.yml", "desktop/macos/project.yml"):
+        info = yaml.safe_load((ROOT / spec).read_text(encoding="utf-8"))["targets"]["SymPyEditor"]["info"]["properties"]
+        exported = info["UTExportedTypeDeclarations"][0]
+        assert exported["UTTypeIdentifier"] == "org.sympy.editor.formula", spec
+        assert exported["UTTypeTagSpecification"]["public.filename-extension"] == ["sympy"], spec
+        assert info["CFBundleDocumentTypes"][0]["LSItemContentTypes"] == ["org.sympy.editor.formula"], spec
+
+
+def test_the_mac_app_builds_every_swift_file_the_shell_uses():
+    """The Mac app lists the iOS shell's files one by one; one left out is a
+    type the others name that does not exist - FilesBridge was missing, and
+    the Mac app did not compile.  And the sandboxed (App Store) build may
+    use the panels and the printer it offers."""
+    yaml = pytest.importorskip("yaml")
+    spec = yaml.safe_load((ROOT / "desktop/macos/project.yml").read_text(encoding="utf-8"))
+    listed = {Path(s["path"]).name for s in spec["targets"]["SymPyEditor"]["sources"]}
+    for swift in (ROOT / "mobile/ios/SymPyEditor").glob("*.swift"):
+        assert swift.name in listed, swift.name
+    mas = (ROOT / "desktop/macos/SymPyEditor/SymPyEditorMAS.entitlements").read_text(encoding="utf-8")
+    assert "com.apple.security.files.user-selected.read-write" in mas
+    assert "com.apple.security.print" in mas
+
+
+
+def test_the_app_interrupts_a_long_message_from_another_thread():
+    """Issue #27: the apps had no Interrupt button.  Their Python runs on one
+    thread of its own; the button reaches it from another (the bridge's),
+    through interrupt(), and the message answers with the document as it
+    was and the reason."""
+    import json
+    import threading
+
+    from sympy import Symbol, srepr
+
+    mod = _load_app_module()
+    assert json.loads(mod.interrupt()) is False                     # nothing running: nothing to stop
+    mod.new_doc("slow", srepr(Symbol("x")), "{}")
+    started = threading.Event()
+
+    def forever(message):                                           # a computation that does not end by itself
+        started.set()
+        while True:
+            pass
+
+    mod._documents["slow"].handle = forever
+    out = {}
+    worker = threading.Thread(target=lambda: out.update(snap=json.loads(mod.handle("slow", '{"action": "snapshot"}'))),
+                              daemon=True)                          # an interrupt that fails must not hang the run
+    worker.start()
+    assert started.wait(10)
+    assert json.loads(mod.interrupt()) is True
+    worker.join(10)
+    assert not worker.is_alive()
+    assert out["snap"]["error"] == "Interrupted" and out["snap"]["src"] == "x"
+    assert json.loads(mod.interrupt()) is False
+    mod.close("slow")
+
+
+def test_an_interrupt_that_comes_too_late_stops_nothing_else():
+    """The race: the button is pressed as a message finishes.  interrupt()
+    used to read which thread was running, and deliver the exception a
+    moment later - by then into the *next* message, whose edit came back as
+    "Interrupted" although nobody had asked.  Now the exception is only
+    delivered while that same message runs, and one that arrives as it ends
+    is taken back before the thread goes on."""
+    import json
+    import threading
+    import time
+
+    from sympy import Symbol, srepr
+
+    mod = _load_app_module()
+    mod.new_doc("race", srepr(Symbol("x")), "{}")
+    busy, asked, finished, delivered = (threading.Event() for _ in range(4))
+    real = mod.interrupt_thread
+    calls = []
+
+    def first(message):                    # the message the button was meant for
+        busy.set()
+        asked.wait(10)                     # ...which finishes just as the button is pressed
+        return {"n": 1}
+
+    def second(message):                   # the next one, which nobody interrupted
+        deadline = time.monotonic() + 5
+        while not delivered.is_set() and time.monotonic() < deadline:
+            pass
+        return {"n": 2}
+
+    def late(ident):                       # the delivery, a moment after the check
+        asked.set()
+        finished.wait(0.5)
+        try:
+            return real(ident)
+        finally:
+            delivered.set()
+
+    mod._documents["race"].handle = lambda message: (first if not calls else second)(calls.append(1) or message)
+    mod.interrupt_thread = late
+    out = {}
+
+    def run():
+        try:
+            out["first"] = json.loads(mod.handle("race", "{}"))
+            finished.set()
+            out["second"] = json.loads(mod.handle("race", "{}"))
+            end = time.monotonic() + 0.3   # nothing still pending in this thread
+            while time.monotonic() < end:
+                pass
+        except BaseException as exc:       # an Interrupted that escaped: the host would answer ok=false
+            out["escaped"] = exc
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    assert busy.wait(10)
+    mod.interrupt()
+    worker.join(15)
+    assert not worker.is_alive()
+    assert "escaped" not in out, out
+    assert out["first"] in ({"n": 1},) or out["first"].get("error") == "Interrupted"
+    assert out["second"] == {"n": 2}, out
+    mod.close("race")
+
+
+def test_an_interrupt_names_the_document_it_is_for():
+    """Each Mac window has documents of its own in the one interpreter (the
+    bridge puts the window's name in front of the page's ids: `w2/doc1`), so
+    a window's Interrupt must stop its own message and nobody else's."""
+    import json
+    import threading
+
+    from sympy import Symbol, srepr
+
+    mod = _load_app_module()
+    mod.new_doc("w2/doc1", srepr(Symbol("x")), "{}")
+    started = threading.Event()
+
+    def forever(message):
+        started.set()
+        while True:
+            pass
+
+    mod._documents["w2/doc1"].handle = forever
+    out = {}
+    worker = threading.Thread(target=lambda: out.update(snap=json.loads(mod.handle("w2/doc1", "{}"))), daemon=True)
+    worker.start()
+    assert started.wait(10)
+    assert json.loads(mod.interrupt("w1")) is False                 # another window's button
+    assert json.loads(mod.interrupt("w2/doc2")) is False            # another document
+    assert worker.is_alive()
+    assert json.loads(mod.interrupt("w2")) is True                  # this window's
+    worker.join(10)
+    assert not worker.is_alive() and out["snap"]["error"] == "Interrupted"
+    mod.close("w2/doc1")
+
+
+def _quick_document(mod, name):
+    """A document of the app's module whose messages take no time at all, so
+    that what is measured is the module's own bookkeeping around them."""
+    from sympy import Symbol, srepr
+
+    mod.new_doc(name, srepr(Symbol("x")), "{}")
+    doc = mod._documents[name]
+    doc.handle = lambda message: {"n": 1}
+    doc.snapshot = lambda error=None: {"error": error}
+    return doc
+
+
+@pytest.mark.skipif(sys.version_info[:2] == (3, 11), reason=(
+    "CPython 3.11: a thread traced after PyThreadState_SetAsyncExc(ident, NULL) took back "
+    "an exception that had already fired hangs at the next function it enters; the apps "
+    "run 3.12 (Android) and 3.13 (iOS), and the sweep needs the tracer"))
+def test_an_interrupt_wherever_it_lands_in_a_message_leaves_nothing_behind():
+    """An interrupt fires where the Python thread next enters a function.
+    When that was the function that ends a message, it was raised before
+    that function's own `try`: the message stayed named as running for good,
+    and the next Interrupt - with nothing running - stopped whatever the
+    thread did next, the opening of a session as a rule.
+
+    Interrupt is pressed here, from a thread of its own, as each function a
+    message goes through is entered, one place per message.  Whichever it
+    is, the message answers, nothing is left named as running and a later
+    Interrupt finds nothing to stop."""
+    import json
+    import threading
+
+    mod = _load_app_module()
+    _quick_document(mod, "sweep")
+
+    def press():                                    # the button: the bridge's own thread
+        bridge = threading.Thread(target=mod.interrupt)
+        bridge.start()
+        bridge.join()
+
+    def message(at):
+        out, entered = {}, []
+
+        def tracer(frame, event, arg):
+            if event == "call":
+                entered.append(frame.f_code.co_name)
+                if len(entered) - 1 == at:
+                    out["pressed"] = entered[-1]
+                    press()                         # pending in this thread: raised as the function starts
+
+        def run():
+            sys.settrace(tracer)
+            try:
+                out["answer"] = json.loads(mod.handle("sweep", "{}"))
+            except BaseException as exc:            # an Interrupted that escaped: the host would answer ok=false
+                out["escaped"] = exc
+            finally:
+                sys.settrace(None)
+            out["running"] = mod._running
+            try:
+                for _ in range(2000):               # nothing still pending in this thread
+                    pass
+            except BaseException as exc:
+                out["late"] = exc
+
+        worker = threading.Thread(target=run, daemon=True)
+        worker.start()
+        worker.join(20)
+        assert not worker.is_alive()
+        return out
+
+    places = []
+    for at in range(200):
+        out = message(at)
+        if "pressed" not in out:                    # past the last function of a message
+            break
+        places.append(out["pressed"])
+        assert "escaped" not in out and "late" not in out, (out["pressed"], out)
+        assert out["answer"] in ({"n": 1}, {"error": "Interrupted"}), (out["pressed"], out)
+        assert out["running"] is None, (out["pressed"], out)
+        assert json.loads(mod.interrupt()) is False, out["pressed"]
+    # the sweep went through the message: into it, through the document's own
+    # work and the writing of the answer
+    assert places[:2] == ["handle", "_begin"] and {"<lambda>", "dumps"} <= set(places), places
+    mod.close("sweep")
+
+
+def test_interrupts_hammered_at_the_app_never_outlive_their_message():
+    """The same, by force: one thread sends messages and opens documents as
+    the app's Python thread does, another presses Interrupt without a pause.
+    Under it one message in a thousand used to end still named as running
+    (87 of 63870), and the press after that landed in the idle thread."""
+    import json
+    import threading
+    import time
+
+    from sympy import Symbol, srepr
+
+    mod = _load_app_module()
+    _quick_document(mod, "hammer")
+    x = srepr(Symbol("x"))
+    out = {"messages": 0, "stale": 0, "escaped": [], "pressed": 0}
+    stop = threading.Event()
+
+    def work():
+        try:
+            end, least = time.monotonic() + 10, time.monotonic() + 1.5
+            while time.monotonic() < end and (time.monotonic() < least or out["pressed"] < 20):
+                try:
+                    json.loads(mod.handle("hammer", "{}"))
+                    if out["messages"] % 500 == 0:      # a session opened and left, between two messages
+                        json.loads(mod.new_doc("hammer/other", x, "{}"))
+                        mod.close("hammer/other")
+                except BaseException as exc:
+                    out["escaped"].append(repr(exc))
+                out["messages"] += 1
+                if mod._running is not None:
+                    out["stale"] += 1
+        except BaseException as exc:                # one that landed between two messages
+            out["escaped"].append("outside a message: " + repr(exc))
+        finally:
+            stop.set()
+
+    def press():
+        while not stop.is_set():
+            if json.loads(mod.interrupt()):
+                out["pressed"] += 1
+
+    interval = sys.getswitchinterval()
+    sys.setswitchinterval(1e-5)                     # the two threads take turns as often as they can
+    try:
+        worker = threading.Thread(target=work, daemon=True)
+        presser = threading.Thread(target=press, daemon=True)
+        worker.start()
+        presser.start()
+        worker.join(30)
+        stop.set()
+        presser.join(10)
+    finally:
+        sys.setswitchinterval(interval)
+    assert not worker.is_alive() and not presser.is_alive()
+    assert out["escaped"] == [] and out["stale"] == 0, out
+    assert out["messages"] > 1000 and out["pressed"] > 0, out       # it was a contest
+    assert mod._running is None and json.loads(mod.interrupt()) is False
+    mod.close("hammer")
+
+
+def test_a_name_left_behind_is_forgotten_when_the_thread_does_something_else():
+    """Should a message ever end still named as running, the harm stops at
+    the next thing its thread does: opening a document (or closing one)
+    forgets the name, so an Interrupt pressed while a session opens has
+    nothing to stop - it used to be raised in there, and the page listed the
+    session as broken.  A name whose thread has ended is forgotten too: the
+    system gives the number to a later thread, which had asked for nothing."""
+    import json
+    import threading
+
+    from sympy import Symbol, srepr
+
+    mod = _load_app_module()
+    x = srepr(Symbol("x"))
+    real = mod.Document
+    opening, pressed = threading.Event(), threading.Event()
+
+    def slow(*args, **kwargs):                      # a session with a long history, being opened
+        opening.set()
+        assert pressed.wait(10)
+        for _ in range(2000):                       # an interrupt delivered meanwhile would be raised here
+            pass
+        return real(*args, **kwargs)
+
+    out = {}
+
+    def run():
+        mod._running = (threading.get_ident(), "left/behind")       # as the race used to leave it
+        mod.Document = slow
+        try:
+            out["opened"] = json.loads(mod.new_doc("fresh", x, "{}"))
+            mod._running = (threading.get_ident(), "left/behind")
+            mod.close("fresh")
+            out["closed"] = mod._running
+        except BaseException as exc:
+            out["escaped"] = exc
+        finally:
+            mod.Document = real
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    assert opening.wait(10)
+    assert json.loads(mod.interrupt()) is False     # nothing is running: a document is being opened
+    pressed.set()
+    worker.join(20)
+    assert not worker.is_alive()
+    assert "escaped" not in out, out
+    assert out["opened"]["src"] == "x" and out["opened"]["error"] is None
+    assert out["closed"] is None
+
+    mod._running = (worker.ident, "gone/with/its/thread")
+    assert json.loads(mod.interrupt()) is False and mod._running is None
+    # ...and a thread cannot be asking for the end of its own message
+    mod._running = (threading.get_ident(), "left/behind")
+    assert json.loads(mod.interrupt()) is False and mod._running is None
+
+
+def test_every_mac_window_shares_the_one_python():
+    """CPython is initialized once per process.  Each window of the Mac app
+    made a PythonRuntime of its own, and the second window's
+    Py_InitializeFromConfig failed: it never had a working Python.  The
+    runtime is a singleton, one queue serves every window, and each window's
+    bridge puts its name in front of the page's document ids (every page
+    starts at doc1) and interrupts only its own."""
+    objc = (ROOT / "mobile/ios/SymPyEditor/PythonRuntime.m").read_text(encoding="utf-8")
+    header = (ROOT / "mobile/ios/SymPyEditor/PythonRuntime.h").read_text(encoding="utf-8")
+    swift = (ROOT / "mobile/ios/SymPyEditor/EditorView.swift").read_text(encoding="utf-8")
+    assert "@property (class, nonatomic, readonly) PythonRuntime *shared;" in header
+    assert "dispatch_once" in objc and "Py_IsInitialized()" in objc
+    assert "static PyObject *sympyEditorApp" in objc          # process-wide, not per instance
+    assert "PythonRuntime()" not in swift                     # nobody makes a second one
+    assert "PythonRuntime.shared" in swift and "static let shared = PythonHost()" in swift
+    assert swift.count("DispatchQueue(label:") == 1           # one Python thread for all windows
+    assert 'rest[0] = window + "/" + rest[0]' in swift        # the window's ids
+    assert "let scope = [window]" in swift                    # its own interrupt
+    assert '"close", arguments: [id]' in swift                # its documents go with it
+
+
+def test_the_hosts_survive_the_page_s_process_dying():
+    """The system may end a WebView's content process (memory) or it may
+    crash.  Unhandled, Android ends the app with it and WebKit leaves a blank
+    view; both hosts load the page again instead."""
+    kotlin = (ROOT / "mobile/android/app/src/main/java/org/sympy/editor/MainActivity.kt").read_text(encoding="utf-8")
+    swift = (ROOT / "mobile/ios/SymPyEditor/EditorView.swift").read_text(encoding="utf-8")
+    assert kotlin.count("override fun onRenderProcessGone(") == 2   # the page's WebView and the printer's
+    gone = kotlin[kotlin.index("override fun onRenderProcessGone("):]
+    assert "recreate()" in gone[:600] and "return true" in gone[:600]
+    assert "func webViewWebContentProcessDidTerminate(_ webView: WKWebView)" in swift
+    assert "webView.reload()" in swift
+
+
+def _between(text, start, end):
+    """The piece of a source from `start` up to the next `end` after it."""
+    begin = text.index(start)
+    return text[begin:text.index(end, begin + len(start))]
+
+
+KOTLIN = ROOT / "mobile/android/app/src/main/java/org/sympy/editor/MainActivity.kt"
+SWIFT = ROOT / "mobile/ios/SymPyEditor"
+
+
+def test_a_file_handed_to_the_apps_is_read_within_bounds_and_off_the_main_thread():
+    """Android asked a file's provider how long it was and read it in one go:
+    many providers answer "unknown" (-1), which passed for small, and a file
+    without an end took all the memory - an Error, which `catch (Exception)`
+    does not see - and the app with it; any app can send one.  The file
+    picked in the dialog had no limit at all, and was read on the main
+    thread, as the save was written there.  One reader now, counting what
+    arrives, on a thread for files; the same on iOS and the Mac.  (Neither
+    is compiled here: what is checked is that the sources still say so.)"""
+    kotlin = KOTLIN.read_text(encoding="utf-8")
+    reader = _between(kotlin, "private fun readFormula(uri: Uri): String {", "\n    }\n")
+    assert "input.read(piece)" in reader and "held.size() + count > MAX_OPEN_BYTES" in reader
+    assert "readText()" not in reader and "readBytes()" not in reader
+    # nobody reads a document in one go any more, nor trusts the length it gives
+    assert "openInputStream(uri)?.bufferedReader()" not in kotlin and "openAssetFileDescriptor" not in kotlin
+    assert kotlin.count("contentResolver.openInputStream(") == 1
+    assert kotlin.count("readFormula(uri)") == 2                    # opened with the app, and picked
+    assert kotlin.count("catch (exc: OutOfMemoryError)") == 2
+    received = _between(kotlin, "private fun receive(intent: Intent?)", "\n    }\n")
+    assert received.index("fileThread.execute {") < received.index("readFormula(uri)")
+    assert "runOnUiThread { if (!isDestroyed) arrive(name, text) }" in received     # the WebView is the main thread's
+    pickers = _between(kotlin, "private fun registerPickers()", "\n    }\n")
+    saving, opening = pickers.split("openFrom = registerForActivityResult")
+    assert saving.index("fileThread.execute {") < saving.index("readBytes()") < saving.index("openOutputStream(uri)")
+    assert opening.index("fileThread.execute {") < opening.index("readFormula(uri)")
+    assert "private val fileThread = Executors.newSingleThreadExecutor()" in kotlin
+    evaluate = _between(kotlin, "private fun evaluate(js: String)", "\n    }\n")
+    assert "runOnUiThread {" in evaluate                            # whichever thread answers
+
+    chrome = (SWIFT / "HostChrome.swift").read_text(encoding="utf-8")
+    reader = _between(chrome, "static func text(of url: URL) throws -> String {", "\n    }\n")
+    assert "handle.read(upToCount: maxBytes + 1)" in reader and "data.count > maxBytes" in reader
+    assert "String(contentsOf:" not in chrome
+    files = (SWIFT / "FilesBridge.swift").read_text(encoding="utf-8")
+    read = _between(files, "fileprivate func read(_ url: URL, token: String) {", "\n    }\n")
+    assert read.index("DispatchQueue.global(") < read.index("HostChrome.text(of: url)")
+    assert "String(contentsOf:" not in read
+    opened = _between(chrome, "func open(_ url: URL) {", "\n    }\n")
+    assert opened.index("DispatchQueue.global(") < opened.index("HostChrome.text(of: url)")
+
+
+def test_a_file_opened_from_the_finder_goes_to_the_window_in_front():
+    """The Mac app has a window per formula, and a file opened with it went
+    to the bridge made last, which the app held weakly: to the newest window
+    whichever was in front - and, once that one had been closed, to nobody,
+    without a word.  The window is looked for when the file is there, among
+    the bridges alive, and a file that finds no page waits for the first."""
+    chrome = (SWIFT / "HostChrome.swift").read_text(encoding="utf-8")
+    files = (SWIFT / "FilesBridge.swift").read_text(encoding="utf-8")
+    assert "weak var files" not in chrome and "HostChrome.shared.files" not in files
+    front = _between(chrome, "private func front() -> FilesBridge? {", "\n    }\n")
+    assert "FilesBridge.live.allObjects" in front and "!$0.isClosing" in front
+    assert front.index("isKeyWindow") < front.index("isMainWindow") < front.index("NSApp.orderedWindows")
+    deliver = _between(chrome, "private func deliver(name: String, text: String) {", "\n    }\n")
+    assert "if let bridge = front()" in deliver and "waiting.append((name, text))" in deliver
+    assert "self?.deliver(name: url.lastPathComponent, text: text)" in chrome
+    # every bridge is listed, on the phone too: the list is outside the Mac's branch
+    body = files[files.index("final class FilesBridge"):]
+    assert "#if os(macOS)" not in body[:body.index("static let live = NSHashTable<FilesBridge>.weakObjects()")]
+    start = _between(files, "override init() {", "\n    }\n")
+    assert start.index("Self.live.add(self)") < start.index("#if os(macOS)")
+    loaded = _between(files, "func pageLoaded() {", "\n    }\n")
+    assert "arrived + HostChrome.shared.takeWaiting()" in loaded
+
+
+def test_the_apple_apps_show_nothing_without_the_rules_that_keep_them_offline():
+    """The page loads once WebKit has the rules that block every http(s) and
+    ws(s) load - and it loaded all the same when they could not be compiled,
+    with a line in the log.  It says why it does not instead, the bundle
+    stays closed to it, and the web view a report is printed from, which had
+    no rules at all, gets the same."""
+    view = (SWIFT / "EditorView.swift").read_text(encoding="utf-8")
+    made = _between(view, "static func webView(for bridge: PythonBridge) -> WKWebView {", "\n    }\n")
+    assert made.count("web.load(URLRequest(url: Self.start))") == 1
+    refused = _between(made, "guard let rules = rules else {", "}")
+    assert "web.loadHTMLString(Self.refusal, baseURL: Self.start)" in refused and "return" in refused
+    assert "web.load(" not in refused
+    assert (made.index("guard let rules = rules else {") < made.index("userContentController.add(rules)")
+            < made.index("bundle.open = true") < made.index("web.load(URLRequest(url: Self.start))"))
+    assert "config.setURLSchemeHandler(bundle, forURLScheme: Self.scheme)" in made
+    served = _between(view, "final class BundleSchemeHandler", "task.request.url")
+    assert "var open = false" in served and "guard open else { task.didFailWithError(" in served
+    assert view.count("compileContentRuleList(") == 1               # one place makes them, for both
+    files = (SWIFT / "FilesBridge.swift").read_text(encoding="utf-8")
+    printer = _between(files[files.index("final class ReportPrinter"):], "func start() {", "\n    }\n")
+    assert (printer.index("EditorView.offline {") < printer.index("guard let rules = rules else {")
+            < printer.index("config.userContentController.add(rules)") < printer.index("WKWebView(frame:")
+            < printer.index("web.loadHTMLString("))
+    assert files.count("WKWebView(frame:") == 1                     # and no other web view is made here
+
+
+def test_the_hosts_take_what_used_to_trip_them():
+    """Four small ones.  A link to a `file://` address raised
+    FileUriExposedException, which the WebView's client did not catch: the
+    app ended.  JSON leaves U+2028 and U+2029 as they are, and to a WebView
+    from before 2018 they end the line - and the script the text was in.  On
+    iOS the background task of a flush was never ended with no web view, and
+    ended twice when time ran out; and a file asked for with no view
+    controller to show the picker was never answered, the page waiting for
+    ever."""
+    kotlin = KOTLIN.read_text(encoding="utf-8")
+    link = _between(kotlin, "override fun shouldOverrideUrlLoading(view: WebView", "\n            }\n")
+    assert "startActivity(Intent(Intent.ACTION_VIEW, url))" in link and "} catch (e: Exception) {" in link
+    assert 'JSONObject.quote(text).replace("\\u2028", "\\\\u2028").replace("\\u2029", "\\\\u2029")' in kotlin
+    assert kotlin.count("JSONObject.quote(") == 1 and kotlin.count("${quote(") >= 14    # every script goes through it
+
+    files = (SWIFT / "FilesBridge.swift").read_text(encoding="utf-8")
+    flush = _between(files, "@objc private func flush() {", "\n    }\n")
+    assert flush.index("guard let view = webView else { return }") < flush.index("beginBackgroundTask")
+    assert flush.count("endBackgroundTask(") == 1 and "task = .invalid" in flush
+    assert "guard task != .invalid else { return }" in flush
+    opened = _between(files, "private func open(token: String, accept: String) {", "\n    }\n")
+    unshown = _between(opened, "if !self.present(picker, from: view) {", "}")
+    assert "self.answer(token, nil, nil)" in unshown
+    assert "private func present(_ controller: UIViewController, from view: UIView) -> Bool {" in files
+
+
+def test_the_android_activity_survives_being_made_again():
+    """A fold, a resize, a keyboard or the density changing recreated the
+    activity - the page reloaded mid-edit, and a save dialog's answer arrived
+    at an activity that had forgotten the text.  The configuration changes
+    are the activity's to handle, and what a dialog waits for is kept in the
+    saved state (the text in a cache file)."""
+    manifest = (ROOT / "mobile/android/app/src/main/AndroidManifest.xml").read_text(encoding="utf-8")
+    changes = set(re.search(r'android:configChanges="([^"]+)"', manifest).group(1).split("|"))
+    assert {"orientation", "screenSize", "smallestScreenSize", "screenLayout", "density", "fontScale",
+            "keyboard", "keyboardHidden", "navigation", "uiMode"} <= changes, changes
+    kotlin = (ROOT / "mobile/android/app/src/main/java/org/sympy/editor/MainActivity.kt").read_text(encoding="utf-8")
+    saved = kotlin[kotlin.index("override fun onSaveInstanceState"):]
+    saved = saved[:saved.index("\n    }\n")]
+    for key in ("STATE_PENDING_PATH", "STATE_PENDING_MIME", "STATE_OPENING"):
+        assert key in saved, key
+        assert "state.getString(" + key + ")" in kotlin, key
+    assert "PendingSave(val mime: String, val path: String)" in kotlin     # the text waits on disk
+    destroy = kotlin[kotlin.index("override fun onDestroy()"):]
+    destroy = destroy[:destroy.index("\n    }\n")]
+    assert "removeView(web)" in destroy and "web.destroy()" in destroy
+    assert destroy.index("removeView(web)") < destroy.index("web.destroy()")
+    assert "pythonThread.shutdown()" not in kotlin                   # the process's thread, not the activity's
+
+
+def test_the_mac_app_keeps_the_work_before_it_quits():
+    """Keeping a session is a round trip through Python; a flush from
+    willTerminate never came back before the app was gone.  Quitting now
+    waits (terminateLater) for every window to have written, or 1.5 s; a
+    window closing flushes too, holding its web view meanwhile."""
+    app = (ROOT / "mobile/ios/SymPyEditor/SymPyEditorApp.swift").read_text(encoding="utf-8")
+    files = (ROOT / "mobile/ios/SymPyEditor/FilesBridge.swift").read_text(encoding="utf-8")
+    assert "@NSApplicationDelegateAdaptor(AppDelegate.self)" in app
+    assert "func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply" in app
+    assert "return .terminateLater" in app and "reply(toApplicationShouldTerminate: true)" in app
+    assert "Timer(timeInterval: 1.5" in app and "FilesBridge.live" in app
+    assert "NSWindow.willCloseNotification" in files and "keptSomething()" in files
+
+
+def test_the_mac_printer_lives_as_long_as_its_sheet():
+    """runModal(for:) returns with the print sheet still up; releasing the
+    printer there took the web view it prints from.  The printer goes when
+    the sheet says it is done."""
+    files = (ROOT / "mobile/ios/SymPyEditor/FilesBridge.swift").read_text(encoding="utf-8")
+    assert "didRun: #selector(printOperationDidRun(_:success:contextInfo:))" in files
+    assert "@objc func printOperationDidRun(_ operation: NSPrintOperation, success: Bool," in files
+    assert "delegate: nil, didRun: nil" not in files
 
 
 def test_the_history_is_written_into_its_frame_not_handed_to_it():
@@ -347,6 +1287,147 @@ def test_the_webview_shows_the_bundle_and_nothing_else():
     assert "standardizedFileURL" in swift and 'hasPrefix(root.path + "/")' in swift
 
 
+def test_the_mac_app_is_the_same_shell_in_a_window():
+    """desktop/macos: the Mac app builds the very sources of the iOS one (a
+    WKWebView is a WKWebView), with the page, the app's Python and SymPy as
+    mobile/build.py stages them.  Its interpreter is the macOS build of the
+    same release, which carries the standard library inside the framework -
+    so there is no install step, and nothing of the iOS one's."""
+    yaml = pytest.importorskip("yaml")
+    spec = yaml.safe_load((ROOT / "desktop" / "macos" / "project.yml").read_text(encoding="utf-8"))
+    target = spec["targets"]["SymPyEditor"]
+    assert target["platform"] == "macOS"
+    assert any(d.get("framework") == "Python.xcframework" and d.get("embed") for d in target["dependencies"])
+    paths = {s["path"] for s in target["sources"] if isinstance(s, dict)}
+    # the shell, shared with iOS, and the three folders the phone build stages
+    assert "../../mobile/ios/SymPyEditor/EditorView.swift" in paths
+    assert {"../../mobile/www", "../../mobile/ios/app", "../../mobile/ios/app_packages"} <= paths
+    assert "postBuildScripts" not in target                      # nothing to install: the framework has it all
+    assert target["settings"]["base"]["CODE_SIGN_ENTITLEMENTS"]
+    assert "disable-library-validation" in (ROOT / "desktop/macos/SymPyEditor/SymPyEditor.entitlements").read_text(encoding="utf-8")
+
+    # the shared sources carry their Mac branches, and the iOS ones with them
+    view = (ROOT / "mobile/ios/SymPyEditor/EditorView.swift").read_text(encoding="utf-8")
+    assert "NSViewRepresentable" in view and "UIViewRepresentable" in view
+    assert "NSWorkspace.shared.open(url)" in view
+    objc = (ROOT / "mobile/ios/SymPyEditor/PythonRuntime.m").read_text(encoding="utf-8")
+    assert "TARGET_OS_OSX" in objc and "Python.framework/Versions/Current" in objc
+
+    build = (ROOT / "desktop" / "build.py").read_text(encoding="utf-8")
+    assert "import build as mobile" in build                     # one staging, both apps
+    assert "macOS-support" in build                              # the macOS flavour of the pinned release
+    assert "mobile.build_www(cdn, native=True)" in build         # the page edits in the app's own Python
+
+
+def test_a_browser_that_is_asked_for_cannot_be_skipped(tmp_path):
+    """CI's browser job ran `pytest tests/`, and the front end's tests skip
+    when the CDN does not answer the one request made as they are collected
+    (or Chromium does not start): the job was green having run nothing.
+    With SYMPY_EDITOR_REQUIRE_BROWSER=1, which the job sets, such a skip is
+    a failure - in a test, in a fixture, or of a whole module as it is
+    imported; every other skip stays one, and so does every skip without
+    the variable."""
+    import subprocess
+
+    (tmp_path / "conftest.py").write_text((ROOT / "tests" / "conftest.py").read_text(encoding="utf-8"), encoding="utf-8")
+    (tmp_path / "test_page.py").write_text("""
+import pytest
+
+pytestmark = pytest.mark.skipif(True, reason="KaTeX CDN not reachable")
+
+
+def test_the_front_end():
+    pass
+""", encoding="utf-8")
+    (tmp_path / "test_launch.py").write_text("""
+import os
+
+import pytest
+
+
+@pytest.fixture
+def browser():
+    pytest.skip("chromium not available: no such file")
+
+
+def test_with_a_browser(browser):
+    pass
+
+
+@pytest.mark.skipif(not os.environ.get("NEVER_SET_ANYWHERE"), reason="set SYMPY_EDITOR_SLOW_TESTS=1")
+def test_a_slow_one():
+    pass
+
+
+def test_with_an_add_on():
+    pytest.importorskip("an_add_on_s_package_that_is_not_installed")
+
+
+def test_that_runs():
+    pass
+""", encoding="utf-8")
+    module = tmp_path / "modules" / "test_module.py"
+    module.parent.mkdir()
+    module.write_text("""
+import pytest
+
+playwright = pytest.importorskip("playwright_which_is_not_installed.sync_api")
+
+
+def test_never_collected():
+    pass
+""", encoding="utf-8")
+
+    def run(required, *files):
+        env = {k: v for k, v in os.environ.items() if k != "SYMPY_EDITOR_REQUIRE_BROWSER"}
+        if required is not None:
+            env["SYMPY_EDITOR_REQUIRE_BROWSER"] = required
+        return subprocess.run([sys.executable, "-m", "pytest", "-q", "-rs", "-p", "no:cacheprovider",
+                               "--rootdir", str(tmp_path), "-c", os.devnull, *files],
+                              cwd=tmp_path, env=env, capture_output=True, text=True, timeout=120)
+
+    for unasked in (None, "", "0"):
+        out = run(unasked, "test_page.py", "test_launch.py", "modules")
+        assert out.returncode == 0 and "1 passed, 5 skipped" in out.stdout, out.stdout
+    out = run("1", "test_page.py", "test_launch.py")
+    assert out.returncode == 1, out.stdout
+    assert "1 passed, 2 skipped, 2 errors" in out.stdout, out.stdout       # the two that wanted the browser
+    assert "this was about to be skipped: Skipped: KaTeX CDN not reachable" in out.stdout
+    assert "this was about to be skipped: Skipped: chromium not available: no such file" in out.stdout
+    assert "set SYMPY_EDITOR_SLOW_TESTS=1" in out.stdout and "an_add_on_s_package" in out.stdout   # still skips
+    out = run("1", "modules")
+    assert out.returncode != 0 and "error" in out.stdout, out.stdout
+    assert "this was about to be skipped: Skipped: could not import 'playwright_which_is_not_installed" in out.stdout
+
+
+def test_the_workflows_ask_for_the_browser_and_hold_no_more_than_they_read():
+    """Two workflows ran with whatever the repository grants a token by
+    default, one of them in the job that holds the release keystore: all
+    three now say `contents: read`, and no job asks for more - none
+    publishes.  And the two jobs that are there for the browser say that it
+    is required (see the test above; the add-ons' tests are out of reach of
+    tests/conftest.py, so their skips are read from pytest's own summary)."""
+    yaml = pytest.importorskip("yaml")
+    flows = {name: yaml.safe_load((ROOT / ".github" / "workflows" / f"{name}.yml").read_text(encoding="utf-8"))
+             for name in ("ci", "mobile", "webapp")}
+    for name, flow in flows.items():
+        assert flow["permissions"] == {"contents": "read"}, name
+        for job, said in flow["jobs"].items():
+            assert "permissions" not in said, (name, job)
+    jobs = flows["ci"]["jobs"]
+    tests = [step for step in jobs["browser"]["steps"] if "pytest" in step.get("run", "")]
+    assert len(tests) == 1 and tests[0]["run"] == "pytest -q tests/"
+    assert tests[0]["env"] == {"SYMPY_EDITOR_SLOW_TESTS": "1", "SYMPY_EDITOR_REQUIRE_BROWSER": "1"}
+    tests = [step for step in jobs["addons"]["steps"] if "pytest" in step.get("run", "")]
+    assert len(tests) == 1 and tests[0]["shell"] == "bash"           # bash -eo pipefail: a failure before the pipe counts
+    assert 'pytest -q -rs addons/ | tee "$RUNNER_TEMP/addons.txt"' in tests[0]["run"]
+    assert 'grep -iE "^SKIPPED .*(playwright|chromium|CDN)" "$RUNNER_TEMP/addons.txt"' in tests[0]["run"]
+    assert "exit 1" in tests[0]["run"]
+    # the jobs without a browser go on skipping what needs one
+    for job in ("tests", "oldest-sympy"):
+        assert "REQUIRE_BROWSER" not in str(jobs[job])
+
+
 def test_no_image_is_committed():
     """Images are drawn, not kept: `mobile/make_icons.py` makes every one of
     them from the SVGs, and a build calls it."""
@@ -397,13 +1478,13 @@ def test_the_ios_app_leaves_openssl_behind():
     assert "CFBundleVersion: ${IOS_BUILD_NUMBER}" in project
 
 
-def test_the_ios_build_number_counts_the_commits():
+def test_the_apple_build_number_is_set_by_hand():
     # by path, as the other tests load it: `mobile` is a directory of scripts,
     # not an importable package, so an installed checkout has no such module
     spec = importlib.util.spec_from_file_location("mobile_build", ROOT / "mobile" / "build.py")
     build = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(build)
-    assert build.build_number().isdigit()
+    assert build.build_number() == str(build.BUILD_NUMBER) and int(build.BUILD_NUMBER) >= 1
 
 
 def test_the_apps_bundle_the_addons_one_folder_each(tmp_path):
@@ -419,7 +1500,8 @@ def test_the_apps_bundle_the_addons_one_folder_each(tmp_path):
     spec.loader.exec_module(build)
     dest = build.copy_python_sources(tmp_path / "python")
     folders = sorted(p.name for p in (dest / "addons").iterdir())
-    assert folders == ["sympy_editor_latex", "sympy_editor_matching", "sympy_editor_plot", "sympy_editor_tree"]   # the template is not shipped
+    assert folders == ["sympy_editor_console", "sympy_editor_latex", "sympy_editor_matching", "sympy_editor_plot",
+                       "sympy_editor_tree"]   # the template is not shipped
     for folder in folders:
         assert (dest / "addons" / folder / "addon.json").is_file()
         assert not (dest / "addons" / folder / "tests").exists()            # nothing of the test suites
@@ -435,13 +1517,18 @@ snap = json.loads(app.new_doc("d", "Add(Symbol('x'), Symbol('y'))", json.dumps({
 print(json.dumps(sorted(a["name"] for a in snap["addons_available"])), json.dumps(snap["addons"]))
 snap = json.loads(app.handle("d", json.dumps({{"action": "addons", "enable": ["tree"]}})))
 print(json.dumps(snap["addons"]), snap["tree"]["head"], "registerAddon" in snap["addon_clients"][0]["js"])
+snap = json.loads(app.handle("d", json.dumps({{"action": "addons", "enable": ["console"]}})))
+code = "import sys\\nprint(sys.implementation.name)\\neditor.expr = 2*editor.expr"
+res = json.loads(app.handle("d", json.dumps({{"action": "addon", "addon": "console", "method": "run", "code": code}})))["query"]["result"]
+print(res["items"][0]["text"].strip(), res["changed"], json.loads(app.handle("d", json.dumps({{"action": "snapshot"}})))["src"])
 """
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=300)
     assert out.returncode == 0, out.stderr
     lines = out.stdout.strip().splitlines()
-    assert json.loads(lines[0]) == ["latex", "matching", "plot", "tree"]
-    assert lines[1] == '["latex", "matching", "plot", "tree"] []'                               # listed, all off
+    assert json.loads(lines[0]) == ["console", "latex", "matching", "plot", "tree"]
+    assert lines[1] == '["console", "latex", "matching", "plot", "tree"] []'                    # listed, all off
     assert lines[2] == '["tree"] Add True'
+    assert lines[3] == "cpython True 2*x + 2*y"                                                  # the console, in the app's Python
 
 
 def test_the_app_keeps_the_addons_the_user_installs(tmp_path, monkeypatch):
@@ -497,9 +1584,10 @@ def test_the_native_bundle_names_the_addons_and_remembers_the_switches(tmp_path)
     mod = _load_builder()
     out = mod.build(tmp_path / "www", native=True)
     page = (out / "index.html").read_text(encoding="utf-8")
-    assert all(m in page for m in ("sympy_editor_latex", "sympy_editor_matching", "sympy_editor_plot", "sympy_editor_tree"))
+    assert all(m in page for m in ("sympy_editor_console", "sympy_editor_latex", "sympy_editor_matching", "sympy_editor_plot",
+                                   "sympy_editor_tree"))
     assert "sympy_editor_addon_template" not in page                        # the template is not shipped
-    assert '"rememberAddons": true' in page and '"addons": []' in page             # off at start, a click away
+    assert '"rememberAddons": true' in page and '"addons": []' in page             # built with none: switched on at start
 
 
 def test_the_android_app_installs_what_the_addons_require():
@@ -511,6 +1599,14 @@ def test_the_android_app_installs_what_the_addons_require():
     gradle = (ROOT / "mobile" / "android" / "app" / "build.gradle.kts").read_text(encoding="utf-8")
     for req in build.addon_requirements():
         assert f'install("{req}")' in gradle, req
+    # ONNX Runtime is the app's Java library (Maven), which the handwriting
+    # add-on reaches through Chaquopy's Java bridge: never a Python package
+    # in the app - there is no wheel of it for Android, and a pip line would
+    # break the build or bring a second copy of the runtime.
+    assert "onnxruntime" not in build.addon_requirements()
+    pip = gradle[gradle.index("pip {"):gradle.index("}", gradle.index("pip {"))]
+    assert "onnxruntime" not in pip, pip
+    assert 'implementation("com.microsoft.onnxruntime:onnxruntime-android:' in gradle
 
 
 def test_a_debug_build_is_its_own_application():
@@ -573,3 +1669,87 @@ def test_a_debug_build_says_debug_everywhere_it_is_named(tmp_path):
     with Image.open(debug_res / "mipmap-xxhdpi/ic_launcher_foreground.png") as image:
         box = [v * 108 / image.size[0] for v in image.split()[-1].getbbox()]
     assert box[0] >= 18 and box[1] >= 18 and box[2] <= 90 and box[3] <= 90, box
+
+
+def test_the_bundle_carries_what_its_add_ons_load_from_a_cdn(tmp_path):
+    """The apps' bundle (native) has Plotly for the plot add-on beside the
+    page, and the page loads that copy: a CDN script in an app is a plot that
+    never comes without a network."""
+    mod = _load_builder()
+    out = mod.build(tmp_path / "www", native=True)
+    from sympy_editor_plot import PLOTLY_JS
+    copy = out / "vendor" / "addons" / PLOTLY_JS.split("://", 1)[1]
+    assert copy.is_file() and copy.stat().st_size > 1_000_000
+    page = (out / "index.html").read_text(encoding="utf-8")
+    assert '"localAssets"' in page and PLOTLY_JS in page
+    assert "Plotly.js (the plot add-on)" in (out / "vendor" / "NOTICE.txt").read_text(encoding="utf-8")
+
+
+def test_the_ios_app_reads_handwriting_with_onnxruntime():
+    """iOS has no onnxruntime wheel: ONNX Runtime's own library is linked
+    into the app and handed to its Python as a built-in module, and what the
+    add-on reads with is staged in a folder the Mac app does not share."""
+    yaml = pytest.importorskip("yaml")
+    target = yaml.safe_load((ROOT / "mobile/ios/project.yml").read_text(encoding="utf-8"))["targets"]["SymPyEditor"]
+    assert any(d.get("framework") == "onnxruntime.xcframework" and d.get("embed") is False
+               for d in target["dependencies"])                       # a static library: linked, not embedded
+    assert "ink" in {s["path"] for s in target["sources"] if isinstance(s, dict)}
+    script = "\n".join(s["script"] for s in target["postBuildScripts"])
+    assert " ink;" in script[script.index("process_dylibs") - 200:]   # NumPy's extension modules made into frameworks
+
+    objc = (ROOT / "mobile/ios/SymPyEditor/PythonRuntime.m").read_text(encoding="utf-8")
+    assert objc.index('PyImport_AppendInittab("_sympy_ort"') < objc.index("Py_PreInitialize(")
+    assert 'setenv("ORT_DISABLE_TELEMETRY", "1", 1)' in objc
+    module = (ROOT / "mobile/ios/SymPyEditor/OrtModule.m").read_text(encoding="utf-8")
+    assert "PyInit__sympy_ort" in module and "DisableTelemetryEvents" in module and "CreateSessionFromArray" in module
+
+    build = (ROOT / "mobile/build.py").read_text(encoding="utf-8")
+    assert "ONNXRUNTIME_IOS_SHA256" in build and "ios_ink(simulator)" in build
+    # ONNX Runtime 1.29's iOS library uploads telemetry (NSURLSession, to Microsoft's
+    # collector): the pinned one does not, and the build refuses any that could
+    sys.path.insert(0, str(ROOT / "mobile"))
+    import build as mobile_build
+    assert tuple(int(n) for n in mobile_build.ONNXRUNTIME_IOS.split(".")) < (1, 29)
+    assert "check_no_network(framework)" in build
+    assert {"NSURLSession", "_nw_", "_socket", "_getaddrinfo"} <= set(mobile_build.ONNXRUNTIME_FORBIDDEN)
+    assert "events.data.microsoft.com" in mobile_build.ONNXRUNTIME_FORBIDDEN_TEXT
+    app = (ROOT / "mobile/app/sympy_editor_app.py").read_text(encoding="utf-8")
+    assert 'INK_DIR / "addons"' in app
+    ignored = (ROOT / ".gitignore").read_text(encoding="utf-8")
+    assert "mobile/ios/ink/" in ignored and "mobile/ios/onnxruntime.xcframework" in ignored   # the model never reaches git
+
+    # the Mac app shares the iOS app's Python folders, and must get none of this
+    mac = (ROOT / "desktop/macos/project.yml").read_text(encoding="utf-8")
+    assert "onnxruntime" not in mac and "ios/ink" not in mac and "OrtModule" not in mac
+    assert "#if !TARGET_OS_OSX" in objc
+
+
+def test_the_apps_have_no_network():
+    """The privacy statement says the apps send nothing, and they must not be
+    able to: ONNX Runtime's Android library asks for INTERNET and starts a
+    telemetry uploader to Microsoft at launch.  Android takes both
+    permissions and the uploader out of the merged manifest, opts out of the
+    WebView's metrics and Safe Browsing, and tells ONNX Runtime to send
+    nothing; iOS and the Mac block every http(s)/ws(s) load in WebKit; the
+    handwriting Python disables ONNX Runtime's telemetry before importing
+    it; and no app build may load from a CDN."""
+    manifest = (ROOT / "mobile/android/app/src/main/AndroidManifest.xml").read_text(encoding="utf-8")
+    for removed in ('android:name="android.permission.INTERNET" tools:node="remove"',
+                    'android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove"',
+                    'android:name="ai.onnxruntime.TelemetryInitializer"'):
+        assert removed in manifest, removed
+    assert manifest.count('tools:node="remove"') == 3
+    assert '<uses-permission android:name="android.permission.INTERNET" />' not in manifest
+    assert 'android.webkit.WebView.MetricsOptOut" android:value="true"' in manifest
+    assert 'android.webkit.WebView.EnableSafeBrowsing" android:value="false"' in manifest
+    kotlin = (ROOT / "mobile/android/app/src/main/java/org/sympy/editor/MainActivity.kt").read_text(encoding="utf-8")
+    assert 'Os.setenv("ORT_DISABLE_TELEMETRY", "1", true)' in kotlin
+    swift = (ROOT / "mobile/ios/SymPyEditor/EditorView.swift").read_text(encoding="utf-8")
+    assert '"^https?://"' in swift and '"^wss?://"' in swift and "compileContentRuleList" in swift
+    recognizer = (ROOT / "addons/sympy_editor_handwriting/sympy_editor_handwriting/recognizer.py").read_text(encoding="utf-8")
+    assert recognizer.index('setdefault("ORT_DISABLE_TELEMETRY", "1")') < recognizer.index("import onnxruntime")
+    assert "setTelemetry(False)" in recognizer and "disable_telemetry_events" in recognizer
+    import subprocess
+    out = subprocess.run([sys.executable, str(ROOT / "mobile/build.py"), "android", "--cdn"],
+                         capture_output=True, text=True, timeout=60)
+    assert out.returncode != 0 and "never use the network" in out.stderr

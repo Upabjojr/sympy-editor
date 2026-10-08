@@ -11,20 +11,31 @@ from __future__ import annotations
 import re
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple as TypingTuple, Union
 
+import ast
+import builtins
+import contextlib
+import datetime
 import io
+import json
 import keyword
 import logging
 import tokenize
 
 import sympy
-from sympy import Add, Basic, Dummy, Function, IndexedBase, Integer, MatrixSymbol, Mul, Symbol, Tuple, sympify
+from sympy import Add, Basic, Dummy, Function, IndexedBase, MatrixSymbol, Mul, Symbol, Tuple, sympify
 from sympy.core.function import AppliedUndef
 from sympy.core.symbol import Str
-from sympy.matrices.expressions import MatrixExpr
+from sympy.core.sympify import SympifyError
+from sympy.matrices.expressions import Identity, MatrixExpr, OneMatrix, ZeroMatrix
+from sympy.matrices.expressions.matexpr import MatrixElement
 from sympy.matrices import MatrixBase
 from sympy.tensor.array import NDimArray
+from sympy.tensor.array.expressions import ArraySymbol, OneArray, ZeroArray
 from sympy.parsing.sympy_parser import (
     convert_xor,
+    function_exponentiation,
+    implicit_application,
+    implicit_multiplication,
     implicit_multiplication_application,
     parse_expr,
     standard_transformations,
@@ -32,7 +43,8 @@ from sympy.parsing.sympy_parser import (
 
 from collections import OrderedDict
 
-from .addons import Addon, inspect_addons, install_addons, installed, load_addon, uninstall_addon, user_installed
+from .addons import (Addon, addon_manifest, inspect_addons, install_addons, installed, load_addon,
+                     uninstall_addon, user_installed)
 from .ops import KINDS, KIND_LABELS, Op, get_ops, node_kind, node_kinds, with_kind
 from .printer import (
     PLACEHOLDER_RE,
@@ -56,7 +68,29 @@ from .printer import (
     replace_at,
     view_parts,
 )
-from .printer import exact_srepr as srepr   # a MatAdd's term order must survive the round trip
+from .invalid import (Invalid, InvalidExpr, UnsafeText, allowing_invalid, first_problem, has_invalid, invalid,
+                      node_problem, read_source, read_srepr, tolerant_parse, tolerate, _is_constructor, _NotSrepr,
+                      _post_order)
+from .printer import ExactReprPrinter, exact_srepr
+
+
+class _SaveReprPrinter(ExactReprPrinter):
+    """``exact_srepr`` with a product's factors written as the product holds
+    them too: SymPy's ``ReprPrinter`` writes them in display order and
+    splits the coefficient (``-2*y/3`` as ``Mul(-1, 2/3, y)``), which only
+    an evaluating reader puts back together - and a saved step is read
+    unevaluated, so that an unevaluated one comes back as it was."""
+
+    def _print_Mul(self, expr, order=None):
+        return "%s(%s)" % (type(expr).__name__, ", ".join(self._print(a) for a in expr.args))
+
+
+def srepr(expr: Any) -> str:
+    """``srepr`` that reads back as the very same expression - argument
+    order kept (a MatAdd's terms, a product's factors) - for what is saved
+    and what a page rebuilds."""
+    return _SaveReprPrinter().doprint(expr)
+
 
 __all__ = ["Document", "SYMBOL_TYPES", "Interrupted", "interrupt_thread"]
 
@@ -85,6 +119,82 @@ def interrupt_thread(ident: int) -> bool:
 SYMBOL_TYPES = ("Symbol", "MatrixSymbol", "Matrix", "Function")
 
 PathLike = Union[str, Path]
+
+
+#: Nodes whose arguments are their name and shape, not expressions inside
+#: them: nothing of theirs can stand in their place (see Document.unwrap).
+#: An explicit matrix's entries are its children, but one of them keeping
+#: the matrix's place is a replacement, not an unwrap.
+_SHAPED = (MatrixBase, NDimArray, MatrixSymbol, ArraySymbol, ZeroMatrix, OneMatrix, Identity, ZeroArray, OneArray)
+
+#: The order the virtual parts of a node are read in: a fraction's
+#: numerator before its denominator, the product after a minus sign.
+_PART_ORDER = {"neg": 0, "n": 1, "d": 2}
+
+
+def _reading_key(path) -> tuple:
+    """A sort key putting paths in reading order: argument indices by
+    number (``/2`` before ``/10``), a fraction's ``n`` before its ``d``."""
+    return tuple((0, int(step), "") if isinstance(step, int) or str(step).isdigit()
+                 else (1, _PART_ORDER.get(str(step), 9), str(step)) for step in path)
+
+
+def _safe_str(expr: Any) -> str:
+    try:
+        return str(expr)
+    except Exception:
+        return f"<{type(expr).__name__}>"
+
+
+def _flag(value: Any) -> bool:
+    """A saved switch: ``true``/``false``, and the texts and numbers a hand
+    written or older file may hold (``"false"`` is off, not a non-empty
+    string)."""
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
+
+
+def _as_list(value: Any, what: str) -> List[Any]:
+    """A list given in a file or a message - the declared names, the add-ons
+    to switch on -, one item given on its own taken as a list of it.  Text
+    was taken a character at a time: ``"enable": "tree"`` asked for the
+    add-ons ``t``, ``r``, ``e`` and ``e``."""
+    if value is None:
+        return []
+    if isinstance(value, dict):
+        raise ValueError(f"The {what} are not a list")
+    if isinstance(value, (str, bytes)) or not isinstance(value, Iterable):
+        return [value]
+    return list(value)
+
+
+def _whole(value: Any, message: str) -> int:
+    """``value`` as a whole number, or ``ValueError(message)``: ``2.5`` rows
+    were taken as 2, ``True`` as 1."""
+    if isinstance(value, bool):
+        raise ValueError(message)
+    if isinstance(value, str):
+        if not re.fullmatch(r"\s*[+-]?\d+\s*", value):
+            raise ValueError(message)
+        return int(value)
+    try:
+        number = int(value)
+        if number != value:
+            raise ValueError(message)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError(message) from None
+    return number
+
+
+#: The most entries ``Document.edit_matrix`` makes a matrix hold: a resize
+#: to 100000 x 100000 filled memory with placeholders before anything said no.
+MAX_MATRIX_ENTRIES = 10000
+
+
+def _short(text: Any, n: int = 60) -> str:
+    text = repr(str(text))
+    return text if len(text) <= n else text[: n - 1] + "…"
 
 
 def _split_args(text: str) -> List[str]:
@@ -190,7 +300,20 @@ def _as_basic(result: Any) -> Any:
         return sympy.FiniteSet(*[_as_basic(r) for r in result])
     if isinstance(result, tuple):
         return Tuple(*[_as_basic(r) for r in result])
-    return sympify(result)
+    return _strict_basic(result)
+
+
+def _strict_basic(result: Any) -> Any:
+    """A number, or an object SymPy knows how to convert, as SymPy's;
+    anything else is refused.  Text above all: ``sympify`` of a string runs
+    it as Python, and a symbol's ``.name`` is whatever a saved file put
+    there - ``__import__('os').system(...) or x`` ran through ``call``."""
+    if isinstance(result, (str, bytes)):
+        raise ValueError(f"The result is text ({_short(result)}), not an expression")
+    try:
+        return sympify(result, strict=True)
+    except SympifyError:
+        raise ValueError(f"The result is a {type(result).__name__}, not an expression") from None
 
 
 def _rebuilt(expr: Basic) -> Basic:
@@ -348,9 +471,398 @@ LAZY_FORMS: Dict[str, Callable] = {
 #: What can be typed for the operator between two arguments (see
 #: ``Document.operator``): nothing means juxtaposition, a product.
 OPERATORS = "+-*/^=<>&|"
+#: Relations beyond the one-key operators, for Document.operator: what a
+#: written ≤, ≥ or ≠ becomes (the handwriting add-on sends them).
+RELATION_OPERATORS = ("<=", ">=", "!=")
 
 UNEVALUATED_CONSTRUCTORS = frozenset({"cbrt", "root", "real_root", "Rational", "Mul", "Add", "Pow"})
 
+#: The version of the format a document is saved in (``Document.save_text``,
+#: the ``"sympy-editor"`` field of a file; ``"format"`` in a session's
+#: export).  See docs/file-format.md, "Versions", for the rules: every
+#: format this one replaced opens through MIGRATIONS, and a file of a newer
+#: format opens too when it says an older reader can read it.
+SAVE_FORMAT = 1
+
+#: The oldest format whose reader can read a file written in SAVE_FORMAT
+#: (the ``"min-reader"`` field).  It stays where it is for a change an older
+#: reader can live with - a field added, which it ignores - and moves up to
+#: SAVE_FORMAT for a breaking one: a field renamed, moved or read otherwise.
+SAVE_MIN_READER = 1
+
+#: Upgrades between formats: ``MIGRATIONS[n]`` takes a file (a dict) of
+#: format ``n`` and returns it in format ``n + 1``; ``upgrade_file`` chains
+#: them.  One is added with every format and none is ever removed - they are
+#: what keeps a file saved years ago opening.  Each reads ``data["session"]``
+#: (the session as ``Document.export`` gives it) and whatever else the file
+#: holds; see ``@migration``.
+MIGRATIONS: Dict[int, Callable[[Dict[str, Any]], Dict[str, Any]]] = {}
+
+
+def migration(version: int):
+    """Register the upgrade from format ``version`` to ``version + 1``:
+
+    >>> @migration(1)                                    # doctest: +SKIP
+    ... def _labels_became_steps(data):
+    ...     session = data.get("session") or {}
+    ...     session["steps"] = [{"label": l} for l in session.pop("labels", [])]
+    ...     return data
+    """
+    def register(fn: Callable[[Dict[str, Any]], Dict[str, Any]]):
+        if version in MIGRATIONS:
+            raise ValueError(f"format {version} already has its upgrade ({MIGRATIONS[version].__name__})")
+        MIGRATIONS[version] = fn
+        return fn
+    return register
+
+
+def _format_number(value: Any, what: str) -> int:
+    if isinstance(value, str) and value.strip().isdigit():
+        value = int(value)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"The file's {what} is not a format number: {value!r}")
+    return value
+
+
+def upgrade_file(data: Dict[str, Any]) -> Dict[str, Any]:
+    """A saved file's data in the format this version writes (SAVE_FORMAT).
+
+    * No ``"sympy-editor"`` field: a file written by hand or by another
+      program (``{"expr": "sin(x)"}``) - taken as it is.
+    * An older format: brought up one format at a time through MIGRATIONS.
+    * A newer format whose ``"min-reader"`` is this format or older: read as
+      it is - what was added since is ignored, and what is kept is what this
+      version knows.
+    * A newer format that needs a newer reader: refused, with the version
+      that can read it, rather than read as something it is not.
+    """
+    if "sympy-editor" not in data:
+        return data
+    version = _format_number(data["sympy-editor"], "format")
+    if version > SAVE_FORMAT:
+        needs = _format_number(data.get("min-reader", version), "min-reader")
+        if needs > SAVE_FORMAT:
+            raise ValueError(f"The file was written by a newer version (format {version}), "
+                             f"which a reader of format {needs} or later can open; this one reads format {SAVE_FORMAT}")
+        return data
+    data = dict(data)
+    if isinstance(data.get("session"), dict):
+        data["session"] = dict(data["session"])       # the migrations may change it in place
+    while version < SAVE_FORMAT:
+        step = MIGRATIONS.get(version)
+        if step is None:
+            raise ValueError(f"No way to read format {version}: its upgrade to format {version + 1} is missing")
+        data = step(data)
+        version += 1
+        data["sympy-editor"] = version
+    data["min-reader"] = SAVE_MIN_READER
+    return data
+
+
+def upgrade_session(session: Dict[str, Any], version: Any) -> Dict[str, Any]:
+    """A session (``Document.export``'s payload) kept in format ``version`` -
+    the sessions a page keeps, whose ``"format"`` says which - in the format
+    this version reads: the same MIGRATIONS as a file's."""
+    upgraded = upgrade_file({"sympy-editor": version, "session": dict(session)})
+    return dict(upgraded.get("session") or {})
+
+#: What a saved document is: JSON, under a type of its own.
+SAVE_MIME = "application/x-sympy-editor+json"
+#: What its file is called.
+SAVE_EXT = ".sympy"
+
+
+class _Script:
+    """What :meth:`Document.python_script` writes: each step as source that
+    rebuilds it, and the variables that source uses."""
+
+    #: Names a variable must not take: what ``from sympy import *`` brings,
+    #: what the script itself uses, Python's keywords and builtins.
+    RESERVED = frozenset(set(getattr(sympy, "__all__", ())) | set(keyword.kwlist) | set(dir(builtins))
+                         | {"steps", "expr", "i", "e", "Invalid", "Placeholder", "Str", "ArraySymbol", "evaluate"})
+
+    def __init__(self):
+        from sympy.printing.python import PythonPrinter
+        script = self
+        self.var: Dict[Any, str] = {}           # object -> variable
+        self.used: List[Any] = []               # in the order first used
+        self.taken = set()
+        self.needs: set = set()                 # imports beyond sympy's
+
+        def name_of(obj):
+            return script.variable(obj)
+
+        class Readable(PythonPrinter):
+            def _print_Symbol(self, expr):
+                return name_of(expr)
+            _print_Dummy = _print_Symbol
+            _print_MatrixSymbol = _print_Symbol
+            _print_IndexedBase = _print_Symbol
+            _print_ArraySymbol = _print_Symbol
+
+            def _print_Function(self, expr):
+                if isinstance(expr, AppliedUndef):
+                    return "%s(%s)" % (name_of(expr.func), ", ".join(self._print(a) for a in expr.args))
+                return super()._print_Function(expr)
+
+        # the saved form's writer: a product's factors as the product holds
+        # them (ExactReprPrinter wrote Mul(x, 2) unevaluated as Mul(2, x))
+        class Exact(_SaveReprPrinter):
+            def _print_Symbol(self, expr):
+                return name_of(expr)
+            _print_Dummy = _print_Symbol
+            _print_MatrixSymbol = _print_Symbol
+            _print_IndexedBase = _print_Symbol
+            _print_ArraySymbol = _print_Symbol
+
+            def _print_Function(self, expr):
+                if isinstance(expr, AppliedUndef):
+                    return "%s(%s)" % (name_of(expr.func), ", ".join(self._print(a) for a in expr.args))
+                return super()._print_Function(expr)
+
+            def _print_Str(self, expr):
+                script.needs.add("from sympy.core.symbol import Str")
+                return "Str(%r)" % expr.name
+
+        self.readable = Readable()
+        self.exact = Exact()
+
+    def variable(self, obj: Any) -> str:
+        if obj in self.var:
+            return self.var[obj]
+        name = Document._symbol_name(obj) if not isinstance(obj, type) else obj.__name__
+        base = name if (name.isidentifier() and not name.startswith("__") and name not in self.RESERVED) else None
+        if base is None:
+            base = re.sub(r"\W+", "_", name).strip("_") or "sym"
+            if base[0].isdigit() or base in self.RESERVED or not base.isidentifier():
+                base = "v_" + base
+        candidate, k = base, 2
+        while candidate in self.taken:
+            candidate, k = f"{base}_{k}", k + 1
+        self.taken.add(candidate)
+        self.var[obj] = candidate
+        self.used.append(obj)
+        return candidate
+
+    def _names(self) -> Dict[str, Any]:
+        names = {v: obj for obj, v in self.var.items()}
+        names.setdefault("Placeholder", Placeholder)
+        return names
+
+    def step(self, expr: Basic) -> List[str]:
+        """The lines that set ``expr`` to this step."""
+        try:
+            text = self.readable.doprint(expr)
+            back = read_source(text, self._names(), python_numbers=True, new_name=_no_new_name)
+            if isinstance(back, Basic) and back == expr and srepr(back) == srepr(expr):
+                self._import_for(expr, text)
+                return [f"expr = {text}"]
+        except Exception:
+            pass
+        text = self.exact.doprint(expr)
+        self._import_for(expr, text)
+        # The constructors, evaluating, when they give the step back: some
+        # refuse to build unevaluated what they build evaluated - a union
+        # of an interval and a set - and the script raised as it ran.
+        try:
+            back = read_srepr(text, self._names(), evaluate=True)
+            if isinstance(back, Basic) and back == expr and srepr(back) == srepr(expr):
+                return [f"expr = {text}"]
+        except Exception:
+            pass
+        return ["with evaluate(False):   # the step as it was, unevaluated", f"    expr = {text}"]
+
+    def _import_for(self, expr: Basic, text: str) -> None:
+        """Import the classes ``text`` names that ``from sympy import *``
+        does not bring (``MatrixElement``, ``PermuteDims``): the script
+        stopped at them with a NameError."""
+        for node in _post_order(expr):
+            cls = type(node)
+            name = cls.__name__
+            if (str(cls.__module__ or "").startswith("sympy.") and re.search(r"\b%s\(" % re.escape(name), text)
+                    and getattr(sympy, name, None) is not cls and name not in self.RESERVED - set(dir(sympy))):
+                self.needs.add(f"from {cls.__module__} import {name}")
+
+    def _declaration(self, obj: Any) -> str:
+        if isinstance(obj, MatrixSymbol):
+            return f"MatrixSymbol({str(obj.name)!r}, {self.readable.doprint(obj.rows)}, {self.readable.doprint(obj.cols)})"
+        if type(obj).__name__ == "ArraySymbol":
+            self.needs.add("from sympy.tensor.array.expressions import ArraySymbol")
+            dims = ", ".join(self.readable.doprint(d) for d in obj.shape)
+            return f"ArraySymbol({str(obj.name)!r}, ({dims}{',' if len(obj.shape) == 1 else ''}))"
+        if isinstance(obj, IndexedBase):
+            return f"IndexedBase({str(obj.label)!r})"
+        if isinstance(obj, type):
+            return f"Function({obj.__name__!r})"
+        if isinstance(obj, Symbol):
+            cls = type(obj)
+            if getattr(sympy, cls.__name__, None) is not cls:
+                self.needs.add(f"from {cls.__module__} import {cls.__name__}")
+            return srepr(obj)                          # Symbol('x', positive=True)
+        return srepr(obj)
+
+    def declarations(self) -> List[str]:
+        out: Dict[Any, str] = {}
+        seen = 0
+        while seen < len(self.used):                   # a shape may bring in new symbols
+            obj = self.used[seen]
+            seen += 1
+            out[obj] = self._declaration(obj)
+        # plain symbols first: a matrix symbol's shape may use them
+        order = sorted(self.used, key=lambda o: (0 if isinstance(o, Symbol) else 1, self.var[o]))
+        return [f"{self.var[o]} = {out[o]}" for o in order]
+
+    def imports(self) -> List[str]:
+        return sorted(self.needs)
+
+
+def _no_new_name(name: str):
+    raise UnsafeText(f"unknown name {name!r}")
+
+
+
+#: How typed text is read, by name: the parser transformations each mode adds
+#: to SymPy's standard ones (and ``^`` for a power).  ``implicit`` is the
+#: default: ``2x``, ``3(x + 1)``, ``sin x``, ``sin^2 x``, names kept whole.
+PARSERS: Dict[str, tuple] = {
+    "strict": (),
+    "implicit": (implicit_multiplication, implicit_application, function_exponentiation),
+    "split": (implicit_multiplication_application,),
+}
+
+_OPENERS = {"(": ")", "[": "]", "{": "}"}
+_BAR_AFTER = set("+-*/^(,=<>&|[{%")   # after one of these a | opens an absolute value
+
+
+def friendly_source(src: str) -> str:
+    """What a typed text means before SymPy reads it - the notation a
+    mathematician writes, turned into SymPy's syntax:
+
+    * ``|x|`` is ``Abs(x)``: a ``|`` with nothing before it, after an
+      operator or touching what comes before (``2|x|``) opens a pair, and
+      the next one closes it; between two operands with a space on each
+      side (``x | y``) it is still the operator "or";
+    * one ``=`` (or ``==``) outside brackets makes an equation,
+      ``Eq(left, right)``; ``<=``, ``>=`` and ``!=`` stay what they are;
+    * brackets left open at the end are closed, so ``sin(x`` reads.
+    """
+    out: List[str] = []
+    bars: List[int] = []            # nesting depth at which each open | sits
+    depth = 0
+    i, n = 0, len(src)
+    while i < n:
+        ch = src[i]
+        if ch == "|":
+            prev = next((c for c in reversed(out) if not c.isspace()), "")
+            spaced = i > 0 and src[i - 1].isspace() and i + 1 < n and src[i + 1].isspace()
+            if bars and bars[-1] == depth and prev not in _BAR_AFTER:
+                out.append(")")                        # closes the pair
+                bars.pop()
+                depth -= 1
+            elif prev == "" or prev[-1] in _BAR_AFTER or not spaced:
+                # nothing before it, an operator, or an operand touching it
+                # (2|x|): the bar opens; between two operands with room on
+                # both sides (x | y) it is the operator "or"
+                out.append("*Abs(" if prev and (prev[-1].isalnum() or prev[-1] in ")]}") else "Abs(")
+                depth += 1
+                bars.append(depth)
+            else:
+                out.append("|")
+            i += 1
+            continue
+        if ch in _OPENERS:
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        out.append(ch)
+        i += 1
+    while bars:
+        out.append(")")
+        bars.pop()
+        depth -= 1
+    text = "".join(out)
+    # Brackets left open at the end are closed in order.
+    stack: List[str] = []
+    for ch in text:
+        if ch in _OPENERS:
+            stack.append(_OPENERS[ch])
+        elif ch in ")]}" and stack and stack[-1] == ch:
+            stack.pop()
+    text += "".join(reversed(stack))
+    # One = outside brackets: an equation.
+    depth = 0
+    cut = None
+    for j, ch in enumerate(text):
+        if ch in _OPENERS:
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif ch == "=" and depth == 0:
+            if j and text[j - 1] in "<>!=":
+                continue
+            if j + 1 < len(text) and text[j + 1] == "=":
+                if cut is not None:
+                    return text
+                cut = (j, j + 2)
+            elif cut is not None:
+                return text                            # two of them: not ours to read
+            else:
+                cut = (j, j + 1)
+    if cut is not None:
+        left, right = text[:cut[0]].strip(), text[cut[1]:].strip()
+        if left and right:
+            text = f"Eq({left}, {right})"
+    return text
+
+
+def parse_error(src: str, exc: BaseException) -> str:
+    """What went wrong reading ``src``, in words: SymPy's parser answers
+    with Python's own messages ("invalid syntax (<string>, line 1)",
+    "'Integer' object is not callable") and the class in front."""
+    shown = src if len(src) <= 60 else src[:57] + "…"
+    msg = str(exc)
+    if isinstance(exc, IndexError):                    # the parser's transformations tripping over a stray bracket
+        return f'Cannot read "{shown}": something is missing or out of place'
+    if isinstance(exc, (SyntaxError, tokenize.TokenError)):
+        low = msg.lower()
+        at = ""
+        offset = getattr(exc, "offset", None)
+        if isinstance(offset, int) and 0 < offset <= len(src) + 1:
+            at = f" at column {offset}"
+        if "eof" in low or "never closed" in low or "unexpected end" in low:
+            reason = "it ends too early"
+        elif "unmatched" in low or "closing parenthesis" in low:
+            reason = "a closing bracket has no opening one"
+        elif "invalid decimal literal" in low or "invalid syntax" in low or "invalid character" in low:
+            reason = f"something is missing or out of place{at}"
+        else:
+            reason = msg.split("(<string>")[0].strip().rstrip(",") or "it is not an expression"
+        return f'Cannot read "{shown}": {reason}'
+    if isinstance(exc, TypeError) and "not callable" in msg:
+        m = re.search(r"'(\w+)' object is not callable", msg)
+        kind = m.group(1) if m else "that"
+        if kind in ("Integer", "Rational", "Float", "int", "float"):
+            return f'Cannot read "{shown}": a number cannot be applied like a function - write 2*(x + 1), not 2(x + 1)'
+        if kind == "Symbol":
+            return f'Cannot read "{shown}": a symbol is not a function - declare it as one in Symbols, or write a * (b)'
+        return f'Cannot read "{shown}": {kind} is not a function'
+    return f'Cannot read "{shown}": {msg or type(exc).__name__}'
+
+
+def describe_error(exc: BaseException) -> str:
+    """The error a front end shows: the message in words, the class only
+    when it is all there is - a refused edit used to read "ValueError:
+    Could not parse 'x+': invalid syntax (<string>, line 1)"."""
+    if isinstance(exc, SympifyError):                  # str() of it starts with its class name
+        obj = exc.expr
+        kind = "a function" if isinstance(obj, sympy.FunctionClass) else f"a {type(obj).__name__}"
+        return f"{_short(obj)} is {kind}, not an expression"
+    msg = str(exc).strip()
+    if not msg:
+        return type(exc).__name__
+    if isinstance(exc, (ValueError, TypeError, AttributeError, NotImplementedError, ZeroDivisionError)):
+        return msg
+    return f"{msg} ({type(exc).__name__})"
 
 class Document:
     """An editable SymPy expression with undo history.
@@ -362,7 +874,15 @@ class Document:
     printer_settings
         Extra :func:`sympy.latex` settings.
     parser
-        ``"strict"`` (default) or ``"implicit"`` (allows ``2x``, ``sin x``).
+        How typed text is read.  ``"implicit"`` (default) reads mathematics
+        as it is written: ``2x``, ``3(x + 1)``, ``sin x`` and ``sin^2 x``,
+        names kept whole (``xy`` is one symbol, as SymPy spells it);
+        ``"split"`` also splits names into letters (``xyz`` is ``x*y*z``,
+        SymPy's ``implicit_multiplication_application``); ``"strict"`` is
+        Python's syntax alone (``2*x``).  Whichever is set, see
+        :func:`friendly_source` for what every mode reads: ``x = 2`` as an
+        equation, ``|x|`` as an absolute value, brackets left open at the end
+        closed.
     ops
         Mapping of op name to :class:`~sympy_editor.ops.Op`; defaults to the
         global registry.
@@ -387,10 +907,21 @@ class Document:
     available
         What can be switched on besides: the same kinds of specs, off to
         start with.  None (the default) means every installed add-on.
+    allow_invalid
+        Whether an edit SymPy refuses to build - a product of matrices whose
+        shapes do not match, ``sin(x, y)``, ``1 + M`` - is kept as an invalid
+        node (``Invalid(MatMul, A, B)``, see ``sympy_editor.invalid``) rather
+        than refused.  ``{"action": "settings", "allow_invalid": ...}``
+        switches it at any time; the expression given here is kept either
+        way.
     addon_state
         ``{name: data}`` from :meth:`export`: what each add-on kept about the
         document it was exported from, given back to it (``restore_state``)
         once it is on.
+    format
+        The format :meth:`export` wrote the session in (its ``"format"``):
+        a session kept by an older version is upgraded (see
+        :func:`upgrade_session`) before it is read.
     """
 
     def __init__(
@@ -398,7 +929,7 @@ class Document:
         expr: Union[Basic, str],
         *,
         printer_settings: Optional[Dict[str, Any]] = None,
-        parser: str = "strict",
+        parser: str = "implicit",
         ops: Optional[Dict[str, Op]] = None,
         max_history: int = 200,
         symbols=(),
@@ -408,11 +939,25 @@ class Document:
         addons=(),
         available=None,
         addon_state=None,
+        allow_invalid: bool = False,
+        format: Optional[int] = None,
     ):
-        if parser not in ("strict", "implicit"):
-            raise ValueError("parser must be 'strict' or 'implicit'")
+        if format is not None and history:
+            # A session a page kept in an older format: upgraded as a file is.
+            session = upgrade_session({"history": list(history), "index": index, "labels": labels,
+                                       "symbols": _as_list(symbols, "declared names"), "addon_state": addon_state,
+                                       "allow_invalid": allow_invalid}, format)
+            history, index, labels = session.get("history"), session.get("index"), session.get("labels")
+            symbols, addon_state = session.get("symbols") or (), session.get("addon_state")
+            allow_invalid = _flag(session.get("allow_invalid", allow_invalid))
+        if parser not in PARSERS:
+            raise ValueError("parser must be one of " + ", ".join(repr(name) for name in PARSERS))
         self.printer_settings = dict(printer_settings or {})
         self.parser = parser
+        #: Whether an edit SymPy refuses to build (``A*B`` of matrices whose
+        #: shapes do not match, ``sin(x, y)``) is kept as an invalid node
+        #: (see ``sympy_editor.invalid``) instead of being refused.
+        self.allow_invalid = _flag(allow_invalid)
         self.ops: Dict[str, Op] = dict(ops) if ops is not None else get_ops()
         #: This document's kind table and labels: the global ones plus the
         #: kinds of the add-ons that are on (see :meth:`enable`).
@@ -449,7 +994,14 @@ class Document:
         self._ready = False
         for spec in addons or ():
             self.enable(spec)
-        self.max_history = max_history
+        try:
+            self.max_history = int(max_history)
+        except (TypeError, ValueError):
+            raise ValueError(f"max_history must be a whole number, not {max_history!r}") from None
+        if self.max_history < 1:
+            # the history holds at least the expression shown: 0 kept nothing,
+            # and the first commit failed with an IndexError
+            raise ValueError("max_history must be at least 1")
         #: Type names whose method lists snapshots have already carried.
         self._methods_sent: set = set()
         self._history: List[Basic] = []
@@ -462,40 +1014,168 @@ class Document:
         self._listeners: List[Callable[[Basic], None]] = []
         #: Declared names (see :meth:`declare`): name -> object.
         self.declared: Dict[str, Any] = {}
+        #: The declared names of each step of the history (a retype is a
+        #: step, and undoing it gives the name back what it was).
+        self._decls: List[Dict[str, Any]] = []
         self.last_note: Optional[str] = None
-        for obj in symbols:
-            if isinstance(obj, str):  # srepr text; Str is not exported by SymPy < 1.14
-                obj = sympify(obj, locals={"Str": Str})
+        for obj in _as_list(symbols, "declared names"):
+            obj = self._read_symbol(obj)             # srepr text is read, never run
             self.declared[self._symbol_name(obj)] = obj
         if history:
+            # Read without running it (a session comes from a page's storage
+            # or a file), unevaluated: every step as it was saved.
             steps = [self._coerce(e) for e in history]
-            if labels is not None and len(labels) > len(steps):
-                raise ValueError(f"{len(labels)} labels for {len(steps)} history steps")
             self._history = steps[-self.max_history:]
-            given = list(labels or [])[-len(self._history):]
+            # More labels than steps: the last ones are the steps' own, as
+            # open_text reads them - saved data opens rather than failing.
+            given = (list(labels) if isinstance(labels, (list, tuple)) else [])[-len(self._history):]
             self._labels = [None] * (len(self._history) - len(given)) + [None if not l else str(l) for l in given]
-            self._index = len(self._history) - 1 if index is None else max(0, min(int(index), len(self._history) - 1))
+            self._index = self._clamp_index(index, len(self._history), len(steps) - len(self._history))
+            self._decls = [dict(self.declared) for _ in self._history]
+            self._showable(self.expr)
         else:
-            self._commit(self._coerce(expr))
+            # What the document is given is kept even when it is not valid:
+            # the last state of a document re-created after an interruption,
+            # or an expression built in Python with the constructors.
+            self._commit(tolerate(self._coerce_given(expr)), check=False)
         self._ready = True
         for name, addon in list(self.addons.items()):
             if name in self._pending_state:
                 addon.restore_state(self, self._pending_state.pop(name))
+
+    @staticmethod
+    def _clamp_index(index: Any, n: int, dropped: int = 0) -> int:
+        """A saved history index, made one of the ``n`` steps (the last when
+        there is none, or it is not a number).  ``dropped``: how many steps
+        before these were left out (a history longer than ``max_history``
+        keeps its last ones) - the index counts from the first that was
+        saved, and unshifted it opened on a step a hundred later."""
+        try:
+            return max(0, min(int(index) - dropped, n - 1))
+        except (TypeError, ValueError, OverflowError):
+            return n - 1
+
+    def save_text(self, name: Optional[str] = None) -> str:
+        """This document as a file to keep: JSON holding the expression as
+        SymPy source - so that the file says what it holds to anyone reading
+        it - and the whole session behind it (:meth:`export`: the history, its
+        labels, the declared names, what the add-ons kept).  :meth:`open_text`
+        takes it back."""
+        data = {
+            "sympy-editor": SAVE_FORMAT,
+            "min-reader": SAVE_MIN_READER,
+            "saved": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+            "expr": str(self.expr),
+            "session": self.export(),
+        }
+        if name:
+            data["name"] = str(name)
+        return json.dumps(data, indent=1, ensure_ascii=False) + "\n"
+
+    def open_text(self, text: str) -> Basic:
+        """Take a file back: one written by :meth:`save_text`, with its whole
+        session, or anything simpler - a JSON file with an ``expr`` alone, or a
+        line of SymPy source - which opens as a document of one step.  What
+        this document held is gone, as though it had just been opened.
+
+        Returns the expression it now holds; raises ``ValueError`` if the file
+        is not one of those things."""
+        text = (text or "").strip()
+        if not text:
+            raise ValueError("The file is empty")
+        session: Dict[str, Any] = {}
+        data: Any = None
+        if text[:1] in "{[":
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"The file is not a formula this can open: {exc}") from None
+        if isinstance(data, dict):
+            data = upgrade_file(data)            # an older format brought up to this one; a newer one checked
+            session = data.get("session") or {}
+            if not isinstance(session, dict):
+                raise ValueError("The file's session is not a session")
+            session = dict(session)
+            if not session.get("history") and data.get("expr") is not None:
+                session = {"history": [str(data["expr"])]}
+        elif data is not None:
+            raise ValueError("The file is not a formula this can open")
+        else:
+            session = {"history": [text]}                    # a line of SymPy source
+        history = session.get("history") or []
+        if not isinstance(history, list):
+            raise ValueError("The file's history is not a list of steps")
+
+        # Everything is read and checked before anything here changes: a
+        # file that cannot be opened leaves the document as it was.
+        declared: Dict[str, Any] = {}
+        for obj in _as_list(session.get("symbols"), "file's declared names"):
+            obj = self._read_symbol(obj)                     # read, never run
+            declared[self._symbol_name(obj)] = obj
+        steps = [self._coerce(e if isinstance(e, str) else str(e), declared) for e in history]
+        if not steps:
+            raise ValueError("The file holds no expression")
+        saved = len(steps)
+        steps = steps[-self.max_history:]
+        labels = session.get("labels")
+        # labels are what the history list says, nothing more: any but a
+        # list are left out (text was taken a character per step)
+        labels = (list(labels) if isinstance(labels, list) else [])[-len(steps):]
+        index = self._clamp_index(session.get("index"), len(steps), saved - len(steps))
+        self._showable(steps[index])          # the step shown first must print, or every message would fail
+        self.declared = declared
+        self._history = steps
+        self._decls = [dict(declared) for _ in steps]
+        self._labels = [None] * (len(steps) - len(labels)) + [None if not l else str(l) for l in labels]
+        self._index = index
+        if "allow_invalid" in session:
+            self.allow_invalid = _flag(session.get("allow_invalid"))
+        self.last_note = None
+        self._action_label = None
+        self._seq += 1
+        # What the file kept for the add-ons goes to the ones that are on; the
+        # rest waits, as it does for a session opened at startup.
+        pending = session.get("addon_state") or {}
+        self._pending_state = dict(pending) if isinstance(pending, dict) else {}
+        for addon_name, addon in list(self.addons.items()):
+            if addon_name in self._pending_state:
+                addon.restore_state(self, self._pending_state.pop(addon_name))
+        self._notify()        # (each in a try: the file is open by now, whatever a callback does)
+        return self.expr
 
     def export(self) -> Dict[str, Any]:
         """The state that :class:`Document` takes back: ``{"history": [srepr,
         ...], "index", "symbols": [srepr of the declared names][,
         "addon_state": {name: data}]}`` (a session's editing history, kept
         by the front end)."""
-        out = {"history": [srepr(e) for e in self._history], "index": self._index, "labels": list(self._labels),
-               "symbols": [srepr(obj) for obj in self.declared.values()]}
+        out = {"format": SAVE_FORMAT,
+               "history": [srepr(e) for e in self._history], "index": self._index, "labels": list(self._labels),
+               "symbols": [srepr(obj) for obj in self.declared.values()], "allow_invalid": self.allow_invalid}
         # What the add-ons that are on keep about this document (a rule set),
         # by name: given back through restore_state when the session is opened.
+        # An add-on that is loaded but off keeps its state too (it comes
+        # back with the next enable), and what a session kept for an add-on
+        # this document has not switched on - or cannot load - goes on as
+        # it came: a session saved again must not lose it.
         state = {}
-        for name, addon in self.addons.items():
-            data = addon.export_state(self)
+        for name, addon in list(self._loaded.items()):
+            if not isinstance(addon, Addon) or (name not in self.addons and name not in self.addon_state):
+                continue
+            try:
+                data = addon.export_state(self)
+            except Exception:
+                if name in self.addons:
+                    raise
+                continue
             if data is not None:
                 state[name] = data
+        for name, addon in self.addons.items():
+            if name not in state:
+                data = addon.export_state(self)
+                if data is not None:
+                    state[name] = data
+        for name, data in self._pending_state.items():
+            state.setdefault(name, data)
         if state:
             out["addon_state"] = state
         return out
@@ -510,6 +1190,13 @@ class Document:
             if isinstance(got, Exception):
                 raise got
             return got
+        if isinstance(spec, str) and spec not in self._catalog and any(isinstance(v, str) for v in self._catalog.values()):
+            # An add-on's name ("console") while the catalogue still knows it
+            # by the module it was given ("sympy_editor_console"): renamed by
+            # the first snapshot, but a switch can come first - a session
+            # opened and set to the editor's add-ons at once.  Where nothing
+            # is installed by name (Pyodide) the name was refused.
+            self.available_addons()
         if isinstance(spec, str) and spec in self._catalog and not isinstance(self._catalog[spec], str):
             return self._catalog[spec]
         if isinstance(spec, str) and spec not in self._catalog:
@@ -587,8 +1274,15 @@ class Document:
                 self._loaded[addon.name] = addon
             if any(entry["name"] == addon.name for entry in out):
                 continue
+            info = addon_manifest(addon)
             entry = {"name": addon.name, "label": addon.label or addon.name, "on": addon.name in self.addons,
                      "requires": list(addon.requires)}
+            if info.get("description"):
+                entry["description"] = str(info["description"])
+            if info.get("version"):
+                entry["version"] = str(info["version"])
+            if info.get("experimental") is True:
+                entry["experimental"] = True
             if addon.name in mine:
                 entry["user"] = {"version": mine[addon.name].get("version", ""), "source": mine[addon.name].get("source", "")}
             out.append(entry)
@@ -659,15 +1353,33 @@ class Document:
 
     def undo(self) -> Basic:
         if self.can_undo:
-            self._index -= 1
-            self._notify()
+            self._move_to(self._index - 1)
         return self.expr
 
     def redo(self) -> Basic:
         if self.can_redo:
-            self._index += 1
-            self._notify()
+            self._move_to(self._index + 1)
         return self.expr
+
+    def _move_to(self, index: int) -> None:
+        """Make step ``index`` the current one, with the declared names it
+        had.  A step that cannot be shown (a saved one) is refused before
+        anything moves: every answer shows the current step."""
+        self._showable(self._history[index])
+        self._index = index
+        if index < len(self._decls):
+            self.declared = dict(self._decls[index])
+        self._notify()
+
+    def _declare_everywhere(self, name: str, obj: Any = None) -> None:
+        """A declaration made outside the history (``declare``,
+        ``undeclare``, a retype of a name the expression does not use) is
+        no step: it holds in every step, the way it was made."""
+        for decls in [self.declared] + self._decls:
+            if obj is None:
+                decls.pop(name, None)
+            else:
+                decls[name] = obj
 
     def goto(self, index: int) -> Basic:
         """Make step ``index`` of the history (0 = oldest) the current
@@ -676,61 +1388,46 @@ class Document:
         if not 0 <= index < len(self._history):
             raise ValueError(f"No history step {index} (there are {len(self._history)})")
         if index != self._index:
-            self._index = index
-            self._notify()
+            self._move_to(index)
         return self.expr
 
     def python_script(self, title: Optional[str] = None) -> str:
         """A Python script reproducing the history with SymPy alone: the
         declarations of every name used by any step, then one ``expr = ...``
         per step with what produced it as a comment, all collected in
-        ``steps`` (``steps[i]`` is step ``i + 1``)."""
-        from sympy.printing.python import PythonPrinter
-        printer = PythonPrinter()
-        names: Dict[str, Any] = {}
-        for e in self._history:
-            for s in e.atoms(Symbol, MatrixSymbol, IndexedBase):
-                if not isinstance(s, Dummy):
-                    names.setdefault(self._symbol_name(s), s)
-            for f in e.atoms(AppliedUndef):
-                names.setdefault(f.func.__name__, f.func)
-        # plain symbols first: a matrix symbol's shape may use them
-        order = sorted(names, key=lambda k: (0 if type(names[k]) is Symbol else 1, k))
-        quote = '"' * 3
+        ``steps`` (``steps[i]`` is step ``i + 1``).
+
+        Every step is written so that running it rebuilds that very step:
+        as SymPy source (``f(p)**2 + 3``) when that source gives the step
+        back, else as its constructors under ``evaluate(False)`` - an
+        unevaluated step (``sqrt(-3/4)`` kept as it is) would otherwise
+        come back evaluated.  Names become variables of their own: two
+        symbols ``x`` with different assumptions are two variables, and a
+        name that is no Python identifier (``x_{1}``), a keyword
+        (``lambda``) or a name the script uses (``steps``, ``Symbol``) gets
+        a variable of another name, still declared as ``Symbol('x_{1}')``."""
+        script = _Script()
+        lines_steps: List[str] = []
         n = len(self._history)
-        lines = [quote + (title or "SymPy Editor history").replace(quote, "'" * 3), "",
-                 f"Generated by sympy-editor: {n} step{'s' if n != 1 else ''}.",
-                 "Run it to rebuild every step (``steps``), or import it.", quote, "", "from sympy import *", ""]
-        for name in order:
-            lines.append(f"{name} = {self._declaration(names[name])}")
-        lines += ["", "steps = []"]
         for i, e in enumerate(self._history):
             label = self._labels[i] if i < len(self._labels) else None
-            what = label or ("start" if i == 0 else "edit")
-            lines += ["", f"# Step {i + 1}: {what}" + ("  (current)" if i == self._index else ""),
-                      f"expr = {self._python(printer, e)}", "steps.append(expr)"]
+            what = " ".join(str(label or ("start" if i == 0 else "edit")).splitlines())   # one comment line
+            lines_steps += ["", f"# Step {i + 1}: {what}" + ("  (current)" if i == self._index else "")]
+            lines_steps += script.step(e)
+            lines_steps.append("steps.append(expr)")
+        declarations = script.declarations()
+        quote = '"' * 3
+        lines = [quote + (title or "SymPy Editor history").replace("\\", "\\\\").replace('"', '\\"'), "",
+                 f"Generated by sympy-editor: {n} step{'s' if n != 1 else ''}.",
+                 "Run it to rebuild every step (``steps``), or import it.", quote, "", "from sympy import *"]
+        if any(has_invalid(e) for e in self._history):
+            lines.append("from sympy_editor.invalid import Invalid   # the steps SymPy would not build")
+        lines += script.imports()
+        lines.append("")
+        lines += declarations
+        lines += ["", "steps = []"] + lines_steps
         lines += ["", 'if __name__ == "__main__":', "    for i, e in enumerate(steps, 1):", '        print(f"Step {i}: {e}")', ""]
         return "\n".join(lines)
-
-    @staticmethod
-    def _declaration(obj: Any) -> str:
-        """Python source constructing ``obj`` (a name used in the history)."""
-        if isinstance(obj, MatrixSymbol):
-            return f"MatrixSymbol({obj.name!r}, {obj.rows}, {obj.cols})"
-        if isinstance(obj, IndexedBase):
-            return f"IndexedBase({str(obj.label)!r})"
-        if isinstance(obj, Symbol):
-            return srepr(obj)                          # Symbol('x', positive=True)
-        if isinstance(obj, type):
-            return f"Function({obj.__name__!r})"
-        return srepr(obj)
-
-    @staticmethod
-    def _python(printer: Any, expr: Basic) -> str:
-        """``expr`` as Python source: SymPy's ``PythonPrinter`` (``Rational(1,
-        2)`` rather than ``1/2``), an ``Integer`` made a SymPy object."""
-        text = printer.doprint(expr)
-        return f"Integer({text})" if isinstance(expr, Integer) else text
 
     def history_labels(self) -> Dict[str, Any]:
         """The history for the front end's list: ``{"labels": [str of every
@@ -740,7 +1437,12 @@ class Document:
         expression)."""
         steps = []
         for e in self._history:
-            step = self._render_cache_get(e)
+            try:
+                step = self._render_cache_get(e)
+            except Exception as exc:
+                # a saved step that does not print: listed, not fatal
+                steps.append({"latex": r"\text{(cannot be shown: %s)}" % type(exc).__name__, "nodes": {}})
+                continue
             if self.addons:
                 # A copy: the add-ons' data is not cached with the render (an
                 # add-on may be switched on or off between two requests).
@@ -748,7 +1450,7 @@ class Document:
                 for addon in self.addons.values():
                     addon.contribute_step(self, step, e)
             steps.append(step)
-        return {"labels": [str(e) for e in self._history], "index": self._index, "steps": steps,
+        return {"labels": [_safe_str(e) for e in self._history], "index": self._index, "steps": steps,
                 "actions": list(self._labels)}
 
     def _render_cache_get(self, expr: Basic) -> Dict[str, Any]:
@@ -772,30 +1474,48 @@ class Document:
         self._listeners.append(callback)
         return callback
 
+    def off_change(self, callback: Callable[[Basic], None]) -> bool:
+        """Stop calling ``callback``; whether it was being called.  What
+        listens for as long as something else lives (an add-on's panel, a
+        view) takes itself off when that goes: the document opened in place
+        of this one inherits the listeners (:func:`sympy_editor.server.load_session`)."""
+        try:
+            self._listeners.remove(callback)
+        except ValueError:
+            return False
+        return True
+
     # -- the view tree ------------------------------------------------------
     # The path functions of ``printer`` bound to the printer settings, which
-    # decide the virtual parts of the view tree (``root_notation``...).
+    # decide the virtual parts of the view tree (``root_notation``...), and
+    # to whether a node SymPy refuses to rebuild may stay as an invalid one.
 
     def _get_at(self, expr, path):
         return get_at(expr, path, self.printer_settings)
 
     def _replace_at(self, expr, path, new):
-        return replace_at(expr, path, new, self.printer_settings)
+        with allowing_invalid(self.allow_invalid):
+            return replace_at(expr, path, new, self.printer_settings)
 
     def _delete_at(self, expr, path):
-        return delete_at(expr, path, self.printer_settings)
+        with allowing_invalid(self.allow_invalid):
+            return delete_at(expr, path, self.printer_settings)
 
     def _insert_at(self, expr, path, index, new):
-        return insert_at(expr, path, index, new, self.printer_settings)
+        with allowing_invalid(self.allow_invalid):
+            return insert_at(expr, path, index, new, self.printer_settings)
 
     def _extract_range(self, expr, path, indices):
-        return extract_range(expr, path, indices, self.printer_settings)
+        with allowing_invalid(self.allow_invalid):
+            return extract_range(expr, path, indices, self.printer_settings)
 
     def _replace_range(self, expr, path, indices, new):
-        return replace_range(expr, path, indices, new, self.printer_settings)
+        with allowing_invalid(self.allow_invalid):
+            return replace_range(expr, path, indices, new, self.printer_settings)
 
     def _delete_range(self, expr, path, indices):
-        return delete_range(expr, path, indices, self.printer_settings)
+        with allowing_invalid(self.allow_invalid):
+            return delete_range(expr, path, indices, self.printer_settings)
 
     def _parts(self, node) -> Optional[List[Tuple[str, Basic]]]:
         return view_parts(node, self.printer_settings)
@@ -875,8 +1595,10 @@ class Document:
         n = len(args)
         L = left if left is not None and 0 <= left < n else None
         R = right if right is not None and 0 <= right < n else None
-        if text in OPERATORS and L is not None and R is not None:
-            return self.operator(p, L, R, text)          # just an operator between two arguments: change it
+        if ((len(text) == 1 and text in OPERATORS) or text in RELATION_OPERATORS) and L is not None and R is not None:
+            # just an operator between two arguments: change it (a whole
+            # operator - "+-" is no operator, though its characters are)
+            return self.operator(p, L, R, text)
         is_sum, is_prod = bool(parent.is_Add), bool(parent.is_Mul)
 
         if not (is_sum or is_prod) or (L is None and R is None):
@@ -921,16 +1643,29 @@ class Document:
         # An operator written at either end joins the neighbour on that side
         # whichever one the caret is attached to ("*y*" between x and z is
         # x*y*z); without one, the text joins the attached neighbour only.
+        # "The whole half of a product" is the half drawn on that side of
+        # the caret: SymPy's argument order is not the screen's.
+        # A + or - at one end of the text, in a product, splits it at the
+        # caret: the half beyond the other end is multiplied onto the text,
+        # whichever neighbour the caret belongs to ("+y" between x and z is
+        # x + y*z - it was z*(x + y) with the caret on x's side).
+        shown = self._display_order(parent)
+        left_half = shown[:shown.index(L) + 1] if L is not None else []
+        right_half = shown[shown.index(R):] if R is not None else []
         if lead in ("+", "-"):
-            left_idx = (list(range(0, L + 1)) if is_prod else [L]) if L is not None else []
+            left_idx = (left_half if is_prod else [L]) if L is not None else []
         elif lead:
             left_idx = [L] if L is not None else []
+        elif is_prod and trail in ("+", "-"):
+            left_idx = left_half
         else:
             left_idx = [L] if L is not None and attach != "right" else []
         if trail in ("+", "-"):
-            right_idx = (list(range(R, n)) if is_prod else [R]) if R is not None else []
+            right_idx = (right_half if is_prod else [R]) if R is not None else []
         elif trail:
             right_idx = [R] if R is not None else []
+        elif is_prod and lead in ("+", "-"):
+            right_idx = right_half
         else:
             right_idx = [R] if R is not None and (attach == "right" or not left_idx) else []
         combined = text
@@ -944,11 +1679,46 @@ class Document:
             return self._commit(self._insert_at(self.expr, p, int(index), new_expr))
         return self._commit(self._replace_range(self.expr, p, consumed, new_expr))
 
+    def _display_order(self, parent: Basic) -> List[int]:
+        """The indices of ``parent``'s arguments in the order the printer
+        draws them: a product's factors as ``as_ordered_factors`` gives
+        them, a sum's terms as ``as_ordered_terms`` (``x**2 + x`` is
+        ``Add(x, x**2)``) - unless the printer keeps the stored order (an
+        unevaluated product with numbers inside, ``order="none"``)."""
+        args = list(parent.args)
+        plain = list(range(len(args)))
+        order = self.printer_settings.get("order")
+        try:
+            if isinstance(parent, Mul) and order not in ("old", "none"):
+                if args and (args[0] is sympy.S.One or any(isinstance(a, sympy.Number) for a in args[1:])):
+                    return plain
+                shown = parent.as_ordered_factors()
+            elif isinstance(parent, Add) and order != "none":
+                shown = parent.as_ordered_terms(order=order)
+            else:
+                return plain
+        except Exception:
+            return plain
+        out: List[int] = []
+        for item in shown:
+            for i, a in enumerate(args):
+                if i not in out and a == item:
+                    out.append(i)
+                    break
+        return out if len(out) == len(args) else plain
+
+    def _split_shown(self, parent: Basic, left: int) -> TypingTuple[List[int], List[int]]:
+        """``parent``'s argument indices drawn up to ``left`` and after it."""
+        shown = self._display_order(parent)
+        k = shown.index(left) + 1
+        return shown[:k], shown[k:]
+
     def operator(self, path: PathLike, left: int, right: int, op: str, lazy: bool = False) -> Basic:
         """Change the operator shown between two neighbouring arguments
         (``left`` and ``right`` are their indices) of the node at ``path``.
 
-        ``op`` is one of ``OPERATORS``; ``""`` (the operator deleted) means
+        ``op`` is one of ``OPERATORS`` or ``RELATION_OPERATORS`` (``<=``,
+        ``>=``, ``!=``: ``Le``, ``Ge``, ``Ne``); ``""`` (the operator deleted) means
         juxtaposition, a product.  In a sum, ``*``/``/``/``^`` bind the two
         terms (``x + y + z`` with ``*`` at the first ``+`` gives ``x*y + z``)
         and ``-`` negates the right one; in a product, ``+``/``-`` split it at
@@ -970,7 +1740,7 @@ class Document:
         if not (0 <= L < n and 0 <= R < n) or L == R:
             raise ValueError("No operator there")
         op = (op or "").strip() or "*"
-        if op not in OPERATORS:
+        if op not in RELATION_OPERATORS and (len(op) != 1 or op not in OPERATORS):
             raise ValueError(f"Not an operator: {op!r}")
         is_sum = bool(parent.is_Add) or isinstance(parent, sympy.MatAdd)
         is_prod = bool(parent.is_Mul) or isinstance(parent, sympy.MatMul)
@@ -988,23 +1758,47 @@ class Document:
         whole = pair == set(range(n))
 
         def build(cls, *items):
-            if lazy:
-                with sympy.evaluate(False):
-                    return cls(*items)
-            return cls(*items)
+            try:
+                if lazy:
+                    with sympy.evaluate(False):
+                        return cls(*items)
+                return cls(*items)
+            except Exception:
+                if not self.allow_invalid:
+                    raise
+                return invalid(cls.__name__)(*items)
+
+        # Unevaluated, what is built around the change stays as it was too:
+        # the halves of a split product and the ancestors rebuilt around the
+        # new node were evaluated, and 2 + 3 + 4 with - over the second +
+        # came out as -4 + 5.
+        with (sympy.evaluate(False) if lazy else contextlib.nullcontext()):
+            result = self._operator_result(p, parent, L, R, op, a, b, is_sum, is_prod, whole, build)
+        return self._commit(result)
+
+    def _operator_result(self, p, parent, L, R, op, a, b, is_sum, is_prod, whole, build) -> Basic:
+        """The expression :meth:`operator` commits."""
+        args = parent.args
+
+        def negated(e):
+            # a number negated is the negative number (-4), not (-1)*4 -
+            # which is what an unevaluated product of the two would show
+            return -e if isinstance(e, sympy.Number) else build(Mul, -1, e)
 
         if is_prod and op in ("+", "-"):
-            split = max(L, R)
-            head = rebuild(parent, args[:split])
-            tail = rebuild(parent, args[split:])
-            new = build(Add, head, tail if op == "+" else build(Mul, -1, tail))
-            return self._commit(self._replace_at(self.expr, p, new))
+            # split where the operator is drawn: the factors shown before it
+            # and after it (SymPy's argument order is not the screen's)
+            before, after = self._split_shown(parent, L)
+            head = rebuild(parent, [args[i] for i in before])
+            tail = rebuild(parent, [args[i] for i in after])
+            new = build(Add, head, tail if op == "+" else negated(tail))
+            return self._replace_at(self.expr, p, new)
         if is_sum and op in ("+", "-"):
-            new = b if op == "+" else build(Mul, -1, b)
-            return self._commit(self._replace_at(self.expr, p + (R,), new))
-        first, second = (a, b) if L < R else (b, a)
+            new = b if op == "+" else negated(b)
+            return self._replace_at(self.expr, p + (R,), new)
+        first, second = a, b                     # left and right as drawn, whatever the argument order
         if op in ("+", "-"):                     # a power, a relation...: the two become a sum
-            new = build(Add, first, second if op == "+" else build(Mul, -1, second))
+            new = build(Add, first, second if op == "+" else negated(second))
         elif op == "*":
             new = build(Mul, first, second)
         elif op == "/":
@@ -1012,13 +1806,14 @@ class Document:
         elif op == "^":
             new = build(sympy.Pow, first, second)
         else:
-            rel = {"=": sympy.Eq, "<": sympy.Lt, ">": sympy.Gt, "&": sympy.And, "|": sympy.Or}[op]
+            rel = {"=": sympy.Eq, "<": sympy.Lt, ">": sympy.Gt, "<=": sympy.Le, ">=": sympy.Ge, "!=": sympy.Ne,
+                   "&": sympy.And, "|": sympy.Or}[op]
             if not whole:
                 raise ValueError(f"{op!r} needs two sides: it can only replace the operator of a node with two arguments")
             new = build(rel, first, second)
         if whole:
-            return self._commit(self._replace_at(self.expr, p, new))
-        return self._commit(self._replace_range(self.expr, p, sorted(pair), new))
+            return self._replace_at(self.expr, p, new)
+        return self._replace_range(self.expr, p, sorted({L, R}), new)
 
     def apply(self, path: PathLike, op: Union[str, Callable], children=None, args=None,
               lazy: bool = False) -> Basic:
@@ -1065,7 +1860,16 @@ class Document:
             missing = [prm["name"] for prm in spec.params[len(values):] if not prm.get("optional")]
             if missing:
                 raise ValueError(f"{spec.label} needs {', '.join(missing)}")
-        result = sympify(func(target, *values, doc=self) if spec is not None and spec.context else func(target, *values))
+        result = func(target, *values, doc=self) if spec is not None and spec.context else func(target, *values)
+        if not isinstance(result, Basic):
+            # An op of someone else's may answer anything: a number is one,
+            # text is never run (see _strict_basic), and a list is refused.
+            result = _strict_basic(result)
+            if isinstance(result, (MatrixBase, NDimArray)) and hasattr(result, "as_immutable"):
+                result = result.as_immutable()
+            if not isinstance(result, Basic):
+                raise ValueError(f"{spec.label if spec is not None else 'The operation'} returned a "
+                                 f"{type(result).__name__}, not an expression")
         if children is not None:
             return self._commit(self._replace_range(self.expr, p, children, result))
         return self._commit(self._replace_at(self.expr, p, result))
@@ -1110,13 +1914,18 @@ class Document:
             result = LAZY_FORMS[name](target, *args)
         elif not dotted and not name.startswith("_") and callable(getattr(sympy, name, None)):
             fn = getattr(sympy, name)
-            if lazy and (isinstance(fn, type) or name in UNEVALUATED_CONSTRUCTORS):
-                with sympy.evaluate(False):
+            try:
+                if lazy and (isinstance(fn, type) or name in UNEVALUATED_CONSTRUCTORS):
+                    with sympy.evaluate(False):
+                        result = _over_contents(fn, target, args)
+                else:
+                    if lazy:
+                        self.last_note = f"{name} has no unevaluated form: applied"
                     result = _over_contents(fn, target, args)
-            else:
-                if lazy:
-                    self.last_note = f"{name} has no unevaluated form: applied"
-                result = _over_contents(fn, target, args)
+            except Exception:
+                if not (self.allow_invalid and _is_constructor(fn)):
+                    raise
+                result = invalid(name)(target, *args)
         elif not name.startswith("_") and hasattr(target, name):
             if lazy:
                 self.last_note = f"{name} has no unevaluated form: applied"
@@ -1224,12 +2033,12 @@ class Document:
             for row in grid:
                 del row[at]
         else:
-            try:
-                nr, nc = int(rows), int(cols)   # type: ignore[arg-type]
-            except (TypeError, ValueError):
-                raise ValueError(f"{op} needs the numbers of rows and columns") from None
+            nr, nc = _whole(rows, f"{op} needs whole numbers of rows and columns"), \
+                _whole(cols, f"{op} needs whole numbers of rows and columns")
             if nr < 1 or nc < 1:
                 raise ValueError("A matrix needs at least one row and one column")
+            if op == "resize" and nr * nc > MAX_MATRIX_ENTRIES:
+                raise ValueError(f"{nr}x{nc} is {nr * nc} entries: a matrix here holds {MAX_MATRIX_ENTRIES} at most")
             if op == "reshape":
                 # The same entries in another shape: only a shape that holds
                 # them all, and no empty slot - what SymPy's reshape does.
@@ -1281,11 +2090,13 @@ class Document:
         of an integral are a ``Tuple``, not something that can stand alone).
         More than one means there is a real choice to offer - ``x**2`` can
         leave the base or the exponent - rather than a natural default."""
+        if isinstance(node, _SHAPED):
+            return []
         parts = self._parts(node) or ()
         source: Iterable[TypingTuple[Union[int, str], Any]] = (
             [(name, value) for name, value in parts] if parts else list(enumerate(node.args)))
         return [(key, value) for key, value in source
-                if isinstance(value, Basic) and not isinstance(value, Tuple)]
+                if isinstance(value, Basic) and not isinstance(value, (Tuple, Str))]
 
     def unwrap(self, path: PathLike, keep: Union[int, str, None] = None) -> Basic:
         """Remove the node at ``path`` but keep one of its arguments in its
@@ -1301,6 +2112,13 @@ class Document:
         node = self._get_at(self.expr, p)
         parts = dict(self._parts(node) or ())
         args = node.args
+        if isinstance(node, _SHAPED):
+            # its arguments are its name and its shape: unwrapping the matrix
+            # [x, y] left its number of rows, 1, in its place
+            if isinstance(node, (MatrixBase, NDimArray)):
+                raise ValueError(f"{type(node).__name__} has no argument to keep in its place: "
+                                 "select an entry to work on it")
+            raise ValueError(f"{node} has nothing inside to keep: its arguments are its name and shape")
         if not args and not parts:
             raise ValueError(f"{node} has nothing inside to keep")
         if keep is None:
@@ -1337,7 +2155,14 @@ class Document:
 
         Nothing is evaluated: wrapping ``4`` in ``sqrt`` gives ``sqrt(4)``, not
         ``2`` - this builds the expression, :meth:`call` computes with it.
+
+        ``func`` may also be a template with ``$`` where the node goes -
+        ``"Matrix([[$, _1], [_2, _3]])"``, a place no function call puts it
+        (the palette's matrix).  The node itself is put there, not its text
+        read back: ``sqrt(4)`` stays ``sqrt(4)``.
         """
+        if "$" in (func or ""):
+            return self._wrap_template(path, func, children)
         if not (func or "").strip():
             raise ValueError("No function to wrap in (cos, sqrt, Integral, f...)")
         m = re.match(r"^\s*([A-Za-z_][A-Za-z_0-9]*)\s*(?:\((.*)\))?\s*$", func or "", re.S)
@@ -1361,9 +2186,34 @@ class Document:
                 with sympy.evaluate(False):
                     result = sympify(_over_contents(fn, target, extra))
         except Exception as exc:     # noqa: BLE001 - a wrong number of arguments, mostly
-            raise ValueError(f"Cannot wrap in {name}: {exc}") from None
+            if not (self.allow_invalid and _is_constructor(fn)):
+                raise ValueError(f"Cannot wrap in {name}: {exc}") from None
+            result = invalid(fn.__name__)(target, *extra)
         if not isinstance(result, Basic):
             raise ValueError(f"{name} returned {type(result).__name__}, not an expression")
+        if children is not None:
+            return self._commit(self._replace_range(self.expr, p, children, result))
+        return self._commit(self._replace_at(self.expr, p, result))
+
+    def _wrap_template(self, path: PathLike, template: str, children=None) -> Basic:
+        """:meth:`wrap` into a template: ``$`` stands for the node.  The text
+        is read with a name of its own in that place, which is then swapped
+        for the node - the node is never printed and parsed again."""
+        if template.count("$") != 1:
+            raise ValueError(f"A template takes the selection in one place ($): {template!r}")
+        p = self._path(path)
+        target = self._extract_range(self.expr, p, children) if children is not None else self._get_at(self.expr, p)
+        taken = set(self.namespace())
+        marker = "selection_"
+        while marker in taken or marker in template:
+            marker += "_"
+        # not in the target's context: in a matrix's, the stand-in would be read as a
+        # matrix symbol, which Matrix spreads out as a block
+        built = self.parse(template.replace("$", marker))
+        stand_in = [a for a in built.atoms(Symbol, MatrixSymbol) if self._symbol_name(a) == marker]
+        if len(stand_in) != 1:
+            raise ValueError(f"Cannot wrap in {template!r}")
+        result = built.xreplace({stand_in[0]: target})
         if children is not None:
             return self._commit(self._replace_range(self.expr, p, children, result))
         return self._commit(self._replace_at(self.expr, p, result))
@@ -1412,11 +2262,50 @@ class Document:
 
     @staticmethod
     def _symbol_name(obj) -> str:
+        """The name a declared object stands for; ``ValueError`` for one that
+        is no name at all (a file's ``symbols`` holding ``Integer(3)``)."""
         if isinstance(obj, IndexedBase):
             return str(obj.label)
         if isinstance(obj, type):  # undefined function class
             return obj.__name__
-        return str(obj.name)
+        if isinstance(obj, MatrixBase):
+            # A name declared as an explicit Matrix is kept as its entries,
+            # M[0, 0], M[0, 1]...: the name is their matrix symbol's.  It
+            # used to be read as ``.name``, which a matrix has not - the
+            # session was saved and never opened again.
+            parents = {e.parent for e in obj if isinstance(e, MatrixElement)}
+            if len(parents) == 1 and all(isinstance(e, MatrixElement) for e in obj):
+                parent = parents.pop()
+                if isinstance(parent, MatrixSymbol):
+                    return str(parent.name)
+            raise ValueError(f"{_short(obj)} is a matrix, not a name")
+        name = getattr(obj, "name", None) if isinstance(obj, Basic) else None
+        if isinstance(name, (Str, Symbol)):   # an ArraySymbol's is a Symbol
+            name = str(name)
+        if not isinstance(name, str):
+            raise ValueError(f"{_short(obj)} is not a name that can be declared")
+        return name
+
+    def parse_saved(self, src: str) -> Basic:
+        """Text that was *saved* - an add-on's state in a file or a kept
+        session (the rewrite rules) - read in this document's namespace as
+        :meth:`parse` reads typed input, new names included (a placeholder,
+        an add-on's own node such as a wildcard), but without running
+        anything: see ``invalid.read_source``.  Typed input is the user's
+        own; a file may have come from anyone."""
+        local = self.namespace()
+        local.setdefault("Invalid", Invalid)
+
+        def new_name(name: str):
+            if PLACEHOLDER_RE.match(name):
+                return Placeholder(name)
+            for addon in self.addons.values():
+                made = addon.make_symbol(name)
+                if made is not None:
+                    return made
+            return Symbol(name)
+
+        return read_source(src, local, new_name=new_name)
 
     def parse(self, src: str, context: Optional[Basic] = None) -> Basic:
         """Parse user input in the context of the current expression.
@@ -1427,12 +2316,11 @@ class Document:
         rather than as plain symbols - so typing ``C.T`` over ``B`` in
         ``A*B`` works, and ``C`` in a matrix product is a matrix.
         """
-        src = (src or "").strip()
-        if not src:
+        typed = (src or "").strip()
+        if not typed:
             raise ValueError("Empty input")
-        transformations = standard_transformations + (convert_xor,)
-        if self.parser == "implicit":
-            transformations = transformations + (implicit_multiplication_application,)
+        src = friendly_source(typed)
+        transformations = standard_transformations + (convert_xor,) + PARSERS[self.parser]
         local = self.namespace()
         # `name` in backticks is a variable even if SymPy has a function or a
         # constant of that name (`sin`, `E`, `gamma`...); the backticks go.
@@ -1454,16 +2342,47 @@ class Document:
                 if made is not None:
                     local[name] = made
                     break
+        local.setdefault("Invalid", Invalid)
+        # A new name followed by a bracket is a function, as SymPy's own
+        # reading has it (f(x) is an undefined function applied): with
+        # multiplication implicit the parser would read a new symbol times
+        # what is in the brackets.  A used symbol stays one: x(y + 1) is x*(y + 1).
+        for name in self._called_names(src, local):
+            local[name] = Function(name)
+        # A bare `e` is Euler's number, which the formula draws as `e`: a
+        # symbol of that name typed over it looked the same and was another
+        # thing.  A declared or used `e` wins, and the note says how to get one.
+        if "e" not in local and "e" in new_names:
+            local["e"] = sympy.E
+            new_names.remove("e")
         self.last_note = self._collision_note(src, local)
         try:
             return sympify(parse_expr(src, local_dict=local, transformations=transformations))
         except Exception as exc:  # SyntaxError, TokenError, TypeError, ...
-            raise ValueError(f"Could not parse {src!r}: {exc}") from None
+            error = exc
+        if self.allow_invalid and not isinstance(error, (SyntaxError, tokenize.TokenError)):
+            # What SymPy refuses to build (A*B of mismatched shapes) is kept
+            # as an invalid node; what does not read at all is still an error.
+            try:
+                return tolerant_parse(src, local, transformations)
+            except Exception:
+                pass
+        raise ValueError(parse_error(typed, error)) from None
+
+    def _with_note(self, error: str) -> str:
+        """The error with the note of the parse that failed, when there is
+        one: `gamma` typed as a variable is read as SymPy's function and
+        refused as "not an expression" - the note says how to get a variable."""
+        note = self.last_note
+        if note and note not in error:
+            error = f"{error} ({note})"
+        return error
 
     @staticmethod
     def _collision_note(src: str, local: Dict[str, Any]) -> Optional[str]:
         """A hint when a typed name that is not a known symbol was read as one
-        of SymPy's functions or constants (``E``, ``I``, ``gamma``...)."""
+        of SymPy's functions or constants (``E``, ``I``, ``gamma``...) - not
+        for ``pi`` and ``oo``, which nobody means as a variable."""
         try:
             tokens = list(tokenize.generate_tokens(io.StringIO(src).readline))
         except (tokenize.TokenError, SyntaxError):
@@ -1477,12 +2396,23 @@ class Document:
             if prev == "." or nxt == "(":          # attributes and calls are meant as functions
                 continue
             obj = getattr(sympy, tok.string, None)
-            if obj is not None and tok.string not in taken:
-                taken.append(tok.string)
+            if obj is None or tok.string in taken or tok.string in ("pi", "oo"):
+                continue
+            # `sin x`: a function applied without brackets is meant as one
+            applied = (i + 1 < len(tokens) and tokens[i + 1].type in (tokenize.NAME, tokenize.NUMBER)
+                       and not keyword.iskeyword(nxt))
+            if callable(obj) and not isinstance(obj, sympy.Basic) and applied:
+                continue
+            taken.append(tok.string)
+        if local.get("e") is sympy.E and "e" not in taken and re.search(r"(?<![\w.])e(?![\w(])", src):
+            taken.append("e")
         if not taken:
             return None
         names = ", ".join(taken)
-        return (f"{names}: read as SymPy's {'constant/function' if len(taken) == 1 else 'constants/functions'}; "
+        known = {"e": "Euler's number", "E": "Euler's number", "I": "the imaginary unit"}
+        what = known[taken[0]] if len(taken) == 1 and taken[0] in known else \
+            f"SymPy's {'constant/function' if len(taken) == 1 else 'constants/functions'}"
+        return (f"{names}: read as {what}; "
                 f"for a variable write `{taken[0]}` in backticks or declare it in Symbols")
 
     @staticmethod
@@ -1501,6 +2431,26 @@ class Document:
             if (tok.type == tokenize.NAME and not keyword.iskeyword(tok.string)
                     and prev != "." and nxt != "(" and tok.string not in local
                     and not hasattr(sympy, tok.string) and tok.string not in names):
+                names.append(tok.string)
+            prev = tok.string
+        return names
+
+    @staticmethod
+    def _called_names(src: str, local: Dict[str, Any]) -> List[str]:
+        """The new identifiers in ``src`` that are called (``f(x)``): not in
+        ``local``, not SymPy's, not attribute names."""
+        try:
+            tokens = list(tokenize.generate_tokens(io.StringIO(src).readline))
+        except (tokenize.TokenError, SyntaxError):
+            return []
+        names: List[str] = []
+        prev = ""
+        for i, tok in enumerate(tokens):
+            nxt = tokens[i + 1].string if i + 1 < len(tokens) else ""
+            if (tok.type == tokenize.NAME and not keyword.iskeyword(tok.string)
+                    and prev != "." and nxt == "(" and tok.string not in local
+                    and not hasattr(sympy, tok.string) and not PLACEHOLDER_RE.match(tok.string)
+                    and tok.string not in names):
                 names.append(tok.string)
             prev = tok.string
         return names
@@ -1566,7 +2516,7 @@ class Document:
         if name in self.namespace():
             return self.retype(name, kind, rows, cols, assumptions)
         new = self._make(name, kind, rows, cols, assumptions)
-        self.declared[name] = new
+        self._declare_everywhere(name, new)
         return new
 
     def undeclare(self, name: str) -> None:
@@ -1575,7 +2525,7 @@ class Document:
             raise ValueError(f"{name} occurs in the expression; remove it there first")
         if name not in self.declared:
             raise ValueError(f"No declared symbol named {name!r}")
-        del self.declared[name]
+        self._declare_everywhere(name, None)
 
     def retype(self, name: str, kind: str, rows: Any = None, cols: Any = None,
                assumptions: Any = None) -> Basic:
@@ -1594,7 +2544,7 @@ class Document:
         if new == old:
             return self.expr
         if name not in self.used_symbols():
-            self.declared[name] = new
+            self._declare_everywhere(name, new)
             return self.expr
         if isinstance(old, type) or isinstance(new, type):
             raise ValueError(f"{name} is used as a {'function' if isinstance(old, type) else 'symbol'}; "
@@ -1615,8 +2565,10 @@ class Document:
             raise ValueError(f"{name} cannot become a {kind} where it is used: {exc}") from None
         # Only a change that went through is recorded: a refused one must not
         # leave the panel (and typed input) believing the name has changed.
-        self.declared[name] = new
-        return self._commit(new_expr)
+        # The new meaning belongs to the new step: undo gives the old one back.
+        declared = dict(self.declared)
+        declared[name] = new
+        return self._commit(new_expr, declared=declared)
 
     # -- serialisation ------------------------------------------------------
 
@@ -1633,8 +2585,7 @@ class Document:
         methods = {}
         for node in nodes.values():
             cls = type(node)
-            if cls.__name__ not in self._methods_sent:
-                self._methods_sent.add(cls.__name__)
+            if cls.__name__ not in self._methods_sent and cls.__name__ not in methods:
                 methods[cls.__name__] = type_methods(cls)
         snap = {
             "seq": self._seq,
@@ -1648,6 +2599,7 @@ class Document:
             "symbols": self.symbol_info(),
             "can_undo": self.can_undo,
             "can_redo": self.can_redo,
+            "allow_invalid": self.allow_invalid,
             "ops": [{"name": op.name, "label": op.label, "kinds": list(op.kinds) if op.kinds else None,
                      "params": [dict(prm) for prm in op.params], "doc": op.doc, "lazy": op.lazy is not None}
                     for op in self.ops.values()],
@@ -1657,12 +2609,16 @@ class Document:
             "addons_available": self.available_addons(),
             # the empty slots, in reading order: Tab walks them, and a new one
             # is selected as it appears so that typing fills it
-            "placeholders": [format_path(p) for p, n in sorted(nodes.items(), key=lambda kv: tuple(str(i) for i in kv[0]))
+            "placeholders": [format_path(p) for p, n in sorted(nodes.items(), key=lambda kv: _reading_key(kv[0]))
                              if is_placeholder(n)],
             "error": error,
         }
         for addon in self.addons.values():
             addon.contribute(self, snap, expr)
+        # Marked as sent only now: a snapshot that failed half way (the
+        # printer, an add-on) never reached the page, and the lists it held
+        # were never sent again - the Methods menu stayed empty for good.
+        self._methods_sent.update(methods)
         return snap
 
     def _node_info(self, path: Path, node: Basic, expr: Optional[Basic] = None) -> Dict[str, Any]:
@@ -1681,6 +2637,8 @@ class Document:
             info["parts"] = [name for name, _value in parts]
         if is_placeholder(node):
             info["placeholder"] = True
+        if isinstance(node, InvalidExpr):
+            info["invalid"] = node.head
         if isinstance(node, MatrixBase):
             # an explicit matrix: the front end offers its row/column tools and
             # the corner handle that resizes it (see edit_matrix)
@@ -1710,9 +2668,12 @@ class Document:
         differ: ``a*b + c`` typed over a matrix previewed as a scalar sum
         and committed as a sum of matrix symbols."""
         try:
-            snap = self.snapshot(expr=self.parse(src, context=self.expr))
+            parsed = self.parse(src, context=self.expr)
+            if not isinstance(parsed, Basic):
+                raise ValueError(f"{_short(parsed)} is a {type(parsed).__name__}, not an expression")
+            snap = self.snapshot(expr=parsed)
         except Exception as exc:
-            snap = self.snapshot(error=f"{type(exc).__name__}: {exc}")
+            snap = self.snapshot(error=self._with_note(describe_error(exc)))
         snap["preview"] = True
         if self.last_note and not snap["error"]:
             snap["note"] = self.last_note
@@ -1745,6 +2706,8 @@ class Document:
         ``{"action": "snapshot"}``, ``{"action": "addon", "addon": name,
         "method": ..., ...}`` (a method of one of the document's add-ons: a
         query answers under ``"query"``, a change like any edit),
+        ``{"action": "settings", "allow_invalid": true}`` (keep what SymPy
+        refuses to build as invalid nodes; not a step of the history),
         ``{"action": "addons", "enable": [names], "disable": [names]}``
         (switch add-ons on or off; see :meth:`available_addons`).  Errors
         are reported in the snapshot's ``"error"`` field.
@@ -1773,9 +2736,9 @@ class Document:
                                                               source=str(message.get("source") or ""))
                 if message.get("uninstall"):
                     result["removed"] = self.uninstall_addons(message["uninstall"])
-                for name in message.get("disable") or []:
+                for name in _as_list(message.get("disable"), "add-ons to switch off"):
                     self.disable(str(name))
-                for name in message.get("enable") or []:
+                for name in _as_list(message.get("enable"), "add-ons to switch on"):
                     self.enable(str(name))
                 snap = self.snapshot()
                 snap["addon_clients"] = [addon.client() for addon in self.addons.values()]
@@ -1797,6 +2760,25 @@ class Document:
                 snap = self.snapshot()
                 snap["script"] = self.python_script(message.get("title"))
                 return snap
+            if action == "savefile":
+                # The document as a file, for the page to hand to the host:
+                # not a step of the history, and nothing here changes.
+                snap = self.snapshot()
+                snap["file"] = {"name": str(message.get("name") or ""), "mime": SAVE_MIME,
+                                "text": self.save_text(message.get("name"))}
+                return snap
+            if action == "openfile":
+                # A file taken back: whatever was here is gone, so the page
+                # gets a whole snapshot, and the history is the file's own.
+                self.open_text(str(message.get("text", "")))
+                snap = self.snapshot()
+                snap["opened"] = True
+                return snap
+            if action == "settings":
+                # The document's switches; not a step of the history.
+                if "allow_invalid" in message:
+                    self.allow_invalid = _flag(message.get("allow_invalid"))
+                return self.snapshot()
             if action == "goto":
                 self.goto(message.get("index", 0))
             elif action == "replace":
@@ -1862,9 +2844,42 @@ class Document:
                 snap["note"] = self.last_note
             return snap
         except Exception as exc:
-            return self.snapshot(error=f"{type(exc).__name__}: {exc}")
+            error = self._with_note(describe_error(exc))
+            try:
+                return self.snapshot(error=error)
+            except Exception as again:
+                # The current expression itself does not print (it should
+                # never get there - see _showable): the answer still says
+                # what went wrong, and the next message can put it right.
+                return self._bare_snapshot(f"{error}; and the expression cannot be shown "
+                                           f"({type(again).__name__}: {again})")
         finally:
             self._action_label = None
+
+    def _bare_snapshot(self, error: str) -> Dict[str, Any]:
+        """A snapshot that prints nothing: what ``handle`` answers when the
+        expression cannot be printed, so that no message ever raises."""
+        self._seq += 1
+        try:
+            src = str(self.expr)
+        except Exception:
+            src = "?"
+        return {"seq": self._seq, "latex": r"\text{?}", "latex_plain": r"\text{?}", "src": src, "spans": {},
+                "srepr": "", "declared": [], "nodes": {}, "symbols": [], "can_undo": self.can_undo,
+                "can_redo": self.can_redo, "allow_invalid": self.allow_invalid, "ops": [],
+                "kind_labels": dict(self.kind_labels), "methods": {}, "addons": list(self.addons),
+                "addons_available": [], "placeholders": [], "error": error}
+
+    def _query_answer(self, query: Dict[str, Any]) -> Dict[str, Any]:
+        """The answer to an add-on's query: the query and nothing else.  It
+        used to ride on a whole snapshot - the formula printed and annotated
+        twice, its node table, its source spans - which every front end
+        throws away for a query (nothing changed), and which was most of its
+        cost: half a second on a phone for each, enough to bring up the
+        editor's "Working…" overlay while the panels loaded.  ``seq`` and
+        the undo flags are the document's own, unchanged."""
+        return {"seq": self._seq, "query": query, "error": None,
+                "can_undo": self.can_undo, "can_redo": self.can_redo}
 
     def _handle_addon(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """One of an add-on's methods (see :meth:`Addon.handle`): a dict
@@ -1877,7 +2892,13 @@ class Document:
         if addon is None:
             raise ValueError(f"No add-on {name!r} in this document (it has {', '.join(self.addons) or 'none'})")
         payload = {k: v for k, v in message.items() if k not in ("action", "addon", "method", "_req")}
-        self._action_label = addon.describe(method, payload) or f"{addon.label or name}: {method}"
+        try:
+            label = addon.describe(method, payload)
+        except Exception:
+            # only the history's label: a describe that fails must not turn
+            # the method's answer into an error the panel never hears of
+            label = None
+        self._action_label = label or f"{addon.label or name}: {method}"
         try:
             result = addon.handle(self, method, payload)
         except Exception as exc:
@@ -1885,13 +2906,9 @@ class Document:
             # with it) and nowhere else: the editor's own error line is for
             # the editor's own edits.  The plot asking for samples of a piece
             # that has none is not an error of the formula.
-            snap = self.snapshot()
-            snap["query"] = {"addon": name, "method": method, "error": f"{type(exc).__name__}: {exc}"}
-            return snap
+            return self._query_answer({"addon": name, "method": method, "error": f"{type(exc).__name__}: {exc}"})
         if isinstance(result, dict):
-            snap = self.snapshot()
-            snap["query"] = {"addon": name, "method": method, "result": result}
-            return snap
+            return self._query_answer({"addon": name, "method": method, "result": result})
         if result is not None:
             self._commit(self._coerce(result))
         snap = self.snapshot()
@@ -1961,22 +2978,112 @@ class Document:
     def _path(path: PathLike) -> Path:
         return parse_path(path) if isinstance(path, str) else tuple(path)
 
-    def _coerce(self, expr) -> Basic:
-        # srepr output names Str (a MatrixSymbol's name) which SymPy < 1.14
-        # does not export: without it in scope, sympify reads Str('A') as an
-        # undefined function of A, and the matrix symbol's name becomes "Str".
-        # An add-on's node types are named in its namespace, so its srepr
-        # strings read back too.
+    def _read_names(self) -> Dict[str, Any]:
+        """The names saved text may use besides SymPy's: the editor's own
+        node types and those of the add-ons that are on (their namespace
+        names the classes their ``srepr`` writes)."""
+        local: Dict[str, Any] = {"Str": Str, "Placeholder": Placeholder, "Invalid": Invalid}
+        for addon in getattr(self, "addons", {}).values():
+            for name, obj in addon.namespace().items():
+                local.setdefault(name, obj)
+        return local
+
+    def _read(self, text: str, declared: Optional[Dict[str, Any]] = None) -> Any:
+        """Saved text - ``srepr``, or a line of SymPy source - read without
+        running it (see ``invalid.read_srepr``/``read_source``): a file or a
+        session comes from outside, and ``sympify`` of its text would run
+        whatever Python it holds.  ``srepr`` is read unevaluated, so a step
+        comes back as it was saved; source is evaluated, as typed input is,
+        with ``declared`` (the file's declared names) in scope."""
+        names = self._read_names()
+        try:
+            return self._read_step(text, names)
+        except _NotSrepr:
+            pass
+        except UnsafeText as exc:
+            raise ValueError(f"Cannot read {_short(text)}: {exc}") from None
+        local = dict(names)
+        local.update(declared if declared is not None else getattr(self, "declared", {}))
+
+        def new_name(name: str):
+            return Placeholder(name) if PLACEHOLDER_RE.match(name) else None
+        try:
+            return read_source(text, local, new_name=new_name)
+        except UnsafeText as exc:
+            raise ValueError(f"Cannot read {_short(text)}: {exc}") from None
+
+    @staticmethod
+    def _read_step(text: str, names: Dict[str, Any]) -> Any:
+        """``srepr`` text as the expression it was written from.  The text
+        does not say whether that expression was evaluated: read
+        unevaluated it keeps a step as it was (``sqrt(-3/4)``,
+        ``Abs(-3)``), but SymPy's constructors also leave marks of their own
+        unevaluated, and the ``srepr`` of earlier versions wrote a product's
+        factors in display order (``-2*y/3`` as ``Mul(-1, 2/3, y)``).  So
+        the evaluated reading is taken whenever it prints back as the very
+        text - what an evaluated step always does - and the unevaluated one
+        otherwise."""
+        raw = read_srepr(text, names)
+        try:
+            built = read_srepr(text, names, evaluate=True)
+        except Exception:
+            return raw
+        if isinstance(built, Basic) and not has_invalid(built):
+            try:
+                wanted = ast.dump(ast.parse(text.strip(), mode="eval"))
+                for printed in (srepr(built), exact_srepr(built)):     # this version's writer, the one before
+                    if ast.dump(ast.parse(printed, mode="eval")) == wanted:
+                        return built
+            except Exception:
+                pass
+        return raw
+
+    def _read_symbol(self, obj: Any) -> Any:
+        """A declared name as saved (``srepr`` text), read without running it."""
+        if isinstance(obj, str):
+            obj = self._read(obj, declared={})
+        if isinstance(obj, MatrixBase):
+            obj = obj.as_immutable()
+        return obj
+
+    def _coerce_given(self, expr) -> Basic:
+        """The expression a document is created with, from Python.  Text from
+        a file or a kept session is read without running anything
+        (:meth:`_coerce`); text handed to the constructor by the program
+        itself is that program's own, as trusted as the rest of it, so
+        what the safe reading refuses - ``Document("M.T")``, an attribute -
+        is sympified as it always was."""
+        try:
+            return self._coerce(expr)
+        except ValueError:
+            if not isinstance(expr, str):
+                raise
+            result = sympify(expr)
+            if isinstance(result, (MatrixBase, NDimArray)) and hasattr(result, "as_immutable"):
+                result = result.as_immutable()
+            if not isinstance(result, Basic):
+                raise TypeError(f"Cannot edit {type(result).__name__} objects") from None
+            return result
+
+    def _coerce(self, expr, declared: Optional[Dict[str, Any]] = None) -> Basic:
+        """A SymPy object from what the document is given.  Text is read by
+        :meth:`_read` - never run - and a node SymPy refuses in it (a step
+        saved by an older version, which let it through) becomes an invalid
+        node: saved data always opens."""
         if isinstance(expr, str):
-            local: Dict[str, Any] = {"Str": Str, "Placeholder": Placeholder}
-            for addon in getattr(self, "addons", {}).values():
-                for name, obj in addon.namespace().items():
-                    local.setdefault(name, obj)
-            result = sympify(expr, locals=local)
+            result = self._read(expr, declared)
+            if isinstance(result, (MatrixBase, NDimArray)) and hasattr(result, "as_immutable"):
+                result = result.as_immutable()
+            elif isinstance(result, (int, float)) or result is None or isinstance(result, bool):
+                result = sympify(result) if result is not None else result
+            if isinstance(result, Basic):
+                result = tolerate(result)
         else:
+            if isinstance(expr, (MatrixBase, NDimArray)) and hasattr(expr, "as_immutable"):
+                expr = expr.as_immutable()
             result = sympify(expr)
         if not isinstance(result, Basic):
-            raise TypeError(f"Cannot edit {type(expr).__name__} objects")
+            raise TypeError(f"Cannot edit {type(result).__name__} objects")
         return result
 
     def _showable(self, expr: Basic) -> None:
@@ -1993,15 +3100,56 @@ class Document:
             raise ValueError(f"The result cannot be shown ({type(exc).__name__}: {exc}); "
                              "the expression is unchanged") from None
 
-    def _commit(self, expr: Basic) -> Basic:
+    def _valid(self, expr: Basic) -> Basic:
+        """``expr`` checked node by node against what SymPy would build.
+        The editor builds with the constructors (``Add(2, M)``, ``Pow(M,
+        S.Half)`` unevaluated), which let through what the operators refuse:
+        a document that allows invalid expressions keeps such a node as an
+        invalid one, any other refuses the edit."""
+        if self.allow_invalid:
+            return tolerate(expr)
+        found = first_problem(expr)
+        if found is not None and self._history:
+            # Only what this edit brings in is refused: an invalid node the
+            # expression already holds (kept while invalid ones were allowed,
+            # or in the expression the document was given) stays, and the
+            # rest of the expression can still be edited - it used to refuse
+            # every edit, anywhere, until that node was put right.  An edit
+            # inside that node makes another node, which must then be valid.
+            before = set(_post_order(self.expr))
+            found = next(((node, problem) for node in _post_order(expr) if node not in before
+                          for problem in (node_problem(node),) if problem is not None), None)
+        if found is not None:
+            node, problem = found
+            raise ValueError(f"{node} is not a valid expression ({problem}); the expression is unchanged"
+                             " - allow invalid expressions to keep it")
+        return expr
+
+    def _commit(self, expr: Basic, check: bool = True, declared: Optional[Dict[str, Any]] = None) -> Basic:
+        if isinstance(expr, (MatrixBase, NDimArray)) and hasattr(expr, "as_immutable"):
+            expr = expr.as_immutable()
+        if not isinstance(expr, Basic):
+            # "[x, 1]", "None", "[]" typed, or an op's answer: Python reads
+            # them (a list stays a list - an argument may be one), and the
+            # document committed them - nothing could print it, and every
+            # message after it failed.
+            raise ValueError(f"{_short(expr)} is a {type(expr).__name__}, not an expression; "
+                             "the expression is unchanged")
+        if check:
+            expr = self._valid(expr)
         self._showable(expr)
+        if declared is not None:
+            self.declared = declared
         del self._history[self._index + 1:]
         del self._labels[self._index + 1:]
+        del self._decls[self._index + 1:]
         self._history.append(expr)
         self._labels.append(self._action_label)
+        self._decls.append(dict(self.declared))
         if len(self._history) > self.max_history:
             del self._history[: len(self._history) - self.max_history]
             del self._labels[: len(self._labels) - self.max_history]
+            del self._decls[: len(self._decls) - self.max_history]
         self._index = len(self._history) - 1
         self._notify()
         return expr

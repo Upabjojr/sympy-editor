@@ -3,6 +3,8 @@
 
     python mobile/screenshots.py            # -> mobile/ios/build/screenshots/{iphone,ipad}/{raw,framed}/*.png
     python mobile/screenshots.py --set examples   # ... /{iphone,ipad}/examples/{raw,framed}: the app's own examples
+    python mobile/screenshots.py --set addons     # ... /{iphone,ipad}/addons/{raw,framed}: the plot, the tree, LaTeX, the rules
+    python mobile/screenshots.py --set console    # ... /{iphone,ipad}/console/{raw,framed}: the Python console
 
 The page is the bundle the apps show (``build_www.build`` with the native
 backend) opened in Playwright's WebKit - the engine of the iOS WebView -
@@ -29,7 +31,8 @@ sys.path[:0] = [str(HERE.parent / "src"), str(HERE / "app"), str(HERE)]
 import build_www  # noqa: E402
 import sympy_editor_app as app  # noqa: E402
 from sympy_editor.examples import EXAMPLES  # noqa: E402
-from sympy import Derivative, Eq, Function, I, Integral, Limit, Matrix, Sum, cos, exp, oo, pi, sin, sqrt, symbols  # noqa: E402
+from sympy import (Derivative, Eq, Function, I, Integral, Limit, Matrix, Sum, cos, erf, exp, factorial, log,  # noqa: E402
+                   oo, pi, sin, sqrt, symbols)
 
 #: points, scale, and how much larger than on the phone a formula may be
 DEVICES = {
@@ -75,7 +78,9 @@ class Screen:
         ctx.add_init_script(BRIDGE)
         self.page = ctx.new_page()
         self.page.on("pageerror", lambda e: print("page error:", e))
-        self.page.goto(f"http://127.0.0.1:{self.srv.server_address[1]}/index.html")
+        # not "load": a slow Plotly makes that miss the timeout now and then, and the editor's own sign follows
+        self.page.goto(f"http://127.0.0.1:{self.srv.server_address[1]}/index.html", wait_until="domcontentloaded",
+                       timeout=120000)
         self.page.wait_for_selector(".sympy-editor .katex", timeout=60000)
         assert self.ev("!!window.SympyEditorPy && !window.pyodide && !window.loadPyodide"), "the page is not on the native backend"
         self.page.wait_for_timeout(600)
@@ -134,6 +139,24 @@ class Screen:
         self.page.wait_for_selector(".se-history-frame", timeout=30000)
         self.page.frame_locator(".se-history-frame").locator(".step").first.wait_for(timeout=30000)
         self.page.wait_for_timeout(1500)
+
+    def addon(self, name, ready):
+        """Switch the add-on ``name`` on, as its switch in the drawer does, and
+        wait for ``ready`` (a selector in its panel)."""
+        self.send({"action": "addons", "enable": [name]})
+        self.page.wait_for_selector(ready, timeout=30000)
+        self.page.wait_for_timeout(600)
+
+    def reveal(self, selector):
+        """Scroll the page so that the formula's top is at the top of the
+        screen, or ``selector``'s bottom at the bottom, whichever is less: an
+        add-on's panel sits under the formula, below the fold on a phone."""
+        self.ev(f"""(() => {{
+          const view = document.querySelector('.se-stage').getBoundingClientRect();
+          const end = document.querySelector({json.dumps(selector)}).getBoundingClientRect();
+          window.scrollBy(0, Math.max(0, Math.min(view.top - 8, end.bottom - window.innerHeight + 12)));
+        }})()""")
+        self.page.wait_for_timeout(400)
 
     def shot(self, name):
         self.page.wait_for_timeout(400)
@@ -305,6 +328,235 @@ def take_examples(work: Path, out: Path, device: str) -> None:
         s.close()
 
 
+u, k, y = symbols("u k y")          # real-line variables: a plot goes both ways from 0
+a, b, c, d = symbols("a b c d")
+
+#: The add-ons that ship with the app, many scenes to choose from:
+#: (file name, caption, kind, what the scene does).
+ADDON_SCENES = [
+    ("01-plot-sinc", "Plot what you select", "plot", dict(expr=sin(u) / u)),
+    ("02-plot-packet", "A wave packet, plotted", "plot", dict(expr=exp(-u**2 / 4) * cos(4 * u))),
+    ("03-plot-bell", "The bell curve", "plot", dict(expr=exp(-u**2 / 2) / sqrt(2 * pi))),
+    ("04-plot-cubic", "Plot any expression", "plot", dict(expr=u**3 - 3 * u, rng=("-2.5", "2.5"))),
+    ("05-plot-erf", "Special functions too", "plot", dict(expr=erf(u), rng=("-3", "3"))),
+    ("06-plot-slider", "Free symbols become sliders", "plot", dict(expr=sin(k * u) / u, var="u", values={"k": "3"})),
+    ("07-plot-piece", "Plot one piece of a formula", "plot",
+     dict(expr=Eq(Integral(exp(-u**2), (u, -oo, oo)), sqrt(pi)), select="exp(-u**2)", rng=("-3", "3"))),
+    ("08-plot-taylor", "A Taylor polynomial of sin", "plot", dict(expr=u - u**3 / 6 + u**5 / 120)),
+    ("09-tree-pythagoras", "See the expression as a tree", "tree", dict(expr=Eq(a**2 + b**2, c**2), select="a**2 + b**2")),
+    ("10-tree-euler", "Euler's formula, as a tree", "tree", dict(expr=Eq(exp(I * u), cos(u) + I * sin(u)), select="exp(I*u)")),
+    ("11-tree-derivative", "Derivatives are nodes too", "tree", dict(expr=Derivative(sin(u)**2, u), select="/")),
+    ("12-tree-gaussian", "Integrals, limits and all", "tree", dict(expr=Integral(exp(-u**2), (u, -oo, oo)), select="/")),
+    ("13-tree-matrix", "Matrices, as trees", "tree", dict(expr=Matrix([[a, b], [c, d]]), select="/")),
+    ("14-tree-and-plot", "Tree and plot side by side", "both", dict(expr=exp(-u**2 / 4) * cos(4 * u))),
+    ("15-latex-sqrt", "Type or paste LaTeX", "latex", dict(text=r"\sqrt{u^2+1}")),
+    ("16-latex-binom", "LaTeX, read as SymPy", "latex", dict(text=r"\binom{n}{k}")),
+    ("17-latex-euler", "LaTeX, read as SymPy", "latex", dict(text=r"e^{i\pi}")),
+    ("18-latex-sin", "LaTeX, read as SymPy", "latex", dict(text=r"\sin^2 u")),
+    ("19-latex-ambiguous", "Every ambiguity, a choice", "latex", dict(text=r"f(u+1)")),
+    ("20-rules-match", "Rewrite with rules of your own", "rules",
+     dict(expr=sin(u + 1)**2 + cos(u + 1)**2, rules=["sin(w_)**2 + cos(w_)**2 -> 1"])),
+    ("21-rules-applied", "Rules apply with one tap", "rules",
+     dict(expr=sin(u + 1)**2 + cos(u + 1)**2, rules=["sin(w_)**2 + cos(w_)**2 -> 1"], apply=True)),
+    ("22-rules-power", "Wildcards, required or optional", "rules",
+     dict(expr=5 * u**3, rules=["_c_*u**_n_ -> _c_*u**(_n_ + 1)/(_n_ + 1) if Ne(_n_, -1)"])),
+    ("23-rules-linear", "Wildcards, required or optional", "rules",
+     dict(expr=3 * u + 2, rules=["_a_*u + _b_ -> -_b_/_a_"])),
+    ("24-rules-log", "A rule set of your own", "rules",
+     dict(expr=log(2 * y), rules=["log(a_*b_) -> log(a_) + log(b_)", "sin(w_)**2 + cos(w_)**2 -> 1"])),
+]
+ADDON_SHOTS = [(name, caption) for name, caption, _kind, _how in ADDON_SCENES]
+PLOTTED = ".plot-area svg.main-svg, .plot-area svg.plot-svg"
+
+
+def _plot(s: "Screen", expr, select="/", rng=None, var=None, values=None, **_) -> None:
+    s.addon("plot", ".se-addon-plot .plot-bar")
+    s.select(select if select.startswith("/") else s.path(select))
+    if var:                               # the axis; the other free symbols get sliders
+        s.page.locator(".se-addon-plot select").first.select_option(var)
+        s.page.wait_for_timeout(500)
+    for symbol, value in (values or {}).items():
+        s.page.locator(f'.plot-sliders label[data-sym="{symbol}"] .plot-value').fill(value)
+    if rng:
+        for i, value in enumerate(rng):
+            field = s.page.locator(".se-addon-plot .plot-bar .plot-num").nth(i)
+            field.fill(value)
+            field.press("Enter")
+    s.page.wait_for_selector(PLOTTED, timeout=60000)
+    s.fit(1.8)
+    s.page.wait_for_timeout(1500)
+    s.reveal(".se-addon-plot .plot-area")
+
+
+def _tree(s: "Screen", expr, select="/", **_) -> None:
+    s.addon("tree", ".se-addon-tree .tree-node")
+    s.select(select)
+    s.fit(1.6)
+    s.page.wait_for_timeout(1000)
+    s.reveal(".se-addon-tree")
+
+
+def _both(s: "Screen", expr, **_) -> None:
+    s.addon("tree", ".se-addon-tree .tree-node")
+    s.addon("plot", ".se-addon-plot .plot-bar")
+    s.select("/")
+    s.page.wait_for_selector(PLOTTED, timeout=60000)
+    s.fit(1.4)
+    s.page.wait_for_timeout(1500)
+    s.reveal(".se-addon-plot .plot-area")
+
+
+def _latex(s: "Screen", text, **_) -> None:
+    # short LaTeX: the field in the formula does not grow as it is typed into
+    s.addon("latex", '[data-cmd="addon:latex:type"]')
+    s.ev(f"{ED}.setZoom({2.2 * s.room})")
+    s.select("/")
+    s.page.click('[data-cmd="addon:latex:type"]')
+    s.page.wait_for_selector(".se-view .ltx-field", timeout=10000)
+    s.page.fill(".se-view .ltx-field", text)
+    s.page.wait_for_selector(".ltx-preview .katex", timeout=60000)
+    s.page.wait_for_timeout(1200)
+    s.reveal(".ltx-panel")
+
+
+def _rules(s: "Screen", expr, rules, apply=False, **_) -> None:
+    s.addon("matching", ".se-addon-matching .mt-field")
+    for rule in rules:
+        before = s.page.locator(".mt-rules li").count()
+        s.page.fill(".mt-field", rule)
+        s.page.press(".mt-field", "Enter")
+        s.page.wait_for_function(f"document.querySelectorAll('.mt-rules li .mt-formula .katex').length > {before}",
+                                 timeout=30000)
+    s.select("/")
+    s.page.wait_for_selector(".mt-hit .mt-apply", timeout=30000)
+    if apply:
+        s.page.click(".mt-hit .mt-apply")
+        s.page.wait_for_function(f"!{ED}.busy")
+        s.page.wait_for_timeout(1200)
+    s.fit(1.6)
+    s.page.wait_for_timeout(800)
+    s.reveal(".se-addon-matching" if apply else ".se-addon-matching .mt-hit")
+
+
+def take_addons(work: Path, out: Path, device: str) -> None:
+    from playwright.sync_api import sync_playwright
+
+    scenes = {"plot": _plot, "tree": _tree, "both": _both, "latex": _latex, "rules": _rules}
+    with sync_playwright() as pw:
+        for name, _caption, kind, how in ADDON_SCENES:
+            s = Screen(pw, how.get("expr", u), work, out, device)
+            try:
+                scenes[kind](s, **how)
+                s.shot(name)
+            except Exception as exc:      # one scene that fails is one picture fewer, not none
+                print(f"   {name}: not taken ({type(exc).__name__}: {str(exc).splitlines()[0]})")
+            finally:
+                s.close()
+
+
+#: The Python console, many scenes to choose from: (file name, caption, the
+#: formula, what the scene does).  ``inputs`` are run one after another as
+#: typed at the prompt; ``typing`` is left in the field (the completion menu),
+#: ``script`` is run from the Script tab, ``use`` taps the last output's Use.
+CONSOLE_SCENES = [
+    ("01-console-integral", "A Python console, SymPy imported", Integral(exp(-u**2), (u, -oo, oo)),
+     dict(inputs=["integrate(exp(-u**2), (u, -oo, oo))", "summation(1/n**2, (n, 1, oo))"])),
+    ("02-console-formula", "The formula is editor.expr", Integral(exp(-u**2), (u, -oo, oo)),
+     dict(inputs=["f = editor.expr", "f.doit()", "f.function.diff(u)"])),
+    ("03-console-assign", "Assign it, and the formula changes", sin(u)**2,
+     dict(inputs=["editor.expr = sin(u)**2 + cos(u)**2", "simplify(editor.expr)"])),
+    ("04-console-series", "Series, limits, sums", sin(u) / u,
+     dict(inputs=["series(sin(u)/u, u, 0, 8)", "limit(sin(u)/u, u, 0)"])),
+    ("05-console-solve", "Solve equations", Eq(u**2 - 2 * u, 3),
+     dict(inputs=["solve(editor.expr, u)", "solve([u + y - 3, u - y - 1], [u, y])"])),
+    ("06-console-matrix", "Matrices and eigenvalues", Matrix([[a, b], [c, d]]),
+     dict(inputs=["M = Matrix([[2, 1], [1, 2]])", "M.eigenvals()", "M.inv()"])),
+    ("07-console-dsolve", "Differential equations", Eq(Derivative(Function("g")(u), u, 2) + Function("g")(u), 0),
+     dict(inputs=["g = Function('g')", "dsolve(editor.expr, g(u))"])),
+    ("08-console-use", "Use puts a result in the formula", u,
+     dict(inputs=["factor(u**4 - 1)"], use=True)),
+    ("09-console-print", "Loops, print, all of Python", factorial(n),
+     dict(inputs=["for j in range(1, 7):\n    print(j, factorial(j), prime(j))"])),
+    ("10-console-display", "display() draws any formula", Sum(1 / n**2, (n, 1, oo)),
+     dict(inputs=["display(Eq(Sum(1/n**2, (n, 1, oo)), pi**2/6))", "display(Integral(sqrt(1 - u**2), (u, -1, 1)).doit())"])),
+    ("11-console-complete", "Completion after a dot", u**4 - 1,
+     dict(inputs=["f = editor.expr"], typing="f.ex")),
+    ("12-console-names", "And for names as you type", Integral(u * exp(u), u),
+     dict(inputs=[], typing="integ")),
+    ("13-console-error", "Errors, as Python reports them", 1 / u,
+     dict(inputs=["1/0"])),
+    ("14-console-script", "Or write a whole script", sin(u)**2 + cos(u)**2,
+     dict(script="\n".join([
+         "# editor is the formula on screen",
+         "f = editor.expr",
+         "print(\"The formula:\", f)",
+         "print(\"Simplified:\", simplify(f))",
+         "",
+         "for k in range(1, 5):",
+         "    print(k, expand((1 + u)**k))",
+         "",
+         "editor.expr = simplify(f)",
+     ]))),
+]
+CONSOLE_SHOTS = [(name, caption) for name, caption, _expr, _how in CONSOLE_SCENES]
+
+
+def _console(s: "Screen", inputs=(), typing=None, script=None, use=False) -> None:
+    s.addon("console", ".se-addon-console .pc-input")
+    s.page.evaluate("document.querySelectorAll('details.se-addon').forEach(d => d.open = d.classList.contains('se-addon-console'))")
+    s.fit(1.6)
+    s.page.fill(".pc-input", "u, y, n = symbols('u y n')")
+    s.page.click(".pc-console .pc-run")
+    s.page.wait_for_function("document.querySelectorAll('.pc-entry').length >= 1", timeout=30000)
+    s.page.click(".pc-tabs .pc-btn")                       # Clear: the transcript starts with the scene
+    s.page.wait_for_timeout(300)
+    for code in inputs:
+        before = s.page.locator(".pc-entry").count()
+        s.page.fill(".pc-input", code)
+        s.page.click(".pc-console .pc-run")
+        if "\n" in code:                                   # a block waits for an empty line
+            s.page.wait_for_timeout(500)
+            s.page.click(".pc-console .pc-run")
+        s.page.wait_for_function(f"document.querySelectorAll('.pc-entry').length > {before}", timeout=60000)
+        s.page.wait_for_timeout(700)
+    if use:
+        s.page.locator(".pc-use").last.click()
+        s.page.wait_for_function(f"!{ED}.busy")
+        s.page.wait_for_timeout(1200)
+        s.fit(1.6)
+    if script is not None:
+        s.page.click('.pc-tab[data-mode="script"]')
+        s.page.fill(".pc-script", script)
+        s.page.click(".pc-scripting .pc-run")
+        s.page.wait_for_selector(".pc-script-out .pc-note", timeout=60000)
+        s.page.wait_for_timeout(1200)
+        s.fit(1.6)
+    if typing is not None:
+        s.page.click(".pc-input")
+        s.page.locator(".pc-input").press_sequentially(typing, delay=120)
+        s.page.wait_for_selector(".pc-complete:not([hidden]) .pc-comp-item", timeout=30000)
+        s.page.wait_for_timeout(600)
+    if typing is None:                                     # no keyboard focus ring in the picture
+        s.page.evaluate("document.activeElement && document.activeElement.blur()")
+    s.reveal(".pc-complete:not([hidden])" if typing is not None else
+             ".pc-script-out" if script is not None else ".pc-input-row")
+
+
+def take_console(work: Path, out: Path, device: str) -> None:
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as pw:
+        for name, _caption, expr, how in CONSOLE_SCENES:
+            s = Screen(pw, expr, work, out, device)
+            try:
+                _console(s, **how)
+                s.shot(name)
+            except Exception as exc:      # one scene that fails is one picture fewer, not none
+                print(f"   {name}: not taken ({type(exc).__name__}: {str(exc).splitlines()[0]})")
+            finally:
+                s.close()
+
+
 def frame(raw: Path, caption: str, out: Path, device: str) -> None:
     """The screen under its caption, on a green ground, in the store's size."""
     from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -357,22 +609,25 @@ def main(argv=None) -> int:
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--device", choices=sorted(DEVICES), action="append", help="one of them only (default: all)")
-    ap.add_argument("--set", choices=("story", "examples"), default="story",
-                    help="story: famous equations worked (default); examples: the app's own examples, under examples/")
+    ap.add_argument("--set", choices=("story", "examples", "addons", "console"), default="story",
+                    help="story: famous equations worked (default); examples: the app's own examples, under examples/; "
+                         "addons: the add-ons it ships, under addons/; console: the Python console, under console/")
     args = ap.parse_args(argv)
-    shots, taker = (EXAMPLE_SHOTS, take_examples) if args.set == "examples" else (SHOTS, take)
+    shots, taker = {"story": (SHOTS, take), "examples": (EXAMPLE_SHOTS, take_examples),
+                    "addons": (ADDON_SHOTS, take_addons), "console": (CONSOLE_SHOTS, take_console)}[args.set]
     out = HERE / "ios" / "build" / "screenshots"
     for device in args.device or sorted(DEVICES):
-        base = out / device / ("examples" if args.set == "examples" else "")
+        base = out / device / ("" if args.set == "story" else args.set)
         raw, framed, work = base / "raw", base / "framed", out / "work"
         for folder in (raw, framed, work):
             folder.mkdir(parents=True, exist_ok=True)
         w, h, scale, _ = DEVICES[device]
         print(f"Taking the {device} screens ({w * scale} x {h * scale}), the {args.set} set")
         taker(work, raw, device)
-        for i, (name, caption) in enumerate(shots, 1):
+        taken = [(name, caption) for name, caption in shots if (raw / f"{name}.png").is_file()]
+        for i, (name, caption) in enumerate(taken, 1):
             frame(raw / f"{name}.png", caption, framed / f"{i}-{name.split('-', 1)[1]}.png", device)
-        print(f"Wrote {raw} and {framed} ({len(shots)} each)")
+        print(f"Wrote {raw} and {framed} ({len(taken)} of {len(shots)} each)")
     return 0
 
 

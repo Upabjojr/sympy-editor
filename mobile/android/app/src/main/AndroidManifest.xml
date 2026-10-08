@@ -1,7 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- The bundle is fully offline; INTERNET is only needed by a CDN (build_www.py with the cdn option) bundle. -->
-    <uses-permission android:name="android.permission.INTERNET" />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- No network at all: the bundle is offline, and the privacy statement
+         says the app sends nothing.  ONNX Runtime's library (the handwriting
+         model) asks for INTERNET and ACCESS_NETWORK_STATE and starts a
+         telemetry uploader of its own (TelemetryInitializer, below); both
+         permissions are taken out of the merged manifest, so nothing in the
+         process can open a socket - the app has no network at all. -->
+    <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
     <application
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -9,14 +16,74 @@
         android:allowBackup="true"
         android:supportsRtl="true"
         android:theme="@style/Theme.AppCompat.DayNight.NoActionBar">
+        <!-- ONNX Runtime's telemetry, started at launch by a provider of its
+             own and sent to Microsoft: never started. -->
+        <provider
+            android:name="ai.onnxruntime.TelemetryInitializer"
+            android:authorities="${applicationId}.onnxruntime_telemetry_initializer"
+            tools:node="remove" />
+        <!-- The WebView's own: no usage metrics to Google, and no Safe
+             Browsing lookups - it only ever shows the app's own pages. -->
+        <meta-data android:name="android.webkit.WebView.MetricsOptOut" android:value="true" />
+        <meta-data android:name="android.webkit.WebView.EnableSafeBrowsing" android:value="false" />
+        <!-- configChanges: a rotation, a fold, a window resized, a keyboard or a
+             display density changing must not recreate the activity - that
+             would reload the page in the middle of an edit (and a pending
+             save or file choice would be asked again). -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|fontScale|keyboard|keyboardHidden|navigation|uiMode"
+            android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- A saved formula opened from elsewhere (a file manager, a mail):
+                 by its own type, and by its extension, since most providers
+                 call a .sympy file application/octet-stream. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="application/x-sympy-editor+json" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:host="*" />
+                <data android:mimeType="*/*" />
+                <data android:pathPattern=".*\\.sympy" />
+                <data android:pathPattern=".*\\..*\\.sympy" />
+                <data android:pathPattern=".*\\..*\\..*\\.sympy" />
+            </intent-filter>
+            <!-- ...and by no name at all: the Downloads list, Google Files and a
+                 mail's attachment hand over content://media/.../1000062462,
+                 typed application/octet-stream (Android knows no .sympy), so
+                 neither filter above can see it.  The app is offered for such
+                 files too; one that is not a formula is refused in words. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="application/json" />
+            </intent-filter>
+            <!-- Shared to the app: a saved formula, or a formula as text. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/x-sympy-editor+json" />
+                <data android:mimeType="application/json" />
+                <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
         <!-- hands the history report (written under cacheDir/reports) to other apps -->

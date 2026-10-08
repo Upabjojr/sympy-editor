@@ -32,7 +32,7 @@ SympyEditor.registerAddon("tree", {
     var wrapField = h("input", { type: "text", class: "tree-field", placeholder: "wrap in…",
       title: "Put the selected node inside this function (Enter)", spellcheck: "false", autocomplete: "off" });
     var nodeBtn = h("button", { type: "button", class: "tree-node-btn", title: "What can be done with the selected node: edit, delete, wrap, transform, its methods (also a right-click on a node)", disabled: "" }, ["Node \u25be"]);
-    var hint = h("span", { class: "tree-hint" }, ["click: select \u00b7 double-click: edit \u00b7 right-click: menu \u00b7 drag onto a node: move \u00b7 Del: remove"]);
+    var hint = h("span", { class: "tree-hint" }, ["click: select \u00b7 double-click: edit \u00b7 right-click: menu \u00b7 drag onto a node: move \u00b7 Del: remove \u00b7 pinch or ctrl+wheel: zoom"]);
     var bar = h("div", { class: "tree-bar" }, [nodeBtn, headSel, argField, wrapField, hint]);
     var menu = h("div", { class: "tree-menu", hidden: "", role: "menu" });
     // The quick actions: a small bar under the clicked node with the few
@@ -55,6 +55,8 @@ SympyEditor.registerAddon("tree", {
     var nodes = [];        // laid-out nodes: {data, x, y, w, el}
     var focused = null;    // the node the tree itself has focused (argument path as "0/1")
     var drag = null;
+    var zoom = 1;          // how much the drawing is magnified (see applyZoom)
+    var natural = null;    // its size at zoom 1, in the units it is laid out in
 
     function key(path) { return path.join("/"); }
     function byKey(k) { for (var i = 0; i < nodes.length; i++) if (key(nodes[i].data.path) === k) return nodes[i]; return null; }
@@ -63,11 +65,26 @@ SympyEditor.registerAddon("tree", {
       for (var i = 0; i < nodes.length; i++) if (nodes[i].data.view === view) return nodes[i];
       return null;
     }
+    /** The node a piece of the formula stands for: its own, or the one
+     *  around it.  The formula has pieces the tree has no node for - the 2
+     *  of x - 2*y is part of a -2 here, the product after the minus
+     *  (/1/neg) is nothing at all - so the view path is walked up, /1/neg/0,
+     *  /1/neg, /1, to the first piece that some node is shown as. */
+    function nodeForView(view) {
+      if (view === null || view === undefined) return null;
+      var steps = String(view).split("/").filter(function (p) { return p !== ""; });
+      while (true) {
+        var n = byView("/" + steps.join("/"));
+        if (n || !steps.length) return n;
+        steps.pop();
+      }
+    }
     function selectedNode() {
-      var v = api.selected();
-      // The formula's selection is a view path; a node under a fraction has
-      // none in the argument tree - fall back to the focused node.
-      return byView(v) || (focused ? byKey(focused) : null) || byKey("");
+      // What is selected in the formula comes first, and the node the tree
+      // has focused only when nothing is: with a piece selected that had no
+      // node of its own, the fields used to act on whichever node was
+      // clicked last - or on the root, the whole expression.
+      return nodeForView(api.selected()) || (focused ? byKey(focused) : null) || byKey("");
     }
 
     /* ---- layout ---- */
@@ -143,10 +160,15 @@ SympyEditor.registerAddon("tree", {
       return out;
     }
 
-    /** The history's step: a collapsible box with the step's tree. */
+    /** The history's step: a collapsible box with the step's tree.
+     *
+     *  Shut to start with.  A history is read as a list of steps, and a tree
+     *  opened beside every one of them buries that list - the trees are worth
+     *  looking at one at a time, or all at once from the tools above, and
+     *  either way it is the reader who asks. */
     function historyBox(step, prev) {
       if (!step || !step.tree) return null;
-      var d = h("details", { class: "tree-history", open: "" }, [h("summary", {}, ["Expression tree"]),
+      var d = h("details", { class: "tree-history" }, [h("summary", {}, ["Expression tree"]),
         h("div", { class: "tree-history-scroll" }, [treeSvg(step.tree, prev && prev.tree)])]);
       if (step.tree.too_big) d.querySelector(".tree-history-scroll").textContent = "(too many nodes to draw)";
       return d;
@@ -177,6 +199,9 @@ SympyEditor.registerAddon("tree", {
       if (tree.too_big) {
         note.textContent = "The tree has " + tree.too_big + " nodes or more; the graph stops at " + tree.max + ".";
         note.hidden = false;
+        natural = null;
+        scroller.style.maxHeight = "";
+        svg.removeAttribute("viewBox");
         svg.setAttribute("width", "0"); svg.setAttribute("height", "0");
         return;
       }
@@ -206,8 +231,8 @@ SympyEditor.registerAddon("tree", {
         boxes.appendChild(g);
         nodes.push({ data: d, x: d._x, y: d._y, w: d._w, el: g });
       })(tree, 0);
-      svg.setAttribute("width", String(tree._span + 2 * PAD));
-      svg.setAttribute("height", String(PAD * 2 + (depth + 1) * NODE_H + depth * GAP_Y));
+      natural = { w: tree._span + 2 * PAD, h: PAD * 2 + (depth + 1) * NODE_H + depth * GAP_Y };
+      applyZoom();
       markSelection();
     }
 
@@ -302,10 +327,13 @@ SympyEditor.registerAddon("tree", {
         if (items[next]) items[next].focus({ preventScroll: true });
       }
     });
-    document.addEventListener("pointerdown", function (ev) {
+    // On the page, not the panel: taken off again in destroy, or every time
+    // the add-on is switched off and on would leave one more behind.
+    function onDocPointerDown(ev) {
       if (!menu.hidden && !menu.contains(ev.target) && ev.target !== nodeBtn) hideMenu();
       if (!quick.hidden && !quick.contains(ev.target) && !svg.contains(ev.target)) hideQuick();
-    });
+    }
+    document.addEventListener("pointerdown", onDocPointerDown);
     nodeBtn.addEventListener("click", function () {
       var n = selectedNode();
       if (!n) return;
@@ -351,6 +379,7 @@ SympyEditor.registerAddon("tree", {
       editField.style.width = Math.max(box.width, 80) + "px";
       editField.hidden = false;
       editField.setAttribute("data-key", key(d.path));
+      editField.setAttribute("data-original", editField.value);
       editField.focus();
       editField.select();
     }
@@ -360,6 +389,11 @@ SympyEditor.registerAddon("tree", {
       editField.hidden = true;
       var n = byKey(k);
       if (!commit || !n || !text) return;
+      // Left as it was, there is nothing to send: losing the focus applies
+      // the field, so a look at a node and a click elsewhere used to be a
+      // step of the history each time, with the expression unchanged and
+      // Undo lit.  The editor's own field does the same (commitEdit).
+      if (text === editField.getAttribute("data-original")) return;
       if (n.data.atom) call("replace", { path: n.data.path, src: text });
       else call("set_head", { path: n.data.path, head: text });
     }
@@ -423,11 +457,58 @@ SympyEditor.registerAddon("tree", {
 
     svg.addEventListener("click", function (ev) {
       var n = nodeOf(ev.target);
-      if (n) { selectNode(n); showQuick(n); } else hideQuick();
+      if (n) {
+        selectNode(n);
+        showQuick(n);
+        clicked = { key: key(n.data.path), x: ev.clientX, y: ev.clientY, at: ev.timeStamp };
+      } else hideQuick();
     });
+
+    /* A double click is told here, not left to the browser.  Its dblclick
+     * goes to whatever is under the pointer at the second click, and that
+     * need not be the node: the first click selects in the formula, the
+     * formula's box grows for the selection's tools, the panel moves down
+     * and the second click - the pointer has not moved - lands beside the
+     * node.  The first double-click on a fresh page opened nothing.
+     *
+     * So a click on a node is remembered, and the next click is its second
+     * when the browser counts it as one (detail, which goes by the system's
+     * own double-click time and does not care what is under the pointer),
+     * or when it comes soon after, where the first was or on the same node -
+     * two taps of a finger are counted by nobody and never land on one spot.
+     * Listened for on the page, before anything else hears it: the second
+     * click may land outside the panel altogether, and whatever it lands on
+     * it was not meant for. */
+    var DOUBLE_MS = 400, DOUBLE_PX = 6;
+    var clicked = null;    // the last click, when it was on a node: {key, x, y, at}
+    function onDocClick(ev) {
+      var first = clicked;
+      clicked = null;
+      if (!first || ev.button !== 0) return;
+      var again = ev.detail > 1;
+      if (!again && ev.timeStamp - first.at <= DOUBLE_MS) {
+        var over = svg.contains(ev.target) ? nodeOf(ev.target) : null;
+        again = (over && key(over.data.path) === first.key) ||
+                Math.abs(ev.clientX - first.x) + Math.abs(ev.clientY - first.y) <= DOUBLE_PX;
+      }
+      var n = again ? byKey(first.key) : null;
+      if (!n) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      hideQuick(); hideMenu();
+      beginEdit(n);
+    }
+    document.addEventListener("click", onDocClick, true);
+    // The browser's own is what is left to a browser that does not count
+    // its clicks.  Not when the field is open: the second click has opened
+    // it, for the node that was clicked first - and on a narrow screen the
+    // panel moves far enough to put another node under the pointer, which
+    // is the one this event is for.
     svg.addEventListener("dblclick", function (ev) {
       var n = nodeOf(ev.target);
-      if (n) { ev.preventDefault(); beginEdit(n); }
+      if (!n) return;
+      ev.preventDefault();
+      if (editField.hidden) beginEdit(n);
     });
     svg.addEventListener("keydown", function (ev) {
       var n = nodeOf(document.activeElement);
@@ -446,8 +527,189 @@ SympyEditor.registerAddon("tree", {
       }
     });
 
+    /* ---- fingers, trackpad and mouse on the tree: pinch to zoom, drag to
+     *      scroll ----
+     *
+     * The same gestures as the plot's picture, and taken the same way; what
+     * differs is what they mean.  The plot has two axes of its own and scales
+     * each by its own share of a pinch, so that a sideways pinch stretches the
+     * span alone.  A tree is a drawing, not a pair of axes: stretching it
+     * along one side would only distort it, so a pinch scales it evenly, by
+     * how far the fingers move apart in any direction.
+     *
+     * Zooming is a viewBox and a size: the drawing keeps its own coordinates
+     * (everything laid out and every position read off the screen goes on
+     * working unchanged) and is drawn larger or smaller than them.  Scrolling
+     * is then the scroll box's own, so a zoomed-in tree pans with one finger
+     * as any overflowing box does - see touch-action in the CSS, which leaves
+     * one finger to the browser and brings two here.
+     *
+     * The magnification stays across redraws: an edit should not throw away
+     * the reader's place in a big tree.
+     */
+    var ZOOM_MIN = 0.25, ZOOM_MAX = 4;
+    var SEPARATION = 24;   // px: fingers closer than this say nothing about scale
+    var pinch = null;
+    var panning = null;
+    var frame = null;    // what the last move asked for, until the frame draws it
+    var queued = false;
+
+    /** Draw the tree at the current magnification.  The layout is untouched:
+     *  the viewBox is its natural size and the element is that size times the
+     *  zoom, so the browser does the scaling and every coordinate in this file
+     *  stays in the units the layout produced. */
+    function applyZoom() {
+      if (!natural) return;
+      svg.setAttribute("viewBox", "0 0 " + natural.w + " " + natural.h);
+      svg.setAttribute("width", String(Math.round(natural.w * zoom)));
+      svg.setAttribute("height", String(Math.round(natural.h * zoom)));
+      // Magnified, the drawing is kept within the room it had at life size:
+      // it then pans up and down inside the panel, rather than growing the
+      // panel until the formula above it is off the screen.  At life size
+      // the box is left alone, so an unzoomed tree shows as it always has.
+      scroller.style.maxHeight = zoom > 1 ? Math.round(natural.h) + "px" : "";
+    }
+
+    function clampZoom(want) {
+      if (!isFinite(want)) return zoom;
+      return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, want));
+    }
+
+    /** Magnify to `want`, and scroll so that the point of the drawing at
+     *  (`px`, `py`) - in the layout's own units - stays under (`clientX`,
+     *  `clientY`) on the screen.  Absolute rather than step by step: a gesture
+     *  works out where it started from and asks for that every time it moves,
+     *  so nothing drifts however many moves it takes.
+     *
+     *  At most once a frame.  A finger sends moves faster than the tree can be
+     *  laid out again, and only the last one before the frame is drawn. */
+    function showAt(want, px, py, clientX, clientY) {
+      frame = { zoom: clampZoom(want), px: px, py: py, x: clientX, y: clientY };
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(function () {
+        var at = frame;
+        frame = null;
+        queued = false;
+        if (!at || !natural) return;
+        zoom = at.zoom;
+        applyZoom();
+        var box = scroller.getBoundingClientRect();
+        scroller.scrollLeft = at.px * zoom - (at.x - box.left);
+        scroller.scrollTop = at.py * zoom - (at.y - box.top);
+      });
+    }
+
+    /** Where the point under (clientX, clientY) is in the drawing's own
+     *  units - what has to be held still while the magnification changes. */
+    function pointAt(clientX, clientY) {
+      var box = scroller.getBoundingClientRect();
+      return { x: (clientX - box.left + scroller.scrollLeft) / zoom,
+               y: (clientY - box.top + scroller.scrollTop) / zoom };
+    }
+
+    /** A node being dragged onto another, given up: a second finger, or
+     *  the browser taking the pointer away (pointercancel), means the drag
+     *  is no longer what is happening.  Not endDrag - that one lets go of
+     *  the subtree where it is. */
+    function cancelDrag() {
+      if (!drag) return;
+      drag.from.el.classList.remove("tree-dragging");
+      if (drag.over) drag.over.el.classList.remove("tree-drop", "tree-drop-no");
+      drag = null;
+    }
+
+    scroller.addEventListener("touchstart", function (ev) {
+      if (ev.touches.length !== 2) { pinch = null; return; }
+      cancelDrag();                       // two fingers are a gesture, not a drag
+      hideQuick(); hideMenu();
+      var a = ev.touches[0], b = ev.touches[1];
+      var mid = pointAt((a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
+      pinch = { apart: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY),
+                zoom: zoom, px: mid.x, py: mid.y };
+      ev.preventDefault();
+    }, { passive: false });
+
+    scroller.addEventListener("touchmove", function (ev) {
+      if (!pinch || ev.touches.length !== 2) return;
+      ev.preventDefault();
+      var a = ev.touches[0], b = ev.touches[1];
+      var now = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      // Fingers barely apart tell us nothing about scale - the ratio of two
+      // small numbers is noise - so they only push the tree along.
+      var scale = (pinch.apart < SEPARATION || now < SEPARATION) ? 1 : now / pinch.apart;
+      // The middle of the fingers carries the point it started on: this is
+      // the pinch and the two-finger drag at once, in one sum.
+      showAt(pinch.zoom * scale, pinch.px, pinch.py,
+             (a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
+    }, { passive: false });
+
+    var endPinch = function (ev) {
+      if (!ev.touches || ev.touches.length < 2) pinch = null;
+    };
+    scroller.addEventListener("touchend", endPinch, true);
+    scroller.addEventListener("touchcancel", endPinch, true);
+
+    /* A pinch on a laptop's trackpad reaches the page as a wheel event with
+     * ctrlKey set - that is how the browser reports it, and how it would zoom
+     * the whole page if nobody took it.  A plain wheel is left alone: it
+     * scrolls the box, which is what a wheel over a tall drawing should do. */
+    scroller.addEventListener("wheel", function (ev) {
+      if (!natural || !(ev.ctrlKey || ev.metaKey)) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      var unit = ev.deltaMode === 1 ? 16 : ev.deltaMode === 2 ? 100 : 1;
+      var at = pointAt(ev.clientX, ev.clientY);
+      // From what the frame is already going to draw, not from what is on the
+      // screen: a trackpad sends several of these between two frames, and
+      // reading the drawn zoom each time would throw all but one of them away.
+      showAt((frame ? frame.zoom : zoom) * Math.exp(-ev.deltaY * unit * 0.002),
+             at.x, at.y, ev.clientX, ev.clientY);
+    }, { passive: false });
+
+    /* With a mouse there is no pinch and nothing to drag on empty space, so
+     * that is where the tree is pushed along from - the scrollbars alone are
+     * a poor way about a drawing wider than the panel.  A press on a node is
+     * left to the drag that moves it. */
+    scroller.addEventListener("pointerdown", function (ev) {
+      if (ev.pointerType === "touch") return;      // fingers: the gestures above
+      if (ev.button !== 0 || nodeOf(ev.target)) return;
+      panning = { x: ev.clientX, y: ev.clientY, id: ev.pointerId,
+                  left: scroller.scrollLeft, top: scroller.scrollTop };
+      try { scroller.setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ }
+      scroller.classList.add("tree-panning");
+    });
+    scroller.addEventListener("pointermove", function (ev) {
+      if (!panning || ev.pointerId !== panning.id) return;
+      scroller.scrollLeft = panning.left - (ev.clientX - panning.x);
+      scroller.scrollTop = panning.top - (ev.clientY - panning.y);
+    });
+    var endPan = function () {
+      if (!panning) return;
+      try { scroller.releasePointerCapture(panning.id); } catch (e) { /* ignore */ }
+      panning = null;
+      scroller.classList.remove("tree-panning");
+    };
+    scroller.addEventListener("pointerup", endPan);
+    scroller.addEventListener("pointercancel", endPan);
+
+    /* Nothing else gets back to life size, so a double-click on empty space
+     * does - the plot's double-click resets its span the same way. */
+    scroller.addEventListener("dblclick", function (ev) {
+      // On a node it opens the field - and so it did when the field is
+      // open: the second click of that one landed here, beside the node.
+      if (nodeOf(ev.target) || zoom === 1 || !editField.hidden) return;
+      var at = pointAt(ev.clientX, ev.clientY);
+      showAt(1, at.x, at.y, ev.clientX, ev.clientY);
+    });
+
     // Drag a subtree onto another node: it becomes that node's last argument.
+    // With a mouse or a pen.  One finger is the browser's, to scroll the box
+    // with (touch-action in the CSS), and a scroll that began on a node was a
+    // drag here as well: the tree went along under the finger and the node
+    // under it was moved into the last one it had passed over.
     svg.addEventListener("pointerdown", function (ev) {
+      if (ev.pointerType === "touch") return;
       var n = nodeOf(ev.target);
       if (!n || !n.data.path.length || ev.button !== 0) return;
       drag = { from: n, x: ev.clientX, y: ev.clientY, moved: false, over: null, pointer: ev.pointerId };
@@ -485,7 +747,9 @@ SympyEditor.registerAddon("tree", {
       call("move", { from: d.from.data.path, to: d.over.data.path });
     }
     svg.addEventListener("pointerup", endDrag);
-    svg.addEventListener("pointercancel", endDrag);
+    // A cancel is not a release: the gesture was taken away - by the browser
+    // for a scroll of its own, by the system - and nothing was dropped.
+    svg.addEventListener("pointercancel", cancelDrag);
 
     headSel.addEventListener("change", function () {
       var n = selectedNode();
@@ -511,19 +775,25 @@ SympyEditor.registerAddon("tree", {
       "<section><h3>What it shows</h3><ul>",
       "<li>The expression as SymPy holds it: <code>x + y*z</code> is <b>Add</b> over <code>x</code> and <b>Mul</b>, <b>Mul</b> over <code>y</code> and <code>z</code>. Inner nodes carry the class (the head), leaves their value.</li>",
       "<li>The formula shows the printer's view: a fraction hides a <code>Pow(…, -1)</code>, a minus a <code>Mul(-1, …)</code>. Those nodes are here, but have no piece of their own in the formula: selecting one selects the nearest piece that is there.</li>",
+      "<li>The other way round, the formula has pieces that are no node here: the <code>2</code> of <code>x - 2*y</code> is part of a <code>-2</code>. With one of them selected, the node around it is the one marked \u2014 <b>Mul</b>, the <code>-2*y</code> \u2014 and the one the fields and <b>Node \u25be</b> act on.</li>",
       "</ul></section>",
       "<section><h3>Selecting</h3><ul>",
       "<li>Click a node to select the same piece in the formula (and the node lights up here when you select in the formula); a bar of quick actions appears under it: edit, delete, wrap, add an argument, and \u22ef for everything else.</li>",
       "<li><kbd>Space</kbd> selects the focused node, <kbd>Tab</kbd> moves between nodes.</li>",
       "</ul></section>",
       "<section><h3>In the history</h3><ul>",
-      "<li>While this add-on is on, every step of the history \u2014 the drawer's list and the History view \u2014 carries the tree of its expression in a collapsible box, the nodes the previous step did not have in green: how the tree evolved, step by step. The saved web page keeps them.</li>",
+      "<li>While this add-on is on, every step of the history \u2014 the drawer's list and the History view \u2014 carries the tree of its expression in a collapsible box \u2014 shut until you open it, so the list of steps stays readable \u2014 with the nodes the previous step did not have in green: how the tree evolved, step by step. The saved web page keeps them.</li>",
       "<li>A click on a box's heading folds or unfolds that tree (the step opens on a click elsewhere); <b>Expand trees</b> and <b>Collapse trees</b>, in the History view's strip and the drawer, do all of them at once.</li>",
       "</ul></section>",
+      "<section><h3>Zoom and scroll</h3><ul>",
+      "<li>Pinch with two fingers, or <kbd>Ctrl</kbd>+wheel (a pinch on a trackpad), to zoom the drawing; what is under the fingers or the pointer stays where it is. Only the tree zooms, never the page.</li>",
+      "<li>Zoomed in, the drawing scrolls in its box: with one finger, the wheel, or a mouse drag on empty space.</li>",
+      "<li>A double-click on empty space brings it back to life size.</li>",
+      "</ul></section>",
       "<section><h3>Editing</h3><ul>",
-      "<li>Double-click a node (or <kbd>Enter</kbd> on it) to type over it: a new value for a leaf, a new head for an inner node \u2014 <b>Mul</b> over the arguments of an <b>Add</b> turns the sum into a product.</li>",
-      "<li>Right-click a node, or press <b>Node \u25be</b> for the selected one: edit, delete, wrap, add an argument, then the editor's <b>Transform</b> entries for that kind of node and the <b>Methods</b> of its class.</li>",
-      "<li>Drag a subtree onto another node: it becomes that node's last argument. While you drag, a node lights up green where the drop may land and red where it may not \u2014 a node that its parent needs (the x of sin(x), the base of a power) cannot be taken out, a leaf takes no argument, nothing goes into itself. <kbd>Del</kbd> removes the focused node.</li>",
+      "<li>Double-click a node (or <kbd>Enter</kbd> on it, or <b>Edit</b>/<b>Head</b> in the bar under it) to type over it: a new value for a leaf, a new head for an inner node \u2014 <b>Mul</b> over the arguments of an <b>Add</b> turns the sum into a product. <kbd>Enter</kbd> or a click elsewhere applies what was typed, <kbd>Esc</kbd> gives it up; a field left as it was changes nothing, and is no step of the history.</li>",
+      "<li>Right-click a node, or press <b>Node \u25be</b> for the selected one (or <b>\u22ef</b> in the bar under it, which is how a finger gets there): edit, delete, wrap, add an argument, then the editor's <b>Transform</b> entries for that kind of node and the <b>Methods</b> of its class.</li>",
+      "<li>With a mouse or a pen, drag a subtree onto another node: it becomes that node's last argument. A finger on the tree scrolls it, from a node as from empty space, and moves nothing. While you drag, a node lights up green where the drop may land and red where it may not \u2014 a node that its parent needs (the x of sin(x), the base of a power) cannot be taken out, a leaf takes no argument, nothing goes into itself. <kbd>Del</kbd> removes the focused node.</li>",
       "<li>A transformation that is not allowed is refused: the error shows in the editor's line and the panel flickers red for half a second.</li>",
       "<li>The fields add an argument to the selected node or wrap it in a function; <b>Head \u25be</b> changes its head.</li>",
       "<li>Every change is a step of the editor's history: <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes it back. SymPy evaluates as it does for any edit, so moving <code>y</code> under an <b>Add</b> of <code>x</code> gives <code>x + y</code>.</li>",
@@ -558,12 +828,17 @@ SympyEditor.registerAddon("tree", {
       onState: function (snap) {
         if (snap.preview || !snap.tree) return;
         tree = snap.tree;
+        clicked = null;                  // the node clicked is not in this tree
         endEdit(false);
         hideQuick();
         draw();
       },
       onSelect: function () { markSelection(); },
-      destroy: function () { drag = null; hideMenu(); }
+      destroy: function () {
+        drag = null; clicked = null; hideMenu();
+        document.removeEventListener("pointerdown", onDocPointerDown);
+        document.removeEventListener("click", onDocClick, true);
+      }
     };
   }
 });

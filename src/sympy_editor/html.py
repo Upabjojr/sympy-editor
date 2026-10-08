@@ -25,12 +25,12 @@ import json
 import secrets
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from sympy import Basic
 
 from .document import Document
-from .printer import exact_srepr as srepr   # srepr that reads back unchanged (SymPy's reorders MatAdd)
+from .document import srepr   # reads back unchanged: SymPy's reorders a MatAdd and splits a product's coefficient
 from .examples import examples
 from .history import History
 
@@ -62,7 +62,7 @@ SYMPY_WHEEL = ("https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135
 
 #: Python modules embedded in Pyodide-backed pages (order matters for nothing,
 #: but keep this list in sync with the imports of document.py).
-EMBEDDED_MODULES = ("printer.py", "ops.py", "addons.py", "document.py")
+EMBEDDED_MODULES = ("printer.py", "invalid.py", "ops.py", "addons.py", "document.py")
 
 
 def default_urls() -> Dict[str, str]:
@@ -74,6 +74,25 @@ def default_urls() -> Dict[str, str]:
         "pyodideIndex": f"https://cdn.jsdelivr.net/pyodide/v{PYODIDE_VERSION}/full/",
         "sympyWheel": SYMPY_WHEEL,     # "" to use Pyodide's own sympy package instead
     }
+
+
+def addon_catalog(doc: Document) -> List[Any]:
+    """The add-ons ``doc`` can switch on, as far as they load: the ones that
+    are on and the rest of its catalogue."""
+    catalog: List[Any] = []
+    for entry in doc.available_addons():
+        if "error" in entry:
+            continue
+        addon = doc._load(entry["name"])
+        if addon not in catalog:
+            catalog.append(addon)
+    return catalog
+
+
+def pyodide_requirements(doc: Document) -> List[str]:
+    """What a Pyodide page must ``micropip.install`` for the add-ons ``doc``
+    can switch on (their ``requires``): names, as PyPI knows them."""
+    return sorted({pkg for addon in addon_catalog(doc) for pkg in addon.pyodide_packages()})
 
 
 def read_static(name: str) -> str:
@@ -98,6 +117,16 @@ def addon_clients(doc: Document) -> list:
 def _script_json(obj: Any) -> str:
     """JSON that is safe to inline inside a <script> element."""
     return json.dumps(obj, ensure_ascii=False).replace("<", "\\u003c").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+
+
+def _id_attr(element_id: str) -> str:
+    """An element id, for an ``id="..."`` attribute."""
+    return _html.escape(str(element_id), quote=True)
+
+
+def _id_script(element_id: str) -> str:
+    """An element id as a JavaScript string, safe inside a <script>."""
+    return _script_json(str(element_id))
 
 
 def _as_document(expr: Union[Basic, str, Document], **document_kwargs) -> Document:
@@ -138,13 +167,7 @@ def build_config(
     # the document's catalogue, as far as it loads - by module name, which is
     # what the Python that makes the document again (a Pyodide page, the
     # host application) can import.
-    catalog = []
-    for entry in doc.available_addons():
-        if "error" in entry:
-            continue
-        addon = doc._load(entry["name"])
-        if addon not in catalog:
-            catalog.append(addon)
+    catalog = addon_catalog(doc)
     if doc.addons:
         document["addons"] = [addon.module for addon in doc.addons.values()]
     if catalog:
@@ -163,7 +186,10 @@ def build_config(
             # Pyodide file system, and what micropip must install first -
             # for what is on and what may be switched on later.
             cfg["packages"] = {addon.module: addon.python_sources() for addon in catalog}
-            cfg["micropip"] = sorted({pkg for addon in catalog for pkg in addon.pyodide_packages()})
+            # A bundle that carries the wheels (mobile/build_www.py, offline)
+            # names them instead: the page installs those, and asks PyPI
+            # for nothing.
+            cfg["micropip"] = list(all_urls.get("wheels") or pyodide_requirements(doc))
     elif backend == "native":
         # The host application runs Python itself (the Android app ships
         # CPython and SymPy); it only needs to know which expression to start
@@ -182,12 +208,12 @@ def render_fragment(config: Dict[str, Any], element_id: Optional[str] = None) ->
     return (
         f'<link rel="stylesheet" href="{katex_css}">\n'
         f"<style>\n{read_static('editor.css')}\n</style>\n"
-        f'<div id="{element_id}" class="sympy-editor-host"></div>\n'
+        f'<div id="{_id_attr(element_id)}" class="sympy-editor-host"></div>\n'
         # Several fragments on one page share one SympyEditor (and, through
         # it, one Pyodide runtime); the script is skipped once it is defined.
         f'<script>\nif (!window.SympyEditor) {{\n{read_static("editor.js")}\n}}\n</script>\n'
         "<script>\n"
-        f'SympyEditor.mount(document.getElementById("{element_id}"), {_script_json(config)});\n'
+        f'SympyEditor.mount(document.getElementById({_id_script(element_id)}), {_script_json(config)});\n'
         "</script>\n"
     )
 
@@ -196,30 +222,46 @@ _PAGE = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>%(title)s</title>
 %(head)s<style>
   body { margin: 2rem; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
          background: #ffffff; color: #1f2328; }
   @media (prefers-color-scheme: dark) { body { background: #1e1e1e; color: #e6e6e6; } }
-  h1 { font-size: 1.2rem; font-weight: 600; margin: 0 0 1rem;
+  /* The page never moves sideways: whatever is wider than the screen - a
+     long formula, a magnified tree - scrolls in a box of its own. */
+  html, body { overflow-x: hidden; overscroll-behavior-x: none; }
+  @supports (overflow: clip) { html, body { overflow-x: clip; } }
+  .page-head { display: flex; align-items: center; gap: 0.5rem; margin: 0 0 1rem; }
+  h1 { font-size: 1.2rem; font-weight: 600; margin: 0;
        display: flex; align-items: center; gap: 0.5rem; }
   /* the application's own icon, on the title's line and as tall as it:
      a page in a WebView has no title bar of its own to carry either */
   h1 .page-logo { flex: 0 0 auto; display: block; }
   h1 .page-logo svg { display: block; width: 1.7em; height: 1.7em; }
+  .page-head .se-page-menu { margin-left: auto; }
   /* phones: a margin that keeps the controls clear of rounded corners and notches
    * (the safe-area insets where the browser reports them; the Android app pads natively) */
   @media (max-width: 640px) {
     body { margin: 0.75rem;
            padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0); }
-    h1 { font-size: 1rem; margin: 0.2rem 0 0.5rem; gap: 0.4rem; }
+    .page-head { margin: 0.2rem 0 0.5rem; }
+    h1 { font-size: 1rem; gap: 0.4rem; }
   }
 </style>
 </head>
 <body>
-<h1>%(heading)s</h1>
-%(fragment)s</body>
+<header class="page-head"><h1>%(heading)s</h1>%(menu)s</header>
+%(fragment)s<script>
+/* A page that is the editor alone - the apps, the site's editor, a page saved
+ * to a file - zooms only what zooms: the formula, the plot, the tree.  The
+ * viewport above says so to a WebView; iOS Safari ignores user-scalable=no
+ * and takes its page zoom from gesture events, so those are cancelled too. */
+["gesturestart", "gesturechange"].forEach(function (type) {
+  document.addEventListener(type, function (ev) { ev.preventDefault(); }, { passive: false });
+});
+</script>
+</body>
 </html>
 """
 
@@ -231,12 +273,17 @@ def render_page(config: Dict[str, Any], title: str = "SymPy Editor", head: str =
     fixes the editor's element id (random otherwise) for a reproducible page;
     ``logo`` is SVG markup shown beside the title (the applications put their
     own icon there, having no title bar to carry it)."""
-    name = _html.escape(title)
+    name = _html.escape(str(title))
+    element_id = element_id or "sympy-editor-" + uuid.uuid4().hex[:12]
     # aria-hidden: the heading beside it already says the name, and the mark's
     # own <title>/<desc> - the note that lets us use SymPy's logo - would
     # otherwise be read out as part of the heading.
     heading = f'<span class="page-logo" aria-hidden="true">{logo}</span>{name}' if logo else name
-    return _PAGE % {"title": name, "heading": heading,
+    # The editor puts its menu button (≡) here, on the title's line at the
+    # right - beside the heading, not in it: it is the page's menu, not one
+    # more tool among the edits, and no part of what the heading says.
+    menu = f'<span class="se-page-menu" data-editor="{_id_attr(element_id)}"></span>'
+    return _PAGE % {"title": name, "heading": heading, "menu": menu,
                     "fragment": render_fragment(config, element_id), "head": head}
 
 
@@ -344,10 +391,10 @@ def render_history_fragment(config: Dict[str, Any], element_id: Optional[str] = 
     return (
         f'<link rel="stylesheet" href="{katex_css}">\n'
         f"<style>\n{read_static('editor.css')}\n</style>\n"
-        f'<div id="{element_id}" class="sympy-editor-host"></div>\n'
+        f'<div id="{_id_attr(element_id)}" class="sympy-editor-host"></div>\n'
         f'<script>\nif (!window.SympyEditor) {{\n{read_static("editor.js")}\n}}\n</script>\n'
         "<script>\n"
-        f'SympyEditor.mountHistory(document.getElementById("{element_id}"), {_script_json(config)});\n'
+        f'SympyEditor.mountHistory(document.getElementById({_id_script(element_id)}), {_script_json(config)});\n'
         "</script>\n"
     )
 
@@ -385,8 +432,8 @@ def to_history_html(
         return fragment
     # No <h1> of its own: the report inside the viewer already opens with the
     # title and the step count.
-    page = _PAGE.replace("<h1>%(heading)s</h1>\n", "")
-    return page % {"title": _html.escape(config["title"]), "fragment": fragment, "head": head}
+    page = _PAGE.replace('<header class="page-head"><h1>%(heading)s</h1>%(menu)s</header>\n', "")
+    return page % {"title": _html.escape(str(config["title"])), "fragment": fragment, "head": head}
 
 
 def save_history_html(steps, path, **kwargs) -> Path:

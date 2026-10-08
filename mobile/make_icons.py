@@ -21,6 +21,9 @@ What comes out:
   launcher at a glance;
 * `ios/SymPyEditor/Assets.xcassets/AppIcon.appiconset/`  the iOS app icon,
   the single 1024x1024 Xcode has wanted since 14;
+* `desktop/macos/SymPyEditor/Assets.xcassets/AppIcon.appiconset/`  the Mac
+  app's icon, which is still a set of sizes (16 to 1024: the Dock draws one,
+  the Finder another);
 * `mobile/icon/icon-512.png`         Google Play's listing icon;
 * `mobile/icon/icon-1024.png`        the same at App Store size.
 
@@ -40,6 +43,19 @@ ICON = HERE / "icon"
 RES = HERE / "android/app/src/main/res"
 DEBUG_RES = HERE / "android/app/src/debug/res"      # the debug build's icons, badged
 IOS_ICONS = HERE / "ios/SymPyEditor/Assets.xcassets/AppIcon.appiconset"
+MAC_ICONS = HERE.parent / "desktop/macos/SymPyEditor/Assets.xcassets/AppIcon.appiconset"
+
+#: What a macOS app icon is made of: (points, scale) - the file for each is
+#: icon-<pixels>.png, and several entries share one file (32 = 16@2x = 32@1x).
+MAC_SIZES = [(16, 1), (16, 2), (32, 1), (32, 2), (128, 1), (128, 2), (256, 1), (256, 2), (512, 1), (512, 2)]
+
+
+def mac_contents() -> str:
+    images = ",\n".join(
+        '    {{ "filename" : "icon-{px}.png", "idiom" : "mac", "scale" : "{scale}x", "size" : "{pt}x{pt}" }}'
+        .format(px=pt * scale, scale=scale, pt=pt) for pt, scale in MAC_SIZES)
+    return '{\n  "images" : [\n' + images + '\n  ],\n  "info" : { "author" : "xcode", "version" : 1 }\n}\n'
+
 
 #: The mark's own drawing, in the source SVG's 750x750 user units (measured
 #: once from a render of mobile/icon/sympy-mark.svg: the tail reaches far to
@@ -249,6 +265,12 @@ def main() -> int:
     render(ICON / "icon.svg", ICON / "icon-512.png", 512)       # Google Play's listing icon
     render(ICON / "icon.svg", ICON / "icon-1024.png", 1024)     # the App Store's
     IOS_ICONS.mkdir(parents=True, exist_ok=True)
+    # The Mac app's icon: a set of sizes, drawn from the same master (the Dock
+    # shows one, the Finder's list another), and Xcode's catalogue to name them.
+    MAC_ICONS.mkdir(parents=True, exist_ok=True)
+    (MAC_ICONS / "Contents.json").write_text(mac_contents(), encoding="utf-8")
+    for pixels in sorted({pt * scale for pt, scale in MAC_SIZES}):
+        render(ICON / "icon.svg", MAC_ICONS / f"icon-{pixels}.png", pixels)
     render(ICON / "icon.svg", IOS_ICONS / "icon-1024.png", 1024)
     flatten(IOS_ICONS / "icon-1024.png")                        # iOS rejects an icon with alpha
     (IOS_ICONS / "Contents.json").write_text(IOS_CONTENTS, encoding="utf-8")
