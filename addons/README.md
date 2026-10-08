@@ -16,6 +16,7 @@ addons/
   sympy_editor_latex/       LaTeX in: a first reading, every ambiguity a choice, constants as switches (lark)
   sympy_editor_console/     a Python console and script runner, with `editor` for the formula (no dependency)
   sympy_editor_assumptions/ what SymPy knows about the selection; the symbols' assumptions as switches (no dependency)
+  sympy_editor_forms/       the selection rewritten by every simplification function, one card per form (no dependency)
   sympy_editor_handwriting/ writing on the formula by hand, read by math-ocr's stroke model (onnxruntime; not in Pyodide)
   sympy_editor_export/      the selection as LaTeX, MathML, Python, C, Fortran, JS, Octave, Julia, Rust or a function (no dependency)
   demo.py                   a page with the first five, to try them in a browser
@@ -400,6 +401,17 @@ whole function by `codegen`, with the free symbols as arguments.  Printers
 run with `strict=False`, so what a language lacks is in their own *Not
 supported* comment; a refusal comes back as words.  Each file has Copy (the
 host's clipboard, as the editor's Copy) and Save (`api.saveFile`).
+
+**`sympy_editor_forms`** - *a simplification explorer*.  The selection (a
+range, the whole formula) rewritten by each of SymPy's rewriting functions -
+`simplify`, `expand`, `factor`, `apart`/`collect` per variable, `trigsimp`,
+`fu`, `logcombine`/`expand_log` with an optional `force`, `rewrite(exp)`... -
+one card per *different* form (equal forms grouped, the functions that gave
+each listed), with its `count_ops` and its length, sorted by either.  The
+panel asks for one function at a time (`run`, a query), each under a time box
+(a trace function raising at the first Python call past the deadline: it works
+in Pyodide, which has no threads), with a pause between them so the user's own
+edits go first; a card's `apply` is an undoable step, "Forms: factor".
 
 ## Open questions
 
