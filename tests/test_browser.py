@@ -4999,26 +4999,30 @@ def test_the_sessions_window_fits_the_screen_and_searches(browser, serve_expr):
     sheet = _open_sheet(page, "sessions")
     sheet.locator(".se-session-current .se-subtab").click()          # the history, with its wide formula
     assert _wait(lambda: page.locator(".se-sheet-view .se-step").count() >= 1)
+    page.wait_for_timeout(300)                                       # the list refreshed after opening (the session saved)
     widths = page.evaluate("""() => { const b = document.querySelector('.se-sheet-body');
         return [b.scrollWidth, b.clientWidth, document.documentElement.scrollWidth,
                 Math.max(...[...document.querySelectorAll('.se-sheet-view .se-session')].map(e => e.getBoundingClientRect().right))]; }""")
     assert widths[0] <= widths[1] and widths[2] <= 390 and widths[3] <= 390, widths
-    long_name = sheet.locator('.se-session[data-id="b"] .se-session-row > code')
-    long_name.wait_for(state="visible")
-    assert long_name.bounding_box()["height"] > 30                   # wrapped onto several lines
+    # wrapped onto several lines (found and measured at once: the list is
+    # rebuilt when the session is saved, and a row found a moment before can
+    # be gone when it is measured)
+    height = """() => { const c = document.querySelector('.se-sheet-view .se-session[data-id="b"] .se-session-row > code');
+                         return c ? c.getBoundingClientRect().height : 0; }"""
+    assert _wait(lambda: page.evaluate(height) > 30)
     # the search: by name, by formula, none
     find = sheet.locator(".se-session-search")
     find.fill("hamiltonian")
     visible = lambda: [r.get_attribute("data-id") for r in sheet.locator(".se-session[data-id]").all() if r.is_visible()]
-    assert visible() == ["c"]
+    assert _wait(lambda: visible() == ["c"])
     find.fill("omega")                                                # the formula it holds
-    assert visible() == ["c"]
+    assert _wait(lambda: visible() == ["c"])
     find.fill("integral sum")
-    assert visible() == ["b"]
+    assert _wait(lambda: visible() == ["b"])
     find.fill("nothing like it")
-    assert visible() == [] and "No session matches" in sheet.locator(".se-session-none").inner_text()
+    assert _wait(lambda: visible() == []) and "No session matches" in sheet.locator(".se-session-none").inner_text()
     find.fill("")
-    assert len(visible()) == 4                                        # the three, and the page's own
+    assert _wait(lambda: len(visible()) == 4)                                        # the three, and the page's own
     page.close()
 
 
@@ -5614,6 +5618,34 @@ def _wait_for(check, timeout=5.0):
     return False
 
 
+def test_an_experimental_add_on_starts_off_until_switched_on(browser, tmp_path):
+    """With rememberAddons every add-on starts on - but one marked
+    experimental (new, not yet checked) starts off, on a first start as for
+    one arriving in an update; once switched on, it stays on."""
+    addon, Boxed = _demo_addon()
+    addon.experimental = True
+    doc = Document(x + y, available=[addon])
+    doc.enable("demo")                                        # the page was built with every add-on on
+    srv = EditorServer(doc, port=0, options={"rememberAddons": True}, store=tmp_path)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        page = _open(browser, srv.url)
+        assert _wait(lambda: list(doc.addons) == [], timeout=15)    # nothing kept: experimental, so off
+        assert page.locator(".se-addon-demo").count() == 0
+        sheet = _open_sheet(page, "addons")
+        assert sheet.locator(".se-addon-badge").count() == 1
+        sheet.locator(".se-addon-row input").check()
+        page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)
+        assert _wait_for(lambda: json.loads((tmp_path / "addons.json").read_text(encoding="utf-8")).get("on") == ["demo"])
+        page.goto(srv.url)                                    # a start with the switch kept: on
+        page.wait_for_selector(".se-addon-demo .demo-panel", timeout=15000)
+        assert list(doc.addons) == ["demo"]
+        assert page.errors == []
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 def test_remembered_addons_come_back_after_a_reload(browser, tmp_path):
     """With rememberAddons, every add-on is on until switched off, and what
     is switched off is kept - kept where the page is being run from: the
@@ -5630,7 +5662,7 @@ def test_remembered_addons_come_back_after_a_reload(browser, tmp_path):
         _open_sheet(page, "addons").locator(".se-addon-row input").uncheck()
         page.wait_for_function("!document.querySelector('.se-addon-demo')", timeout=10000)
         assert _wait_for(lambda: (tmp_path / "addons.json").is_file()
-                         and json.loads((tmp_path / "addons.json").read_text(encoding="utf-8")) == {"off": ["demo"]})
+                         and json.loads((tmp_path / "addons.json").read_text(encoding="utf-8")) == {"off": ["demo"], "on": []})
         assert page.evaluate("localStorage.getItem('sympy-editor:addons')") is None
         doc.enable("demo")                                      # the server's document has it on (an app restarted)
         page.goto(srv.url)
@@ -5639,7 +5671,7 @@ def test_remembered_addons_come_back_after_a_reload(browser, tmp_path):
         assert page.locator(".se-addon-demo").count() == 0
         _open_sheet(page, "addons").locator(".se-addon-row input").check()
         page.wait_for_selector(".se-addon-demo .demo-panel", timeout=10000)
-        assert _wait_for(lambda: json.loads((tmp_path / "addons.json").read_text(encoding="utf-8")) == {"off": []})
+        assert _wait_for(lambda: json.loads((tmp_path / "addons.json").read_text(encoding="utf-8")) == {"off": [], "on": ["demo"]})
         assert page.errors == []
     finally:
         srv.shutdown()

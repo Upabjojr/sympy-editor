@@ -2,6 +2,12 @@
 
 ## 0.1.3 — unreleased
 
+* **New add-ons are marked experimental, and start off.** An add-on whose
+  `addon.json` says `"experimental": true` shows an *Experimental* badge in
+  the Add-ons window, and in the apps it starts switched off - on a first
+  launch, and when one arrives in an update - until it is switched on; the
+  switch is then remembered like any other.
+
 * **Sessions, Add-ons and File have windows of their own.** "New
   session…" heads the ≡ menu, with an entry under it that opens the list of
   sessions in a window (a session picked there opens, and the window goes;
