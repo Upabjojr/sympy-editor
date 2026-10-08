@@ -82,6 +82,7 @@ examples/       demo.py generates demo.html / runs the server.
 addons/         Add-on drafts, each a package of its own (tree, plot, matching, latex,
                 console, handwriting, assumptions).
                 console, handwriting, numeric).
+                console, handwriting, transforms).
 ```
 
 Data flow: Python `Document.snapshot()` → JSON (`latex`, `latex_plain`,

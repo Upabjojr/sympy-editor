@@ -22,6 +22,7 @@ addons/
   sympy_editor_handwriting/ writing on the formula by hand, read by math-ocr's stroke model (onnxruntime; not in Pyodide)
   sympy_editor_export/      the selection as LaTeX, MathML, Python, C, Fortran, JS, Octave, Julia, Rust or a function (no dependency)
   sympy_editor_check/       "Check my work": is each step of the history equivalent to the one before (no dependency)
+  sympy_editor_transforms/  Laplace, Fourier, Mellin, Hankel and z-transforms of the selection (no dependency)
   demo.py                   a page with the first five, to try them in a browser
 ```
 
@@ -437,6 +438,17 @@ leading term; with the coefficients, and the truncation error at a sample
 point.  `insert` replaces the selection with the expansion, with or without
 its O term, as one step.  Every computation is time-boxed in a thread that
 is stopped when it overruns, and SymPy's failures are said in words.
+
+**`sympy_editor_transforms`** - *ops + a panel that computes*.  Laplace,
+Fourier, sine, cosine, Mellin and Hankel transforms and their inverses are
+SymPy's, asked for their conditions; the one-sided z-transform (a table of
+geometric, trigonometric and polynomial-times-geometric terms, `summation`
+otherwise) and its inverse for rational functions (partial fractions) are
+the add-on's own.  The panel's *Compute* is a query that shows the result
+and where it holds in words ("converges for Re(s) > -2"); *Apply* replaces
+the selection, unevaluated (`LaplaceTransform(f, t, s)`) when the editor's
+toggle is on.  Six ops put the same in the Transform menu, asking for the
+variables through the op `params`.
 
 ## Open questions
 
