@@ -498,3 +498,25 @@ def test_an_addon_written_in_a_script_embeds_no_file_of_its_neighbours(tmp_path,
         assert "hunter2" not in page
     finally:
         sys.modules.pop("lone_addon", None)
+
+
+def test_names_an_addon_puts_in_scope_are_not_the_documents_own():
+    """An atom with Symbols for arguments (a unit: ``Quantity(meter, m)``) is
+    not two names of the formula - taken for them, they shadowed the add-on's
+    ``meter`` at the next edit - and what an add-on puts in scope is not
+    listed in the Symbols panel, which is for the document's own names."""
+    from sympy.physics.units import meter
+
+    class Units(Addon):
+        name = "units_probe"
+
+        def namespace(self):
+            return {"meter": meter}
+
+    doc = Document("x", addons=[Units()], available=[])
+    doc.handle({"action": "set", "src": "5*meter + x"})
+    assert doc.expr == 5 * meter + symbols("x")
+    assert set(doc.used_symbols()) == {"x"}
+    doc.handle({"action": "set", "src": "2*meter"})
+    assert doc.expr == 2 * meter                       # still the unit
+    assert [s["name"] for s in doc.snapshot()["symbols"]] == []

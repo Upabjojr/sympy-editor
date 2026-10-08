@@ -20,6 +20,7 @@ addons/
   sympy_editor_numeric/     the selection as a number: any precision, exact forms, why there is none, tables (no dependency)
   sympy_editor_series/      series expansions of the selection: Taylor, Laurent, Puiseux, asymptotic, leading term (no dependency)
   sympy_editor_solver/      solve the selected equation, inequality or system; check, insert (no dependency)
+  sympy_editor_units/       physical units: typed names, dimensions checked term by term, conversions (no dependency)
   sympy_editor_handwriting/ writing on the formula by hand, read by math-ocr's stroke model (onnxruntime; not in Pyodide)
   sympy_editor_export/      the selection as LaTeX, MathML, Python, C, Fortran, JS, Octave, Julia, Rust or a function (no dependency)
   sympy_editor_check/       "Check my work": is each step of the history equivalent to the one before (no dependency)
@@ -482,6 +483,19 @@ which puts it in place of the matrix as a step of the history.  Every
 computation runs under a time budget on a thread of its own and is stopped
 past it, the panel saying so in words (Pyodide has no threads: the editor's
 Interrupt is the limit there).
+
+**`sympy_editor_units`** - *new nodes from SymPy itself + a panel*.  The
+units and constants of `sympy.physics.units` become names in the formula
+through `namespace()` - the units' own names (what `srepr` writes, so a
+session reads back) and their long aliases always, the one-letter
+abbreviations (`m`, `s`, `N`) only with the document's *short unit names*
+switch, since they are variables far more often.  The panel shows the
+selection's dimension and checks every sum, relation, exponent and function
+argument under it - the terms that disagree are listed and outlined in the
+formula - and converts (`convert_to`, SI base units, `quantity_simplify`),
+each a step of the history.  A unit is a SymPy *atom* whose arguments are the
+Symbols of its name: the document does not count those as the formula's names
+(`_names_in`), or the next `meter` typed was a plain symbol.
 
 ## Open questions
 
