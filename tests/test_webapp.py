@@ -255,7 +255,9 @@ def test_the_shelf_opens_with_an_editor_of_its_own(tmp_path):
     run = 'SympyEditorTutorial.run(document.getElementById("try-the-editor"), '
     assert run in page and page.count("if (!window.SympyEditorTutorial) {") == 1
     tour = page.split(run, 1)[1].splitlines()[0]
-    assert '"stopButton": true' in tour and '"part": "history"' not in tour and "se-history-close" not in tour
+    # without the History part: neither its steps nor the click that closes it
+    # (the Add-ons window's own close button shares the class, and stays)
+    assert '"stopButton": true' in tour and '"part": "history"' not in tour and '"click": ".se-history-close"' not in tour
     # it stops when the reader goes elsewhere, and the button in the text plays it again
     assert '"stopOnLeave": true' in tour and '"playButton": "try-the-editor-play"' in tour
     assert page.index('id="try-the-editor-play"') < page.index('<div id="try-the-editor"></div>')

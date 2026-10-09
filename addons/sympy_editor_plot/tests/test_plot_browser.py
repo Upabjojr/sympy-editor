@@ -675,3 +675,42 @@ def test_a_sampling_slower_than_the_overlay_asks_once():
         page.wait_for_timeout(1500)
         assert _sampled(page) == []
         assert page.errors == []
+
+
+def test_a_value_waits_while_its_symbol_is_out_of_sight():
+    """A value given to a symbol is kept while the selection is a part
+    without it, and comes back with the symbol: y = 4 was forgotten after a
+    look at a part with no y, and the whole formula, selected again, asked for
+    it once more instead of being drawn (the site's tour stopped drawing
+    there)."""
+    z = Symbol("z")
+    doc = Document(cos(y * x) * z, addons=[ADDON])                  # x on the axis: y and z want values
+    srv = EditorServer(doc, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with playwright.sync_playwright() as p:
+            browser = _launch(p)
+            try:
+                page = browser.new_page()
+                errors = []
+                page.on("pageerror", lambda e: errors.append(str(e)))
+                page.goto(srv.url)
+                page.wait_for_selector('.plot-sliders [data-sym="z"]', timeout=30000)
+                page.locator('.plot-sliders [data-sym="y"] .plot-value').fill("2")
+                page.locator('.plot-sliders [data-sym="z"] .plot-value').fill("3")
+                page.wait_for_selector(".plot-area svg.main-svg, .plot-area svg.plot-svg", timeout=30000)
+                cosine = page.evaluate(f"Object.entries({ED}.state.nodes).find(([k, v]) => v.src === 'cos(x*y)')[0]")
+                page.evaluate(f"{ED}.select({cosine!r})")                   # a part with no z: its row goes
+                page.wait_for_function("!document.querySelector('.plot-sliders [data-sym=\"z\"]')")
+                page.evaluate(f"{ED}.select('/')")                          # the whole formula: z is back, 3 with it
+                page.wait_for_selector('.plot-sliders [data-sym="z"]')
+                assert page.locator('.plot-sliders [data-sym="z"] .plot-value').input_value() == "3"
+                assert page.locator('.plot-sliders [data-sym="y"] .plot-value').input_value() == "2"
+                page.wait_for_function("!document.querySelector('.se-addon-plot .plot-note.error')", timeout=15000)
+                page.wait_for_selector(".plot-area svg.main-svg, .plot-area svg.plot-svg", timeout=30000)
+                assert errors == []
+            finally:
+                browser.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()

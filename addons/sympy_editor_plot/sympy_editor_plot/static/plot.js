@@ -46,6 +46,11 @@ SympyEditor.registerAddon("plot", {
     // it: a name is any text, and a symbol called constructor would
     // otherwise come with a value nobody gave.
     var values = Object.create(null);
+    //: Values of symbols out of sight for now (the selection is a part
+    //: without them, or one became the axis): given back when they return.
+    //: Forgotten, y = 4 was gone after a look at a part with no y, and the
+    //: whole formula, selected again, could no longer be drawn.
+    var kept = Object.create(null);
     var seq = 0, timer = null, plotly = null, plotlyFailed = false;
     var loading = null;     // Plotly on its way: one load, however many answers come meanwhile
     var waiting = null;     // ... and the answer to draw when it arrives, the latest one only
@@ -250,8 +255,10 @@ SympyEditor.registerAddon("plot", {
     function fillSliders(res, sent) {
       var wanted = (res.free || []).filter(function (n) { return n !== res.var; });
       // A field and a slider per free symbol besides the axis: a value is
-      // the user's to give (none is guessed); new symbols get an empty row,
-      // vanished ones lose theirs, the rest keep their value.
+      // the user's to give (none is guessed); new symbols get an empty row -
+      // or the value they had when they were last here -, vanished ones lose
+      // their row and the value waits in `kept`, the rest keep their value.
+      var restored = false;
       wanted.forEach(function (name) {
         var row = rowOf(name);
         if (row) {
@@ -264,6 +271,8 @@ SympyEditor.registerAddon("plot", {
           }
           return;
         }
+        if (!(name in values) && name in kept) { values[name] = kept[name]; restored = true; }
+        delete kept[name];
         var has = name in values;
         var num = h("input", { type: "text", autocapitalize: "off", autocorrect: "off", class: "plot-num plot-value", placeholder: "value", title: "The value of " + name + " for the plot: a number, or what is one (pi/2, sqrt(2))",
                                value: has ? String(values[name]) : "", spellcheck: "false", autocomplete: "off" });
@@ -284,8 +293,14 @@ SympyEditor.registerAddon("plot", {
       });
       Array.prototype.slice.call(sliders.children).forEach(function (row) {
         var name = row.getAttribute("data-sym");
-        if (wanted.indexOf(name) < 0) { sliders.removeChild(row); delete values[name]; }
+        if (wanted.indexOf(name) < 0) {
+          sliders.removeChild(row);
+          if (name in values) kept[name] = values[name];
+          delete values[name];
+        }
       });
+      // this answer was worked out without the values given back: once more, with them
+      if (restored) request();
     }
 
     /** Plotly, asked for once a page: by the first panel that draws, for

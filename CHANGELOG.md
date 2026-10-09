@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+* **The tour follows the editor again.**  The tour on the web site left the
+  ≡ menu open over the editor after switching the add-ons on (Escape in the
+  Add-ons window now goes back to the menu, so the tour presses the
+  window's × instead), its LaTeX steps used a reader that is no longer there
+  (they now type in the formula and Apply), and the full tour could not find
+  ≡ beside a page's title.  Stopped, or at its end, the tour also closes a
+  menu's window.
+* **The plot keeps a value while its symbol is out of sight.**  A value
+  given to y is kept while the selection is a part without y, and comes
+  back with it - the whole formula, selected again, is drawn again instead
+  of asking for y once more.
+
 * **An action brings the formula back into sight.**  On a phone the
   Transform, Methods and function menus sit a screen or more below the
   formula; picking an action there now scrolls back to the formula, so the

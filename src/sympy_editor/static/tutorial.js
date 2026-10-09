@@ -519,7 +519,7 @@
 
   /** The script is over: the last caption has its time, then everything of
    *  the player goes, and what is left is the editor, as a reader finds it -
-   *  no overlay, the History, the drawer and the menus shut, the page at its
+   *  no overlay, the History, the drawer, its windows and the menus shut, the page at its
    *  top. */
   Player.prototype.finish = async function () {
     var ov = this.overlay;
@@ -535,6 +535,7 @@
     ov.remove();
     var ed = this.editor;
     if (ed.root.querySelector(".se-history-view") && typeof ed.closeHistory === "function") ed.closeHistory();
+    if (typeof ed.closeSheet === "function") ed.closeSheet();      // a window of the menu's (Add-ons, File...)
     if (typeof ed.closeDrawer === "function") ed.closeDrawer();
     if (document.activeElement && document.activeElement !== document.body && ed.root.contains(document.activeElement)) document.activeElement.blur();
     try {
@@ -585,6 +586,7 @@
     this.overlay.remove();
     var ed = this.editor;
     if (ed.root.querySelector(".se-history-view") && typeof ed.closeHistory === "function") ed.closeHistory();
+    if (typeof ed.closeSheet === "function") ed.closeSheet();      // a window of the menu's (Add-ons, File...)
     if (typeof ed.closeDrawer === "function") ed.closeDrawer();
     if (ed.input && typeof ed.cancelEdit === "function") ed.cancelEdit(true);
     var a = document.activeElement;
