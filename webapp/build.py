@@ -226,8 +226,17 @@ h1 {{ font-size: 2.2rem; margin: 0 0 0.5rem; letter-spacing: -0.015em;
       display: flex; align-items: center; gap: 0.8rem; }}
 h1 img {{ border-radius: 0.9rem; box-shadow: 0 1px 2px rgba(27, 31, 36, 0.12), 0 10px 24px -12px rgba(27, 31, 36, 0.35); }}
 header p {{ margin: 0 0 1rem; color: #57606a; max-width: 42rem; }}
-header .actions {{ display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 1.5rem; }}
-header a.button {{ display: inline-block; padding: 0.55rem 1.15rem; border-radius: 0.55rem;
+header .stores {{ display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.9rem; margin-top: 1.6rem; }}
+header .stores a {{ display: inline-flex; border-radius: 0.6rem; transition: transform 120ms ease; }}
+header .stores a:hover {{ transform: translateY(-1px); }}
+header .stores a:focus-visible {{ outline: 2px solid #3b82f6; outline-offset: 2px; }}
+header .app-badge img {{ height: 40px; width: auto; display: block; }}
+/* Google's badge carries a transparent margin of its own: at 58px its drawn
+   part is the App Store badge's 40 */
+header .play-badge img {{ height: 58px; width: auto; display: block; margin: -9px -8px; }}
+header .actions {{ display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 1.1rem; }}
+header a.button svg {{ width: 1.05em; height: 1.05em; flex: none; }}
+header a.button {{ display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.55rem 1.15rem; border-radius: 0.55rem;
                   border: 1px solid #d0d7de; text-decoration: none; color: inherit; font-size: 0.95rem;
                   background: #ffffff; box-shadow: 0 1px 2px rgba(27, 31, 36, 0.06);
                   transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease; }}
@@ -375,10 +384,14 @@ header a.button code {{ font-size: 0.85em; }}
   what produced it, and what it became. The viewers further down are that
   history, and they do not need the editor at all - a derivation computed in Python
   is shown the same way. Here are {count} of them.</p>
+  <div class="stores">
+    <a class="app-badge" href="{app_store}"><img src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40"></a>
+    <a class="play-badge" href="{google_play}"><img src="badges/google-play.png" alt="Get it on Google Play" width="150" height="58"></a>
+  </div>
   <div class="actions">
-    <a class="button primary" href="{editor_href}">Open standalone editor</a>
-    <a class="button" href="https://github.com/Upabjojr/sympy-editor">Source on GitHub</a>
-    <a class="button" href="https://pypi.org/project/sympy-editor/"><code>pip install sympy-editor</code></a>
+    <a class="button primary" href="{editor_href}">{icon_editor}Open standalone editor</a>
+    <a class="button" href="https://github.com/Upabjojr/sympy-editor">{icon_github}Source on GitHub</a>
+    <a class="button" href="https://pypi.org/project/sympy-editor/">{icon_pip}<code>pip install sympy-editor</code></a>
   </div>
 </header>
 {try_editor}
@@ -668,9 +681,43 @@ def manifest() -> dict:
     }
 
 
+#: The apps in the stores (the link without a country: the store picks the reader's own).
+APP_STORE = "https://apps.apple.com/app/sympy-editor/id6807581349"
+GOOGLE_PLAY = "https://play.google.com/store/apps/details?id=org.sympy.editor"
+#: The stores' own badges, as Apple and Google publish them for linking to an
+#: app.  Downloaded at build time and kept beside the page - the front page
+#: loads nothing from anywhere else (privacy.html says so) - and never
+#: committed: no image is.
+STORE_BADGES = {
+    "app-store.svg": "https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg",
+    "google-play.png": "https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png",
+}
+#: Icons on the header's buttons: drawn inline, in the button's own colour.
+ICON_EDITOR = ('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" '
+               'stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/>'
+               '<path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>')
+ICON_GITHUB = ('<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.7.5.5 5.7.5 12c0 '
+               '5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.6v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 '
+               '1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.4 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.4-2.3 '
+               '1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 0 1 5.8 0c2.2-1.5 3.2-1.2 3.2-1.2.6 1.6.2 '
+               '2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.2c0 .3.2.7.8.6 4.6-1.5 '
+               '7.9-5.8 7.9-10.9C23.5 5.7 18.3.5 12 .5z"/></svg>')
+ICON_PIP = ('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" '
+            'stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="4" width="19" height="16" rx="2"/>'
+            '<path d="m7 9 3 3-3 3M12.5 15H17"/></svg>')
+
+
+def store_badges(folder: Path, cache: Path | None = None) -> None:
+    """The App Store's and Google Play's badges, into `folder/badges/`."""
+    cache = cache or Path.home() / ".cache" / "sympy-editor"
+    for name, url in STORE_BADGES.items():
+        build_www.fetch(url, folder / "badges" / name, cache)
+
+
 def derivations_page(folder: Path, *, urls: dict | None = None,
                      editor_href: str = "../index.html",
-                     editor: dict | None = None, tour: dict | None = None) -> Path | None:
+                     editor: dict | None = None, tour: dict | None = None,
+                     cache: Path | None = None) -> Path | None:
     """The project introduced, then the whole shelf of worked derivations,
     each with its own player, as `folder/index.html`.
 
@@ -752,9 +799,11 @@ def derivations_page(folder: Path, *, urls: dict | None = None,
         editor_css=read_static("editor.css"), cards="\n".join(cards), figures=figures,
         editor_js=read_static("editor.js"), mounts="\n".join(mounts), count=len(cards),
         editor_href=html.escape(editor_href, quote=True), try_editor=try_editor,
-        try_watch=try_watch)
+        try_watch=try_watch, app_store=APP_STORE, google_play=GOOGLE_PLAY,
+        icon_editor=ICON_EDITOR, icon_github=ICON_GITHUB, icon_pip=ICON_PIP)
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "index.html").write_text(page, encoding="utf-8")
+    store_badges(folder, cache)
     doc_pages(folder)
     icon = ROOT / "mobile" / "icon" / "icon.svg"     # the pages' mark, where write_icons did not run (dist/derivations)
     if icon.is_file() and not (folder / "icon.svg").exists():
@@ -805,7 +854,7 @@ def shelf_site(out: Path, *, cache: Path | None = None, cdn: bool = False) -> Pa
     tour = without_parts(load_tutorial(ROOT / "examples" / "tutorial" / "tour.json"), ["history"])
     live = build_config(build_www.document_with_addons(sympify(tour["expression"])),
                         backend="pyodide", urls=urls, options={})
-    derivations_page(out, urls=urls, editor_href="editor.html", editor=live, tour=tour)
+    derivations_page(out, urls=urls, editor_href="editor.html", editor=live, tour=tour, cache=cache)
     return out
 
 
@@ -817,7 +866,7 @@ def build(out: Path, *, cdn: bool = False, cache: Path | None = None) -> Path:
     build_www.build(out, cdn=cdn, cache=cache, title=NAME, head=head, enable_addons=True)
     vendored = (out / "vendor/katex/katex.min.js").is_file()
     derivations_page(                           # before sw.js: the precache lists what is there
-        out / "derivations",
+        out / "derivations", cache=cache,
         urls=({"katexJs": "../vendor/katex/katex.min.js", "katexCss": "../vendor/katex/katex.min.css"}
               if vendored else None))
     (out / "manifest.webmanifest").write_text(json.dumps(manifest(), indent=2), encoding="utf-8")

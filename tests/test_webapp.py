@@ -203,6 +203,24 @@ def test_the_web_app_wears_the_app_s_own_icon(tmp_path):
     assert [i["src"] for i in manifest["icons"]] == ["icon.svg", "icon-192.png", "icon-512.png"]
 
 
+def test_the_shelf_links_the_apps_with_the_stores_own_badges(tmp_path):
+    """The front page sends a reader to both apps with Apple's and Google's
+    badges - kept beside the page, since it loads nothing from anywhere else
+    (the privacy statement says so), and in the web app's copy of it too."""
+    build = _load()
+    out = build.shelf_site(tmp_path / "shelf", cdn=True)
+    page = (out / "index.html").read_text(encoding="utf-8")
+    assert f'<a class="app-badge" href="{build.APP_STORE}"><img src="badges/app-store.svg"' in page
+    assert f'<a class="play-badge" href="{build.GOOGLE_PLAY}"><img src="badges/google-play.png"' in page
+    assert build.APP_STORE.endswith("/id6807581349") and build.GOOGLE_PLAY.endswith("?id=org.sympy.editor")
+    assert (out / "badges/app-store.svg").read_bytes().lstrip().startswith(b"<svg")
+    assert (out / "badges/google-play.png").read_bytes().startswith(b"\x89PNG")
+    assert not re.search(r'<img[^>]+src="https?://', page)          # no picture from elsewhere
+    assert page.count('<svg viewBox="0 0 24 24"') >= 3                # the buttons' icons, inline
+    dist = build.build(tmp_path / "dist", cdn=True)
+    assert (dist / "derivations/badges/google-play.png").is_file()
+
+
 def test_the_shelf_s_editor_wears_the_mark_beside_its_title(tmp_path):
     """The editor the site links to is the project's own page, and shows it:
     the mark sits on the title's line, as it does in the apps.  It was the one
