@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Color
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.net.Uri
@@ -16,6 +17,8 @@ import android.view.HapticFeedbackConstants
 import android.view.ViewGroup
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.JavascriptInterface
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.view.inputmethod.InputMethodManager
@@ -87,6 +90,16 @@ class MainActivity : AppCompatActivity() {
      *  be remembered and applied again - see [onWindowFocusChanged]. */
     private var wantsFullscreen = false
 
+    /** The page's `<input type="file">` (the Add-ons menu installing an
+     *  add-on from a .zip): a WebView shows no chooser of its own, so the
+     *  request is handed to the system's document picker and its answer
+     *  back to the page.  iOS's WKWebView does this by itself. */
+    private var fileChooser: ValueCallback<Array<Uri>>? = null
+    private val pickFile = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        fileChooser?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data))
+        fileChooser = null
+    }
+
     /** Whether the page has loaded: a file opened with the app from elsewhere
      *  waits in [arrived] until it has, since there is nobody to hand it to. */
     private var pageReady = false
@@ -144,6 +157,19 @@ class MainActivity : AppCompatActivity() {
         // cannot download a blob, so they go to Downloads and the share sheet.
         web.addJavascriptInterface(ReportBridge(), "SympyEditorApp")
         web.addJavascriptInterface(PythonBridge(), "SympyEditorPy")
+        web.webChromeClient = object : WebChromeClient() {
+            override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean {
+                fileChooser?.onReceiveValue(null)       // a chooser still open: the page gets nothing for it
+                fileChooser = callback
+                return try {
+                    pickFile.launch(params.createIntent())
+                    true
+                } catch (e: android.content.ActivityNotFoundException) {
+                    fileChooser = null
+                    false
+                }
+            }
+        }
         // Start Python (unpacking its assets on the first launch) while the
         // page loads, so the first edit does not wait for it.
         pythonThread.execute { pythonApp }

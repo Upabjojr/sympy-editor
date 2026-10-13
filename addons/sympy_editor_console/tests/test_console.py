@@ -414,7 +414,8 @@ def test_completion_reads_no_property():
     # the formula is the console's own to read, and SymPy's slots are there
     res = complete("editor.expr.")
     assert "editor.expr.expand" in res["matches"] and dict(zip(res["matches"], res["kinds"]))["editor.expr.args"] == "property"
-    assert complete("editor.doc.un")["kinds"] == ["method"] * 3
+    res = complete("editor.doc.un")                    # undo, unwrap, undeclare... - all of them methods
+    assert set(res["kinds"]) == {"method"} and "editor.doc.undo" in res["matches"]
     assert "x.name.upper" in complete("x.name.")["matches"]
     # and the names of an ordinary object are the ones dir() gives
     assert {m[2:] for m in complete("x.")["matches"]} == {n for n in dir(x) if not n.startswith("_")}
