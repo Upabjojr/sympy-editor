@@ -1454,7 +1454,26 @@ builds a `--cdn` copy and checks the worker installs and caches in Chromium;
   after Pyodide's `mpmath`) and the offline bundles vendor it - keep the
   three in step when bumping.  CI runs
   the suite with the latest SymPy *and* with the oldest admitted one (job
-  `oldest-sympy`): only use what exists in both.
+  `oldest-sympy`): only use what exists in both.  A third job, `sympy-master`
+  (allowed to fail), runs it against SymPy's development branch: a private
+  name that goes there (`_CodegenArrayAbstract`, dropped after 1.14 - `ops.py`
+  imports it optionally) or a printer that changes what it writes is seen
+  before the release.  To try it locally: `pip install --no-deps
+  git+https://github.com/sympy/sympy.git@master` in a venv of its own.
+  What 1.15 changes that the code and the tests allow for, each of which
+  must keep working on 1.14 too: an unevaluated `Add`/`Or` (`evaluate=False`)
+  keeps the order it was given and compares unequal to the sorted one (the
+  steps add-on's solutions `x = 3 ∨ x = 2`: tests compare the set);
+  `srepr` writes an `Add`'s terms as stored (a `MatAdd` round-trips
+  unchanged, which `exact_srepr` was written for); the LaTeX printer writes
+  `1/2^{20000}` without working it out; `laplace_transform(exp(t**2))`
+  comes back as a divergent closed form rather than unevaluated;
+  `manualintegrate`'s rules are plain classes with `__slots__`, no longer
+  dataclasses (`_rule_fields` in the steps add-on reads either); and the
+  lark LaTeX grammar reads every trigonometric command through one rule,
+  `trigonometric_function`, so its transformer dropped `sin`, `cos`,
+  `sin_power`... - the LaTeX add-on keeps 1.14's grammar (its readings and
+  ambiguities rest on it) and defines those rules itself (`RULE_FUNCTIONS`).
 - Tests (`pytest`, run by `.github/workflows/ci.yml`):
   - `tests/test_printer.py` — annotation transparency (`strip_annotations`
     == `sympy.latex`) and path correctness for a corpus of expressions;

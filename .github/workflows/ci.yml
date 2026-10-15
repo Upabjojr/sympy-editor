@@ -38,6 +38,23 @@ jobs:
       - run: pip install -e ".[jupyter,test]" "sympy==1.14.*" "lark>=1.1" "sympy-matching>=0.0.4"
       - run: pytest -q --ignore=tests/test_browser.py
 
+  # SymPy's development branch, so that a change there (a private class
+  # dropped, a printer that writes something differently) is seen before
+  # the release that carries it.  Upstream may break on any day, so this
+  # job warns and never fails the run.
+  sympy-master:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[jupyter,test]" "lark>=1.1" "sympy-matching>=0.0.4"
+      - run: pip install --no-deps "git+https://github.com/sympy/sympy.git@master"
+      - run: python -c "import sympy; print(sympy.__version__)"
+      - run: pytest -q --ignore=tests/test_browser.py
+
   # Every test that drives a page, not only test_browser.py: the other
   # modules skip without Playwright, so the jobs above never run them.
   # No add-on is installed here, as after a plain `pip install sympy-editor`.

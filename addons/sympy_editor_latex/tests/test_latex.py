@@ -537,7 +537,12 @@ def test_nothing_a_page_sends_makes_the_reading_raise(reader):
     res = reader.read(r"\frac{d^2 y}{dx^2}", choices={"derivative@0-18": 5})
     assert res["expr"] == Derivative(y, (x, 2)) and res["choices"]["derivative@0-18"] == 0
     assert reader.read(r"2^{10000} \cdot 2^{10000}")["ok"]              # a product of two large numbers: kept as a product
-    for tex in (r"2^{-20000}", r"x \frac{d}{dx}"):
+    # 2^{-20000}: SymPy 1.14's printer wrote the number out and the reading
+    # was refused; 1.15 writes \frac{1}{2^{20000}} and it is read, nothing written out
+    res = reader.read(r"2^{-20000}")
+    assert (res["ok"] and len(res["latex"]) < 100 and res["src"] == "2**(-20000)") \
+        or (res["ok"] is False and res["error"].startswith("This LaTeX could not be read")), res
+    for tex in (r"x \frac{d}{dx}",):
         res = reader.read(tex)
         assert res["ok"] is False and res["error"].startswith("This LaTeX could not be read"), (tex, res)
     for latex in (None, 5, ["a"]):

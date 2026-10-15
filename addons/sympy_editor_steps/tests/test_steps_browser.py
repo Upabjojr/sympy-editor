@@ -117,7 +117,9 @@ def test_an_equation_is_solved_and_what_cannot_be_is_said():
         assert rows.nth(1).locator(".st-apply").count() == 0
         rows.last.locator(".st-apply").click()
         page.wait_for_function("document.querySelector('.se-source').textContent.includes('Eq(x, 3)')")
-        assert doc.expr == Or(Eq(x, 2), Eq(x, 3))
+        # the roots as the formula gives them, -b + sqrt(D) first: SymPy 1.14
+        # sorts an unevaluated Or's arguments, 1.15 keeps them as given
+        assert isinstance(doc.expr, Or) and set(doc.expr.args) == {Eq(x, 2), Eq(x, 3)}
         # the solutions are no integral, derivative or equation: said in words
         page.wait_for_function("document.querySelector('.se-addon-steps .st-note').textContent.length > 0")
         assert page.locator(".se-addon-steps .st-step").count() == 0

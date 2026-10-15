@@ -118,8 +118,9 @@ def test_fourier_sine_cosine_mellin_hankel():
 
 
 def test_failures_are_said_in_words():
+    # (exp(t**2) was the example: SymPy 1.15 answers it with a divergent closed form)
     with pytest.raises(ValueError, match="could not find the Laplace transform"):
-        transform("laplace", exp(t ** 2), t, s)
+        transform("laplace", exp(t ** 3), t, s)
     with pytest.raises(ValueError, match="already occurs"):
         transform("laplace", exp(-s * t), t, s)
     with pytest.raises(ValueError, match="No transform"):
@@ -191,7 +192,7 @@ def test_a_range_is_transformed():
 
 
 def test_errors_come_back_to_the_panel():
-    doc = Document(exp(t ** 2), addons=[ADDON])
+    doc = Document(exp(t ** 3), addons=[ADDON])
     res = _call(doc, "compute", path="/", transform="laplace", var="t", new="s")
     assert "could not find the Laplace transform" in res["query"]["error"]
     res = _call(doc, "compute", path="/", transform="laplace", var="t", new="2*s")

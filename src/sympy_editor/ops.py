@@ -32,12 +32,18 @@ from sympy.tensor.array import NDimArray
 from sympy.tensor.array.expressions import (ArraySymbol, Reshape, convert_array_to_matrix,
                                             convert_matrix_to_array)
 # Symbolic arrays - an ArraySymbol, or a PermuteDims/ArrayContraction/... over
-# one - have no public base class in common: _ArrayExpr covers the leaves and
-# _CodegenArrayAbstract the operations.  Both are Expr, so without them here an
-# array symbol would be classified "scalar" and offered none of its own tools.
-from sympy.tensor.array.expressions.array_expressions import _ArrayExpr, _CodegenArrayAbstract
-
-ARRAY_EXPR = (_ArrayExpr, _CodegenArrayAbstract)
+# one - are Expr, so without them here an array symbol would be classified
+# "scalar" and offered none of its own tools.  Up to SymPy 1.14 they have no
+# public base class in common: _ArrayExpr covers the leaves and
+# _CodegenArrayAbstract the operations; later versions derive everything from
+# _ArrayExpr and drop the second class.
+from sympy.tensor.array.expressions.array_expressions import _ArrayExpr
+try:
+    from sympy.tensor.array.expressions.array_expressions import _CodegenArrayAbstract
+except ImportError:  # SymPy >= 1.15
+    ARRAY_EXPR: tuple = (_ArrayExpr,)
+else:
+    ARRAY_EXPR = (_ArrayExpr, _CodegenArrayAbstract)
 
 __all__ = ["Op", "make_op", "register_op", "get_ops", "default_ops", "KINDS", "KIND_LABELS", "add_kind",
            "with_kind", "node_kind", "node_kinds"]

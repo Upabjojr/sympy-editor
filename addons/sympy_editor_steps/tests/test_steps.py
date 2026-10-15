@@ -41,6 +41,14 @@ def test_integration_by_parts_step_by_step():
     assert expl.steps[-1].latex().endswith("+ C")
 
 
+def solutions(result):
+    """The equations of an ``Or`` of solutions, whatever their order: the
+    engine builds it unevaluated, which SymPy 1.14 sorts and 1.15 keeps as
+    given (the root with + sqrt(D) first)."""
+    assert isinstance(result, Or), result
+    return set(result.args)
+
+
 def test_a_substitution_names_its_variable_and_puts_x_back():
     expl = explain(Integral(sin(x) ** 3, x))
     t = texts(expl)
@@ -147,20 +155,20 @@ def test_a_quadratic_equation_by_the_formula():
                      "The discriminant Δ = b² − 4ac", "The quadratic formula"]
     assert [st.applicable for st in expl.steps] == [False, False, False, True]
     assert "\\Delta = b^{2} - 4ac = 1" in expl.steps[1].latex()
-    assert expl.result == Or(Eq(x, 2), Eq(x, 3))
+    assert solutions(expl.result) == {Eq(x, 2), Eq(x, 3)}
 
 
 def test_a_quadratic_without_real_solutions_says_so():
     expl = explain(Eq(x**2 + 2 * x + 5, 0))
     assert "no real solution" in expl.steps[-1].text
-    assert expl.result == Or(Eq(x, -1 + 2 * I), Eq(x, -1 - 2 * I))
+    assert solutions(expl.result) == {Eq(x, -1 + 2 * I), Eq(x, -1 - 2 * I)}
 
 
 def test_quadratics_with_a_missing_coefficient():
     assert texts(explain(Eq(x**2 + 3 * x, 0)))[0] == "Factor out x"
-    assert explain(Eq(x**2 + 3 * x, 0)).result == Or(Eq(x, 0), Eq(x, -3))
+    assert solutions(explain(Eq(x**2 + 3 * x, 0)).result) == {Eq(x, 0), Eq(x, -3)}
     expl = explain(Eq(2 * x**2, 8))
-    assert texts(expl)[0] == "Isolate x²" and expl.result == Or(Eq(x, 2), Eq(x, -2))
+    assert texts(expl)[0] == "Isolate x²" and solutions(expl.result) == {Eq(x, 2), Eq(x, -2)}
 
 
 def test_what_is_not_solved_is_said_in_words():
@@ -175,7 +183,7 @@ def test_what_is_not_solved_is_said_in_words():
 def test_a_plain_expression_offers_what_can_be_done():
     expl = explain(x**2 + y)
     assert expl.steps == [] and expl.offers == ["differentiate", "integrate", "solve"]
-    assert explain(x**2 - 4, "solve").result == Or(Eq(x, -2), Eq(x, 2))
+    assert solutions(explain(x**2 - 4, "solve").result) == {Eq(x, -2), Eq(x, 2)}
     assert explain(x**2 * y, "differentiate", "y").result == x**2
     assert _same(diff(explain(x * cos(x), "integrate").result, x), x * cos(x))
 
@@ -231,7 +239,7 @@ def test_solving_an_expression_it_is_the_whole_of():
     assert res["src"] == "x**2 - 4" and res["steps"][-1]["applicable"]
     doc.handle({"action": "addon", "addon": "steps", "method": "apply", "path": "/", "task": "solve",
                 "index": len(res["steps"]) - 1, "src": res["src"], "label": res["steps"][-1]["text"]})
-    assert doc.expr == Or(Eq(x, -2), Eq(x, 2)) and doc.can_undo
+    assert solutions(doc.expr) == {Eq(x, -2), Eq(x, 2)} and doc.can_undo
 
 
 def test_solving_a_piece_of_a_sum_shows_the_steps_but_puts_no_equation_in_the_sum():

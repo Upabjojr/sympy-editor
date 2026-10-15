@@ -206,7 +206,17 @@ INTEGRAL_FIELDS = {"integrand": None, "variable": None, "u_var": None, "other": 
 
 
 def _rule_fields(rule) -> List[str]:
-    return [f.name for f in dataclasses.fields(rule)]
+    """The names of a rule's fields, in order: SymPy 1.14's rules are
+    dataclasses, 1.15's are plain classes with ``__slots__`` (the base's
+    ``integrand`` and ``variable`` first, then each class's own)."""
+    if dataclasses.is_dataclass(rule):
+        return [f.name for f in dataclasses.fields(rule)]
+    names: List[str] = []
+    for cls in reversed(type(rule).__mro__):
+        for name in getattr(cls, "__slots__", ()):
+            if name not in names:
+                names.append(name)
+    return names
 
 
 def _sub_rules(value):

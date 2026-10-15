@@ -321,7 +321,10 @@ def test_exact_srepr_round_trips_a_matrix_sum():
     from sympy.core.symbol import Str
     ns = {"MatrixSymbol": MatrixSymbol, "Str": Str}
     theirs = [str(a) for a in sympify(srepr(expr), locals=ns).args]
-    assert theirs != ours                                   # the upstream bug this guards
+    # SymPy 1.14 gives them back the other way round (the upstream bug this
+    # guards against); 1.15 writes them as stored.  Either way exact_srepr
+    # must bring back the order the expression holds.
+    assert sorted(theirs) == sorted(ours)
     back = sympify(exact_srepr(expr), locals=ns)
     assert [str(a) for a in back.args] == ours
     assert back == expr

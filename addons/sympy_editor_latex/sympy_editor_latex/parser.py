@@ -904,24 +904,14 @@ def _transformer_class():
         def binomial(self, tokens):
             return self.call(sympy.binomial, tokens[1], tokens[2])
 
-        # the hyperbolic functions SymPy's grammar and transformer lack
-        def coth(self, tokens):
-            return sympy.coth(tokens[1])
-
-        def sech(self, tokens):
-            return sympy.sech(tokens[1])
-
-        def csch(self, tokens):
-            return sympy.csch(tokens[1])
-
-        def acoth(self, tokens):
-            return sympy.acoth(tokens[1])
-
-        def asech(self, tokens):
-            return sympy.asech(tokens[1])
-
-        def acsch(self, tokens):
-            return sympy.acsch(tokens[1])
+        # The function rules of the add-on's grammar - SymPy 1.14's, one rule
+        # per command (``sin: FUNC_SIN _expression``), plus the hyperbolic
+        # functions it lacked - are read here, for every SymPy: 1.15's
+        # transformer reads the whole family from one terminal
+        # (``trigonometric_function``) and has no method for these rules,
+        # and the grammar stays the add-on's own, with its readings
+        # (``\\sin x \\cos y`` is a choice here, not a rule).  See
+        # ``_rule_functions`` below the class.
 
         # -- matrices -------------------------------------------------------------
 
@@ -1062,7 +1052,46 @@ def _transformer_class():
             leads = bool(re.match(r"(d|\\partial|\\mathrm\{d\}|\\text\{d\})(?![A-Za-z])", top))
             return "derivative@%d-%d" % (start, min(i, len(text))), leads
 
+    _rule_functions(Transformer)
     return Transformer
+
+
+#: Rule name -> the function it applies to the argument that follows the command.
+RULE_FUNCTIONS: Dict[str, Any] = {
+    "sin": sympy.sin, "cos": sympy.cos, "tan": sympy.tan, "csc": sympy.csc, "sec": sympy.sec, "cot": sympy.cot,
+    "arcsin": sympy.asin, "arccos": sympy.acos, "arctan": sympy.atan,
+    "arccsc": sympy.acsc, "arcsec": sympy.asec, "arccot": sympy.acot,
+    "sinh": sympy.sinh, "cosh": sympy.cosh, "tanh": sympy.tanh, "coth": sympy.coth, "sech": sympy.sech, "csch": sympy.csch,
+    "asinh": sympy.asinh, "acosh": sympy.acosh, "atanh": sympy.atanh,
+    "acoth": sympy.acoth, "asech": sympy.asech, "acsch": sympy.acsch,
+}
+#: ``\sin^{-1} x`` is the inverse, any other exponent a power of the value.
+INVERSE_FUNCTIONS: Dict[Any, Any] = {
+    sympy.sin: sympy.asin, sympy.cos: sympy.acos, sympy.tan: sympy.atan,
+    sympy.csc: sympy.acsc, sympy.sec: sympy.asec, sympy.cot: sympy.acot,
+}
+
+
+def _rule_functions(cls) -> None:
+    """Give ``cls`` a method per rule of :data:`RULE_FUNCTIONS` (the command
+    then the argument: ``tokens[1]``) and per ``<rule>_power`` of the
+    trigonometric ones (command, caret, exponent, argument), as SymPy 1.14's
+    transformer had them."""
+    def applies(fn):
+        return lambda self, tokens: fn(tokens[1])
+
+    def raises(fn):
+        def method(self, tokens):
+            exponent = tokens[2]
+            if exponent == -1 and fn in INVERSE_FUNCTIONS:
+                return INVERSE_FUNCTIONS[fn](tokens[-1])
+            return sympy.Pow(fn(tokens[-1]), exponent)
+        return method
+
+    for rule, fn in RULE_FUNCTIONS.items():
+        setattr(cls, rule, applies(fn))
+        if fn in INVERSE_FUNCTIONS:
+            setattr(cls, rule + "_power", raises(fn))
 
 
 def _misplaced(expr: Basic) -> bool:
