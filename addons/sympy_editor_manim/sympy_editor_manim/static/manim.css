@@ -1,0 +1,22 @@
+/* sympy-editor add-on "manim" - scoped under the panel the editor gives it. */
+.se-addon-manim .mn-panel { font-size: 12px; display: flex; flex-direction: column; gap: 0.4rem; }
+.se-addon-manim .mn-settings, .se-addon-manim .mn-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.se-addon-manim .mn-settings label { display: inline-flex; align-items: center; gap: 0.3rem; color: var(--se-muted); }
+.se-addon-manim .mn-settings select, .se-addon-manim .mn-row select { font: inherit; color: var(--se-fg); }
+.se-addon-manim .mn-title { font: inherit; width: 11em; padding: 0.15rem 0.3rem; color: var(--se-fg);
+  background: var(--se-field, var(--se-bg)); border: 1px solid var(--se-rule, var(--se-border)); border-radius: 0.3rem; }
+.se-addon-manim .mn-count { color: var(--se-muted); }
+.se-addon-manim .mn-code { margin: 0; max-height: 18rem; overflow: auto; padding: 0.5rem; font: 11px/1.4 var(--se-mono);
+  color: var(--se-fg); background: var(--se-surface, var(--se-bg)); border: 1px solid var(--se-rule, var(--se-border)); border-radius: 0.35rem;
+  white-space: pre; }
+.se-addon-manim .mn-note { color: var(--se-muted); overflow-wrap: anywhere; }
+.se-addon-manim .mn-note.mn-missing { color: var(--se-removed); }
+.se-addon-manim .mn-note.mn-busy { color: rgb(var(--se-accent)); }
+.se-addon-manim .mn-player { display: flex; flex-direction: column; gap: 0.3rem; }
+.se-addon-manim .mn-video { max-width: 100%; max-height: 24rem; border-radius: 0.35rem; background: #000; }
+.se-addon-manim .mn-save-video { color: rgb(var(--se-accent)); }
+.se-addon-manim .mn-info { color: var(--se-muted); }
+@media (any-pointer: coarse) {
+  .se-addon-manim .mn-settings select, .se-addon-manim .mn-row select, .se-addon-manim .mn-title { min-height: 2rem; }
+  .se-addon-manim .mn-check input { width: 1.1rem; height: 1.1rem; }
+}

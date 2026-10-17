@@ -69,7 +69,7 @@ pip install -e addons/sympy_editor_solver -e addons/sympy_editor_assumptions
 pip install -e addons/sympy_editor_numeric -e addons/sympy_editor_series
 pip install -e addons/sympy_editor_units -e addons/sympy_editor_linalg
 pip install -e addons/sympy_editor_transforms -e addons/sympy_editor_forms
-pip install -e addons/sympy_editor_feynman
+pip install -e addons/sympy_editor_feynman -e addons/sympy_editor_manim
 ```
 
 Every installed add-on is then listed in the **Add-ons** window of the
@@ -616,6 +616,10 @@ Another, the assumptions panel, shows what SymPy knows about the selection
 (real, positive, integer... - true, false or unknown, and why) and turns
 the symbols' assumptions into switches: making `x` positive retypes it
 everywhere, as one undoable step, and says what that let SymPy simplify.
+The manim add-on writes the session's steps as a [Manim](https://www.manim.community/)
+scene - each formula turning into the next, the parts a change keeps
+travelling to their new place - and renders it to a video where Manim is
+installed.
 
 An add-on is a package of its own, made by anyone, found by the editor
 once it is installed (`pip install -e addons/sympy_editor_tree` for a
@@ -666,6 +670,7 @@ follow.
 | Pyodide (+ CPython, micropip) | MPL-2.0 / PSF-2.0 | loaded from a CDN by the browser, standalone HTML and the web bundle only |
 | SymPy wheel (PyPI) | BSD-3 | loaded by the browser into Pyodide (the newest SymPy, ahead of Pyodide's own package) |
 | lark, sympy-matching, NumPy, onnxruntime, Plotly.js | MIT / BSD-3 | the add-ons' own: LaTeX, rewrite rules, plot, handwriting |
+| Manim Community | MIT | optional: the manim add-on renders its scene with it where it is installed beside the editor's Python; never carried by a build |
 | Chaquopy, ONNX Runtime for Android, androidx, Kotlin | MIT / Apache-2.0 | the Android app is built on them |
 | ONNX Runtime for iOS, NumPy (BeeWare's build) | MIT / BSD-3 | the iOS app's handwriting runs on them |
 | Python-Apple-support (BeeWare) | MIT | the iOS and Mac apps' CPython |

@@ -1,0 +1,10 @@
+{
+  "name": "manim",
+  "label": "Manim",
+  "module": "sympy_editor_manim",
+  "version": "0.0.1",
+  "description": "The history's steps as an animation: a Manim scene in which each formula turns into the next, written as a script and rendered to a video where Manim is installed.",
+  "requires": [],
+  "bundle": false,
+  "experimental": true
+}

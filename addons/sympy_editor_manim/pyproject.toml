@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sympy-editor-manim"
+version = "0.0.1"
+description = "sympy-editor add-on: the history's steps animated with Manim, each formula turning into the next"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "AGPL-3.0-or-later" }   # as sympy-editor: see its LICENSE
+dependencies = ["sympy-editor"]
+
+# The script is written without Manim; rendering it to a video needs Manim
+# (and a LaTeX installation and ffmpeg beside it, which pip does not bring).
+[project.optional-dependencies]
+render = ["manim>=0.18"]
+
+[project.entry-points."sympy_editor.addons"]
+manim = "sympy_editor_manim:ADDON"
+
+[tool.setuptools.packages.find]
+include = ["sympy_editor_manim*"]
+
+[tool.setuptools.package-data]
+sympy_editor_manim = ["static/*"]

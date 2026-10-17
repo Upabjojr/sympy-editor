@@ -28,6 +28,7 @@ addons/
   sympy_editor_steps/       step-by-step solutions: integrals, derivatives, equations of degree one or two (no dependency)
   sympy_editor_linalg/      a linear algebra workbench for the selected matrix: spectrum, Jordan form, LU/QR/Cholesky, row reduction step by step (no dependency)
   sympy_editor_feynman/     path integrals of QED expanded into Feynman diagrams, each drawn (no dependency)
+  sympy_editor_manim/       the history's steps animated with Manim: a scene written without it, rendered to a video where it is installed (manim, optional)
   demo.py                   a page with the first five, to try them in a browser
 ```
 

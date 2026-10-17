@@ -39,6 +39,7 @@ Installed by pip beside the editor, never carried by it:
 | [sympy-matching](https://pypi.org/project/sympy-matching/) (0.0.4), with omnimatch and multiset | MIT | Rewrite rules (`sympy-editor-matching`) |
 | [NumPy](https://numpy.org) (1.26) | BSD-3-Clause | Handwriting; the plot add-on's `fast` extra |
 | [onnxruntime](https://onnxruntime.ai) | MIT | Handwriting, where Python runs the model itself |
+| [Manim Community](https://www.manim.community) | MIT | Manim (`sympy-editor-manim`), optional: the scene is written without it; rendering it runs a Manim installed beside the editor's Python (`pip install manim`, with LaTeX and ffmpeg), which no build carries |
 
 An add-on may have a licence of its own; each says so in its own `README.md`
 and `LICENSE`.  All of the add-ons shipped here are AGPL-3.0-or-later.
